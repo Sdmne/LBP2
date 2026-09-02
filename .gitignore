@@ -1,0 +1,71 @@
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+
+# Local configuration and credentials
+.env*
+*.pem
+*.ppk
+*.key
+*.p12
+*.pfx
+*credentials*
+*cookies*
+*secrets*
+
+# Local and generated data
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+*.dump
+*.sql
+*.sqlite*
+*.bak
+*.zip
+*.tar
+*.tar.gz
+*.7z
+screenshots/
+uploads/
+private/
+backups/
+
+# Tests and migrations are maintained outside this publication
+tests/
+test/
+__tests__/
+*.test.*
+*.spec.*
+*.snap
+migrations/
+alembic/
+prisma/migrations/
+
+# Container and deployment configuration
+Dockerfile*
+docker-compose*
+compose*.yml
+compose*.yaml
+
+# Internal instructions and tool state
+AGENTS.md
+CLAUDE.md
+.codex*
+.claude/
+
+# Database-backed reference exports
+catalog_locations.json
+partner_services.json
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
