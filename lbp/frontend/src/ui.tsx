@@ -654,7 +654,7 @@ function CallManager({ session }: { session: Session }) {
 
 const SITE_TEXT = {
   en: {
-    knowledge: "Knowledge Hub", match: "Find a match", clinics: "Clinics", lawyers: "Lawyers",
+    knowledge: "Knowledge Hub", match: "Find a match", clinics: "Clinics", lawyers: "Lawyers", resources: "Resources & Tools", safety: "Safety", pricing: "Pricing",
     profile: "Profile", signOut: "Sign out", signIn: "Sign in", signUp: "Sign up",
     likes: "Likes", messages: "Messages", notifications: "Member notifications",
     tagline: "Helping every family find their way.", platform: "Platform", company: "Company",
@@ -662,7 +662,7 @@ const SITE_TEXT = {
     rights: "© 2026 LetsBeParents. All rights reserved.", cookies: "Cookie settings", language: "Language",
   },
   ru: {
-    knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы",
+    knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы", resources: "Ресурсы и инструменты", safety: "Безопасность", pricing: "Цены",
     profile: "Мой профиль", signOut: "Выйти", signIn: "Войти", signUp: "Регистрация",
     likes: "Лайки", messages: "Сообщения", notifications: "Уведомления участника",
     tagline: "Помогаем каждой семье найти свой путь.", platform: "Платформа", company: "Компания",
@@ -670,7 +670,7 @@ const SITE_TEXT = {
     rights: "© 2026 LetsBeParents. Все права защищены.", cookies: "Настройки cookies", language: "Язык",
   },
   es: {
-    knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados",
+    knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados", resources: "Recursos y herramientas", safety: "Seguridad", pricing: "Precios",
     profile: "Mi perfil", signOut: "Cerrar sesión", signIn: "Iniciar sesión", signUp: "Registrarse",
     likes: "Me gusta", messages: "Mensajes", notifications: "Notificaciones de miembro",
     tagline: "Ayudamos a cada familia a encontrar su camino.", platform: "Plataforma", company: "Empresa",
@@ -785,6 +785,10 @@ function Shell({
   const isDirectoryDetail = new RegExp(`^/${locale}/(?:clinics|lawyers)/[^/]+/?$`).test(window.location.pathname);
   const isArticle = new RegExp(`^/${locale}/knowledge-hub/[^/]+/?$`).test(window.location.pathname);
   const isContact = new RegExp(`^/${locale}/contact/?$`).test(window.location.pathname);
+  const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(window.location.pathname);
+  const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(window.location.pathname);
+  const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(window.location.pathname);
+  const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(window.location.pathname);
   const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(window.location.pathname);
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -828,6 +832,15 @@ function Shell({
       </Link>
       <Link className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
         {text.lawyers}
+      </Link>
+      <Link className={isResources ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
+        {text.resources}
+      </Link>
+      <Link className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
+        {text.safety}
+      </Link>
+      <Link className={isPricing ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/pricing`}>
+        {text.pricing}
       </Link>
       <div className="mobile-nav-actions">
         {session ? (
@@ -879,7 +892,7 @@ function Shell({
           )}
         </div>
       </header>}
-      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isStaticPage ? " static-main" : ""}`}>{children}</main>
+      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isStaticPage ? " static-main" : ""}`}>{children}</main>
       <footer className="web-footer">
         <div className="web-footer-inner">
           <div className="footer-brand">
@@ -895,6 +908,9 @@ function Shell({
               <Link to={`/${locale}/catalog`}>{text.match}</Link>
               <Link to={`/${locale}/clinics`}>{text.clinics}</Link>
               <Link to={`/${locale}/lawyers`}>{text.lawyers}</Link>
+              <Link to={`/${locale}/resources`}>{text.resources}</Link>
+              <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
+              <Link to={`/${locale}/pricing`}>{text.pricing}</Link>
             </nav>
           </div>
           <div className="footer-column">
@@ -971,20 +987,34 @@ function LandingReveal({ children, className = "" }: { children: ReactNode; clas
 
 const LANDING_TEXT = {
   en: {
-    pill: "Alternative parenting platform",
+    pill: "Family-building platform",
     title: "Your path to parenthood starts here",
-    intro: "Whether you're a single parent by choice, an LGBTQ+ couple, or exploring alternative family building - we guide you through every step with the right people, clinics, and legal support.",
-    start: "Get started free", how: "HOW IT WORKS", stepsTitle: "Four steps to your family",
+    intro: "Find a donor, co-parent or family-building partner - then take the next steps with trusted clinics, legal experts and practical guidance.",
+    start: "Find your path", how: "HOW IT WORKS", stepsTitle: "Five steps to your family",
+    trustLine: "Every profile is identity-verified - see what we check.",
     steps: [
       ["01", "Create your profile", "Tell us about yourself, your preferences and what kind of family you dream of building.", "profile"],
-      ["02", "Find your match", "Browse profiles of donors and co-parents. Filter by values and connect.", "match"],
-      ["03", "Choose your clinic", "Compare verified fertility clinics worldwide. Book video consultations from home.", "clinic"],
-      ["04", "Get legal support", "Connect with reproductive law specialists for contracts, rights, and peace of mind.", "legal"],
+      ["02", "Find your match", "Browse profiles of donors, co-parents and family-building partners. Filter by values and connect.", "match"],
+      ["03", "Understand your compatibility", "See your compatibility score and what matters most to talk through before you decide.", "compatibility"],
+      ["04", "Plan your family together", "Build a shared Family Plan - parenting, finances, legal steps - in one place.", "plan"],
+      ["05", "Get expert support", "Connect with vetted fertility clinics and reproductive law specialists whenever you need them.", "support"],
     ],
+    pathSelector: {
+      label: "FIND YOUR PATH", title: "What brings you here?",
+      intro: "Every family starts differently. Choose the path that fits you best - you can always explore more later.",
+      options: [
+        ["coparent", "I'm looking for a co-parent"],
+        ["donor", "I'm looking for a donor"],
+        ["partner", "I'm looking for a family-building partner"],
+        ["couple-donor", "We're a couple looking for a donor"],
+        ["exploring", "I'm exploring my options"],
+      ],
+    },
     features: [
-      { label: "MATCHMAKING", title: "Find your donor or co-parent", copy: "Our thoughtful matching system helps you connect with the right person. Filter by location, values, and preferences. Like profiles, get matched, then chat and video call - all in a safe, private space.", points: ["Advanced filters by location, type, and preferences", "Built-in messaging and HD video calls", "Privacy-first: control who sees your profile"] },
+      { label: "MATCHMAKING", title: "Find your donor, co-parent or partner", copy: "Our thoughtful matching system helps you connect with the right person. Filter by location, values, and preferences. Like profiles, get matched, then chat and video call - all in a safe, private space.", points: ["Advanced filters by location, type, and preferences", "Built-in messaging and HD video calls", "Privacy-first: control who sees your profile"] },
       { label: "CLINICS", title: "World-class fertility clinics, one click away", copy: "Browse verified clinics across 20+ countries. Read detailed profiles, compare services, and start a video consultation - all from your living room. Every clinic is vetted for quality and inclusivity.", points: ["Video consultations with top specialists", "Clinics verified for LGBTQ+ and single-parent inclusivity", "Transparent pricing and real patient reviews"] },
       { label: "LAWYERS", title: "Legal guidance you can trust", copy: "Donor agreements, parental rights - reproductive law is complex. Our directory of 350+ verified lawyers across 20+ countries ensures you get expert legal support tailored to your family structure.", points: ["Specialists in donor and family law", "Filter by country, language, and practice area", "Save favorites and compare legal professionals"] },
+      { label: "FAMILY PLANNING", title: "Plan your family, together", copy: "Once you've matched, keep building together. See your Compatibility Report, talk through what matters, and create a shared Family Plan covering parenting, finances and legal steps - all in one place.", points: ["Compatibility Report with real talking points, not a pass/fail score", "Shared Family Plan for parenting, finances and legal steps", "One place to keep planning after the match, not just chat"] },
       { label: "BECOME A DONOR", title: "Give the gift of parenthood", copy: "You have the power to change someone's life forever. Whether you're considering egg or sperm donation - our platform connects you with people who dream of starting a family. Create your profile, set your terms, and help make parenthood possible.", points: ["Safe, verified matching with intended parents", "Full control over your profile, terms, and privacy", "Built-in chat and video calls to get to know each other"] },
       { label: "FOR CLINICS & LAWYERS", title: "Grow your practice, reach more families", copy: "Join our professional directory and connect with thousands of potential clients. Get your own partner dashboard to manage appointments, communicate with patients through secure chat and video calls, run promotional campaigns, and build your reputation in the reproductive health community.", points: ["Personal partner dashboard with analytics", "Secure chat and video consultations with clients", "Promotional tools and targeted email campaigns"] },
     ],
@@ -993,20 +1023,34 @@ const LANDING_TEXT = {
     ctaButton: "Create free account", appLabel: "Also available as a free mobile app",
   },
   ru: {
-    pill: "Платформа альтернативного родительства",
+    pill: "Платформа для создания семьи",
     title: "Ваш путь к родительству начинается здесь",
-    intro: "Если вы одинокий родитель по выбору, ЛГБТК+ пара или ищете альтернативные пути создания семьи - мы проведём вас через каждый шаг с нужными людьми, клиниками и юридической поддержкой.",
-    start: "Начать бесплатно", how: "КАК ЭТО РАБОТАЕТ", stepsTitle: "Четыре шага к вашей семье",
+    intro: "Найдите донора, со-родителя или партнёра для создания семьи - а затем сделайте следующие шаги с проверенными клиниками, юридическими экспертами и практическими рекомендациями.",
+    start: "Найти свой путь", how: "КАК ЭТО РАБОТАЕТ", stepsTitle: "Пять шагов к вашей семье",
+    trustLine: "Каждый профиль проходит проверку личности - узнайте, что мы проверяем.",
     steps: [
       ["01", "Создайте профиль", "Расскажите о себе, своих предпочтениях и о какой семье вы мечтаете.", "profile"],
-      ["02", "Найдите пару", "Просматривайте профили доноров и со-родителей. Фильтруйте по ценностям и общайтесь.", "match"],
-      ["03", "Выберите клинику", "Сравните проверенные клиники по всему миру. Запишитесь на видеоконсультацию из дома.", "clinic"],
-      ["04", "Получите юридическую поддержку", "Свяжитесь со специалистами в области репродуктивного права для оформления договоров и защиты ваших прав.", "legal"],
+      ["02", "Найдите пару", "Просматривайте профили доноров, со-родителей и партнёров для создания семьи. Фильтруйте по ценностям и общайтесь.", "match"],
+      ["03", "Оцените совместимость", "Узнайте свою оценку совместимости и что стоит обсудить, прежде чем принять решение.", "compatibility"],
+      ["04", "Спланируйте семью вместе", "Постройте общий Family Plan - воспитание, финансы, юридические шаги - всё в одном месте.", "plan"],
+      ["05", "Получите поддержку экспертов", "Свяжитесь с проверенными клиниками репродуктивной медицины и юристами, когда это понадобится.", "support"],
     ],
+    pathSelector: {
+      label: "НАЙДИТЕ СВОЙ ПУТЬ", title: "Что привело вас сюда?",
+      intro: "Каждая семья начинается по-своему. Выберите путь, который подходит вам сейчас - позже вы всегда сможете изучить другие варианты.",
+      options: [
+        ["coparent", "Я ищу со-родителя"],
+        ["donor", "Я ищу донора"],
+        ["partner", "Я ищу партнёра для создания семьи"],
+        ["couple-donor", "Мы пара, ищем донора"],
+        ["exploring", "Я изучаю варианты"],
+      ],
+    },
     features: [
-      { label: "ПОДБОР ПАРЫ", title: "Найдите донора или со-родителя", copy: "Наша продуманная система подбора поможет вам найти подходящего человека. Фильтруйте по локации, ценностям и предпочтениям. Ставьте лайки, получайте совпадения, общайтесь в чате и по видеосвязи - всё в безопасном, приватном пространстве.", points: ["Расширенные фильтры по местоположению, типу и предпочтениям", "Встроенные сообщения и HD видеозвонки", "Конфиденциальность: контролируйте, кто видит ваш профиль"] },
+      { label: "ПОДБОР ПАРЫ", title: "Найдите донора, со-родителя или партнёра", copy: "Наша продуманная система подбора поможет вам найти подходящего человека. Фильтруйте по локации, ценностям и предпочтениям. Ставьте лайки, получайте совпадения, общайтесь в чате и по видеосвязи - всё в безопасном, приватном пространстве.", points: ["Расширенные фильтры по местоположению, типу и предпочтениям", "Встроенные сообщения и HD видеозвонки", "Конфиденциальность: контролируйте, кто видит ваш профиль"] },
       { label: "КЛИНИКИ", title: "Лучшие клиники репродуктивной медицины в один клик", copy: "Просматривайте проверенные клиники в 20+ странах. Изучайте подробные профили, сравнивайте услуги и начинайте видеоконсультацию - всё из дома. Каждая клиника проверена на качество и инклюзивность.", points: ["Видеоконсультации с ведущими специалистами", "Клиники, проверенные на инклюзивность для ЛГБТК+ и одиноких родителей", "Прозрачные цены и реальные отзывы пациентов"] },
       { label: "ЮРИСТЫ", title: "Юридическая поддержка, которой можно доверять", copy: "Донорские соглашения, родительские права - репродуктивное право сложно. Наш каталог из 350+ проверенных юристов в 20+ странах обеспечит вам экспертную юридическую поддержку, адаптированную к вашей семейной ситуации.", points: ["Специалисты по донорскому и семейному праву", "Фильтрация по стране, языку и области практики", "Сохраняйте избранное и сравнивайте юристов"] },
+      { label: "ПЛАНИРОВАНИЕ СЕМЬИ", title: "Планируйте семью вместе", copy: "После совпадения продолжайте строить отношения вместе. Смотрите свой отчёт о совместимости, обсуждайте важное и создавайте общий Family Plan - воспитание, финансы, юридические шаги - всё в одном месте.", points: ["Отчёт о совместимости с реальными темами для обсуждения, а не оценкой «прошёл/не прошёл»", "Общий Family Plan для воспитания, финансов и юридических шагов", "Одно место для планирования после совпадения, а не только чат"] },
       { label: "СТАТЬ ДОНОРОМ", title: "Подарите дар родительства", copy: "У вас есть возможность навсегда изменить чью-то жизнь. Если вы рассматриваете донорство яйцеклетки или спермы - наша платформа связывает вас с людьми, которые мечтают о семье. Создайте профиль, установите свои условия и помогите сделать родительство возможным.", points: ["Безопасный, проверенный подбор с будущими родителями", "Полный контроль над профилем, условиями и конфиденциальностью", "Встроенный чат и видеозвонки для знакомства"] },
       { label: "ДЛЯ КЛИНИК И ЮРИСТОВ", title: "Развивайте практику, охватите больше семей", copy: "Присоединяйтесь к нашему профессиональному каталогу и связывайтесь с тысячами потенциальных клиентов. Получите собственный партнёрский кабинет для управления записями, общения с пациентами через безопасный чат и видеосвязь, проведения промо-кампаний и укрепления репутации в сфере репродуктивного здоровья.", points: ["Персональный партнёрский кабинет с аналитикой", "Безопасный чат и видеоконсультации с клиентами", "Инструменты продвижения и целевые email-рассылки"] },
     ],
@@ -1015,20 +1059,34 @@ const LANDING_TEXT = {
     ctaButton: "Создать бесплатный аккаунт", appLabel: "Также доступно как бесплатное мобильное приложение",
   },
   es: {
-    pill: "Plataforma de parentalidad alternativa",
+    pill: "Plataforma de formación de familias",
     title: "Tu camino a la maternidad o paternidad empieza aquí",
-    intro: "Seas madre o padre soltero por elección, pareja LGBTQ+ o estés explorando formas alternativas de formar familia, te guiamos en cada paso con las personas, clínicas y apoyo legal adecuados.",
-    start: "Empieza gratis", how: "CÓMO FUNCIONA", stepsTitle: "Cuatro pasos hacia tu familia",
+    intro: "Encuentra un donante, co-padre o pareja para formar una familia - y luego da los siguientes pasos con clínicas de confianza, expertos legales y orientación práctica.",
+    start: "Encuentra tu camino", how: "CÓMO FUNCIONA", stepsTitle: "Cinco pasos hacia tu familia",
+    trustLine: "Cada perfil verifica su identidad - descubre qué comprobamos.",
     steps: [
       ["01", "Crea tu perfil", "Cuéntanos sobre ti, tus preferencias y qué tipo de familia sueñas formar.", "profile"],
-      ["02", "Encuentra tu match", "Explora perfiles de donantes y co-padres. Filtra por valores y conecta.", "match"],
-      ["03", "Elige tu clínica", "Compara clínicas de fertilidad verificadas en todo el mundo. Reserva videoconsultas desde casa.", "clinic"],
-      ["04", "Recibe apoyo legal", "Conecta con especialistas en derecho reproductivo para contratos, derechos y tranquilidad.", "legal"],
+      ["02", "Encuentra tu match", "Explora perfiles de donantes, co-padres y parejas para formar una familia. Filtra por valores y conecta.", "match"],
+      ["03", "Evalúa tu compatibilidad", "Descubre tu puntuación de compatibilidad y qué conviene hablar antes de decidir.", "compatibility"],
+      ["04", "Planifica tu familia juntos", "Crea un Family Plan compartido - crianza, finanzas, pasos legales - todo en un solo lugar.", "plan"],
+      ["05", "Recibe apoyo experto", "Conecta con clínicas de fertilidad verificadas y especialistas en derecho reproductivo cuando lo necesites.", "support"],
     ],
+    pathSelector: {
+      label: "ENCUENTRA TU CAMINO", title: "¿Qué te trae por aquí?",
+      intro: "Cada familia empieza de una forma distinta. Elige el camino que mejor te encaje - siempre podrás explorar otras opciones más adelante.",
+      options: [
+        ["coparent", "Busco un co-padre o co-madre"],
+        ["donor", "Busco un donante"],
+        ["partner", "Busco una pareja para formar una familia"],
+        ["couple-donor", "Somos una pareja y buscamos un donante"],
+        ["exploring", "Estoy explorando mis opciones"],
+      ],
+    },
     features: [
-      { label: "MATCHMAKING", title: "Encuentra a tu donante o co-padre", copy: "Nuestro sistema de emparejamiento te ayuda a conectar con la persona adecuada. Filtra por ubicación, valores y preferencias. Da like a perfiles, haz match, chatea y haz videollamadas, todo en un espacio seguro y privado.", points: ["Filtros avanzados por ubicación, tipo y preferencias", "Mensajería integrada y videollamadas HD", "Privacidad primero: controla quién ve tu perfil"] },
+      { label: "MATCHMAKING", title: "Encuentra a tu donante, co-padre o pareja", copy: "Nuestro sistema de emparejamiento te ayuda a conectar con la persona adecuada. Filtra por ubicación, valores y preferencias. Da like a perfiles, haz match, chatea y haz videollamadas, todo en un espacio seguro y privado.", points: ["Filtros avanzados por ubicación, tipo y preferencias", "Mensajería integrada y videollamadas HD", "Privacidad primero: controla quién ve tu perfil"] },
       { label: "CLÍNICAS", title: "Clínicas de fertilidad de primer nivel, a un clic", copy: "Explora clínicas verificadas en más de 20 países. Lee perfiles detallados, compara servicios e inicia una videoconsulta, todo desde casa. Cada clínica está validada por calidad e inclusividad.", points: ["Videoconsultas con los mejores especialistas", "Clínicas verificadas para LGBTQ+ y familias monoparentales", "Precios transparentes y reseñas reales de pacientes"] },
       { label: "ABOGADOS", title: "Orientación legal de confianza", copy: "Acuerdos de donantes, derechos parentales: el derecho reproductivo es complejo. Nuestro directorio de más de 350 abogados verificados en más de 20 países te garantiza apoyo legal experto adaptado a tu familia.", points: ["Especialistas en donación y derecho de familia", "Filtra por país, idioma y área de práctica", "Guarda favoritos y compara profesionales legales"] },
+      { label: "PLANIFICACIÓN FAMILIAR", title: "Planifica tu familia, juntos", copy: "Una vez que hagáis match, seguid construyendo juntos. Consulta tu Informe de Compatibilidad, habla de lo que importa y crea un Family Plan compartido que cubra crianza, finanzas y pasos legales - todo en un solo lugar.", points: ["Informe de compatibilidad con temas reales para hablar, no una puntuación de aprobado/reprobado", "Family Plan compartido para crianza, finanzas y pasos legales", "Un solo lugar para seguir planificando después del match, no solo chat"] },
       { label: "SÉ DONANTE", title: "Regala la oportunidad de ser madres o padres", copy: "Tienes el poder de cambiar la vida de alguien para siempre. Si estás considerando donar óvulos o esperma, nuestra plataforma te conecta con personas que sueñan con formar una familia. Crea tu perfil, fija tus condiciones y ayuda a hacer posible la parentalidad.", points: ["Emparejamiento seguro y verificado con padres y madres intencionales", "Control total sobre tu perfil, condiciones y privacidad", "Chat y videollamadas integrados para conoceros"] },
       { label: "PARA CLÍNICAS Y ABOGADOS", title: "Haz crecer tu práctica, llega a más familias", copy: "Únete a nuestro directorio profesional y conecta con miles de potenciales clientes. Accede a tu panel de partner para gestionar citas, comunicarte con pacientes por chat seguro y videollamadas, lanzar campañas y construir tu reputación en la comunidad de salud reproductiva.", points: ["Panel de partner personal con analíticas", "Chat seguro y videoconsultas con clientes", "Herramientas promocionales y campañas de email segmentadas"] },
     ],
@@ -1042,9 +1100,24 @@ const LANDING_FEATURE_IMAGES = [
   "/web-static/images/landing/feature-matchmaking-4122e02d.jpg",
   "/web-static/images/landing/feature-clinics-e8a42166.jpg",
   "/web-static/images/landing/feature-lawyers-3681de6d.jpg",
+  "/web-static/images/landing/feature-matchmaking-4122e02d.jpg",
   "/web-static/images/landing/feature-donors-80e118c5.jpg",
   "/web-static/images/landing/feature-partners-a2b6d846.jpg",
 ] as const;
+
+function pathIcon(key: string) {
+  if (key === "donor") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>;
+  if (key === "partner") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>;
+  if (key === "couple-donor") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="m17 11 2 2 4-4"/></svg>;
+  if (key === "exploring") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+}
+
+// Maps the Path Selector's internal keys (also used for ?path= on registration) to the
+// Find Your Path URL slugs from LBP_findyourpath_TZ.md - only "coparent" differs.
+function pathSlug(key: string) {
+  return key === "coparent" ? "co-parenting" : key;
+}
 
 function Home() {
   const locale = localeOf();
@@ -1054,7 +1127,17 @@ function Home() {
     if (icon === "profile") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>;
     if (icon === "match") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.414 14.414C21 12.828 22 11.5 22 9.5a5.5 5.5 0 0 0-9.591-3.676.6.6 0 0 1-.818.001A5.5 5.5 0 0 0 2 9.5c0 2.3 1.5 4 3 5.5l5.535 5.362a2 2 0 0 0 2.879.052 2.12 2.12 0 0 0-.004-3 2.124 2.124 0 1 0 3-3 2.124 2.124 0 0 0 3.004 0 2 2 0 0 0 0-2.828l-1.881-1.882a2.41 2.41 0 0 0-3.409 0l-1.71 1.71a2 2 0 0 1-2.828 0 2 2 0 0 1 0-2.828l2.823-2.762"/></svg>;
     if (icon === "clinic") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/></svg>;
+    if (icon === "compatibility") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>;
+    if (icon === "plan") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></svg>;
+    if (icon === "support") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>;
     return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>;
+  };
+  const pathImage = (key: string) => {
+    if (key === "donor") return "/web-static/images/landing/path-donor.jpg";
+    if (key === "partner") return "/web-static/images/landing/path-partner.jpg";
+    if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor.jpg";
+    if (key === "exploring") return "/web-static/images/landing/path-exploring.jpg";
+    return "/web-static/images/landing/path-coparent.jpg";
   };
   const features = text.features.map((feature, index) => ({ ...feature, image: LANDING_FEATURE_IMAGES[index] }));
   return (
@@ -1076,10 +1159,28 @@ function Home() {
           <div className="landing-pill"><i /><span>{text.pill}</span></div>
           <h1>{text.title}</h1>
           <p>{text.intro}</p>
-          <Link className="landing-gradient-button" to={`/${locale}/auth/register`}>
+          <a className="landing-gradient-button" href="#path-selector">
             {text.start}
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
-          </Link>
+          </a>
+        </div>
+      </section>
+
+      <section className="landing-path-selector" id="path-selector">
+        <div className="landing-section-intro">
+          <span>{text.pathSelector.label}</span>
+          <h2>{text.pathSelector.title}</h2>
+          <p className="landing-path-intro">{text.pathSelector.intro}</p>
+        </div>
+        <div className="landing-path-grid">
+          {text.pathSelector.options.map(([key, label]) => (
+            <Link key={key} className="landing-path-card" style={{ backgroundImage: `url(${pathImage(key)})` }} to={`/${locale}/find-your-path/${pathSlug(key)}`}>
+              <span className="landing-path-shade" />
+              <svg className="landing-path-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
+              <span className="landing-path-icon">{pathIcon(key)}</span>
+              <span className="landing-path-label">{label}</span>
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -1118,6 +1219,14 @@ function Home() {
         {text.stats.map(([value, label]) => (
           <div key={label}><strong>{value}</strong><span>{label}</span></div>
         ))}
+      </section>
+
+      <section className="landing-trust-line">
+        <Link to={`/${locale}/trust-safety`}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>
+          <span>{text.trustLine}</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
+        </Link>
       </section>
 
       <section className="landing-cta">
@@ -4274,6 +4383,261 @@ function Subscription({ session }: { session: Session }) {
   );
 }
 
+const PRICING_TEXT = {
+  en: {
+    eyebrow: "PRICING",
+    title: "Find the right person to build a family with.",
+    intro: "Better matches. Deeper compatibility. More confidence. Start free, upgrade when you're ready to go deeper.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Free forever", altNote: "",
+        tagline: "Create your profile and start discovering.",
+        features: ["Full profile & basic discovery", "3 likes per day", "Basic matching"],
+        cta: "Get started free", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "per month, billed monthly",
+        altNote: "or €49.99 for 3 months - €16.66/month, save 33%",
+        tagline: "For members ready to match with intention.",
+        features: ["Compatibility Score & Why you match", "Advanced family filters", "See who liked you", "Video & audio calls", "15 likes/day, 5 reach-outs/day", "Priority in discovery"],
+        cta: "Start Family Builder", badge: "Best value",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "per month", altNote: "",
+        tagline: "Everything in Family Builder, plus deeper guidance.",
+        features: ["Everything in Family Builder", "AI Family Advisor", "Detailed Compatibility Report", "Family Plan & Shared Family Room", "Document & checklist tools", "Priority support"],
+        cta: "Go Pro", badge: "",
+      },
+    ],
+    footnote: "Prices shown in EUR and may vary by region. Cancel anytime. Premium requires profile verification.",
+    faqLinkLabel: "See how we verify members",
+    compareTitle: "Compare all features",
+    compareSub: "See exactly what's included in each plan.",
+    matrixGroups: [
+      { name: "Match better", rows: [
+        { label: "Daily likes", values: ["3", "15", "Unlimited"] },
+        { label: "Reach out first", values: ["", "5/day", "Unlimited"] },
+        { label: "Advanced family filters", values: ["", "check", "check"] },
+        { label: "Priority in catalog", values: ["", "check", "check"] },
+        { label: "See who liked you", values: ["", "check", "check"] },
+        { label: "See profile visitors", values: ["", "check", "check"] },
+      ] },
+      { name: "Understand compatibility", rows: [
+        { label: "Compatibility Score", values: ["", "check", "check"] },
+        { label: "Why you match", values: ["", "check", "check"] },
+        { label: "Expanded profile info", values: ["", "check", "check"] },
+        { label: "Verification info", values: ["", "check", "check"] },
+      ] },
+      { name: "Connect & communicate", rows: [
+        { label: "Video & audio calls", values: ["", "check", "check"] },
+        { label: "Private photos", values: ["", "check", "check"] },
+        { label: "Incognito mode", values: ["", "check", "check"] },
+      ] },
+      { name: "Build your family", rows: [
+        { label: "Family Plan (shared)", values: ["", "Limited", "check"] },
+        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "Detailed Compatibility Report", values: ["", "", "check"] },
+        { label: "Document & checklist tools", values: ["", "", "check"] },
+        { label: "Priority support", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  ru: {
+    eyebrow: "ЦЕНЫ",
+    title: "Найдите того, с кем строить семью.",
+    intro: "Более точные совпадения. Глубже совместимость. Больше уверенности. Начните бесплатно, обновитесь, когда будете готовы к большему.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Бесплатно навсегда", altNote: "",
+        tagline: "Создайте профиль и начните знакомиться.",
+        features: ["Полный профиль и базовый поиск", "3 лайка в день", "Базовый подбор пар"],
+        cta: "Начать бесплатно", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "в месяц, ежемесячная оплата",
+        altNote: "или €49.99 за 3 месяца - €16.66/мес, экономия 33%",
+        tagline: "Для тех, кто готов искать пару осознанно.",
+        features: ["Оценка совместимости и «почему вы подходите»", "Расширенные семейные фильтры", "Кто лайкнул вас", "Видео- и аудиозвонки", "15 лайков/день, 5 обращений/день", "Приоритет в поиске"],
+        cta: "Начать Family Builder", badge: "Лучшая цена",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "в месяц", altNote: "",
+        tagline: "Всё из Family Builder плюс более глубокое сопровождение.",
+        features: ["Всё из Family Builder", "AI Family Advisor", "Подробный отчёт о совместимости", "Family Plan и общая комната семьи", "Документы и чек-листы", "Приоритетная поддержка"],
+        cta: "Перейти на Pro", badge: "",
+      },
+    ],
+    footnote: "Цены указаны в евро и могут отличаться в зависимости от региона. Отмена в любой момент. Premium доступен после верификации профиля.",
+    faqLinkLabel: "Как мы проверяем участников",
+    compareTitle: "Сравните все возможности",
+    compareSub: "Точный список того, что включено в каждый тариф.",
+    matrixGroups: [
+      { name: "Больше совпадений", rows: [
+        { label: "Лайки в день", values: ["3", "15", "Без ограничений"] },
+        { label: "Первым написать", values: ["", "5 в день", "Без ограничений"] },
+        { label: "Расширенные семейные фильтры", values: ["", "check", "check"] },
+        { label: "Приоритет в каталоге", values: ["", "check", "check"] },
+        { label: "Кто лайкнул вас", values: ["", "check", "check"] },
+        { label: "Кто смотрел профиль", values: ["", "check", "check"] },
+      ] },
+      { name: "Понимание совместимости", rows: [
+        { label: "Оценка совместимости", values: ["", "check", "check"] },
+        { label: "Почему вы подходите", values: ["", "check", "check"] },
+        { label: "Расширенная информация профиля", values: ["", "check", "check"] },
+        { label: "Информация о верификации", values: ["", "check", "check"] },
+      ] },
+      { name: "Связь и общение", rows: [
+        { label: "Видео- и аудиозвонки", values: ["", "check", "check"] },
+        { label: "Приватные фото", values: ["", "check", "check"] },
+        { label: "Режим инкогнито", values: ["", "check", "check"] },
+      ] },
+      { name: "Постройте свою семью", rows: [
+        { label: "Семейный план (общий)", values: ["", "Ограниченно", "check"] },
+        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "Подробный отчёт о совместимости", values: ["", "", "check"] },
+        { label: "Документы и чек-листы", values: ["", "", "check"] },
+        { label: "Приоритетная поддержка", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  es: {
+    eyebrow: "PRECIOS",
+    title: "Encuentra a la persona adecuada para formar una familia.",
+    intro: "Mejores matches. Mayor compatibilidad. Más confianza. Empieza gratis y mejora cuando quieras ir más allá.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Gratis para siempre", altNote: "",
+        tagline: "Crea tu perfil y empieza a descubrir.",
+        features: ["Perfil completo y descubrimiento básico", "3 likes al día", "Emparejamiento básico"],
+        cta: "Empieza gratis", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "al mes, facturación mensual",
+        altNote: "o €49.99 por 3 meses - €16.66/mes, ahorra 33%",
+        tagline: "Para quienes buscan match con intención.",
+        features: ["Puntuación de compatibilidad y «por qué haces match»", "Filtros familiares avanzados", "Ver quién te dio like", "Videollamadas y llamadas de audio", "15 likes/día, 5 contactos/día", "Prioridad en el descubrimiento"],
+        cta: "Empezar Family Builder", badge: "Mejor precio",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "al mes", altNote: "",
+        tagline: "Todo lo de Family Builder, con acompañamiento más profundo.",
+        features: ["Todo lo de Family Builder", "AI Family Advisor", "Informe de compatibilidad detallado", "Family Plan y Sala Familiar Compartida", "Documentos y listas de verificación", "Soporte prioritario"],
+        cta: "Pasar a Pro", badge: "",
+      },
+    ],
+    footnote: "Los precios se muestran en EUR y pueden variar según la región. Cancela cuando quieras. Premium requiere verificación de perfil.",
+    faqLinkLabel: "Cómo verificamos a los miembros",
+    compareTitle: "Compara todas las funciones",
+    compareSub: "Mira exactamente qué incluye cada plan.",
+    matrixGroups: [
+      { name: "Mejores coincidencias", rows: [
+        { label: "Me gusta diarios", values: ["3", "15", "Ilimitado"] },
+        { label: "Escribir primero", values: ["", "5/día", "Ilimitado"] },
+        { label: "Filtros familiares avanzados", values: ["", "check", "check"] },
+        { label: "Prioridad en el catálogo", values: ["", "check", "check"] },
+        { label: "Ver quién te dio like", values: ["", "check", "check"] },
+        { label: "Ver visitantes del perfil", values: ["", "check", "check"] },
+      ] },
+      { name: "Entender la compatibilidad", rows: [
+        { label: "Puntuación de compatibilidad", values: ["", "check", "check"] },
+        { label: "Por qué coincidís", values: ["", "check", "check"] },
+        { label: "Información ampliada del perfil", values: ["", "check", "check"] },
+        { label: "Información de verificación", values: ["", "check", "check"] },
+      ] },
+      { name: "Conectar y comunicarse", rows: [
+        { label: "Videollamadas y llamadas de audio", values: ["", "check", "check"] },
+        { label: "Fotos privadas", values: ["", "check", "check"] },
+        { label: "Modo incógnito", values: ["", "check", "check"] },
+      ] },
+      { name: "Construye tu familia", rows: [
+        { label: "Plan familiar (compartido)", values: ["", "Limitado", "check"] },
+        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "Informe de compatibilidad detallado", values: ["", "", "check"] },
+        { label: "Documentos y listas de verificación", values: ["", "", "check"] },
+        { label: "Soporte prioritario", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+} satisfies Record<CookieLocale, Record<string, unknown>>;
+
+function Pricing({ session }: { session: Session }) {
+  const locale = localeOf();
+  const text = PRICING_TEXT[locale];
+  const primaryHref = session ? `/${locale}/subscription` : `/${locale}/auth/register`;
+  const freeHref = session ? `/${locale}/catalog` : `/${locale}/auth/register`;
+  return (
+    <div className="pricing-page">
+      <section className="pricing-hero">
+        <span className="landing-pill pricing-pill"><i /><span>{text.eyebrow}</span></span>
+        <h1>{text.title}</h1>
+        <p>{text.intro}</p>
+      </section>
+      <div className="pricing-grid">
+        {text.plans.map((plan) => (
+          <article key={plan.key} className={`pricing-card${plan.badge ? " highlight" : ""}`}>
+            {plan.badge ? <span className="pricing-card-badge">{plan.badge}</span> : null}
+            <h3>{plan.name}</h3>
+            <p className="pricing-tagline">{plan.tagline}</p>
+            <div className="pricing-price">
+              <strong>{plan.price}</strong>
+              <span>{plan.priceNote}</span>
+            </div>
+            {plan.altNote ? <p className="pricing-alt-note">{plan.altNote}</p> : null}
+            <ul className="pricing-features">
+              {plan.features.map((feature) => (
+                <li key={feature}>
+                  <i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg></i>
+                  <span>{feature}</span>
+                </li>
+              ))}
+            </ul>
+            <Link className={plan.badge ? "landing-gradient-button pricing-cta" : "pricing-secondary-button"} to={plan.key === "explore" ? freeHref : primaryHref}>
+              {plan.cta}
+            </Link>
+          </article>
+        ))}
+      </div>
+      <section className="pricing-compare">
+        <div className="landing-section-intro">
+          <span>{text.eyebrow}</span>
+          <h2>{text.compareTitle}</h2>
+          <p className="resources-section-sub">{text.compareSub}</p>
+        </div>
+        <div className="pricing-matrix">
+          <div className="pricing-matrix-head">
+            <span />
+            {text.plans.map((plan) => <span key={plan.key}>{plan.name}</span>)}
+          </div>
+          {text.matrixGroups.map((group) => (
+            <div key={group.name} className="pricing-matrix-group">
+              <div className="pricing-matrix-group-name">{group.name}</div>
+              {group.rows.map((row) => (
+                <div key={row.label} className="pricing-matrix-row">
+                  <span className="pricing-matrix-label">{row.label}</span>
+                  {row.values.map((value, i) => (
+                    <span key={i} className="pricing-matrix-cell">
+                      {value === "check" ? (
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+                      ) : value === "" ? (
+                        <span className="pricing-matrix-dash">—</span>
+                      ) : (
+                        <span className="pricing-matrix-value">{value}</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="pricing-footnote">
+        <p>{text.footnote} <Link to={`/${locale}/trust-safety`}>{text.faqLinkLabel}</Link></p>
+      </section>
+    </div>
+  );
+}
+
 const knowledgeCategories = [
   { slug: "ivf-in-vitro-fertilization", name: "IVF - In Vitro Fertilization" },
   { slug: "Co-parenting", name: "Co-parenting" },
@@ -4744,6 +5108,1162 @@ function ContentPage() {
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </article>
+  );
+}
+
+type ResourceTool = {
+  slug: string;
+  title: string;
+  description: string;
+  tag?: string;
+  format?: string;
+  downloadUrl?: string;
+  downloadName?: string;
+  sections?: string[];
+  sampleQuestions?: string[];
+  disclaimer?: string;
+};
+
+type ResourceCategoryData = {
+  slug: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  icon: string;
+  disclaimer?: string;
+  tools: ResourceTool[];
+};
+
+const RESOURCES_CATEGORIES: ResourceCategoryData[] = [
+  {
+    slug: "co-parenting",
+    eyebrow: "Co-parenting",
+    title: "Tools for building a family with a co-parent",
+    description: "Questions, checklists and templates for finding and getting to know a co-parent.",
+    icon: "coparenting",
+    tools: [
+      {
+        slug: "planning-template",
+        title: "Co-Parenting Planning Template",
+        description: "Talk through parenting, finances, living arrangements and boundaries before you move forward.",
+        tag: "Available now",
+        format: ".docx · 10 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Co-Parenting-Planning-Template.docx",
+        downloadName: "LetsBeParents-Co-Parenting-Planning-Template.docx",
+        sections: [
+          "Our intentions",
+          "The child's home and everyday life",
+          "Parenting values and decisions",
+          "Pregnancy, conception and medical care",
+          "Finances",
+          "Communication and boundaries",
+          "New partners and changing families",
+          "The child's relationship with both parents",
+          "Conflict and outside support",
+          "If circumstances change",
+        ],
+        sampleQuestions: [
+          "Why are we considering co-parenting?",
+          "What would make us decide not to move forward?",
+          "What do we each expect from the other person as a parent?",
+        ],
+        disclaimer: "This template is a conversation tool, not a legal document. Completing it does not create or guarantee legal parenthood, parental responsibility, custody or financial rights. Check the law that applies to your family before you rely on anything you agree here.",
+      },
+      {
+        slug: "questions-to-ask", title: "Questions to Ask a Potential Co-Parent",
+        description: "A practical list of questions covering parenting, money, communication and everyday life.",
+        tag: "Available now", format: ".docx · 7 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Questions-to-Ask-a-Potential-Co-Parent.docx",
+        downloadName: "LetsBeParents-Questions-to-Ask-a-Potential-Co-Parent.docx",
+        sections: ["Why parenthood?", "Everyday life", "Parenting values", "Money", "Relationships and boundaries", "Difficult situations", "Before moving forward"],
+        sampleQuestions: ["Why do you want to become a parent?", "Why are you considering co-parenting?", "What does being an involved parent mean to you?"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+      {
+        slug: "first-meeting", title: "First Meeting With a Potential Co-Parent",
+        description: "What to cover and look out for the first time you meet in person.",
+        tag: "Available now", format: ".docx · 5 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-First-Meeting-With-a-Potential-Co-Parent.docx",
+        downloadName: "LetsBeParents-First-Meeting-With-a-Potential-Co-Parent.docx",
+        sections: ["Before you meet", "Start with the big picture", "Notice how it feels", "You do not need to decide everything", "After the meeting"],
+        sampleQuestions: ["Why are you both considering co-parenting?", "What does parenthood mean to each of you?", "What kind of family are you hoping to build?"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+      {
+        slug: "red-flags-checklist", title: "Co-Parenting Red Flags Checklist",
+        description: "Signs worth paying attention to before you commit to co-parenting with someone.",
+        tag: "Available now", format: ".docx · 7 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Co-Parenting-Red-Flags-Checklist.docx",
+        downloadName: "LetsBeParents-Co-Parenting-Red-Flags-Checklist.docx",
+        sections: ["Pressure", "Boundaries", "Communication", "Money", "Responsibility", "Safety", "If something feels wrong"],
+        sampleQuestions: ["They push you to make major decisions quickly.", "They use age, fertility timing or fear of missing out to pressure you.", "They ignore a clear no."],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+      {
+        slug: "compatibility-scorecard", title: "Co-Parent Compatibility Scorecard",
+        description: "A simple way to note where you align and where you don't, after your first meeting.",
+        tag: "Available now", format: ".docx · 3 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Co-Parent-Compatibility-Scorecard.docx",
+        downloadName: "LetsBeParents-Co-Parent-Compatibility-Scorecard.docx",
+        sections: ["Rate 1-5", "Questions to ask yourself", "Before another step"],
+        sampleQuestions: ["Communication", "Respect for boundaries", "Parenting values"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+      {
+        slug: "parenting-values-worksheet", title: "Parenting Values Worksheet",
+        description: "Clarify your own parenting values before comparing them with someone else's.",
+        tag: "Available now", format: ".docx · 5 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Parenting-Values-Worksheet.docx",
+        downloadName: "LetsBeParents-Parenting-Values-Worksheet.docx",
+        sections: ["What matters most", "Everyday parenting", "Education and identity", "Money and family", "When we disagree"],
+        sampleQuestions: ["The three things I most want my child to experience are:", "The values I want to model are:", "The kind of parent I hope to be is:"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+    ],
+  },
+  {
+    slug: "fertility-donor",
+    eyebrow: "Fertility & donor conception",
+    title: "Prepare for clinic and donor conversations",
+    description: "Practical questions and checklists for talking to clinics and professionals.",
+    icon: "fertility",
+    disclaimer: "These resources are designed to help you prepare for conversations with qualified professionals. They are not medical or legal advice.",
+    tools: [
+      {
+        slug: "fertility-consultation-questions", title: "Fertility Consultation Questions",
+        description: "Questions worth bringing to your first consultation with a fertility clinic.",
+        tag: "Available now", format: ".docx · 7 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Fertility-Consultation-Questions.docx",
+        downloadName: "LetsBeParents-Fertility-Consultation-Questions.docx",
+        sections: ["Understanding your options", "Success and expectations", "Risks and medication", "Cost", "If treatment does not work", "Support", "Donor conception"],
+        sampleQuestions: ["Why are you recommending this treatment?", "What alternatives are available?", "What factors in my history affect the recommendation?"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+      {
+        slug: "donor-conception-questions", title: "Donor Conception Questions Checklist",
+        description: "What to ask and think through before choosing donor conception.",
+        tag: "Available now", format: ".docx · 5 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Donor-Conception-Questions-Checklist.docx",
+        downloadName: "LetsBeParents-Donor-Conception-Questions-Checklist.docx",
+        sections: ["About the donor", "Clinic and treatment", "Known donor", "Talking to your child", "Legal and future questions"],
+        sampleQuestions: ["What information is available?", "What medical and genetic screening has been completed?", "What information can the future child access?"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+      {
+        slug: "fertility-clinic-checklist", title: "Choosing a Fertility Clinic Checklist",
+        description: "What to compare when you're deciding between fertility clinics.",
+        tag: "Available now", format: ".docx · 5 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Choosing-a-Fertility-Clinic-Checklist.docx",
+        downloadName: "LetsBeParents-Choosing-a-Fertility-Clinic-Checklist.docx",
+        sections: ["Regulation and safety", "Treatment and evidence", "Costs", "Support", "Treatment abroad"],
+        sampleQuestions: ["Is the clinic properly regulated?", "What quality and safety standards apply?", "How are laboratories and storage managed?"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+    ],
+  },
+  {
+    slug: "parenthood-planning",
+    eyebrow: "Parenthood planning",
+    title: "Get ready for the practical side",
+    description: "For the practical side of preparing for a child.",
+    icon: "planning",
+    tools: [
+      {
+        slug: "financial-planning", title: "Financial Planning for Future Parents",
+        description: "A worksheet for thinking through the cost of building and raising a family.",
+        tag: "Available now", format: ".docx · 5 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Financial-Planning-for-Future-Parents.docx",
+        downloadName: "LetsBeParents-Financial-Planning-for-Future-Parents.docx",
+        sections: ["Before pregnancy or treatment", "Pregnancy and birth", "First year", "Shared expenses", "Financial changes"],
+        sampleQuestions: ["Which costs should be shared equally?", "Which costs should be divided by income?", "What happens if income changes?"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+      {
+        slug: "parenting-values-worksheet", title: "Parenting Values Worksheet",
+        description: "Clarify your own parenting values before comparing them with someone else's.",
+        tag: "Available now", format: ".docx · 5 sections · free",
+        downloadUrl: "/web-static/resources/LetsBeParents-Parenting-Values-Worksheet.docx",
+        downloadName: "LetsBeParents-Parenting-Values-Worksheet.docx",
+        sections: ["What matters most", "Everyday parenting", "Education and identity", "Money and family", "When we disagree"],
+        sampleQuestions: ["The three things I most want my child to experience are:", "The values I want to model are:", "The kind of parent I hope to be is:"],
+        disclaimer: "This resource is for planning and discussion purposes. It is not legal, medical, psychological or financial advice. Rules and professional recommendations vary by country and individual circumstances.",
+      },
+    ],
+  },
+];
+
+function resourceArrow() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>;
+}
+
+function resourceCategoryIcon(icon: string) {
+  if (icon === "fertility") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>;
+  if (icon === "planning") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M12 11h4" /><path d="M12 16h4" /><path d="M8 11h.01" /><path d="M8 16h.01" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14" /><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /></svg>;
+}
+
+function resourceDocIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" /></svg>;
+}
+
+function resourceQuizIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 14 4-4" /><path d="M3.34 19a10 10 0 1 1 17.32 0" /></svg>;
+}
+
+function resourceChatIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>;
+}
+
+function ResourcesIndex() {
+  const locale = localeOf();
+  return (
+    <div className="resources-page">
+      <section className="resources-hero">
+        <span className="landing-pill resources-pill"><i /><span>Resources & tools</span></span>
+        <h1>Parenthood resources and tools</h1>
+        <p>Practical checklists, worksheets and planning tools to help you explore co-parenting, fertility, donor conception and the practical side of becoming a parent.</p>
+      </section>
+
+      <section className="resources-start">
+        <div className="landing-section-intro">
+          <span>Start here</span>
+          <h2>Three good places to begin</h2>
+          <p className="resources-section-sub">Whichever stage you're at.</p>
+        </div>
+        <div className="resources-start-grid">
+          <Link className="resources-start-card" to={`/${locale}/resources/co-parenting/planning-template`}>
+            <span className="resources-start-icon">{resourceDocIcon()}</span>
+            <h3>Co-Parenting Planning Template</h3>
+            <p>Thinking about becoming co-parents? Talk through parenting, finances, living arrangements and boundaries before you move forward.</p>
+            <span className="resources-start-link">Download the template {resourceArrow()}</span>
+          </Link>
+          <Link className="resources-start-card" to={`/${locale}/resources/co-parenting/questions-to-ask`}>
+            <span className="resources-start-icon">{resourceDocIcon()}</span>
+            <h3>Questions to Ask a Potential Co-Parent</h3>
+            <p>Not sure what to ask before taking the next step? A practical list covering parenting, money, communication and everyday life.</p>
+            <span className="resources-start-link">View the questions {resourceArrow()}</span>
+          </Link>
+          <Link className="resources-start-card featured" to={`/${locale}/resources/co-parenting/compatibility-quiz`}>
+            <span className="resources-start-icon">{resourceQuizIcon()}</span>
+            <h3>Co-Parenting Compatibility Quiz</h3>
+            <p>See where your expectations line up, and what's worth discussing further. It won't tell you whether you're a "match."</p>
+            <span className="resources-start-link">Take the quiz {resourceArrow()}</span>
+          </Link>
+        </div>
+      </section>
+
+      <section className="resources-categories">
+        <div className="landing-section-intro">
+          <span>Explore all</span>
+          <h2>Explore all resources</h2>
+          <p className="resources-section-sub">The full set of checklists, worksheets and templates, grouped by what you're working through.</p>
+        </div>
+        <div className="resources-category-grid">
+          {RESOURCES_CATEGORIES.map((cat) => (
+            <article key={cat.slug} className="resources-category-card">
+              <span className="resources-category-icon">{resourceCategoryIcon(cat.icon)}</span>
+              <span className="resources-category-eyebrow">{cat.eyebrow}</span>
+              <h3>{cat.title}</h3>
+              <p>{cat.description}</p>
+              <ul>
+                {cat.tools.map((tool) => (
+                  <li key={tool.slug}><Link to={`/${locale}/resources/${cat.slug}/${tool.slug}`}>{tool.title}</Link></li>
+                ))}
+              </ul>
+              {cat.disclaimer && <p className="resources-category-note">{cat.disclaimer}</p>}
+              <Link className="resources-category-cta" to={`/${locale}/resources/${cat.slug}`}>
+                Explore {cat.eyebrow.toLowerCase()} {resourceArrow()}
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="resources-routes">
+        <span className="resources-routes-icon">{resourceArrow()}</span>
+        <div className="resources-routes-copy">
+          <h2>Not sure where to start?</h2>
+          <p>You don't have to have everything figured out. Start with the question that's most relevant to you right now.</p>
+        </div>
+        <div className="resources-routes-grid">
+          <Link to={`/${locale}/resources/co-parenting`}>I'm exploring co-parenting {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/fertility-donor`}>I'm thinking about fertility {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/fertility-donor`}>I'm considering donor conception {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/parenthood-planning`}>I want to plan ahead {resourceArrow()}</Link>
+        </div>
+      </section>
+
+      <section className="resources-pro">
+        <span className="resources-pro-icon">{resourceChatIcon()}</span>
+        <div className="resources-pro-copy">
+          <h2>Looking for professional guidance?</h2>
+          <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
+        </div>
+        <Link className="resources-pro-button" to={`/${locale}/contact`}>Learn about professional support {resourceArrow()}</Link>
+      </section>
+
+      <section className="landing-cta">
+        <h2>Explore LetsBeParents</h2>
+        <p>These tools work well on their own - or as part of your journey on the platform.</p>
+        <Link to={`/${locale}/auth/register`}>Create free account <span>→</span></Link>
+      </section>
+    </div>
+  );
+}
+
+function ResourceCategory() {
+  const locale = localeOf();
+  const { category = "" } = useParams();
+  const cat = RESOURCES_CATEGORIES.find((item) => item.slug === category);
+  if (!cat) {
+    return (
+      <div className="resources-page">
+        <section className="resources-hero">
+          <h1>Resource category not found</h1>
+          <Link className="landing-gradient-button" to={`/${locale}/resources`}>Back to Resources & Tools {resourceArrow()}</Link>
+        </section>
+      </div>
+    );
+  }
+  return (
+    <div className="resources-page">
+      <section className="resources-hero resource-detail-hero">
+        <span className="resources-category-icon large">{resourceCategoryIcon(cat.icon)}</span>
+        <h1>{cat.title}</h1>
+        <p>{cat.description}</p>
+      </section>
+      <div className="resources-tool-grid">
+        {cat.tools.map((tool) => (
+          <Link key={tool.slug} className="resources-tool-card" to={`/${locale}/resources/${cat.slug}/${tool.slug}`}>
+            <span className="resources-tool-icon">{resourceDocIcon()}</span>
+            {tool.tag && <span className="resources-tool-tag">{tool.tag}</span>}
+            <h3>{tool.title}</h3>
+            <p>{tool.description}</p>
+            <span className="resources-tool-link">{tool.downloadUrl ? "Download the template" : "View resource"} {resourceArrow()}</span>
+          </Link>
+        ))}
+      </div>
+      {cat.slug === "co-parenting" && (
+        <section className="resources-quiz-strip">
+          <h2>Not sure you're on the same page yet?</h2>
+          <p>The Co-Parenting Compatibility Quiz helps you and a potential co-parent see where your expectations align - and what's worth discussing further.</p>
+          <Link className="landing-gradient-button" to={`/${locale}/resources/co-parenting/compatibility-quiz`}>Take the quiz {resourceArrow()}</Link>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// Co-Parenting Compatibility Quiz - built from LetsBeParents_Quiz_UIUX_Spec_Board.pdf.
+// MVP scope per that spec: 26 questions / 8 sections / ~5 min, a reflection tool (not a compatibility
+// test) - explicitly no score, percentage or pass/fail. Results reflect one person's own answer
+// patterns (which sections they answered decisively vs. uncertainly), not a two-person comparison -
+// the spec labels person-to-person comparison "Phase 2", out of scope here.
+const QUIZ_SECTIONS = ["Why parent?", "Parenting", "Everyday life", "Money", "Communication", "Boundaries", "Future", "Important questions"];
+
+type QuizQuestion = { section: number; type: "select" | "text"; prompt: string; options?: string[] };
+
+// For "select" questions, the LAST option is always the "still deciding" one - used only to gauge
+// how settled someone's thinking is in that area for the reflection results, never shown as "wrong".
+const QUIZ_QUESTIONS: QuizQuestion[] = [
+  { section: 1, type: "select", prompt: "Why do you want to become a parent?", options: ["I've always wanted to raise a child", "I want to build a family before it's too late for me", "I want to give a child a loving home, however that looks", "I'm honestly still exploring why"] },
+  { section: 1, type: "select", prompt: "How would you describe the kind of parent you hope to be?", options: ["Hands-on and involved in the daily details", "Present, but giving my child independence", "Guided by structure and routine", "Still figuring this out"] },
+  { section: 1, type: "select", prompt: "What matters most to you about becoming a parent right now?", options: ["Timing - I don't want to wait much longer", "Finding the right situation, whenever that happens", "Doing it in a way that feels stable and prepared", "I'm not sure yet, I'm exploring my options"] },
+  { section: 2, type: "select", prompt: "How would you ideally share parenting responsibilities?", options: ["As equally as possible", "Based on schedules", "Based on income", "Decide together", "I'm not sure yet"] },
+  { section: 2, type: "select", prompt: "What's your view on discipline?", options: ["Clear rules and consistent consequences", "Gentle guidance, talking things through", "Depends on the situation", "Something we'd need to agree on together"] },
+  { section: 2, type: "select", prompt: "How involved do you want the other parent to be in day-to-day decisions?", options: ["Involved in everything, always", "Involved in the big decisions, independent on the small ones", "Mostly independent, checking in occasionally", "I'm still working this out"] },
+  { section: 2, type: "select", prompt: "How do you feel about extended family being involved in parenting?", options: ["Very involved - grandparents and family close by", "Involved sometimes, but we set the boundaries", "Minimal involvement, we'd raise the child mostly ourselves", "Depends entirely on the family, I'd need to think it through"] },
+  { section: 3, type: "select", prompt: "Where would you ideally want your child to grow up?", options: ["Close to where I live now", "Open to moving somewhere new", "Close to family, wherever they are", "Haven't thought about it yet"] },
+  { section: 3, type: "select", prompt: "How would you divide everyday routines like school runs, meals and bedtime?", options: ["Split evenly by default", "Whoever's schedule allows it that day", "One of us takes the lead, the other supports", "We'd figure it out as we go"] },
+  { section: 3, type: "select", prompt: "How much flexibility do you want in your day-to-day parenting schedule?", options: ["A clear, consistent routine works best for me", "I like flexibility and adapting as needed", "A mix of both", "Not sure yet"] },
+  { section: 4, type: "select", prompt: "How do you feel about splitting child-related costs?", options: ["Equally, no matter what we each earn", "Proportional to what we each earn", "One of us takes on more financially", "We'd need to talk this through"] },
+  { section: 4, type: "select", prompt: "How would you handle a large, unexpected expense for your child?", options: ["Split it immediately, no discussion needed", "Talk it through and decide together first", "Whoever has the means covers it, for now", "Honestly not sure yet"] },
+  { section: 4, type: "select", prompt: "How comfortable are you discussing money with a co-parent before you commit to anything?", options: ["Very comfortable - I'd want this settled early", "Comfortable, but I'd ease into it", "A bit uneasy, but I know it's necessary", "I tend to avoid money conversations"] },
+  { section: 5, type: "select", prompt: "How often do you expect to communicate with a co-parent about your child?", options: ["Daily updates, even for small things", "Regularly, for anything that matters", "Only when a decision needs to be made", "I'm not sure what's realistic yet"] },
+  { section: 5, type: "select", prompt: "What's your preferred way to handle a disagreement?", options: ["Talk it out immediately, in person if possible", "Take some time to think, then talk", "Write it out first so I can be clear", "I tend to avoid conflict when I can"] },
+  { section: 5, type: "select", prompt: "How do you feel about being asked hard questions early on?", options: ["I'd rather know everything upfront", "I'm fine with it once there's some trust", "I'd prefer to ease into deeper topics", "It makes me a little uncomfortable"] },
+  { section: 6, type: "select", prompt: "How do you feel about a co-parent dating other people?", options: ["Completely fine, as long as it's respectful", "Fine, but I'd want some boundaries in place", "I'd want to discuss this before it happens", "I haven't thought this through yet"] },
+  { section: 6, type: "select", prompt: "What personal information are you comfortable sharing early in a co-parenting conversation?", options: ["Pretty much everything relevant", "The basics, more as trust builds", "Only what's directly related to parenting", "I'm naturally private about most things"] },
+  { section: 6, type: "select", prompt: "How do you feel about a co-parent setting limits on how involved you are?", options: ["Completely fair, we should each be able to set limits", "Depends on what the limit is", "I'd want to be as involved as possible, always", "Haven't considered this yet"] },
+  { section: 7, type: "select", prompt: "How do you picture your family five years from now?", options: ["A clear, stable routine we've settled into", "Still adapting as things change", "Depends a lot on where life takes us", "Honestly, I haven't pictured it yet"] },
+  { section: 7, type: "select", prompt: "What happens if one of you wants to relocate someday?", options: ["We'd need to agree on this before starting", "We'd figure it out together when it comes up", "I'd want the flexibility to move if needed", "Not sure how I'd handle this"] },
+  { section: 7, type: "select", prompt: "How do you feel about the arrangement changing as your child gets older?", options: ["I expect it to evolve, and I'm comfortable with that", "I'd want to keep things as consistent as possible", "A bit of both, depending on what's needed", "Haven't thought that far ahead"] },
+  { section: 8, type: "select", prompt: "What would make you decide not to move forward with a potential co-parent?", options: ["A mismatch in core values around parenting", "Feeling pressured or rushed into decisions", "Concerns about reliability or follow-through", "I'd know it when I felt it"] },
+  { section: 8, type: "text", prompt: "What do you most want a potential co-parent to understand about you before you move forward together?" },
+  { section: 8, type: "text", prompt: "What's one question you're afraid to ask, but know you should?" },
+  { section: 8, type: "text", prompt: "Is there anything else about your situation or expectations you'd want to share?" },
+];
+
+const QUIZ_STRENGTH_COPY: Record<number, { title: string; copy: string }> = {
+  1: { title: "Why parent?", copy: "You seem clear on why you want to become a parent - that clarity is worth naming out loud early in a conversation." },
+  2: { title: "Parenting", copy: "You appear to have a settled sense of how you'd want to co-parent day to day." },
+  3: { title: "Everyday life", copy: "You have a fairly clear picture of what daily life and routines could look like." },
+  4: { title: "Money", copy: "You seem comfortable and decisive about how money and costs would be handled." },
+  5: { title: "Communication", copy: "You appear comfortable discussing difficult subjects and looking for solutions together." },
+  6: { title: "Boundaries", copy: "You have a clear sense of the boundaries that matter to you." },
+  7: { title: "Future", copy: "You seem to have thought through how things might change as your family grows." },
+  8: { title: "Important questions", copy: "You have a clear sense of what would - and wouldn't - work for you." },
+};
+
+const QUIZ_DISCUSS_COPY: Record<number, { title: string; copy: string }> = {
+  1: { title: "Why parent?", copy: "Your answers suggest your reasons for parenthood are still taking shape - worth putting into words before you go much further." },
+  2: { title: "Parenting", copy: "How day-to-day parenting responsibilities would actually be split looks like an area worth a deeper conversation." },
+  3: { title: "Everyday life", copy: "Living arrangements and daily routines - your answers show an area where you may want a deeper conversation." },
+  4: { title: "Money", copy: "How costs would be shared seems less settled for you - a good one to raise early, not after the fact." },
+  5: { title: "Communication", copy: "How you'd communicate day to day, especially during disagreements, is worth talking through explicitly." },
+  6: { title: "Boundaries", copy: "Where your boundaries sit isn't fully settled yet - worth clarifying for yourself, then with a potential co-parent." },
+  7: { title: "Future", copy: "How things might change over the years is still uncertain for you - worth revisiting as the relationship develops." },
+  8: { title: "Important questions", copy: "Some of the harder questions are still open for you - they're worth sitting with before you commit to anything." },
+};
+
+const QUIZ_PROMPTS: Record<number, string[]> = {
+  1: ["Why are you both considering this now, specifically?", "What would make this feel like the wrong decision in hindsight?"],
+  2: ["How would you split decisions on schooling, healthcare and discipline?", "What happens if you disagree on a parenting decision?"],
+  3: ["Where would you each ideally want to live, and how close to each other?", "How would a typical week actually be divided?"],
+  4: ["How would you divide costs if one of you earns significantly more?", "Who would cover an unplanned, larger expense?"],
+  5: ["How often do you expect to check in with each other?", "What does a fair way to disagree look like to each of you?"],
+  6: ["What would you want to know about each other's other relationships?", "What information do you each consider private?"],
+  7: ["What would you do if one of you wanted to move away?", "How do you imagine this arrangement evolving over 10+ years?"],
+  8: ["What would be a dealbreaker for each of you?", "Is there anything you're hesitant to bring up right now?"],
+};
+
+function computeQuizResults(answers: (string | null)[]) {
+  const bySection = new Map<number, { decisive: number; total: number }>();
+  QUIZ_QUESTIONS.forEach((q, i) => {
+    if (q.type !== "select" || !q.options) return;
+    const entry = bySection.get(q.section) ?? { decisive: 0, total: 0 };
+    entry.total += 1;
+    const answer = answers[i];
+    if (answer && answer !== q.options[q.options.length - 1]) entry.decisive += 1;
+    bySection.set(q.section, entry);
+  });
+  const ranked = [...bySection.entries()].map(([section, { decisive, total }]) => ({ section, ratio: total ? decisive / total : 0 }));
+  const byStrength = [...ranked].sort((a, b) => b.ratio - a.ratio);
+  const strongest = byStrength.filter((r) => r.ratio >= 0.66).slice(0, 2).map((r) => r.section);
+  const discuss = [...ranked].sort((a, b) => a.ratio - b.ratio).filter((r) => r.ratio < 0.66 && !strongest.includes(r.section)).slice(0, 2).map((r) => r.section);
+  const prompts = discuss.flatMap((section) => QUIZ_PROMPTS[section] ?? []).slice(0, 3);
+  return { strongest, discuss, prompts };
+}
+
+function CompatibilityQuiz() {
+  const locale = localeOf();
+  const [step, setStep] = useState<"intro" | number | "results">("intro");
+  const [answers, setAnswers] = useState<(string | null)[]>(() => QUIZ_QUESTIONS.map(() => null));
+  const totalQuestions = QUIZ_QUESTIONS.length;
+
+  const setAnswer = (index: number, value: string) => {
+    setAnswers((prev) => prev.map((a, i) => (i === index ? value : a)));
+  };
+
+  const downloadResults = (results: ReturnType<typeof computeQuizResults>) => {
+    const lines: string[] = ["LetsBeParents - Co-Parenting Compatibility Quiz", "A reflection of your priorities, not a verdict.", ""];
+    QUIZ_QUESTIONS.forEach((q, i) => {
+      lines.push(`${QUIZ_SECTIONS[q.section - 1]} - ${q.prompt}`);
+      lines.push(`> ${answers[i] || "(not answered)"}`);
+      lines.push("");
+    });
+    lines.push("Your strongest areas:");
+    results.strongest.forEach((s) => lines.push(`- ${QUIZ_STRENGTH_COPY[s].title}: ${QUIZ_STRENGTH_COPY[s].copy}`));
+    lines.push("");
+    lines.push("Worth discussing:");
+    results.discuss.forEach((s) => lines.push(`- ${QUIZ_DISCUSS_COPY[s].title}: ${QUIZ_DISCUSS_COPY[s].copy}`));
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "LetsBeParents-Compatibility-Quiz-Results.txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  if (step === "intro") {
+    return (
+      <div className="quiz-intro">
+        <h2>Could you see yourself parenting well with this person?</h2>
+        <p>This quiz won't tell you whether you should co-parent. It helps you see where expectations align - and what's worth discussing further.</p>
+        <div className="quiz-intro-grid">
+          <div>
+            <h3>Before you start</h3>
+            <ul>
+              <li>{totalQuestions} questions</li>
+              <li>About 5 minutes</li>
+              <li>You can go back and edit answers</li>
+              <li>Free-text answers are optional</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Privacy</h3>
+            <p>Your answers stay in this browser session and are never shared automatically. Create a free account if you'd like to save or share your results.</p>
+          </div>
+        </div>
+        <button type="button" className="landing-gradient-button" onClick={() => setStep(0)}>Start the quiz {resourceArrow()}</button>
+      </div>
+    );
+  }
+
+  if (step === "results") {
+    const results = computeQuizResults(answers);
+    return (
+      <div className="quiz-results">
+        <div className="quiz-results-head">
+          <h2>What your answers suggest</h2>
+          <p>A reflection of your priorities - not a verdict.</p>
+        </div>
+        {results.strongest.length > 0 && (
+          <div className="quiz-result-group strong">
+            <h3>Your strongest areas</h3>
+            {results.strongest.map((s) => (
+              <div key={s} className="quiz-result-card">
+                <strong>{QUIZ_STRENGTH_COPY[s].title}</strong>
+                <p>{QUIZ_STRENGTH_COPY[s].copy}</p>
+              </div>
+            ))}
+          </div>
+        )}
+        {results.discuss.length > 0 ? (
+          <div className="quiz-result-group discuss">
+            <h3>Worth discussing</h3>
+            {results.discuss.map((s) => (
+              <div key={s} className="quiz-result-card">
+                <strong>{QUIZ_DISCUSS_COPY[s].title}</strong>
+                <p>{QUIZ_DISCUSS_COPY[s].copy}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="quiz-result-group discuss">
+            <h3>Worth discussing</h3>
+            <div className="quiz-result-card">
+              <p>You answered fairly decisively across the board - that's a good sign, but it's still worth having these conversations out loud with a potential co-parent, not just with yourself.</p>
+            </div>
+          </div>
+        )}
+        {results.prompts.length > 0 && (
+          <div className="quiz-result-prompts">
+            <h3>Questions to explore together</h3>
+            {results.prompts.map((prompt) => (
+              <span key={prompt}>{resourceArrow()} {prompt}</span>
+            ))}
+          </div>
+        )}
+        <div className="quiz-result-actions quiz-no-print">
+          <button type="button" className="landing-gradient-button" onClick={() => downloadResults(results)}>Download results</button>
+          <button type="button" className="resources-pro-button" onClick={() => window.print()}>Print</button>
+          <span className="quiz-no-score">No compatibility %</span>
+        </div>
+        <div className="quiz-next-steps quiz-no-print">
+          <Link to={`/${locale}/resources/co-parenting/questions-to-ask`}>Questions to Ask a Potential Co-Parent {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/co-parenting/planning-template`}>Create a Co-Parenting Plan {resourceArrow()}</Link>
+          <Link to={`/${locale}/auth/register`}>Invite your potential co-parent {resourceArrow()}</Link>
+        </div>
+      </div>
+    );
+  }
+
+  const index = step;
+  const question = QUIZ_QUESTIONS[index];
+  const answer = answers[index];
+  const canAdvance = question.type === "text" || Boolean(answer);
+  const isLast = index === totalQuestions - 1;
+  const goNext = () => {
+    if (isLast) setStep("results");
+    else setStep(index + 1);
+  };
+  const goBack = () => {
+    if (index === 0) setStep("intro");
+    else setStep(index - 1);
+  };
+  return (
+    <div className="quiz-question">
+      <div className="quiz-progress">
+        <div className="quiz-progress-fill" style={{ width: `${((index + 1) / totalQuestions) * 100}%` }} />
+      </div>
+      <span className="quiz-progress-label">Section {question.section} of 8 - {QUIZ_SECTIONS[question.section - 1]}</span>
+      <h2>{question.prompt}</h2>
+      {question.type === "select" ? (
+        <>
+          <p className="quiz-question-hint">Choose the answer that feels closest to you.</p>
+          <div className="quiz-options">
+            {question.options?.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`quiz-option${answer === option ? " selected" : ""}`}
+                onClick={() => setAnswer(index, option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="quiz-question-hint">Optional - write as much or as little as you like.</p>
+          <textarea
+            className="quiz-textarea"
+            value={answer ?? ""}
+            onChange={(e) => setAnswer(index, e.target.value)}
+            rows={4}
+          />
+        </>
+      )}
+      <div className="quiz-nav">
+        <button type="button" className="quiz-back" onClick={goBack}>Back</button>
+        <button type="button" className="landing-gradient-button" disabled={!canAdvance} onClick={goNext}>
+          {isLast ? "See results" : "Next"} {resourceArrow()}
+        </button>
+      </div>
+      <p className="quiz-nav-note">Answers can be changed before you reach your results.</p>
+    </div>
+  );
+}
+
+function ResourceTool() {
+  const locale = localeOf();
+  const { category = "", tool: toolSlug = "" } = useParams();
+  const cat = RESOURCES_CATEGORIES.find((item) => item.slug === category);
+  if (!cat) {
+    return (
+      <div className="resources-page">
+        <section className="resources-hero">
+          <h1>Resource not found</h1>
+          <Link className="landing-gradient-button" to={`/${locale}/resources`}>Back to Resources & Tools {resourceArrow()}</Link>
+        </section>
+      </div>
+    );
+  }
+  if (toolSlug === "compatibility-quiz" && cat.slug === "co-parenting") {
+    return (
+      <div className="resources-page quiz-page">
+        <section className="resources-hero resource-detail-hero quiz-hero">
+          <span className="resources-category-icon large">{resourceQuizIcon()}</span>
+          <h1>Co-Parenting Compatibility Quiz</h1>
+          <p>See where your expectations line up, and what's worth discussing further. It won't tell you whether you're a "match."</p>
+        </section>
+        <CompatibilityQuiz />
+      </div>
+    );
+  }
+  const tool = cat.tools.find((item) => item.slug === toolSlug);
+  if (!tool) {
+    return (
+      <div className="resources-page">
+        <section className="resources-hero">
+          <h1>Resource not found</h1>
+          <Link className="landing-gradient-button" to={`/${locale}/resources/${cat.slug}`}>Back to {cat.eyebrow} {resourceArrow()}</Link>
+        </section>
+      </div>
+    );
+  }
+  return (
+    <div className="resources-page">
+      <section className="resources-hero resource-detail-hero">
+        <span className="resources-category-icon large">{resourceDocIcon()}</span>
+        <h1>{tool.title}</h1>
+        <p>{tool.description}</p>
+        {tool.downloadUrl ? (
+          <div className="resources-tool-actions">
+            <a className="landing-gradient-button" href={tool.downloadUrl} download={tool.downloadName}>
+              Download the template {resourceArrow()}
+            </a>
+            {tool.format && <span className="resources-tool-format">{tool.format}</span>}
+          </div>
+        ) : (
+          <span className="resources-tool-tag soon">Coming soon</span>
+        )}
+      </section>
+      {tool.sections ? (
+        <div className="resources-tool-layout">
+          <div className="resources-tool-main">
+            <div className="resources-tool-preview">
+              <h2>What's inside</h2>
+              <p>{tool.sections.length} sections, each with open questions for both of you to answer - independently first, then together.</p>
+              <ol className="resources-tool-sections">
+                {tool.sections.map((section, index) => (
+                  <li key={section}><span>{String(index + 1).padStart(2, "0")}</span>{section}</li>
+                ))}
+              </ol>
+              {tool.sampleQuestions && (
+                <div className="resources-tool-samples">
+                  <span>A few sample questions from section 1</span>
+                  <div className="resources-tool-sample-list">
+                    {tool.sampleQuestions.map((question) => <span key={question}>{question}</span>)}
+                  </div>
+                </div>
+              )}
+            </div>
+            {tool.disclaimer && <div className="resources-tool-disclaimer">{tool.disclaimer}</div>}
+          </div>
+          <aside className="resources-tool-sidebar">
+            <div className="resources-tool-related">
+              <h3>Related resources</h3>
+              {cat.tools.filter((item) => item.slug !== tool.slug).slice(0, 3).map((item) => (
+                <Link key={item.slug} to={`/${locale}/resources/${cat.slug}/${item.slug}`}>{item.title} {resourceArrow()}</Link>
+              ))}
+            </div>
+            <div className="resources-tool-cta">
+              <h3>Ready to take the next step?</h3>
+              <p>Create a free account to save your answers and build a shared Family Plan on LetsBeParents.</p>
+              <Link className="landing-gradient-button" to={`/${locale}/auth/register`}>Create free account {resourceArrow()}</Link>
+            </div>
+          </aside>
+        </div>
+      ) : (
+        <div className="resources-coming-soon">
+          <p>We're finishing this resource - check back soon, or explore what's already available in {cat.eyebrow}.</p>
+          <Link className="landing-gradient-button" to={`/${locale}/resources/${cat.slug}`}>Back to {cat.eyebrow} {resourceArrow()}</Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Find Your Path landing pages, per LBP_findyourpath_TZ.md (Sept 2026).
+// registerKey matches the Path Selector's internal key (also the ?path= value on registration);
+// slug is the URL segment under /find-your-path/, per the TZ's §1 URL structure (only "coparent" -> "co-parenting" differs).
+type FypResourceRef = { category: string; tool: string };
+type FypPath = {
+  slug: string;
+  registerKey: string;
+  h1: string;
+  subtitle: string;
+  paragraphs: string[];
+  resources: FypResourceRef[] | "all";
+  ctaLabel: string;
+  ctaType: "register" | "quiz";
+};
+
+const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
+  eyebrow: string;
+  whatThisLooksLike: string;
+  resourcesTitle: string;
+  resourcesAllTitle: string;
+  resourcesAllCopy: string;
+  resourcesAllCta: string;
+  paths: FypPath[];
+}> = {
+  en: {
+    eyebrow: "Find your path",
+    whatThisLooksLike: "What this path looks like",
+    resourcesTitle: "Resources for this path",
+    resourcesAllTitle: "Not sure yet? Browse everything",
+    resourcesAllCopy: "Explore the full set of checklists, worksheets and templates across every path - co-parenting, fertility, donor conception and planning ahead.",
+    resourcesAllCta: "Browse all resources & tools",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Finding the right co-parent starts with knowing what you want",
+        subtitle: "Co-parenting means raising a child together without a romantic relationship. It works when both people are clear on expectations from day one.",
+        paragraphs: [
+          "Co-parenting on LetsBeParents means building a family with someone you're not romantically involved with - two separate households, shared decisions about your child's life. It works best when both people are honest about what they want before they start looking, not after they've already found someone they like.",
+          "Instead of a swipe-based feed, matching here starts with a values-based quiz and a Compatibility Score that shows where you and a potential co-parent actually align - on parenting style, involvement, timeline and boundaries - so you're comparing what matters, not just a photo.",
+          "Once you've had a first conversation, the next steps are the same ones any thoughtful co-parenting decision needs: more conversations, a written plan, and, when you're ready, independent legal advice.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Create your profile", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Find the right donor for your family",
+        subtitle: "Whether you're looking for a known or anonymous donor, LetsBeParents helps you filter by what matters most to you.",
+        paragraphs: [
+          "Choosing a donor is one of the most personal decisions in building a family, with real medical, legal and long-term implications. Some people want a known donor with an ongoing relationship to the child; others prefer anonymity through a clinic. Both are valid paths, and they lead to different questions.",
+          "On LetsBeParents, donor profiles include the information that actually matters for this decision, and every donor goes through identity verification before you can connect. You set the filters that matter to you - medical history, openness to contact, location - instead of scrolling blind.",
+          "Before you move forward with any donor, working through the practical questions with a fertility clinic and, where relevant, a lawyer is worth doing early, rather than after you've already made an emotional decision.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Browse donor profiles", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Build a family with a partner who shares your vision",
+        subtitle: "A family-building partner isn't a donor or a co-parent from a distance - it's someone you build a shared family life with.",
+        paragraphs: [
+          "A family-building partner is different from both a co-parent and a donor: this is someone you'd build a shared household and daily life with, the way a couple would - just with parenthood as the explicit, shared goal from the start, rather than something you hope comes up.",
+          "Because this is closer to a life partnership than a transaction, LetsBeParents doesn't treat it like dating. There's no swiping here - it starts with a short compatibility quiz that surfaces how you each think about parenting, commitment and day-to-day life, so early conversations start from real alignment instead of a profile photo.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Take the compatibility quiz", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Find a donor together, as a couple",
+        subtitle: "Looking for a donor as a couple has its own questions - from legal parentage to how involved you want the donor to be.",
+        paragraphs: [
+          "Searching for a donor as a couple raises questions a solo search doesn't: how involved (or not) you want the donor to be, how legal parentage works for both of you, and how you'll make decisions together as you go. Getting aligned with your partner before you start looking saves a lot of friction later.",
+          "LetsBeParents lets both of you browse and filter donor profiles together, with the same identity-verified donor pool and the same filters - medical history, openness to contact, and more - available whether you're searching alone or as a pair.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Create your profile", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Still figuring out your path? Start here.",
+        subtitle: "You don't need to have it all figured out. Most people start by exploring their options before deciding on a path.",
+        paragraphs: [
+          "Most people who end up building a family with LetsBeParents didn't start out sure exactly what that would look like. If you're still weighing co-parenting against donor conception, or a partner against going it alone, that's a completely normal place to be - and not something you need to resolve before you start.",
+          "The best next step isn't a decision, it's information: read through what each path actually involves, and take the Compatibility Quiz to get a clearer sense of what you're looking for. There's no pressure to register or commit to anything while you're still exploring.",
+        ],
+        resources: "all",
+        ctaLabel: "Take the Co-Parenting Compatibility Quiz", ctaType: "quiz",
+      },
+    ],
+  },
+  ru: {
+    eyebrow: "Найдите свой путь",
+    whatThisLooksLike: "Как это выглядит на практике",
+    resourcesTitle: "Ресурсы для этого пути",
+    resourcesAllTitle: "Ещё не уверены? Посмотрите всё",
+    resourcesAllCopy: "Изучите полный набор чек-листов, воркшитов и шаблонов по всем путям - co-parenting, донорское зачатие, фертильность и планирование будущего.",
+    resourcesAllCta: "Все ресурсы и инструменты",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Найти подходящего со-родителя начинается с понимания того, чего вы хотите",
+        subtitle: "Co-parenting - это совместное воспитание ребёнка без романтических отношений. Это работает, когда оба человека с самого начала чётко понимают ожидания друг друга.",
+        paragraphs: [
+          "Co-parenting на LetsBeParents означает построение семьи с человеком, с которым у вас нет романтических отношений - два отдельных дома, общие решения по ребёнку. Это работает лучше всего, когда оба честны в том, чего хотят, ещё до начала поиска, а не после того, как уже понравился конкретный человек.",
+          "Вместо ленты со свайпами подбор здесь начинается с квиза на основе ценностей и Compatibility Score, который показывает, в чём вы и потенциальный со-родитель действительно совпадаете - в стиле воспитания, вовлечённости, сроках и границах - так вы сравниваете то, что важно, а не только фото.",
+          "После первого разговора дальнейшие шаги такие же, как в любом взвешенном решении о co-parenting: больше разговоров, письменный план и, когда будете готовы, независимая юридическая консультация.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Создать профиль", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Найдите подходящего донора для своей семьи",
+        subtitle: "Ищете ли вы известного или анонимного донора, LetsBeParents помогает фильтровать по тому, что важно именно вам.",
+        paragraphs: [
+          "Выбор донора - одно из самых личных решений при построении семьи, и оно имеет реальные медицинские, юридические и долгосрочные последствия. Одни хотят известного донора с продолжающимися отношениями с ребёнком, другие предпочитают анонимность через клинику. Оба пути законны и ведут к разным вопросам.",
+          "На LetsBeParents профили доноров содержат информацию, которая действительно важна для этого решения, и каждый донор проходит проверку личности прежде чем вы сможете с ним связаться. Вы сами задаёте фильтры, которые важны вам - медицинскую историю, открытость к контакту, местоположение - вместо того чтобы листать вслепую.",
+          "Прежде чем двигаться дальше с любым донором, стоит проработать практические вопросы с клиникой репродукции и, где это уместно, с юристом - лучше сделать это заранее, а не после того, как решение уже принято эмоционально.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Смотреть профили доноров", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Постройте семью с партнёром, который разделяет ваше видение",
+        subtitle: "Партнёр для создания семьи - это не донор и не со-родитель на расстоянии, это человек, с которым вы строите общую семейную жизнь.",
+        paragraphs: [
+          "Партнёр для создания семьи отличается и от со-родителя, и от донора: это человек, с которым вы будете строить общий дом и повседневную жизнь, как пара - но с родительством как явной, общей целью с самого начала, а не тем, что вы надеетесь получится само собой.",
+          "Поскольку это ближе к жизненному партнёрству, чем к транзакции, LetsBeParents не относится к этому как к дейтингу. Здесь нет свайпов - всё начинается с короткого квиза на совместимость, который показывает, как каждый из вас думает о родительстве, обязательствах и повседневной жизни, чтобы первые разговоры начинались с реального совпадения, а не с фото профиля.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Пройти квиз на совместимость", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Найдите донора вместе, как пара",
+        subtitle: "Поиск донора парой поднимает свои вопросы - от юридического родительства до того, насколько вовлечён должен быть донор.",
+        paragraphs: [
+          "Поиск донора парой поднимает вопросы, которых нет при поиске в одиночку: насколько вовлечён (или нет) должен быть донор, как будет работать юридическое родительство для вас обоих, и как вы будете принимать решения вместе по ходу дела. Договориться с партнёром до начала поиска экономит много сил в будущем.",
+          "LetsBeParents позволяет вам обоим просматривать и фильтровать профили доноров вместе, с тем же пулом проверенных доноров и теми же фильтрами - медицинская история, открытость к контакту и другое - независимо от того, ищете вы в одиночку или вдвоём.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Создать профиль", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Всё ещё определяетесь с путём? Начните здесь.",
+        subtitle: "Не обязательно иметь готовый план. Большинство людей начинают с изучения вариантов, прежде чем выбрать путь.",
+        paragraphs: [
+          "Большинство людей, которые в итоге строят семью на LetsBeParents, изначально не были уверены, как именно это будет выглядеть. Если вы всё ещё взвешиваете co-parenting против донорского зачатия или партнёра против самостоятельного пути - это абсолютно нормально, и вам не нужно решать это прямо сейчас.",
+          "Лучший следующий шаг - не решение, а информация: изучите, что на самом деле означает каждый путь, и пройдите Compatibility Quiz, чтобы лучше понять, чего вы ищете. Пока вы всё ещё изучаете варианты, регистрироваться или брать на себя обязательства не нужно.",
+        ],
+        resources: "all",
+        ctaLabel: "Пройти Co-Parenting Compatibility Quiz", ctaType: "quiz",
+      },
+    ],
+  },
+  es: {
+    eyebrow: "Encuentra tu camino",
+    whatThisLooksLike: "Cómo es este camino en la práctica",
+    resourcesTitle: "Recursos para este camino",
+    resourcesAllTitle: "¿Aún no lo tienes claro? Explóralo todo",
+    resourcesAllCopy: "Explora el conjunto completo de listas de verificación, plantillas y guías para cada camino - coparentalidad, fertilidad, donación y planificación.",
+    resourcesAllCta: "Ver todos los recursos y herramientas",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Encontrar al co-padre o co-madre adecuado empieza por saber qué quieres",
+        subtitle: "La coparentalidad significa criar a un hijo juntos sin una relación romántica. Funciona cuando ambas personas tienen claras sus expectativas desde el principio.",
+        paragraphs: [
+          "La coparentalidad en LetsBeParents significa construir una familia con alguien con quien no tienes una relación romántica - dos hogares separados, decisiones compartidas sobre tu hijo. Funciona mejor cuando ambas personas son honestas sobre lo que quieren antes de empezar a buscar, no después de haber encontrado a alguien que les gusta.",
+          "En lugar de un feed de swipe, el emparejamiento aquí empieza con un cuestionario basado en valores y una Puntuación de Compatibilidad que muestra en qué coinciden realmente tú y un posible co-padre - en estilo de crianza, implicación, plazos y límites - así comparas lo que importa, no solo una foto.",
+          "Después de una primera conversación, los siguientes pasos son los mismos que requiere cualquier decisión de coparentalidad bien pensada: más conversaciones, un plan por escrito y, cuando estés listo, asesoría legal independiente.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Crear tu perfil", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Encuentra al donante adecuado para tu familia",
+        subtitle: "Ya busques un donante conocido o anónimo, LetsBeParents te ayuda a filtrar por lo que más te importa.",
+        paragraphs: [
+          "Elegir un donante es una de las decisiones más personales al formar una familia, y tiene implicaciones médicas, legales y a largo plazo reales. Algunas personas quieren un donante conocido con una relación continua con el niño; otras prefieren el anonimato a través de una clínica. Ambos caminos son válidos y llevan a preguntas distintas.",
+          "En LetsBeParents, los perfiles de donantes incluyen la información que realmente importa para esta decisión, y cada donante pasa por una verificación de identidad antes de que puedas contactarlo. Tú defines los filtros que te importan - historial médico, apertura al contacto, ubicación - en lugar de buscar a ciegas.",
+          "Antes de avanzar con cualquier donante, vale la pena resolver las preguntas prácticas con una clínica de fertilidad y, cuando corresponda, con un abogado, y hacerlo pronto en lugar de después de haber tomado ya una decisión emocional.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Ver perfiles de donantes", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Construye una familia con una pareja que comparta tu visión",
+        subtitle: "Una pareja para formar una familia no es un donante ni un co-padre a distancia - es alguien con quien construyes una vida familiar compartida.",
+        paragraphs: [
+          "Una pareja para formar una familia es diferente tanto de un co-padre como de un donante: es alguien con quien construirías un hogar y una vida diaria compartidos, como lo haría una pareja - solo que con la paternidad como objetivo explícito y compartido desde el principio, en lugar de algo que esperas que surja.",
+          "Como esto se parece más a una asociación de vida que a una transacción, LetsBeParents no lo trata como una app de citas. Aquí no hay swipe - empieza con un breve cuestionario de compatibilidad que revela cómo piensa cada uno sobre la crianza, el compromiso y la vida diaria, para que las primeras conversaciones partan de una alineación real y no de una foto de perfil.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Hacer el cuestionario de compatibilidad", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Encuentra un donante juntos, en pareja",
+        subtitle: "Buscar un donante en pareja tiene sus propias preguntas - desde la filiación legal hasta cuánto quieres que participe el donante.",
+        paragraphs: [
+          "Buscar un donante en pareja plantea preguntas que una búsqueda en solitario no tiene: cuánto (o cuán poco) quieres que participe el donante, cómo funcionará la filiación legal para ambos, y cómo tomarán decisiones juntos en el camino. Poneros de acuerdo con tu pareja antes de empezar a buscar ahorra mucha fricción después.",
+          "LetsBeParents permite que ambos exploren y filtren perfiles de donantes juntos, con el mismo grupo de donantes verificados y los mismos filtros - historial médico, apertura al contacto y más - ya sea que busquen en solitario o en pareja.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Crear tu perfil", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "¿Aún estás definiendo tu camino? Empieza aquí.",
+        subtitle: "No necesitas tenerlo todo resuelto. La mayoría de las personas empiezan explorando sus opciones antes de decidir un camino.",
+        paragraphs: [
+          "La mayoría de las personas que terminan formando una familia en LetsBeParents no empezaron con la certeza de cómo sería exactamente. Si todavía estás sopesando la coparentalidad frente a la donación, o una pareja frente a hacerlo en solitario, es un lugar completamente normal en el que estar - y no algo que debas resolver antes de empezar.",
+          "El mejor siguiente paso no es una decisión, es información: lee lo que implica cada camino y haz el Cuestionario de Compatibilidad para tener una idea más clara de lo que buscas. No hay presión para registrarte ni comprometerte a nada mientras sigues explorando.",
+        ],
+        resources: "all",
+        ctaLabel: "Hacer el Cuestionario de Compatibilidad de Coparentalidad", ctaType: "quiz",
+      },
+    ],
+  },
+};
+
+function FindYourPath() {
+  const locale = localeOf();
+  const { slug = "" } = useParams();
+  const text = FIND_YOUR_PATH_TEXT[locale];
+  const path = text.paths.find((p) => p.slug === slug);
+  const quizHref = `/${locale}/resources/co-parenting/compatibility-quiz`;
+  if (!path) {
+    return (
+      <div className="fyp-page">
+        <section className="fyp-hero">
+          <h1>Path not found</h1>
+          <Link className="landing-gradient-button" to={`/${locale}/`}>Back to home {resourceArrow()}</Link>
+        </section>
+      </div>
+    );
+  }
+  const ctaHref = path.ctaType === "quiz" ? quizHref : `/${locale}/auth/register?path=${path.registerKey}`;
+  const resolvedResources = path.resources === "all" ? [] : path.resources
+    .map((ref) => {
+      const cat = RESOURCES_CATEGORIES.find((c) => c.slug === ref.category);
+      const tool = cat?.tools.find((t) => t.slug === ref.tool);
+      return tool && cat ? { cat, tool } : null;
+    })
+    .filter((item): item is { cat: ResourceCategoryData; tool: ResourceTool } => item !== null);
+  return (
+    <div className="fyp-page">
+      <section className="fyp-hero">
+        <span className="landing-pill fyp-pill"><i /><span>{text.eyebrow}</span></span>
+        <span className="fyp-hero-icon">{pathIcon(path.registerKey)}</span>
+        <h1>{path.h1}</h1>
+        <p>{path.subtitle}</p>
+      </section>
+      <section className="fyp-body">
+        <h2>{text.whatThisLooksLike}</h2>
+        {path.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+      </section>
+      {path.resources === "all" ? (
+        <section className="fyp-resources-all">
+          <h2>{text.resourcesAllTitle}</h2>
+          <p>{text.resourcesAllCopy}</p>
+          <Link className="landing-gradient-button" to={`/${locale}/resources`}>{text.resourcesAllCta} {resourceArrow()}</Link>
+        </section>
+      ) : (
+        <section className="fyp-resources">
+          <div className="landing-section-intro">
+            <span>{text.eyebrow}</span>
+            <h2>{text.resourcesTitle}</h2>
+          </div>
+          <div className="resources-tool-grid fyp-resources-grid">
+            {resolvedResources.map(({ cat, tool }) => (
+              <Link key={tool.slug} className="resources-tool-card" to={`/${locale}/resources/${cat.slug}/${tool.slug}`}>
+                <span className="resources-tool-icon">{resourceDocIcon()}</span>
+                {tool.tag && <span className="resources-tool-tag">{tool.tag}</span>}
+                <h3>{tool.title}</h3>
+                <p>{tool.description}</p>
+                <span className="resources-tool-link">{tool.downloadUrl ? "Download the template" : "View resource"} {resourceArrow()}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+      <section className="fyp-next-action">
+        <Link className="landing-gradient-button" to={ctaHref}>{path.ctaLabel} {resourceArrow()}</Link>
+      </section>
+      <section className="resources-pro">
+        <span className="resources-pro-icon">{resourceChatIcon()}</span>
+        <div className="resources-pro-copy">
+          <h2>Looking for professional guidance?</h2>
+          <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
+        </div>
+        <Link className="resources-pro-button" to={`/${locale}/contact`}>Learn about professional support {resourceArrow()}</Link>
+      </section>
+    </div>
+  );
+}
+
+const TRUST_TEXT = {
+  en: {
+    pill: "Trust & Safety",
+    title: "Every profile is identity-verified - see exactly what we check.",
+    intro: "Building a family means trusting the people you meet along the way. Here's what LetsBeParents verifies before you connect, and what's still on you to check for yourself.",
+    checks: [
+      ["Identity verification", "Before unlocking full access to matches, members confirm their identity through a secure document check, handled by our verification partner, Didit. We don't store your ID document or selfie on LetsBeParents' own servers - that data is processed and retained by Didit under their own privacy terms, and can be deleted on request."],
+      ["Photo review", "Every profile photo is automatically screened for policy violations, and any photo you report is reviewed by our team."],
+      ["Private messaging & video", "Chat and video calls happen inside LetsBeParents. Your phone number and email stay private until you choose to share them."],
+      ["Vetted clinics & lawyers", "Every clinic and lawyer in our directory is reviewed before it's listed, so you're never guessing who you're contacting."],
+      ["Report & block, anytime", "You can report or block any member in one tap. Every report is reviewed by our team, not a bot."],
+      ["Data protection", "Your data is encrypted in transit and at rest. We never sell your information, and you control what's visible on your profile."],
+    ],
+    diditLinks: { privacy: "Didit Privacy Policy", terms: "Didit Identity Verification Terms" },
+    noteTitle: "What verification means - and what it doesn't",
+    noteCopy: "Identity and photo checks reduce fake and duplicate profiles, but they aren't a medical, legal, or background-check guarantee. We strongly recommend independent legal advice before any donor or co-parenting agreement, and meeting new connections for the first time in a public place.",
+    ctaTitle: "Questions about safety on LetsBeParents?",
+    ctaButton: "Contact our team",
+  },
+  ru: {
+    pill: "Доверие и безопасность",
+    title: "Каждый профиль проходит проверку личности - вот что именно мы проверяем.",
+    intro: "Создание семьи - это доверие к людям, которых вы встречаете на этом пути. Вот что LetsBeParents проверяет перед тем, как вы начнёте общаться, и что вам всё же стоит проверить самостоятельно.",
+    checks: [
+      ["Проверка личности", "Прежде чем получить полный доступ к подбору пар, участники подтверждают личность через безопасную проверку документов - её проводит наш партнёр по верификации, сервис Didit. Мы не храним ваш документ или селфи на своих серверах - эти данные обрабатывает и хранит Didit по своим собственным условиям конфиденциальности, и их можно удалить по запросу."],
+      ["Проверка фотографий", "Каждое фото профиля автоматически проверяется на нарушения правил, а фото, на которое поступила жалоба, проверяет наша команда."],
+      ["Приватные сообщения и видеозвонки", "Переписка и видеозвонки происходят внутри LetsBeParents. Ваш номер телефона и email остаются приватными, пока вы сами не решите ими поделиться."],
+      ["Проверенные клиники и юристы", "Каждая клиника и юрист в нашем каталоге проходят проверку перед публикацией - вам не нужно гадать, с кем вы связываетесь."],
+      ["Жалоба и блокировка в любой момент", "Вы можете пожаловаться на участника или заблокировать его одним нажатием. Каждую жалобу рассматривает наша команда, а не бот."],
+      ["Защита данных", "Ваши данные шифруются при передаче и хранении. Мы никогда не продаём вашу информацию, и вы сами решаете, что видно в вашем профиле."],
+    ],
+    diditLinks: { privacy: "Политика конфиденциальности Didit", terms: "Условия проверки личности Didit" },
+    noteTitle: "Что означает проверка - а что нет",
+    noteCopy: "Проверка личности и фотографий снижает число фейковых и дублирующихся профилей, но не является медицинской, юридической гарантией или полной проверкой биографии. Мы настоятельно рекомендуем получить независимую юридическую консультацию перед любым донорским или со-родительским соглашением и встречаться с новыми знакомыми впервые в общественном месте.",
+    ctaTitle: "Остались вопросы о безопасности на LetsBeParents?",
+    ctaButton: "Написать нашей команде",
+  },
+  es: {
+    pill: "Confianza y seguridad",
+    title: "Cada perfil verifica su identidad - mira exactamente qué comprobamos.",
+    intro: "Formar una familia significa confiar en las personas que conoces en el camino. Esto es lo que LetsBeParents verifica antes de que conectes, y lo que sigue dependiendo de ti comprobar.",
+    checks: [
+      ["Verificación de identidad", "Antes de desbloquear el acceso completo a los matches, los miembros confirman su identidad mediante una comprobación segura de documentos, a cargo de nuestro socio de verificación, Didit. No almacenamos tu documento de identidad ni tu selfie en los servidores de LetsBeParents - esos datos los procesa y conserva Didit según sus propias condiciones de privacidad, y pueden eliminarse a petición."],
+      ["Revisión de fotos", "Cada foto de perfil se analiza automáticamente en busca de infracciones, y cualquier foto reportada es revisada por nuestro equipo."],
+      ["Mensajería y videollamadas privadas", "Los chats y videollamadas ocurren dentro de LetsBeParents. Tu teléfono y email permanecen privados hasta que decidas compartirlos."],
+      ["Clínicas y abogados verificados", "Cada clínica y abogado de nuestro directorio se revisa antes de publicarse, así nunca tienes que adivinar con quién estás hablando."],
+      ["Reporta o bloquea en cualquier momento", "Puedes reportar o bloquear a cualquier miembro con un toque. Cada reporte es revisado por nuestro equipo, no por un bot."],
+      ["Protección de datos", "Tus datos se cifran en tránsito y en reposo. Nunca vendemos tu información, y tú controlas qué es visible en tu perfil."],
+    ],
+    diditLinks: { privacy: "Política de privacidad de Didit", terms: "Términos de verificación de identidad de Didit" },
+    noteTitle: "Qué significa la verificación - y qué no",
+    noteCopy: "Las verificaciones de identidad y fotos reducen los perfiles falsos y duplicados, pero no son una garantía médica, legal ni de antecedentes. Recomendamos encarecidamente obtener asesoría legal independiente antes de cualquier acuerdo de donación o co-parentalidad, y conocer en persona por primera vez en un lugar público.",
+    ctaTitle: "¿Tienes dudas sobre la seguridad en LetsBeParents?",
+    ctaButton: "Contactar con nuestro equipo",
+  },
+} satisfies Record<CookieLocale, Record<string, unknown>>;
+
+function TrustSafety() {
+  const locale = localeOf();
+  const text = TRUST_TEXT[locale];
+  const checkIcon = (index: number) => {
+    if (index === 1) return <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg>;
+    if (index === 2) return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>;
+    if (index === 3) return <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="14" x="2" y="7" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>;
+    if (index === 4) return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></svg>;
+    if (index === 5) return <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>;
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.35 8.95a1 1 0 0 1-1.3 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.79 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" /></svg>;
+  };
+  return (
+    <div className="trust-page">
+      <section className="trust-hero">
+        <span className="landing-pill trust-pill"><i /><span>{text.pill}</span></span>
+        <h1>{text.title}</h1>
+        <p>{text.intro}</p>
+      </section>
+      <div className="trust-check-grid">
+        {text.checks.map(([title, copy], index) => (
+          <article key={title}>
+            <div className="trust-check-icon">{checkIcon(index)}</div>
+            <h3>{title}</h3>
+            <p>{copy}</p>
+            {index === 0 ? (
+              <div className="trust-check-links">
+                <a href="https://didit.me/terms/privacy-policy/" target="_blank" rel="noopener noreferrer">{text.diditLinks.privacy}</a>
+                <a href="https://didit.me/terms/identity-verification/" target="_blank" rel="noopener noreferrer">{text.diditLinks.terms}</a>
+              </div>
+            ) : null}
+          </article>
+        ))}
+      </div>
+      <section className="trust-note">
+        <h2>{text.noteTitle}</h2>
+        <p>{text.noteCopy}</p>
+      </section>
+      <section className="trust-cta">
+        <h2>{text.ctaTitle}</h2>
+        <Link className="landing-gradient-button" to={`/${locale}/contact`}>
+          {text.ctaButton}
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
+        </Link>
+      </section>
+    </div>
   );
 }
 
@@ -5434,6 +6954,12 @@ export function WebApp() {
         element={content(<Article />)}
       />
       <Route path="/:locale/contact" element={content(<Contact />)} />
+      <Route path="/:locale/trust-safety" element={content(<TrustSafety />)} />
+      <Route path="/:locale/pricing" element={content(<Pricing session={session} />)} />
+      <Route path="/:locale/resources" element={content(<ResourcesIndex />)} />
+      <Route path="/:locale/resources/:category" element={content(<ResourceCategory />)} />
+      <Route path="/:locale/resources/:category/:tool" element={content(<ResourceTool />)} />
+      <Route path="/:locale/find-your-path/:slug" element={content(<FindYourPath />)} />
       <Route path="/:locale/pages/:slug" element={content(<ContentPage />)} />
       <Route
         path="/:locale/likes"
