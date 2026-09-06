@@ -5,9 +5,13 @@ build/
 out/
 coverage/
 *.tsbuildinfo
+.venv/
+venv/
+*.egg-info/
 
 # Local configuration and credentials
 .env*
+!.env.example
 *.pem
 *.ppk
 *.key
@@ -44,6 +48,16 @@ __tests__/
 *.test.*
 *.spec.*
 *.snap
+test_*.py
+conftest.py
+pytest.ini
+playwright.config.*
+vitest.config.*
+jest.config.*
+fixtures/
+mocks/
+test-results/
+playwright-report/
 migrations/
 alembic/
 prisma/migrations/
@@ -63,6 +77,8 @@ CLAUDE.md
 # Database-backed reference exports
 catalog_locations.json
 partner_services.json
+lbp/frontend/src/reference-article-meta.ts
+lbp/frontend/public/web-static/articles/
 
 # Editor and operating-system files
 .idea/

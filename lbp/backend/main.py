@@ -6,11 +6,15 @@ import hmac
 import io
 import json
 import logging
+import math
+import platform
 import re
 import secrets
 import shutil
+import socket
 import smtplib
 import ssl
+import subprocess
 import uuid
 import urllib.error
 import urllib.parse
@@ -52,7 +56,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPE
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from postgres_database import postgres_cursor
 
 
@@ -604,6 +608,15 @@ def set_user_session_cookie(response: Response, token: str) -> None:
     delete_private_cookie(response, COOKIE_LEGACY_SESSION_NAME)
 
 
+def auth_session_response(response: Response, token: str, expires_at: str, user: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    # Browsers retain the HttpOnly cookie. Native clients can use the same
+    # session as a Bearer token without depending on a cookie jar.
+    set_user_session_cookie(response, token)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return {"sessionToken": token, "expiresAt": expires_at, "user": public_user(user), **extra}
+
+
 def request_session_tokens(request: Request, authorization: str | None) -> list[str]:
     tokens: list[str] = []
     encrypted_session = encrypted_cookie_value(request, COOKIE_SESSION_NAME, "user-session")
@@ -1126,6 +1139,22 @@ class FirebaseAuthPayload(BaseModel):
     intent: Literal["login", "register"] = "login"
 
 
+class AuthSessionResponse(BaseModel):
+    sessionToken: str = Field(description="Opaque application session token. Send as Authorization: Bearer on subsequent API requests. Not a Firebase ID token.", repr=False)
+    expiresAt: str = Field(description="Session expiration as an ISO 8601 UTC timestamp.")
+    user: dict[str, Any]
+
+
+class SignupSessionResponse(AuthSessionResponse):
+    emailVerificationRequired: bool
+    emailSent: bool
+
+
+class FirebaseSessionResponse(AuthSessionResponse):
+    provider: str
+    isNewUser: bool
+
+
 class ForgotPasswordPayload(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     locale: str = Field(default="en", max_length=8)
@@ -1197,7 +1226,12 @@ class MessageCreatePayload(BaseModel):
 
 
 class CallCreatePayload(BaseModel):
-    callType: str = Field(default="VOICE", pattern="^(VOICE|VIDEO)$")
+    callType: Literal["VOICE", "VIDEO", "AUDIO"] = Field(default="VOICE", description="VOICE or VIDEO. Legacy AUDIO is accepted and normalized to VOICE.")
+
+    @field_validator("callType")
+    @classmethod
+    def canonical_call_type(cls, value: str) -> str:
+        return "VOICE" if value == "AUDIO" else value
 
 
 class VerificationPayload(BaseModel):
@@ -1232,8 +1266,9 @@ class AdminAccountCreatePayload(BaseModel):
 
 class AdminAccountUpdatePayload(BaseModel):
     password: str | None = Field(default=None, max_length=200)
-    role: str = Field(default="STAFF", pattern="^(ADMIN|STAFF)$")
-    permissions: list[str] = Field(default_factory=list, max_length=32)
+    role: str | None = Field(default=None, pattern="^(ADMIN|STAFF)$")
+    permissions: list[str] | None = Field(default=None, max_length=32)
+    status: str | None = Field(default=None, pattern="^(ACTIVE|INACTIVE)$")
 
 
 class AdminSubscriptionGrantPayload(BaseModel):
@@ -1621,7 +1656,8 @@ def b64url_decode(value: str) -> bytes:
 
 def sign_admin_session(user: str) -> str:
     expires = now_utc() + timedelta(hours=ADMIN_SESSION_HOURS)
-    payload = {"user": user, "exp": int(expires.timestamp())}
+    account = dynamic_admin_account(user)
+    payload = {"user": user, "exp": int(expires.timestamp()), "version": int((account or {}).get("sessionVersion") or 0)}
     body = b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signature = hmac.new(ADMIN_API_PASSWORD.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
@@ -1631,14 +1667,14 @@ def is_admin_login_disabled(user: str | None) -> bool:
     return str(user or "").strip().lower() in ADMIN_DISABLED_LOGIN_EMAILS
 
 
-def dynamic_admin_account(user: str | None) -> dict[str, Any] | None:
+def dynamic_admin_account(user: str | None, *, include_inactive: bool = False) -> dict[str, Any] | None:
     email = str(user or "").strip().lower()
     if not email:
         return None
     with db_cursor() as (_, cursor):
         cursor.execute("SELECT id, source_key, title, status, data, created_at, updated_at FROM app_entities WHERE entity_type = 'admin_account' AND LOWER(source_key) = %s ORDER BY id DESC LIMIT 1", (email,))
         row = cursor.fetchone()
-    if not row or str(row.get("status") or "").upper() != "ACTIVE":
+    if not row or (not include_inactive and str(row.get("status") or "").upper() != "ACTIVE"):
         return None
     data = row.get("data")
     if isinstance(data, str):
@@ -1649,37 +1685,45 @@ def dynamic_admin_account(user: str | None) -> dict[str, Any] | None:
 
 
 def is_configured_admin_user(user: str | None) -> bool:
-    email = str(user or "").strip()
+    email = str(user or "").strip().lower()
+    managed = dynamic_admin_account(email, include_inactive=True)
+    if managed:
+        return str(managed.get("status") or "").upper() == "ACTIVE"
     return bool(email) and (
-        secrets.compare_digest(email, ADMIN_API_USER)
-        or (bool(ADMIN_TEST_USER) and secrets.compare_digest(email, ADMIN_TEST_USER))
-        or dynamic_admin_account(email) is not None
+        secrets.compare_digest(email, ADMIN_API_USER.lower())
+        or (bool(ADMIN_TEST_USER) and secrets.compare_digest(email, ADMIN_TEST_USER.lower()))
     )
 
 
 def has_valid_admin_credentials(user: str | None, password: str | None) -> bool:
-    email = str(user or "").strip()
+    email = str(user or "").strip().lower()
     secret = str(password or "")
+    if is_admin_login_disabled(email):
+        return False
+    managed = dynamic_admin_account(email, include_inactive=True)
+    if managed:
+        # Once managed in the database, configuration credentials must not
+        # bypass a password reset or account deactivation.
+        return bool(str(managed.get("status") or "").upper() == "ACTIVE" and managed.get("passwordHash") and verify_password(secret, str(managed["passwordHash"])))
     primary_match = (
-        secrets.compare_digest(email, ADMIN_API_USER)
+        secrets.compare_digest(email, ADMIN_API_USER.lower())
         and bool(ADMIN_API_PASSWORD)
         and secrets.compare_digest(secret, ADMIN_API_PASSWORD)
     )
     test_match = (
         bool(ADMIN_TEST_USER)
         and bool(ADMIN_TEST_PASSWORD)
-        and secrets.compare_digest(email, ADMIN_TEST_USER)
+        and secrets.compare_digest(email, ADMIN_TEST_USER.lower())
         and secrets.compare_digest(secret, ADMIN_TEST_PASSWORD)
     )
-    dynamic = dynamic_admin_account(email)
-    dynamic_match = bool(dynamic and dynamic.get("passwordHash") and verify_password(secret, str(dynamic["passwordHash"])))
-    return (primary_match or test_match or dynamic_match) and not is_admin_login_disabled(email)
+    return primary_match or test_match
 
 
 def required_admin_permissions(path: str) -> set[str]:
     tail = path.removeprefix("/api/admin/").strip("/")
     if not tail or tail in {"session", "logout", "login", "filters"}: return set()
     if tail == "stats": return {"dashboard"}
+    if tail == "audit-log": return {"settings"}
     if tail.startswith("accounts") or tail.startswith("settings") or tail.startswith("list/settings") or tail.startswith("item/settings") or tail.startswith("create/settings") or tail.startswith("notifications/test"): return {"settings"}
     if tail.startswith("operations"): return {"monitoring", "storage", "settings"}
     if tail.startswith("users") or tail.startswith("list/users") or tail.startswith("item/users"): return {"users"}
@@ -1718,6 +1762,9 @@ def verify_admin_session(token: str | None) -> str | None:
         user = str(payload.get("user") or "")
         expires = int(payload.get("exp") or 0)
         if not is_configured_admin_user(user) or is_admin_login_disabled(user) or expires <= int(now_utc().timestamp()):
+            return None
+        account = dynamic_admin_account(user)
+        if int(payload.get("version") or 0) != int((account or {}).get("sessionVersion") or 0):
             return None
         return user
     except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
@@ -1879,8 +1926,8 @@ def normalize_partner_clinic(row: dict[str, Any]) -> dict[str, Any]:
         "credentials": data.get("credentials"),
         "honorsAwards": data.get("honorsAwards"),
         "aboutHtml": data.get("aboutHtml"),
-        "chatEnabled": bool(data.get("chatEnabled", False)),
-        "isActive": bool(data.get("isActive", row.get("status") == "active")),
+        "chatEnabled": json_bool(data, "chatEnabled", False),
+        "isActive": json_bool(data, "isActive", row.get("status") == "active"),
         "status": row.get("status"),
         "languages": languages,
         "languagesCount": len(languages) if languages else int(data.get("languagesCount") or 0),
@@ -2085,7 +2132,7 @@ def inferred_article_category(title: str, slug: str, meta: dict[str, Any]) -> st
     for key in ("category", "categoryName", "categorySlug"):
         value = meta.get(key)
         if isinstance(value, dict):
-            value = value.get("name") or value.get("slug")
+            value = value.get("slug") or value.get("name")
         if isinstance(value, str) and value.strip():
             return value.strip()
     haystack = f"{title} {slug}".lower()
@@ -2314,6 +2361,282 @@ def catalog_completion_sql(table_name: str = "profiles") -> str:
         )
       )
     )"""
+
+
+RUNTIME_SETTING_DEFAULTS: dict[str, bool | int] = {
+    "platform.registration_enabled": True,
+    "platform.livekit_enabled": True,
+    "limits.free_likes_per_day": FREE_DAILY_LIKE_LIMIT,
+    "limits.premium_likes_per_day": PREMIUM_DAILY_LIKE_LIMIT,
+    "limits.free_cold_chats_per_day": FREE_DAILY_COLD_CHAT_LIMIT,
+    "limits.premium_cold_chats_per_day": PREMIUM_DAILY_COLD_CHAT_LIMIT,
+    "limits.max_message_length": 5000,
+}
+
+
+def runtime_setting_key(row: dict[str, Any]) -> str:
+    data = as_dict(row.get("data"))
+    return next((value for value in (row.get("source_key"), data.get("key"), row.get("slug"), row.get("title"))
+                 if isinstance(value, str) and value.startswith(("platform.", "limits."))), "")
+
+
+def normalize_runtime_setting(key: str, value: Any) -> bool | int:
+    if key not in RUNTIME_SETTING_DEFAULTS:
+        raise ValueError("Unknown runtime setting")
+    if isinstance(RUNTIME_SETTING_DEFAULTS[key], bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+            return value.strip().lower() == "true"
+        raise ValueError(f"{key} must be true or false")
+    minimum, maximum = (1, 5000) if key == "limits.max_message_length" else (0, 1_000_000)
+    try:
+        number = float(value) if isinstance(value, (str, int, float)) and not isinstance(value, bool) else float("nan")
+    except (ValueError, OverflowError):
+        number = float("nan")
+    if not math.isfinite(number) or not number.is_integer() or not minimum <= number <= maximum:
+        raise ValueError(f"{key} must be an integer between {minimum} and {maximum}")
+    return int(number)
+
+
+def validate_runtime_setting(values: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
+    current_key = runtime_setting_key(current or {})
+    proposed_key = runtime_setting_key(values)
+    key = current_key or proposed_key
+    if key not in RUNTIME_SETTING_DEFAULTS:
+        return values
+    if current_key and proposed_key and current_key != proposed_key:
+        raise HTTPException(status_code=422, detail="A runtime setting key cannot be changed")
+    if "data" in values and not isinstance(values["data"], dict):
+        raise HTTPException(status_code=422, detail="Runtime setting data must be an object")
+    data = {**as_dict((current or {}).get("data")), **as_dict(values.get("data"))}
+    if data.get("key") and data["key"] != key:
+        raise HTTPException(status_code=422, detail="Runtime setting keys must match")
+    try:
+        data["value"] = normalize_runtime_setting(key, data.get("value"))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    data["key"] = key
+    return {**values, "data": data}
+
+
+def runtime_settings(cursor) -> dict[str, bool | int]:
+    # The allowlist prevents contact addresses, provider keys or other private
+    # settings from leaking through the public configuration endpoint.
+    keys = tuple(RUNTIME_SETTING_DEFAULTS)
+    placeholders = ", ".join(["%s"] * len(keys))
+    cursor.execute(
+        f"""SELECT source_key, title, slug, status, data FROM app_entities
+            WHERE entity_type = 'setting'
+              AND (source_key IN ({placeholders}) OR data->>'key' IN ({placeholders})
+                   OR slug IN ({placeholders}) OR title IN ({placeholders}))
+              AND (status IS NULL OR LOWER(status) IN ('active', ''))
+            ORDER BY updated_at DESC NULLS LAST, id DESC""",
+        keys * 4,
+    )
+    settings = dict(RUNTIME_SETTING_DEFAULTS)
+    seen = set()
+    for row in cursor.fetchall():
+        key = runtime_setting_key(row)
+        if key not in settings or key in seen:
+            continue
+        seen.add(key)
+        try:
+            settings[key] = normalize_runtime_setting(key, as_dict(row.get("data")).get("value"))
+        except ValueError:
+            # Keep a safe bounded default for malformed imported rows. The
+            # admin write boundary rejects new malformed values.
+            pass
+    return settings
+
+
+def require_registration_enabled(cursor) -> None:
+    if not runtime_settings(cursor)["platform.registration_enabled"]:
+        raise HTTPException(status_code=403, detail="REGISTRATION_DISABLED")
+
+
+def require_new_calls_enabled(cursor) -> None:
+    if not livekit_is_configured() or not runtime_settings(cursor)["platform.livekit_enabled"]:
+        raise HTTPException(status_code=503, detail="Calls are temporarily unavailable")
+
+
+def validate_chat_message(cursor, body: str) -> str:
+    text = body.strip()
+    maximum = int(runtime_settings(cursor)["limits.max_message_length"])
+    if not text:
+        raise HTTPException(status_code=422, detail="Message cannot be empty")
+    if len(body) > maximum:
+        raise HTTPException(status_code=422, detail=f"Message cannot exceed {maximum} characters")
+    return text
+
+
+RANKING_DEFAULTS: dict[str, bool | float] = {
+    "ranking.v2.enabled": True,
+    "ranking.honeymoon.durationDays": 5,
+    "ranking.recency.halfLifeHours": 48,
+    "ranking.weights.completeness": 25,
+    "ranking.weights.honeymoon": 5,
+    "ranking.weights.premium": 30,
+    "ranking.weights.recency": 25,
+    "ranking.weights.verified": 100,
+}
+
+
+def normalize_ranking_value(key: str, value: Any) -> bool | float:
+    if key not in RANKING_DEFAULTS:
+        raise ValueError("Unknown ranking setting")
+    if key == "ranking.v2.enabled":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+            return value.strip().lower() == "true"
+        raise ValueError("Ranking v2 enabled must be true or false")
+    minimum = 0.001 if key == "ranking.recency.halfLifeHours" else 0
+    try:
+        number = float(value) if isinstance(value, (str, int, float)) and not isinstance(value, bool) else float("nan")
+    except (ValueError, OverflowError):
+        number = float("nan")
+    if not math.isfinite(number) or not minimum <= number <= 1_000_000:
+        raise ValueError(f"{key} must be a finite number between {minimum} and 1000000")
+    return number
+
+
+def ranking_setting_key(row: dict[str, Any]) -> str:
+    data = as_dict(row.get("data"))
+    return next((str(value) for value in (row.get("source_key"), data.get("key"), row.get("slug"), row.get("title"))
+                 if isinstance(value, str) and value.startswith("ranking.")), "")
+
+
+def validate_ranking_setting(values: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Validate both generic setting create and patch without affecting other settings."""
+    current_key = ranking_setting_key(current or {})
+    proposed_key = ranking_setting_key(values)
+    key = current_key or proposed_key
+    if not key:
+        return values
+    if current_key and proposed_key and current_key != proposed_key:
+        raise HTTPException(status_code=422, detail="A ranking setting key cannot be changed")
+    if "data" in values and not isinstance(values["data"], dict):
+        raise HTTPException(status_code=422, detail="Ranking setting data must be an object")
+    data = {**as_dict((current or {}).get("data")), **as_dict(values.get("data"))}
+    if data.get("key") and data["key"] != key:
+        raise HTTPException(status_code=422, detail="Ranking setting keys must match")
+    try:
+        data["value"] = normalize_ranking_value(key, data.get("value"))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    data["key"] = key
+    return {**values, "data": data}
+
+
+def catalog_ranking_settings(cursor) -> dict[str, bool | float]:
+    # Read the shared database per request: committed admin edits are effective
+    # on the next request on every API worker, well within the advertised 60s.
+    cursor.execute(
+        """
+        SELECT source_key, title, slug, status, data FROM app_entities
+        WHERE entity_type = 'setting'
+          AND (source_key LIKE 'ranking.%' OR data->>'key' LIKE 'ranking.%'
+               OR slug LIKE 'ranking.%' OR title LIKE 'ranking.%')
+          AND (status IS NULL OR LOWER(status) IN ('active', ''))
+        ORDER BY updated_at DESC NULLS LAST, id DESC
+        """
+    )
+    settings = dict(RANKING_DEFAULTS)
+    seen = set()
+    for row in cursor.fetchall():
+        key = ranking_setting_key(row)
+        if key not in settings or key in seen:
+            continue
+        seen.add(key)
+        try:
+            settings[key] = normalize_ranking_value(key, as_dict(row.get("data")).get("value"))
+        except ValueError:
+            # Imported malformed values must not take down the catalog. New
+            # invalid values are rejected at the admin write boundary above.
+            pass
+    return settings
+
+
+def ranking_timestamp_sql(expression: str) -> str:
+    # Never use arbitrary PostgreSQL date inputs such as 'now' or 'infinity'.
+    return f"""CASE WHEN ({expression}) ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}([Tt ]|$)'
+        AND pg_input_is_valid(({expression}), 'timestamp with time zone')
+        THEN ({expression})::timestamptz END"""
+
+
+def catalog_profile_completeness_sql(table_name: str = "profiles") -> str:
+    def filled(expression: str) -> str:
+        return f"COALESCE(NULLIF(BTRIM({expression}), ''), '') NOT IN ('', 'null', '[]', '{{}}')"
+    factors = [filled(f"{table_name}.data->>'{field}'") for field in ("profileType", "avatarUrl", "dateOfBirth", "country", "city", "lookingFor")]
+    about = filled(f"{table_name}.data->>'about'")
+    bio = filled(f"{table_name}.data->>'bio'")
+    factors.append(f"({about} OR {bio})")
+    return "(" + " + ".join(f"CASE WHEN {factor} THEN 1.0 ELSE 0.0 END" for factor in factors) + ") / 7.0"
+
+
+def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, list[Any]]:
+    """Shared joins/order for public and member catalogs; apply before pagination."""
+    if not settings["ranking.v2.enabled"]:
+        return "", """CASE WHEN LOWER(COALESCE(profiles.data->>'isPremium',
+            profiles.data->>'premium', 'false')) = 'true' THEN 0 ELSE 1 END,
+            profiles.id DESC""", []
+    joins: list[str] = []
+    terms: list[str] = []
+    params: list[Any] = []
+    weights = {name: float(settings[f"ranking.weights.{name}"]) for name in ("completeness", "honeymoon", "premium", "recency", "verified")}
+    if weights["completeness"]:
+        terms.append(f"%s * ({catalog_profile_completeness_sql()})")
+        params.append(weights["completeness"])
+    if weights["honeymoon"] and settings["ranking.honeymoon.durationDays"]:
+        original_signup_at = ranking_timestamp_sql("profiles.data->>'createdAt'")
+        signup_at = f"COALESCE({original_signup_at}, profiles.created_at)"
+        terms.append(f"%s * CASE WHEN {signup_at} <= CURRENT_TIMESTAMP AND {signup_at} > CURRENT_TIMESTAMP - (%s * INTERVAL '1 day') THEN 1 ELSE 0 END")
+        params.extend([weights["honeymoon"], settings["ranking.honeymoon.durationDays"]])
+    if weights["premium"]:
+        expiry_text = "COALESCE(NULLIF(s.data->>'expiresAt', ''), NULLIF(s.data->>'currentPeriodEnd', ''), NULLIF(s.data->>'expiresDate', ''))"
+        expiry_at = ranking_timestamp_sql(expiry_text)
+        # Aggregate once, not a correlated subscription scan for every profile.
+        # Numeric local profile IDs and original imported user UUIDs are both used.
+        joins.append(f"""CROSS JOIN (
+            SELECT COALESCE(jsonb_object_agg(profile_key, active), '{{}}'::jsonb) AS membership
+            FROM (
+                SELECT COALESCE(NULLIF(s.data->>'profileId', ''), NULLIF(s.data->>'userId', '')) AS profile_key,
+                       BOOL_OR(UPPER(s.status) = 'ACTIVE' AND ({expiry_text} IS NULL OR ({expiry_at}) > CURRENT_TIMESTAMP)) AS active
+                FROM app_entities s WHERE s.entity_type = 'subscription'
+                GROUP BY COALESCE(NULLIF(s.data->>'profileId', ''), NULLIF(s.data->>'userId', ''))
+            ) grouped_subscriptions WHERE profile_key IS NOT NULL
+        ) ranking_subscriptions""")
+        terms.append("""%s * CASE
+            WHEN ranking_subscriptions.membership ? profiles.id::text
+              OR ranking_subscriptions.membership ? COALESCE(profiles.data->>'id', '')
+            THEN CASE WHEN COALESCE((ranking_subscriptions.membership->>profiles.id::text)::boolean, false)
+                        OR COALESCE((ranking_subscriptions.membership->>COALESCE(profiles.data->>'id', ''))::boolean, false)
+                      THEN 1 ELSE 0 END
+            ELSE CASE WHEN LOWER(COALESCE(profiles.data->>'isPremium', 'false')) IN ('true','1')
+                        OR LOWER(COALESCE(profiles.data->>'premium', 'false')) IN ('true','1')
+                      THEN 1 ELSE 0 END END""")
+        params.append(weights["premium"])
+    if weights["recency"]:
+        joins.append("""LEFT JOIN (
+            SELECT u.profile_id AS ranking_profile_id, MAX(s.created_at) AS ranking_last_login
+            FROM local_users u JOIN auth_sessions s ON s.user_id = u.id
+            WHERE u.profile_id IS NOT NULL
+            GROUP BY u.profile_id
+        ) ranking_activity ON ranking_activity.ranking_profile_id = profiles.id""")
+        imported_login = ranking_timestamp_sql("profiles.data->>'lastLoginAt'")
+        last_login = f"GREATEST(ranking_activity.ranking_last_login, {imported_login})"
+        terms.append(f"""%s * CASE WHEN {last_login} IS NULL THEN 0 ELSE
+            POWER(0.5::double precision, LEAST(1022.0,
+                GREATEST(0, EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - ({last_login}))) / 3600.0) / %s)) END""")
+        params.extend([weights["recency"], settings["ranking.recency.halfLifeHours"]])
+    if weights["verified"]:
+        verified_at = ranking_timestamp_sql("profiles.data->>'verifiedAt'")
+        terms.append(f"""%s * CASE WHEN LOWER(COALESCE(profiles.data->>'isVerified', 'false')) IN ('true','1')
+                         OR ({verified_at}) IS NOT NULL THEN 1 ELSE 0 END""")
+        params.append(weights["verified"])
+    order = f"({' + '.join(terms)}) DESC, profiles.id DESC" if terms else "profiles.id DESC"
+    return "\n".join(joins), order, params
 
 
 def normalize_subscription_plan(value: str) -> str:
@@ -2778,6 +3101,23 @@ def conversation_scope_sql() -> str:
     """
 
 
+def audit_safe_payload(value: Any) -> Any:
+    """Keep operational metadata, never credentials or secret setting values."""
+    if isinstance(value, dict):
+        def sensitive(key: Any) -> bool:
+            return bool(re.search(r"password|secret|token|credential|authorization|cookie|api.?key|private.?key", str(key), re.I))
+
+        secret_setting = any(sensitive(value.get(key, "")) for key in ("key", "title", "slug"))
+        return {
+            key: ("[redacted]" if (sensitive(key) and not (key == "passwordChanged" and isinstance(item, bool)))
+                  or (secret_setting and key in {"value", "data"}) else audit_safe_payload(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [audit_safe_payload(item) for item in value]
+    return value
+
+
 def audit(conn, actor: str, action: str, target_type: str | None = None, target_id: Any = None, payload: Any = None):
     cursor = conn.cursor(dictionary=True)
     try:
@@ -2791,7 +3131,7 @@ def audit(conn, actor: str, action: str, target_type: str | None = None, target_
                 action,
                 target_type,
                 str(target_id) if target_id is not None else None,
-                json.dumps(payload, ensure_ascii=False) if payload is not None else None,
+                json.dumps(audit_safe_payload(payload), ensure_ascii=False) if payload is not None else None,
             ),
         )
     finally:
@@ -2815,13 +3155,14 @@ def api_root():
     }
 
 
-@app.post("/api/auth/signup")
+@app.post("/api/auth/signup", response_model=SignupSessionResponse)
 def auth_signup(payload: SignupPayload, response: Response):
     email = normalize_email(payload.email)
     if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
         raise HTTPException(status_code=422, detail="Valid email is required")
     password_hash = hash_password(payload.password)
     with db_cursor() as (conn, cursor):
+        require_registration_enabled(cursor)
         cursor.execute("SELECT id FROM local_users WHERE email = %s LIMIT 1", (email,))
         if cursor.fetchone():
             raise HTTPException(status_code=409, detail="ACCOUNT_ALREADY_EXISTS")
@@ -2872,16 +3213,10 @@ def auth_signup(payload: SignupPayload, response: Response):
         )
         user = cursor.fetchone()
     email_sent = send_auth_action_email(user_id, email, "VERIFY_EMAIL", verification_token, payload.locale)
-    set_user_session_cookie(response, token)
-    return {
-        "expiresAt": expires_at,
-        "user": public_user(user),
-        "emailVerificationRequired": True,
-        "emailSent": email_sent,
-    }
+    return auth_session_response(response, token, expires_at, user, emailVerificationRequired=True, emailSent=email_sent)
 
 
-@app.post("/api/auth/firebase")
+@app.post("/api/auth/firebase", response_model=FirebaseSessionResponse)
 def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Request):
     decoded = verify_firebase_token(payload.idToken)
     firebase_uid = str(decoded.get("uid") or decoded.get("sub") or "").strip()
@@ -2970,6 +3305,7 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
                     (user_id,),
                 )
             else:
+                require_registration_enabled(cursor)
                 profile_data = json.dumps(
                     {
                         "source": "firebase_auth",
@@ -3032,16 +3368,10 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
         token, expires_at = create_session(cursor, user["id"])
         conn.commit()
 
-    set_user_session_cookie(response, token)
-    return {
-        "expiresAt": expires_at,
-        "user": public_user(user),
-        "provider": provider,
-        "isNewUser": is_new_user,
-    }
+    return auth_session_response(response, token, expires_at, user, provider=provider, isNewUser=is_new_user)
 
 
-@app.post("/api/auth/login")
+@app.post("/api/auth/login", response_model=AuthSessionResponse)
 def auth_login(payload: LoginPayload, response: Response, request: Request):
     email = normalize_email(payload.email)
     with db_cursor() as (conn, cursor):
@@ -3075,8 +3405,7 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
         record_device_session(cursor, int(user["profile_id"]), request, "password")
         token, expires_at = create_session(cursor, user["id"])
         conn.commit()
-    set_user_session_cookie(response, token)
-    return {"expiresAt": expires_at, "user": public_user(user)}
+    return auth_session_response(response, token, expires_at, user)
 
 
 @app.get("/api/auth/me")
@@ -3366,6 +3695,18 @@ def public_contact(payload: ContactPayload):
         )
         conn.commit()
     return {"ok": True, "message": "Message sent"}
+
+
+@app.get("/api/public/runtime-config")
+def public_runtime_config(response: Response):
+    with db_cursor() as (_, cursor):
+        settings = runtime_settings(cursor)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "registrationEnabled": settings["platform.registration_enabled"],
+        "callsEnabled": bool(settings["platform.livekit_enabled"] and livekit_is_configured()),
+        "limits": {key.removeprefix("limits."): value for key, value in settings.items() if key.startswith("limits.")},
+    }
 
 
 @app.post("/api/partner/login")
@@ -4257,6 +4598,7 @@ def apply_profile_photo_moderation(photo_id: int, result: dict[str, Any], actor:
             "INSERT INTO api_events (event_type, payload) VALUES ('member.photo_moderated', %s)",
             (json.dumps({"profileId": profile_id, "photoId": photo_id, "decision": decision, "actor": actor}, ensure_ascii=False),),
         )
+        audit(conn, actor.removeprefix("admin:"), f"photo.{decision.lower()}", "profile_photos", photo_id, {"profileId": profile_id})
         conn.commit()
     return {
         "id": photo_id,
@@ -4348,6 +4690,7 @@ def apply_avatar_crop_moderation(
             "INSERT INTO api_events (event_type, payload) VALUES ('member.avatar_moderated', %s)",
             (json.dumps({"profileId": profile_id, "mediaFileId": media_file_id, "decision": decision, "actor": actor}, ensure_ascii=False),),
         )
+        audit(conn, actor.removeprefix("admin:"), f"avatar.{decision.lower()}", "media_files", media_file_id, {"profileId": profile_id})
         conn.commit()
     return {"status": decision, "reason": reason, "avatarUrl": public_url}
 
@@ -4775,6 +5118,9 @@ def member_like_profile(
 ):
     actor_profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id FROM profiles WHERE id = %s LIMIT 1 FOR NO KEY UPDATE", (actor_profile_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Profile not found")
         actor_profile = fetch_profile(cursor, actor_profile_id)
         if not profile_is_verified(actor_profile):
             raise HTTPException(status_code=403, detail="Verify your profile before sending likes")
@@ -4798,7 +5144,8 @@ def member_like_profile(
         existing_like = cursor.fetchone()
         is_new_like = not existing_like or existing_like.get("status") != "ACTIVE"
         if is_new_like:
-            daily_limit = PREMIUM_DAILY_LIKE_LIMIT if profile_is_premium(actor_profile) else FREE_DAILY_LIKE_LIMIT
+            settings = runtime_settings(cursor)
+            daily_limit = int(settings["limits.premium_likes_per_day" if profile_is_premium(actor_profile) else "limits.free_likes_per_day"])
             used_today = daily_like_count(cursor, actor_profile_id)
             if used_today >= daily_limit:
                 raise HTTPException(
@@ -5415,6 +5762,7 @@ def member_account_deletion(payload: AccountDeletionPayload, user: dict[str, Any
             profile_id,
             "Your account deletion request has been received and is pending review.",
         )
+        audit(conn, user["email"], "USER_DELETION_REQUESTED", "profiles", profile_id, {"email": user["email"], "deleteAfter": body["deleteAfter"]})
         conn.commit()
     return {"ok": True, "status": "PENDING", "message": "Deletion request saved for admin review."}
 
@@ -5526,13 +5874,16 @@ def member_create_conversation(payload: ConversationCreatePayload, user: dict[st
             }
         is_cold_chat = target_role == "USER" and not bool(match_id)
         if is_cold_chat:
-            if not profile_is_premium(profile):
+            settings = runtime_settings(cursor)
+            premium = profile_is_premium(profile)
+            daily_limit = int(settings["limits.premium_cold_chats_per_day" if premium else "limits.free_cold_chats_per_day"])
+            if not premium and daily_limit == 0:
                 raise HTTPException(status_code=402, detail="Premium is required to start a chat without a match")
             used_today = daily_cold_chat_count(cursor, profile_id)
-            if used_today >= PREMIUM_DAILY_COLD_CHAT_LIMIT:
+            if used_today >= daily_limit:
                 raise HTTPException(
                     status_code=429,
-                    detail=f"Daily cold chat limit reached ({PREMIUM_DAILY_COLD_CHAT_LIMIT}). Continue tomorrow.",
+                    detail=f"Daily cold chat limit reached ({daily_limit}). Continue tomorrow.",
                 )
         conversation_id = ensure_conversation(cursor, profile_id, target_profile_id, match_id)
         if is_cold_chat:
@@ -5650,6 +6001,7 @@ def member_send_message(
     if not body:
         raise HTTPException(status_code=422, detail="Message cannot be empty")
     with db_cursor() as (conn, cursor):
+        body = validate_chat_message(cursor, payload.body)
         cursor.execute(
             """
             SELECT id
@@ -5913,6 +6265,7 @@ def member_start_call(conversation_id: int, payload: CallCreatePayload, user: di
         raise HTTPException(status_code=503, detail="Calls are temporarily unavailable")
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
+        require_new_calls_enabled(cursor)
         caller_profile = fetch_profile(cursor, profile_id)
         if not profile_is_premium(caller_profile):
             raise HTTPException(status_code=402, detail="Premium is required for video and audio calls")
@@ -5953,6 +6306,8 @@ def member_incoming_calls(user: dict[str, Any] = Depends(require_user)):
     if not livekit_is_configured():
         return {"items": []}
     with db_cursor() as (conn, cursor):
+        if not runtime_settings(cursor)["platform.livekit_enabled"]:
+            return {"items": []}
         profile = fetch_profile(cursor, profile_id)
         if not profile_is_premium(profile):
             return {"items": []}
@@ -5990,6 +6345,7 @@ def member_call_status(call_id: int, user: dict[str, Any] = Depends(require_user
 def member_accept_call(call_id: int, user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
+        require_new_calls_enabled(cursor)
         profile = fetch_profile(cursor, profile_id)
         if not profile_is_premium(profile):
             raise HTTPException(status_code=402, detail="Premium is required for video and audio calls")
@@ -6353,6 +6709,8 @@ async def didit_webhook(request: Request):
             (json.dumps({"profileId": profile_id, "provider": "didit", "sessionId": session_id, "status": internal_status}, ensure_ascii=False),),
         )
         if internal_status != previous_status and internal_status not in {"PENDING", "IN_REVIEW"}:
+            profile = fetch_profile(cursor, profile_id) or {}
+            audit(conn, profile.get("email") or "Unknown", f"verification.{internal_status.lower()}", "verification", verification["id"], {"profileId": profile_id, "sessionId": session_id})
             verification_messages = {
                 "APPROVED": "Your profile verification has been approved.",
                 "DECLINED": "Your profile verification was not approved. Please review your main photo and try again.",
@@ -6610,11 +6968,18 @@ def admin_login(payload: AdminLoginPayload, response: Response):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin credentials")
     dynamic = dynamic_admin_account(email)
     if dynamic:
-        data = {key: value for key, value in dynamic.items() if key not in {"id", "source_key", "title", "status", "created_at", "updated_at", "password_hash"}}
+        data = as_dict(dynamic.get("data")).copy()
         data["lastLoginAt"] = now_utc().isoformat()
         with db_cursor() as (conn, cursor):
             cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps(data, ensure_ascii=False), dynamic["id"]))
             conn.commit()
+    response.delete_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        path="/admin",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
     response.set_cookie(
         key=ADMIN_SESSION_COOKIE,
         value=sign_admin_session(email),
@@ -6622,13 +6987,20 @@ def admin_login(payload: AdminLoginPayload, response: Response):
         httponly=True,
         secure=True,
         samesite="strict",
-        path="/admin",
+        path="/",
     )
     return {"ok": True, "email": email}
 
 
 @app.post("/api/admin/logout")
 def admin_logout(response: Response):
+    response.delete_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
     response.delete_cookie(
         key=ADMIN_SESSION_COOKIE,
         path="/admin",
@@ -6645,23 +7017,91 @@ def admin_session(admin: str = Depends(require_admin)):
     return {"ok": True, "email": admin, "role": account.get("role", "ADMIN") if account else "ADMIN", "permissions": account.get("permissions", []) if account else ["*"]}
 
 
+ADMIN_AUDIT_SOURCE_SQL = """
+    SELECT 'native' AS source, id, actor, action, target_type, target_id,
+           payload AS data, created_at
+    FROM admin_audit_log
+    UNION ALL
+    SELECT 'imported' AS source, id, data->>'adminEmail' AS actor,
+           data->>'action' AS action, data->>'entityType' AS target_type,
+           data->>'entityId' AS target_id, data,
+           CASE WHEN pg_input_is_valid(data->>'createdAt', 'timestamp with time zone')
+                THEN (data->>'createdAt')::timestamptz ELSE created_at END AS created_at
+    FROM app_entities WHERE entity_type = 'settings_audit_log'
+"""
+
+
+def public_audit_entry(row: dict[str, Any]) -> dict[str, Any]:
+    data = audit_safe_payload(as_dict(row.get("data")))
+    source = row["source"]
+    # Do not expose raw payloads, oldData/newData, passwords or session material.
+    fields = ("details", "entityName", "entityId", "entityType") if source == "imported" else ("email", "entityName", "name", "title")
+    details = next((str(data[key]) for key in fields if isinstance(data.get(key), (str, int)) and data[key]), "")
+    if not details and source == "native":
+        details = " #".join(str(value) for value in (row.get("target_type"), row.get("target_id")) if value is not None)
+        changed_fields = data.get("fields")
+        if isinstance(changed_fields, list):
+            details += ": " + ", ".join(str(field) for field in changed_fields)
+    return {
+        "id": f"{source}:{row['id']}",
+        "data": {
+            "createdAt": row.get("created_at"),
+            "adminEmail": row.get("actor") or "Unknown",
+            "action": row.get("action") or "Unknown",
+            "details": details,
+            "source": source,
+        },
+    }
+
+
+@app.get("/api/admin/audit-log")
+def admin_audit_log(
+    response: Response,
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    _admin: str = Depends(require_admin),
+):
+    with db_cursor() as (_, cursor):
+        cursor.execute(f"SELECT COUNT(*) AS total FROM ({ADMIN_AUDIT_SOURCE_SQL}) AS history")
+        total = int(cursor.fetchone()["total"])
+        cursor.execute(
+            f"SELECT * FROM ({ADMIN_AUDIT_SOURCE_SQL}) AS history ORDER BY created_at DESC NULLS LAST, source, id DESC LIMIT %s OFFSET %s",
+            (limit, offset),
+        )
+        items = [public_audit_entry(row) for row in cursor.fetchall()]
+    response.headers["Cache-Control"] = "no-store"
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+def configured_admin_accounts() -> dict[str, tuple[str, str]]:
+    accounts: dict[str, tuple[str, str]] = {}
+    for key, email, password in (
+        ("configured-primary", ADMIN_API_USER, ADMIN_API_PASSWORD),
+        ("configured-test", ADMIN_TEST_USER, ADMIN_TEST_PASSWORD),
+    ):
+        email = email.strip().lower()
+        if email and email not in {item[0] for item in accounts.values()}:
+            accounts[key] = (email, password)
+    return accounts
+
+
+def public_admin_accounts(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    managed_emails = {str(row.get("source_key") or "").lower() for row in rows}
+    for key, (email, _) in configured_admin_accounts().items():
+        if email not in managed_emails:
+            items.append({"id": key, "email": email, "role": "ADMIN", "permissions": ["*"], "status": "ACTIVE", "configured": True})
+    for row in rows:
+        data = as_dict(row.get("data"))
+        items.append({"id": row.get("id"), "email": data.get("email") or row.get("source_key"), "role": data.get("role") or "STAFF", "permissions": data.get("permissions") or [], "status": str(row.get("status") or "ACTIVE").upper(), "lastLoginAt": data.get("lastLoginAt"), "createdAt": row.get("created_at")})
+    return items
+
+
 @app.get("/api/admin/accounts")
 def admin_accounts(admin: str = Depends(require_admin)):
-    items: list[dict[str, Any]] = []
-    configured = [ADMIN_API_USER, ADMIN_TEST_USER]
-    for email in configured:
-        if email and email not in {item.get("email") for item in items}:
-            items.append({"email": email, "role": "ADMIN", "permissions": ["*"], "status": "ACTIVE", "configured": True})
     with db_cursor() as (_, cursor):
         cursor.execute("SELECT id, source_key, status, data, created_at, updated_at FROM app_entities WHERE entity_type = 'admin_account' ORDER BY created_at ASC, id ASC")
-        rows = cursor.fetchall()
-    for row in rows:
-        data = row.get("data")
-        if isinstance(data, str):
-            try: data = json.loads(data)
-            except json.JSONDecodeError: data = {}
-        data = data if isinstance(data, dict) else {}
-        items.append({"id": row.get("id"), "email": data.get("email") or row.get("source_key"), "role": data.get("role") or "STAFF", "permissions": data.get("permissions") or [], "status": str(row.get("status") or "ACTIVE").upper(), "lastLoginAt": data.get("lastLoginAt"), "createdAt": row.get("created_at")})
+        items = public_admin_accounts(cursor.fetchall())
     return {"items": items, "total": len(items), "limit": len(items), "offset": 0, "current": admin}
 
 
@@ -6676,7 +7116,7 @@ def admin_create_account(payload: AdminAccountCreatePayload, actor: str = Depend
     if not re.search(r"[A-Z]", payload.password) or not re.search(r"\d", payload.password):
         raise HTTPException(status_code=422, detail="Password must contain an uppercase letter and a number")
     allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings"}
-    permissions = sorted(set(payload.permissions) & allowed) if payload.role == "STAFF" else ["*"]
+    permissions = list(dict.fromkeys(item for item in payload.permissions if item in allowed)) if payload.role == "STAFF" else ["*"]
     with db_cursor() as (conn, cursor):
         cursor.execute("SELECT id FROM app_entities WHERE entity_type = 'admin_account' AND LOWER(source_key) = %s LIMIT 1", (email,))
         if cursor.fetchone() or is_configured_admin_user(email):
@@ -6690,30 +7130,60 @@ def admin_create_account(payload: AdminAccountCreatePayload, actor: str = Depend
 
 
 @app.patch("/api/admin/accounts/{account_id}")
-def admin_update_account(account_id: int, payload: AdminAccountUpdatePayload, actor: str = Depends(require_admin)):
-    actor_account = dynamic_admin_account(actor)
-    if actor_account and str(actor_account.get("role") or "STAFF").upper() != "ADMIN":
-        raise HTTPException(status_code=403, detail="Only administrators can manage admin accounts")
+def admin_update_account(account_id: str, payload: AdminAccountUpdatePayload, response: Response, actor: str = Depends(require_admin)):
     allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings"}
-    permissions = sorted(set(payload.permissions) & allowed) if payload.role == "STAFF" else ["*"]
+    if not payload.model_fields_set:
+        raise HTTPException(status_code=422, detail="Choose an account field to update")
+    if payload.password is not None and (len(payload.password) < 8 or not re.search(r"[A-Z]", payload.password) or not re.search(r"\d", payload.password)):
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters and contain an uppercase letter and a number")
+    configured = configured_admin_accounts().get(account_id)
     with db_cursor() as (conn, cursor):
-        cursor.execute("SELECT id, source_key, status, data FROM app_entities WHERE id = %s AND entity_type = 'admin_account' LIMIT 1", (account_id,))
-        row = cursor.fetchone()
-        if not row: raise HTTPException(status_code=404, detail="Admin account not found")
-        data = row.get("data")
-        if isinstance(data, str):
-            try: data = json.loads(data)
-            except json.JSONDecodeError: data = {}
-        data = data if isinstance(data, dict) else {}
-        data.update({"role": payload.role, "permissions": permissions})
+        # Serialize role/status changes so concurrent requests cannot remove
+        # the last administrator or create two overrides for one account.
+        cursor.execute("SELECT pg_advisory_xact_lock(73140601)")
+        actor_account = dynamic_admin_account(actor, include_inactive=True)
+        if actor_account and (str(actor_account.get("role") or "STAFF").upper() != "ADMIN" or str(actor_account.get("status") or "").upper() != "ACTIVE"):
+            raise HTTPException(status_code=403, detail="Only active administrators can manage admin accounts")
+        cursor.execute("SELECT id, source_key, status, data, created_at, updated_at FROM app_entities WHERE entity_type = 'admin_account' ORDER BY created_at ASC, id ASC")
+        rows = cursor.fetchall()
+        row = next((item for item in rows if (configured and str(item.get("source_key") or "").lower() == configured[0]) or (not configured and str(item["id"]) == account_id)), None)
+        if not row and not configured:
+            raise HTTPException(status_code=404, detail="Admin account not found")
+        data = as_dict(row.get("data")).copy() if row else {"email": configured[0], "role": "ADMIN", "permissions": ["*"]}
+        email = str(data.get("email") or (row or {}).get("source_key") or "").lower()
+        role = payload.role or str(data.get("role") or "STAFF").upper()
+        account_status = payload.status or str((row or {}).get("status") or "ACTIVE").upper()
+        if email == actor.strip().lower() and (role != "ADMIN" or account_status != "ACTIVE"):
+            raise HTTPException(status_code=409, detail="You cannot deactivate your own account or remove your administrator role. Ask another administrator.")
+        current_role = str(data.get("role") or "STAFF").upper()
+        current_status = str((row or {}).get("status") or "ACTIVE").upper()
+        if current_role == "ADMIN" and current_status == "ACTIVE" and (role != "ADMIN" or account_status != "ACTIVE"):
+            remaining = [item for item in public_admin_accounts(rows) if str(item.get("email") or "").lower() != email and item["role"] == "ADMIN" and item["status"] == "ACTIVE" and not is_admin_login_disabled(item.get("email"))]
+            if not remaining:
+                raise HTTPException(status_code=409, detail="At least one active administrator must remain")
+        if payload.permissions is not None and role == "ADMIN" and set(payload.permissions) != {"*"}:
+            raise HTTPException(status_code=422, detail="Administrators have access to all sections. Change the role to Staff before assigning individual permissions.")
+        current_permissions = data.get("permissions") if isinstance(data.get("permissions"), list) else []
+        requested_permissions = payload.permissions if payload.permissions is not None else current_permissions
+        permissions = list(dict.fromkeys(item for item in requested_permissions if item in allowed)) if role == "STAFF" else ["*"]
+        data.update({"role": role, "permissions": permissions})
         if payload.password:
-            if len(payload.password) < 8 or not re.search(r"[A-Z]", payload.password) or not re.search(r"\d", payload.password):
-                raise HTTPException(status_code=422, detail="Password must be at least 8 characters and contain an uppercase letter and a number")
             data["passwordHash"] = hash_password(payload.password)
-        cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps(data, ensure_ascii=False), account_id))
-        audit(conn, actor, "update_admin_account", "admin_account", account_id, {"role": payload.role, "permissions": permissions, "passwordChanged": bool(payload.password)})
+        elif not row:
+            data["passwordHash"] = hash_password(configured[1])
+        if payload.password or account_status != current_status:
+            data["sessionVersion"] = int(data.get("sessionVersion") or 0) + 1
+        if row:
+            saved_id = row["id"]
+            cursor.execute("UPDATE app_entities SET data = %s, status = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps(data, ensure_ascii=False), account_status, saved_id))
+        else:
+            cursor.execute("INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at) VALUES ('admin_account', %s, %s, %s, %s, UTC_TIMESTAMP(), UTC_TIMESTAMP()) RETURNING id", (email, email, account_status, json.dumps(data, ensure_ascii=False)))
+            saved_id = cursor.fetchone()["id"]
+        audit(conn, actor, "update_admin_account", "admin_account", saved_id, {"email": email, "role": role, "permissions": permissions, "status": account_status, "passwordChanged": bool(payload.password)})
         conn.commit()
-    return {"ok": True, "id": account_id, "email": data.get("email") or row.get("source_key"), "role": payload.role, "permissions": permissions}
+    if payload.password and email == actor.strip().lower():
+        response.set_cookie(key=ADMIN_SESSION_COOKIE, value=sign_admin_session(actor), max_age=ADMIN_SESSION_HOURS * 60 * 60, httponly=True, secure=True, samesite="strict", path="/")
+    return {"ok": True, "id": saved_id, "email": email, "role": role, "permissions": permissions, "status": account_status}
 
 
 @app.post("/api/admin/notifications/test")
@@ -6927,15 +7397,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
                               AND {catalog_completion_sql()}
                               AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.visibleInCatalog')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVisibleInCatalog')), 'true') <> 'false'
                              THEN 1 ELSE 0 END) AS visible,
-                    AVG((
-                      (CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileType')), '') <> '' THEN 1 ELSE 0 END) +
-                      (CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')), '') <> '' THEN 1 ELSE 0 END) +
-                      (CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.dateOfBirth')), '') <> '' THEN 1 ELSE 0 END) +
-                      (CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '') <> '' THEN 1 ELSE 0 END) +
-                      (CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.city')), '') <> '' THEN 1 ELSE 0 END) +
-                      (CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.about')), '') <> '' OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.bio')), '') <> '' THEN 1 ELSE 0 END) +
-                      (CASE WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.lookingFor')), '[]') <> '[]' THEN 1 ELSE 0 END)
-                    ) / 7) AS completeness
+                    AVG({catalog_profile_completeness_sql()}) AS completeness
                 FROM profiles
                 WHERE {profile_filter}
                 """
@@ -7110,7 +7572,16 @@ def admin_stats(_admin: str = Depends(require_admin)):
                     f"""
                     SELECT {profile_flow_category.format(alias='sender')} AS sender_type,
                            {profile_flow_category.format(alias='receiver')} AS receiver_type,
-                           COUNT(*) AS cnt
+                           COUNT(*) AS cnt,
+                           SUM(
+                             CASE WHEN EXISTS (
+                               SELECT 1
+                               FROM profile_likes reciprocal_like
+                               WHERE reciprocal_like.actor_profile_id = likes.target_profile_id
+                                 AND reciprocal_like.target_profile_id = likes.actor_profile_id
+                                 AND reciprocal_like.status = 'ACTIVE'
+                             ) THEN 1 ELSE 0 END
+                           ) AS reciprocated
                     FROM profile_likes likes
                     JOIN profiles sender ON sender.id = likes.actor_profile_id
                     JOIN profiles receiver ON receiver.id = likes.target_profile_id
@@ -7118,11 +7589,58 @@ def admin_stats(_admin: str = Depends(require_admin)):
                     GROUP BY sender_type, receiver_type
                     """
                 )
-                flow_counts = {(str(row.get("sender_type") or ""), str(row.get("receiver_type") or "")): int(row.get("cnt") or 0) for row in cursor.fetchall()}
+                flow_stats = {
+                    (str(row.get("sender_type") or ""), str(row.get("receiver_type") or "")): {
+                        "sent": int(row.get("cnt") or 0),
+                        "reciprocated": int(row.get("reciprocated") or 0),
+                    }
+                    for row in cursor.fetchall()
+                }
+                visible_flow_pairs = {
+                    (sender, receiver)
+                    for sender in flow_labels
+                    for receiver in flow_labels
+                }
+                flow_total = sum(
+                    item["sent"]
+                    for pair, item in flow_stats.items()
+                    if pair in visible_flow_pairs
+                )
+                unknown_flow_total = sum(
+                    item["sent"]
+                    for pair, item in flow_stats.items()
+                    if pair not in visible_flow_pairs
+                )
+                flow_rows: list[dict[str, Any]] = []
+                for sender in flow_labels:
+                    sent_values: list[int] = []
+                    reciprocated_values: list[int] = []
+                    reciprocation_pcts: list[float] = []
+                    for receiver in flow_labels:
+                        cell = flow_stats.get(
+                            (sender, receiver),
+                            {"sent": 0, "reciprocated": 0},
+                        )
+                        sent = int(cell["sent"])
+                        reciprocated = int(cell["reciprocated"])
+                        sent_values.append(sent)
+                        reciprocated_values.append(reciprocated)
+                        reciprocation_pcts.append(
+                            round(reciprocated / sent * 100, 1) if sent else 0
+                        )
+                    flow_rows.append(
+                        {
+                            "label": sender,
+                            "values": sent_values,
+                            "reciprocatedValues": reciprocated_values,
+                            "reciprocationPcts": reciprocation_pcts,
+                        }
+                    )
                 like_flow_by_range[str(flow_days)] = {
                     "headers": flow_labels,
-                    "rows": [{"label": sender, "values": [flow_counts.get((sender, receiver), 0) for receiver in flow_labels]} for sender in flow_labels],
-                    "total": sum(flow_counts.values()),
+                    "rows": flow_rows,
+                    "total": flow_total,
+                    "unknown": unknown_flow_total,
                 }
             engagement_dashboard["likeFlowByRange"] = like_flow_by_range
             engagement_dashboard["likeFlow"] = like_flow_by_range["30"]
@@ -7324,6 +7842,289 @@ def admin_stats(_admin: str = Depends(require_admin)):
         },
         "warnings": warnings,
     }
+
+
+ADMIN_CLEANUP_JOBS = [
+    {"task": "readNotifications", "description": "Delete read notifications older than 90 days", "schedule": "Daily 05:00 UTC"},
+    {"task": "emailTokens", "description": "Delete expired email verification tokens", "schedule": "Daily 05:00 UTC"},
+    {"task": "passwordTokens", "description": "Delete expired password reset tokens", "schedule": "Daily 05:00 UTC"},
+    {"task": "refreshTokens", "description": "Delete expired mobile refresh tokens", "schedule": "Daily 05:00 UTC"},
+    {"task": "verificationSessions", "description": "Delete stale pending verification sessions", "schedule": "Daily 05:00 UTC"},
+    {"task": "staleCalls", "description": "Mark stuck ringing calls as missed", "schedule": "Daily 05:00 UTC"},
+    {"task": "orphanNotifications", "description": "Delete notifications from deleted users", "schedule": "Daily 05:00 UTC"},
+    {"task": "auditLogs", "description": "Delete audit logs older than one year", "schedule": "Daily 05:00 UTC"},
+    {"task": "staleActiveCalls", "description": "End active calls older than two hours", "schedule": "Daily 05:00 UTC"},
+    {"task": "oldUnreadNotifications", "description": "Delete unread notifications older than one year", "schedule": "Daily 05:00 UTC"},
+    {"task": "orphanDeviceInfo", "description": "Delete device records from deleted users", "schedule": "Daily 05:00 UTC"},
+    {"task": "oldCronLogs", "description": "Delete cron logs older than 90 days", "schedule": "Daily 05:00 UTC"},
+    {"task": "honeymoonExpiry", "description": "Expire completed free trial periods", "schedule": "Daily 05:00 UTC"},
+]
+
+
+def admin_host_memory() -> dict[str, int]:
+    values: dict[str, int] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, raw = line.split(":", 1)
+            match = re.search(r"\d+", raw)
+            if match:
+                values[key] = int(match.group(0)) * 1024
+    except (OSError, ValueError):
+        pass
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", values.get("MemFree", 0))
+    return {"total": total, "available": available, "used": max(0, total - available)}
+
+
+def admin_host_uptime() -> int:
+    try:
+        return max(0, int(float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0])))
+    except (OSError, ValueError, IndexError):
+        return 0
+
+
+def admin_cpu_model() -> str:
+    try:
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
+            if line.lower().startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except (OSError, ValueError, IndexError):
+        pass
+    return platform.processor() or "Unknown"
+
+
+def admin_parse_size(value: Any) -> int:
+    match = re.search(r"([0-9.]+)\s*([kmgtp]?i?b)?", str(value or "0"), re.I)
+    if not match:
+        return 0
+    units = {"b": 1, "kb": 1000, "kib": 1024, "mb": 1000**2, "mib": 1024**2, "gb": 1000**3, "gib": 1024**3, "tb": 1000**4, "tib": 1024**4}
+    return int(float(match.group(1)) * units.get((match.group(2) or "b").lower(), 1))
+
+
+def admin_docker_usage() -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "available": False,
+        "message": "Docker statistics are not exposed to the application container.",
+        "images": 0,
+        "containers": 0,
+        "volumes": 0,
+        "imageBytes": 0,
+        "cacheBytes": 0,
+        "reclaimableBytes": 0,
+        "reclaimablePercent": 0,
+    }
+    try:
+        completed = subprocess.run(
+            ["docker", "system", "df", "--format", "{{json .}}"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=4,
+        )
+        rows = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return result
+    for row in rows:
+        kind = str(row.get("Type") or "").lower()
+        count = int_or_none(row.get("TotalCount")) or 0
+        size = admin_parse_size(row.get("Size"))
+        reclaimable = admin_parse_size(row.get("Reclaimable"))
+        result["reclaimableBytes"] += reclaimable
+        if "image" in kind:
+            result["images"] = count
+            result["imageBytes"] = size
+        elif "container" in kind:
+            result["containers"] = count
+        elif "volume" in kind:
+            result["volumes"] = count
+        elif "build" in kind:
+            result["cacheBytes"] = size
+    occupied = int(result["imageBytes"]) + int(result["cacheBytes"])
+    result.update({
+        "available": True,
+        "message": "",
+        "reclaimablePercent": round(100 * int(result["reclaimableBytes"]) / max(1, occupied), 1),
+    })
+    return result
+
+
+def admin_system_cron_jobs() -> list[dict[str, str]]:
+    jobs: list[dict[str, str]] = []
+    cron_root = Path("/etc/cron.d")
+    if not cron_root.is_dir():
+        return jobs
+    for path in sorted(cron_root.iterdir()):
+        if not path.is_file() or path.name.startswith("."):
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for index, line in enumerate(lines, 1):
+            clean = line.strip()
+            if not clean or clean.startswith("#") or "=" in clean.split(maxsplit=1)[0]:
+                continue
+            parts = clean.split()
+            if len(parts) < 7:
+                continue
+            jobs.append({
+                "task": path.stem if index == 1 else f"{path.stem}-{index}",
+                "description": "Server scheduled task",
+                "schedule": " ".join(parts[:5]),
+            })
+    return jobs
+
+
+def admin_event_metric(cursor, pattern: str) -> dict[str, int]:
+    cursor.execute(
+        """
+        SELECT
+          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) AS today,
+          COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)) AS month,
+          COUNT(*) AS "all"
+        FROM api_events
+        WHERE event_type ILIKE %s
+        """,
+        (pattern,),
+    )
+    row = cursor.fetchone() or {}
+    return {key: int(row.get(key) or 0) for key in ("today", "month", "all")}
+
+
+@app.get("/api/admin/monitoring")
+def admin_monitoring(
+    min_mean_ms: float = Query(100, alias="minMeanMs", ge=0, le=3_600_000),
+    _admin: str = Depends(require_admin),
+):
+    storage_root = UPLOAD_DIR if UPLOAD_DIR.exists() else Path("/")
+    disk_usage = shutil.disk_usage(storage_root)
+    try:
+        load_average = list(os.getloadavg())
+    except (AttributeError, OSError):
+        load_average = [0, 0, 0]
+    slow_queries: list[dict[str, Any]] = []
+    slow_queries_available = False
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT pg_database_size(current_database()) AS size,
+                   (SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database()) AS connections,
+                   (SELECT COUNT(*) FROM pg_catalog.pg_tables WHERE schemaname = 'public') AS tables,
+                   EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - pg_postmaster_start_time()))::bigint AS uptime_seconds
+            """
+        )
+        database = cursor.fetchone() or {}
+        cursor.execute(
+            """
+            SELECT relname AS name, n_live_tup AS rows, pg_total_relation_size(relid) AS bytes
+            FROM pg_stat_user_tables
+            ORDER BY pg_total_relation_size(relid) DESC
+            LIMIT 25
+            """
+        )
+        database["tableSizes"] = cursor.fetchall()
+        cursor.execute("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') AS available")
+        slow_queries_available = bool((cursor.fetchone() or {}).get("available"))
+        if slow_queries_available:
+            cursor.execute("SAVEPOINT admin_slow_queries")
+            try:
+                cursor.execute(
+                    """
+                    SELECT query, calls, mean_exec_time AS mean_ms, max_exec_time AS max_ms,
+                           total_exec_time AS total_ms,
+                           CASE WHEN calls > 0 THEN rows::numeric / calls ELSE 0 END AS rows_per_call
+                    FROM pg_stat_statements
+                    WHERE mean_exec_time >= %s
+                    ORDER BY mean_exec_time DESC
+                    LIMIT 100
+                    """,
+                    (min_mean_ms,),
+                )
+                slow_queries = cursor.fetchall()
+                cursor.execute("RELEASE SAVEPOINT admin_slow_queries")
+            except psycopg.Error as error:
+                cursor.execute("ROLLBACK TO SAVEPOINT admin_slow_queries")
+                cursor.execute("RELEASE SAVEPOINT admin_slow_queries")
+                logger.warning("Slow query monitoring is unavailable: %s", error)
+                slow_queries_available = False
+        external_apis = [
+            {
+                "key": "email",
+                "name": "Email API",
+                "description": "Transactional email delivery",
+                "metrics": {
+                    "Email Verification": admin_event_metric(cursor, "%email%verification%"),
+                    "Welcome": admin_event_metric(cursor, "%email%welcome%"),
+                    "Forgot Password": admin_event_metric(cursor, "%password%reset%"),
+                    "New Message": admin_event_metric(cursor, "%message%notification%"),
+                },
+            },
+            {
+                "key": "places",
+                "name": "Google Places API",
+                "description": "City autocomplete and place details lookups",
+                "metrics": {
+                    "Autocomplete": admin_event_metric(cursor, "%places%autocomplete%"),
+                    "Place Details": admin_event_metric(cursor, "%places%details%"),
+                },
+            },
+            {
+                "key": "vision",
+                "name": "Google Vision API",
+                "description": "Photo moderation SafeSearch detection",
+                "metrics": {"SafeSearch": admin_event_metric(cursor, "%photo%moderated%")},
+            },
+        ]
+        cursor.execute(
+            """
+            SELECT id, event_type, payload, created_at
+            FROM api_events
+            WHERE event_type ILIKE '%cron%' OR event_type ILIKE '%cleanup%'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 90
+            """
+        )
+        cron_history = [normalize_row(row) for row in cursor.fetchall()]
+    return {
+        "system": {
+            "uptimeSeconds": admin_host_uptime(),
+            "hostname": socket.gethostname(),
+            "cpuCores": os.cpu_count() or 0,
+            "cpuModel": admin_cpu_model(),
+            "loadAverage": load_average,
+            "platform": platform.system().lower(),
+            "disk": {"used": disk_usage.used, "total": disk_usage.total, "free": disk_usage.free},
+            "memory": admin_host_memory(),
+        },
+        "docker": admin_docker_usage(),
+        "postgres": {
+            "size": int(database.get("size") or 0),
+            "connections": int(database.get("connections") or 0),
+            "tables": int(database.get("tables") or 0),
+            "uptimeSeconds": int(database.get("uptime_seconds") or 0),
+            "tableSizes": database.get("tableSizes") or [],
+        },
+        "redis": {"status": "Not configured", "version": "—", "memoryUsed": "—", "memoryPeak": "—", "totalKeys": 0, "clients": 0, "uptimeSeconds": 0, "totalCommands": 0},
+        "externalApis": external_apis,
+        "appCleanupJobs": ADMIN_CLEANUP_JOBS,
+        "systemCronJobs": admin_system_cron_jobs(),
+        "cronHistory": cron_history,
+        "slowQueriesAvailable": slow_queries_available,
+        "slowQueries": slow_queries,
+    }
+
+
+@app.post("/api/admin/monitoring/slow-queries/reset")
+def admin_monitoring_reset_slow_queries(actor: str = Depends(require_admin)):
+    try:
+        with db_cursor() as (conn, cursor):
+            cursor.execute("SELECT pg_stat_statements_reset()")
+            audit(conn, actor, "reset_slow_query_statistics", "monitoring", None, {})
+            conn.commit()
+    except psycopg.Error as error:
+        logger.warning("Slow query statistics could not be reset: %s", error)
+        raise HTTPException(status_code=409, detail="pg_stat_statements is not available") from error
+    return {"ok": True}
 
 
 @app.get("/api/admin/operations")
@@ -7791,6 +8592,7 @@ def normalize_admin_clinic(row: dict[str, Any]) -> dict[str, Any]:
     data = as_dict(row.get("data"))
     partner = data.get("partner") if isinstance(data.get("partner"), dict) else {}
     clinic["partnerName"] = data.get("partnerName") or partner.get("name") or partner.get("displayName") or "-"
+    clinic["partnerEmail"] = data.get("partnerEmail") or partner.get("email") or data.get("ownerEmail") or ""
     return clinic
 
 
@@ -7804,7 +8606,32 @@ def admin_clinic_overview(clinic_identifier: str, _admin: str = Depends(require_
             """
             SELECT e.id, e.created_at, e.updated_at, e.data,
                    p.id AS profileLocalId, p.display_name AS profileName, p.email AS profileEmail,
-                   p.status AS profileStatus, p.data AS profileData
+                   p.status AS profileStatus, p.data AS profileData,
+                   (SELECT COALESCE(
+                       NULLIF(amf.public_url, ''),
+                       NULLIF(pph.public_url, ''),
+                       CASE
+                         WHEN pph.avatar_media_file_id IS NOT NULL
+                           THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                         ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                       END
+                    )
+                    FROM profile_photos pph
+                    LEFT JOIN media_files amf ON amf.id = pph.avatar_media_file_id
+                    WHERE pph.profile_id = p.id
+                      AND pph.status = 'ACTIVE'
+                      AND pph.moderation_status = 'APPROVED'
+                    ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS profileAvatarUrl,
+                   (SELECT CASE
+                       WHEN pph.avatar_media_file_id IS NOT NULL
+                         THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                       ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                    END
+                    FROM profile_photos pph
+                    WHERE pph.profile_id = p.id
+                      AND pph.status = 'ACTIVE'
+                      AND pph.moderation_status = 'APPROVED'
+                    ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS profileAvatarFallbackUrl
             FROM app_entities e
             LEFT JOIN profiles p ON p.id = CAST(NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.profileLocalId')), ''), 'null') AS UNSIGNED)
             WHERE e.entity_type = 'favourite_clinic'
@@ -7821,20 +8648,26 @@ def admin_clinic_overview(clinic_identifier: str, _admin: str = Depends(require_
             profile_data = as_dict(visitor.get("profileData"))
             visitors.append({
                 "id": visitor.get("id"), "profileName": visitor.get("profileName") or "Member",
-                "profileEmail": visitor.get("profileEmail") or "-", "avatarUrl": profile_data.get("avatarUrl") or profile_data.get("avatar") or "",
+                "profileEmail": visitor.get("profileEmail") or "-", "avatarUrl": profile_data.get("avatarUrl") or profile_data.get("avatar") or visitor.get("profileAvatarUrl") or "",
+                "avatarFallbackUrl": visitor.get("profileAvatarFallbackUrl") or "",
                 "verified": bool(profile_data.get("isVerified") or profile_data.get("verified")),
                 "premium": bool(profile_data.get("isPremium") or profile_data.get("premium")),
+                "profileStatus": visitor.get("profileStatus") or "",
                 "viewCount": int(visitor_data.get("viewCount") or 1), "createdAt": visitor.get("created_at"), "updatedAt": visitor.get("updated_at"),
             })
+        cursor.execute(
+            "SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM clinics WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY value"
+        )
+        country_options = cursor.fetchall()
     service_labels = {
-        "ivf": "IVF", "icsi_ivf": "ICSI IVF", "egg_donation_ivf": "Egg donation IVF", "sperm_donations_ivf": "Sperm donation IVF", "genetic_testing_ivf": "Genetic testing IVF", "own_egg_sperm_ivf": "Own egg / sperm IVF", "embryo_donations_ivf": "Embryo donation IVF",
-        "freezing": "Fertility freezing", "egg_freezing": "Egg freezing", "sperm_freezing": "Sperm freezing", "embryo_freezing": "Embryo freezing",
-        "iui_intrauterine": "Iui Intrauterine", "ici_intracervical": "Ici Intracervical", "iutpi_tuboperitoneal": "Iutpi Tuboperitoneal", "iti_intratubal": "Iti Intratubal",
-        "women_over_46": "Women Over 46", "hiv_positive_female": "Hiv Positive Female", "hiv_positive_male": "Hiv Positive Male", "hepatitis_bc_male": "Hepatitis Bc Male", "hepatitis_bc_female": "Hepatitis Bc Female",
+        "ivf": "IVF", "icsi_ivf": "ICSI IVF", "egg_donation_ivf": "Egg Donation IVF", "sperm_donations_ivf": "Sperm Donations IVF", "genetic_testing_ivf": "Genetic Testing IVF", "own_egg_sperm_ivf": "Own Egg Sperm IVF", "embryo_donations_ivf": "Embryo Donations IVF",
+        "freezing": "Freezing", "egg_freezing": "Egg Freezing", "sperm_freezing": "Sperm Freezing", "embryo_freezing": "Embryo Freezing",
+        "iui_intrauterine": "IUI - Intrauterine", "ici_intracervical": "ICI - Intracervical", "iutpi_tuboperitoneal": "IUTPI - Tuboperitoneal", "iti_intratubal": "ITI - Intratubal",
+        "women_over_46": "Women over 46", "hiv_positive_female": "HIV+ Female", "hiv_positive_male": "HIV+ Male", "hepatitis_bc_male": "Hepatitis B/C Male", "hepatitis_bc_female": "Hepatitis B/C Female",
     }
     group_labels = {"ivf_treatments": "IVF Treatments", "fertility_preservation": "Fertility Preservation", "artificial_insemination": "Artificial Insemination", "special_situations": "Special Situations"}
     groups = {group_labels.get(key, key.replace("_", " ").title()): [{"slug": slug, "label": service_labels.get(slug, slug.replace("_", " ").title())} for slug in values] for key, values in CLINIC_SERVICE_GROUPS.items()}
-    return {"clinic": clinic, "visitors": visitors, "visitorCount": len(visitors), "serviceGroups": groups}
+    return {"clinic": clinic, "visitors": visitors, "visitorCount": len(visitors), "serviceGroups": groups, "countryOptions": country_options}
 
 
 @app.patch("/api/admin/clinics/{clinic_identifier}")
@@ -7853,7 +8686,7 @@ def admin_update_clinic(clinic_identifier: str, payload: AdminPatchPayload, acto
             data["languages"] = []
         if "services" in data and not isinstance(data["services"], list):
             data["services"] = []
-        active = bool(data.get("isActive", str(row.get("status") or "").lower() == "active"))
+        active = json_bool(data, "isActive", str(row.get("status") or "").lower() == "active")
         status = "active" if active else "inactive"
         cursor.execute(
             "UPDATE clinics SET name = %s, country = %s, city = %s, status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
@@ -7914,6 +8747,171 @@ def admin_delete_clinic(clinic_identifier: str, actor: str = Depends(require_adm
         audit(conn, actor, "permanently_delete_clinic", "clinics", row["id"], {"name": row.get("name")})
         conn.commit()
     return {"ok": True}
+
+
+ADMIN_LAWYER_PRACTICE_AREAS = (
+    ("assisted_reproduction", "Assisted Reproduction"),
+    ("contested_adoption", "Contested Adoption"),
+    ("domestic_adoption", "Domestic Adoption"),
+    ("icpc_adoption", "Interstate (ICPC) Adoption"),
+    ("intercountry_adoption", "Intercountry Adoption"),
+    ("lgbtq_family_formation", "LGBTQ Family Formation"),
+    ("private_networking", "Private Networking"),
+    ("egg_donation", "Egg Donation"),
+    ("embryo_donation", "Embryo Donation"),
+    ("sperm_donation", "Sperm Donation"),
+    ("surrogacy", "Surrogacy"),
+    ("grandparent_representation", "Grandparent Representation"),
+    ("special_needs_children", "Special Needs Children"),
+    ("mediation", "Mediation"),
+)
+
+
+def fetch_admin_lawyer(cursor, identifier: str | int) -> dict[str, Any]:
+    raw = str(identifier).strip()
+    lookup_parts = [
+        "JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) = %s",
+        "JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) = %s",
+    ]
+    lookup_params: list[Any] = [raw, raw]
+    if raw.isdigit():
+        lookup_parts.insert(0, "id = %s")
+        lookup_params.insert(0, int(raw))
+    cursor.execute(
+        f"SELECT id, name, country, city, status, data, created_at, updated_at FROM lawyers WHERE {' OR '.join(lookup_parts)} LIMIT 1",
+        lookup_params,
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Lawyer not found")
+    return row
+
+
+def normalize_admin_lawyer(row: dict[str, Any]) -> dict[str, Any]:
+    data = as_dict(row.get("data"))
+    practice_areas = data.get("practiceAreas") if isinstance(data.get("practiceAreas"), list) else []
+    return {
+        "dbId": row.get("id"),
+        "id": data.get("id") or str(row.get("id")),
+        "name": row.get("name") or data.get("name"),
+        "slug": data.get("slug"),
+        "photoUrl": data.get("photoUrl") or data.get("avatarUrl") or data.get("imageUrl"),
+        "location": data.get("location") or data.get("address"),
+        "country": row.get("country") or data.get("country"),
+        "state": data.get("state") or data.get("region"),
+        "city": row.get("city") or data.get("city"),
+        "zip": data.get("zip") or data.get("zipCode") or data.get("postalCode"),
+        "latitude": data.get("latitude"),
+        "longitude": data.get("longitude"),
+        "website": data.get("website"),
+        "phone": data.get("phone"),
+        "fax": data.get("fax"),
+        "facebookUrl": data.get("facebookUrl") or data.get("facebook"),
+        "instagramUrl": data.get("instagramUrl") or data.get("instagram"),
+        "linkedinUrl": data.get("linkedinUrl") or data.get("linkedin"),
+        "isActive": json_bool(data, "isActive", str(row.get("status") or "").lower() == "active"),
+        "status": row.get("status"),
+        "practiceAreas": practice_areas,
+        "practiceAreasCount": len(practice_areas) if practice_areas else int(data.get("practiceAreasCount") or 0),
+        "createdAt": row.get("created_at"),
+        "updatedAt": row.get("updated_at"),
+    }
+
+
+@app.get("/api/admin/lawyers/{lawyer_identifier}/overview")
+def admin_lawyer_overview(lawyer_identifier: str, _admin: str = Depends(require_admin)):
+    with db_cursor() as (_, cursor):
+        lawyer = normalize_admin_lawyer(fetch_admin_lawyer(cursor, lawyer_identifier))
+        cursor.execute(
+            "SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM lawyers WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY value"
+        )
+        country_options = cursor.fetchall()
+    return {
+        "lawyer": lawyer,
+        "practiceAreaOptions": [
+            {"slug": slug, "name": name} for slug, name in ADMIN_LAWYER_PRACTICE_AREAS
+        ],
+        "countryOptions": country_options,
+    }
+
+
+@app.patch("/api/admin/lawyers/{lawyer_identifier}")
+def admin_update_lawyer(lawyer_identifier: str, payload: AdminPatchPayload, actor: str = Depends(require_admin)):
+    allowed = {
+        "name", "slug", "photoUrl", "location", "country", "state", "city", "zip",
+        "latitude", "longitude", "website", "phone", "fax", "facebookUrl",
+        "instagramUrl", "linkedinUrl", "practiceAreas", "isActive",
+    }
+    values = {key: value for key, value in payload.values.items() if key in allowed}
+    with db_cursor() as (conn, cursor):
+        row = fetch_admin_lawyer(cursor, lawyer_identifier)
+        data = as_dict(row.get("data"))
+        data.update(values)
+        if "practiceAreas" in values:
+            data["practiceAreasCount"] = len(values["practiceAreas"]) if isinstance(values["practiceAreas"], list) else 0
+        if "practiceAreas" in data and not isinstance(data["practiceAreas"], list):
+            data["practiceAreas"] = []
+        active = json_bool(data, "isActive", str(row.get("status") or "").lower() == "active")
+        status = "active" if active else "inactive"
+        cursor.execute(
+            "UPDATE lawyers SET name = %s, country = %s, city = %s, status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (
+                data.get("name") or row.get("name"),
+                data.get("country") or row.get("country"),
+                data.get("city") or row.get("city"),
+                status,
+                json.dumps(data, ensure_ascii=False),
+                row["id"],
+            ),
+        )
+        audit(conn, actor, "update_lawyer", "lawyers", row["id"], {"fields": list(values)})
+        conn.commit()
+        updated = fetch_admin_lawyer(cursor, row["id"])
+    return {"lawyer": normalize_admin_lawyer(updated)}
+
+
+@app.post("/api/admin/lawyers/{lawyer_identifier}/photo")
+async def admin_upload_lawyer_photo(
+    lawyer_identifier: str,
+    file: UploadFile = File(...),
+    actor: str = Depends(require_admin),
+):
+    content_type = (file.content_type or "").split(";")[0].lower()
+    ext = ALLOWED_IMAGE_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(status_code=415, detail="Only JPEG, PNG and WebP images are supported")
+    body = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Photo file is too large")
+    if not body:
+        raise HTTPException(status_code=422, detail="Photo file is empty")
+    with db_cursor() as (conn, cursor):
+        row = fetch_admin_lawyer(cursor, lawyer_identifier)
+        storage_dir = UPLOAD_DIR / "lawyers" / str(row["id"])
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        storage_name = f"photo-{int(now_utc().timestamp())}-{secrets.token_hex(6)}{ext}"
+        storage_path = storage_dir / storage_name
+        storage_path.write_bytes(body)
+        storage_key = f"lawyers/{row['id']}/{storage_name}"
+        public_url = f"{UPLOAD_URL_PREFIX.rstrip('/')}/{storage_key}"
+        metadata = {"originalName": file.filename, "lawyerId": row["id"], "purpose": "admin_lawyer_photo"}
+        cursor.execute(
+            """
+            INSERT INTO media_files (storage_key, public_url, mime_type, bytes, metadata)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE public_url = VALUES(public_url), mime_type = VALUES(mime_type), bytes = VALUES(bytes), metadata = VALUES(metadata)
+            """,
+            (storage_key, public_url, content_type, len(body), json.dumps(metadata, ensure_ascii=False)),
+        )
+        data = as_dict(row.get("data"))
+        data["photoUrl"] = public_url
+        cursor.execute(
+            "UPDATE lawyers SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(data, ensure_ascii=False), row["id"]),
+        )
+        audit(conn, actor, "admin_upload_lawyer_photo", "lawyers", row["id"], {"publicUrl": public_url})
+        conn.commit()
+    return {"ok": True, "publicUrl": public_url}
 
 
 @app.post("/api/admin/subscriptions/grant")
@@ -8100,16 +9098,24 @@ def admin_support_list(
     unanswered: bool = Query(False),
     _admin: str = Depends(require_admin),
 ):
-    where = ["(a.role = 'SUPPORT' OR b.role = 'SUPPORT')"]
-    params: list[Any] = []
+    base_where = ["(a.role = 'SUPPORT' OR b.role = 'SUPPORT')"]
+    base_params: list[Any] = []
     if q:
-        where.append("(a.display_name LIKE %s OR b.display_name LIKE %s OR a.email LIKE %s OR b.email LIKE %s)")
+        base_where.append("(a.display_name LIKE %s OR b.display_name LIKE %s OR a.email LIKE %s OR b.email LIKE %s)")
         like = f"%{q}%"
-        params.extend([like, like, like, like])
+        base_params.extend([like, like, like, like])
+    unanswered_clause = "EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')"
+    where = list(base_where)
     if unanswered:
-        where.append("EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')")
+        where.append(unanswered_clause)
     where_sql = "WHERE " + " AND ".join(where)
+    base_where_sql = "WHERE " + " AND ".join(base_where)
     with db_cursor() as (_, cursor):
+        cursor.execute(f"SELECT COUNT(*) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id {base_where_sql}", base_params)
+        total_all = int(cursor.fetchone()["cnt"] or 0)
+        cursor.execute(f"SELECT COUNT(*) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id {base_where_sql} AND {unanswered_clause}", base_params)
+        total_unanswered = int(cursor.fetchone()["cnt"] or 0)
+        params = list(base_params)
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id {where_sql}", params)
         total = int(cursor.fetchone()["cnt"] or 0)
         cursor.execute(
@@ -8119,6 +9125,20 @@ def admin_support_list(
               CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END AS userId,
               CASE WHEN a.role = 'SUPPORT' THEN b.display_name ELSE a.display_name END AS userName,
               CASE WHEN a.role = 'SUPPORT' THEN b.email ELSE a.email END AS email,
+              CASE WHEN a.role = 'SUPPORT'
+                THEN COALESCE(
+                  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.avatarUrl')), ''),
+                  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.photoUrl')), '')
+                )
+                ELSE COALESCE(
+                  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.avatarUrl')), ''),
+                  NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.photoUrl')), '')
+                )
+              END AS avatarUrl,
+              CASE WHEN a.role = 'SUPPORT'
+                THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
+                ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
+              END AS profileType,
               (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
               (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
               (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount
@@ -8138,7 +9158,14 @@ def admin_support_list(
             [*params, limit, offset],
         )
         items = [normalize_row(row) for row in cursor.fetchall()]
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+    return {
+        "items": items,
+        "total": total,
+        "totalAll": total_all,
+        "totalUnanswered": total_unanswered,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @app.get("/api/admin/support/{conversation_id}")
@@ -8150,7 +9177,21 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
                    a.role AS profileARole, b.role AS profileBRole,
                    CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END AS userId,
                    CASE WHEN a.role = 'SUPPORT' THEN b.display_name ELSE a.display_name END AS userName,
-                   CASE WHEN a.role = 'SUPPORT' THEN b.email ELSE a.email END AS email
+                   CASE WHEN a.role = 'SUPPORT' THEN b.email ELSE a.email END AS email,
+                   CASE WHEN a.role = 'SUPPORT'
+                     THEN COALESCE(
+                       NULLIF(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.avatarUrl')), ''),
+                       NULLIF(JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.photoUrl')), '')
+                     )
+                     ELSE COALESCE(
+                       NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.avatarUrl')), ''),
+                       NULLIF(JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.photoUrl')), '')
+                     )
+                   END AS avatarUrl,
+                   CASE WHEN a.role = 'SUPPORT'
+                     THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
+                     ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
+                   END AS profileType
             FROM conversations c
             JOIN profiles a ON a.id = c.profile_a_id
             JOIN profiles b ON b.id = c.profile_b_id
@@ -8183,6 +9224,7 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
 @app.post("/api/admin/support/{conversation_id}/messages")
 def admin_send_support_message(conversation_id: int, payload: AdminSupportMessagePayload, actor: str = Depends(require_admin)):
     with db_cursor() as (conn, cursor):
+        body = validate_chat_message(cursor, payload.body)
         support = support_profile(cursor)
         cursor.execute("SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1", (conversation_id, support["id"], support["id"]))
         conversation = cursor.fetchone()
@@ -8190,7 +9232,7 @@ def admin_send_support_message(conversation_id: int, payload: AdminSupportMessag
             raise HTTPException(status_code=404, detail="Support conversation not found")
         if str(conversation.get("status") or "").upper() != "ACTIVE":
             raise HTTPException(status_code=409, detail="Support conversation is not active")
-        cursor.execute("INSERT INTO conversation_messages (conversation_id, sender_profile_id, body, status, created_at) VALUES (%s, %s, %s, 'ACTIVE', UTC_TIMESTAMP())", (conversation_id, support["id"], payload.body.strip()))
+        cursor.execute("INSERT INTO conversation_messages (conversation_id, sender_profile_id, body, status, created_at) VALUES (%s, %s, %s, 'ACTIVE', UTC_TIMESTAMP())", (conversation_id, support["id"], body))
         message_id = cursor.lastrowid
         cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
         audit(conn, actor, "send_support_message", "conversation", conversation_id, {"messageId": message_id})
@@ -8213,11 +9255,38 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                 JSON_UNQUOTE(JSON_EXTRACT(data, '$.platform')),
                 'Web App'
             ) AS source,
-            (SELECT public_url FROM profile_photos pph
+            COALESCE(
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatar_url')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.photoUrl')), ''),
+                (SELECT COALESCE(
+                    NULLIF(amf.public_url, ''),
+                    NULLIF(pph.public_url, ''),
+                    NULLIF(mf.public_url, ''),
+                    CASE
+                        WHEN pph.avatar_media_file_id IS NOT NULL
+                            THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                        ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                    END
+                 )
+                 FROM profile_photos pph
+                 JOIN media_files mf ON mf.id = pph.media_file_id
+                 LEFT JOIN media_files amf ON amf.id = pph.avatar_media_file_id
+                 WHERE pph.profile_id = profiles.id
+                   AND pph.status = 'ACTIVE'
+                   AND pph.moderation_status = 'APPROVED'
+                 ORDER BY pph.position ASC, pph.id ASC LIMIT 1)
+            ) AS avatarUrl,
+            (SELECT CASE
+                WHEN pph.avatar_media_file_id IS NOT NULL
+                    THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+             END
+             FROM profile_photos pph
              WHERE pph.profile_id = profiles.id
                AND pph.status = 'ACTIVE'
                AND pph.moderation_status = 'APPROVED'
-             ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarUrl,
+             ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl,
             EXISTS(
                 SELECT 1 FROM local_users lu
                 JOIN auth_sessions aus ON aus.user_id = lu.id
@@ -8272,11 +9341,38 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                 JSON_UNQUOTE(JSON_EXTRACT(data, '$.platform')),
                 'Web App'
             ) AS source,
-            (SELECT public_url FROM profile_photos pph
+            COALESCE(
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatar_url')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.photoUrl')), ''),
+                (SELECT COALESCE(
+                    NULLIF(amf.public_url, ''),
+                    NULLIF(pph.public_url, ''),
+                    NULLIF(mf.public_url, ''),
+                    CASE
+                        WHEN pph.avatar_media_file_id IS NOT NULL
+                            THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                        ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                    END
+                 )
+                 FROM profile_photos pph
+                 JOIN media_files mf ON mf.id = pph.media_file_id
+                 LEFT JOIN media_files amf ON amf.id = pph.avatar_media_file_id
+                 WHERE pph.profile_id = profiles.id
+                   AND pph.status = 'ACTIVE'
+                   AND pph.moderation_status = 'APPROVED'
+                 ORDER BY pph.position ASC, pph.id ASC LIMIT 1)
+            ) AS avatarUrl,
+            (SELECT CASE
+                WHEN pph.avatar_media_file_id IS NOT NULL
+                    THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+             END
+             FROM profile_photos pph
              WHERE pph.profile_id = profiles.id
                AND pph.status = 'ACTIVE'
                AND pph.moderation_status = 'APPROVED'
-             ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarUrl,
+             ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl,
             EXISTS(
                 SELECT 1 FROM local_users lu
                 JOIN auth_sessions aus ON aus.user_id = lu.id
@@ -8322,15 +9418,29 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
         "select": """
             id, name, country, city, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug,
-            JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl')) AS logoUrl,
-            JSON_EXTRACT(data, '$.servicesCount') AS servicesCount,
-            JSON_UNQUOTE(JSON_EXTRACT(data, '$.partner.name')) AS partnerName
+            COALESCE(
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logo')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.imageUrl')), '')
+            ) AS logoUrl,
+            CASE
+                WHEN COALESCE(data->>'servicesCount', '') ~ '^[0-9]+$'
+                    THEN (data->>'servicesCount')::INTEGER
+                WHEN jsonb_typeof(data->'services') = 'array'
+                    THEN jsonb_array_length(data->'services')
+                ELSE 0
+            END AS servicesCount,
+            COALESCE(
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.partnerName')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.partner.name')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.partner.displayName')), '')
+            ) AS partnerName
         """,
         "search": ["name", "country", "city", "JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug'))"],
-        "filters": {"status": "status", "country": "country", "city": "city"},
+        "filters": {"status": "status", "country": "COALESCE(NULLIF(country, ''), JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')))", "city": "city"},
         "boolean_filters": {
             "hasWebsite": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.website'))",
-            "hasLogo": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl'))",
+            "hasLogo": "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.logo')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.imageUrl')))",
         },
         "order": "name ASC, id ASC",
     },
@@ -8339,11 +9449,22 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
         "select": """
             id, name, country, city, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug,
-            JSON_UNQUOTE(JSON_EXTRACT(data, '$.photoUrl')) AS photoUrl,
-            JSON_EXTRACT(data, '$.practiceAreasCount') AS practiceAreasCount
+            COALESCE(
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.photoUrl')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')), ''),
+                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.imageUrl')), '')
+            ) AS photoUrl,
+            JSON_UNQUOTE(JSON_EXTRACT(data, '$.state')) AS state,
+            CASE
+                WHEN COALESCE(data->>'practiceAreasCount', '') ~ '^[0-9]+$'
+                    THEN (data->>'practiceAreasCount')::INTEGER
+                WHEN jsonb_typeof(data->'practiceAreas') = 'array'
+                    THEN jsonb_array_length(data->'practiceAreas')
+                ELSE 0
+            END AS practiceAreasCount
         """,
         "search": ["name", "country", "city", "JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug'))"],
-        "filters": {"status": "status", "country": "country", "city": "city"},
+        "filters": {"status": "status", "country": "COALESCE(NULLIF(country, ''), JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')))", "city": "city"},
         "order": "name ASC, id ASC",
     },
     "articles": {
@@ -8423,6 +9544,37 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
         "filters": {"status": "status"},
         "order": "created_at DESC, id DESC",
     },
+    "livekit": {
+        "table": "member_calls",
+        "select": """
+            id, conversation_id AS conversationId,
+            caller_profile_id AS callerProfileId,
+            callee_profile_id AS calleeProfileId,
+            room_name AS roomName,
+            call_type AS type,
+            status,
+            created_at AS createdAt,
+            accepted_at AS acceptedAt,
+            ended_at AS endedAt,
+            updated_at AS updatedAt,
+            CASE
+                WHEN accepted_at IS NOT NULL AND ended_at IS NOT NULL
+                THEN GREATEST(0, TIMESTAMPDIFF(SECOND, accepted_at, ended_at))
+                ELSE NULL
+            END AS durationSeconds,
+            (SELECT display_name FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerName,
+            (SELECT display_name FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeName
+        """,
+        "search": [
+            "CAST(conversation_id AS CHAR)",
+            "CAST(caller_profile_id AS CHAR)",
+            "CAST(callee_profile_id AS CHAR)",
+            "(SELECT display_name FROM profiles p WHERE p.id = member_calls.caller_profile_id)",
+            "(SELECT display_name FROM profiles p WHERE p.id = member_calls.callee_profile_id)",
+        ],
+        "filters": {"status": "status"},
+        "order": "created_at DESC, id DESC",
+    },
     "profile-photos": {
         "table": "profile_photos",
         "select": """
@@ -8490,6 +9642,660 @@ ADMIN_ENTITY_VIEWS: dict[str, str] = {
     "support": "support_chat",
     "livekit": "livekit_room",
 }
+
+
+ADMIN_ARTICLE_CATEGORY_DEFAULTS: tuple[dict[str, Any], ...] = (
+    {
+        "slug": "ivf-in-vitro-fertilization",
+        "translations": [
+            {"locale": "en", "name": "IVF - In Vitro Fertilization"},
+            {"locale": "ru", "name": "ЭКО - Экстракорпоральное оплодотворение"},
+        ],
+    },
+    {
+        "slug": "Co-parenting",
+        "translations": [
+            {"locale": "en", "name": "Co-parenting"},
+            {"locale": "ru", "name": "Копереннтинг"},
+        ],
+    },
+    {
+        "slug": "sperm-donor",
+        "translations": [
+            {"locale": "en", "name": "Sperm donor"},
+            {"locale": "ru", "name": "Донор спермы"},
+        ],
+    },
+    {
+        "slug": "fertility",
+        "translations": [{"locale": "en", "name": "Fertility"}],
+    },
+    {
+        "slug": "lgbtq",
+        "translations": [
+            {"locale": "en", "name": "LGBTQ+"},
+            {"locale": "ru", "name": "ЛГБТК+"},
+        ],
+    },
+    {
+        "slug": "Parenthood",
+        "translations": [{"locale": "en", "name": "Parenthood"}],
+    },
+)
+
+ADMIN_ARTICLE_CATEGORY_LEGACY_IDS = {
+    "12d76e41-4b15-4c13-bbaf-cd9e1f2fcb7a": "fertility",
+    "7a1bc559-e213-4abb-bd1e-27c919dc7939": "ivf-in-vitro-fertilization",
+    "ad80a04a-68a5-4a19-9286-f01ef68f119c": "sperm-donor",
+    "c777b506-3714-4f2a-9aef-7b86a97e8a34": "co-parenting",
+    "f8963576-77d5-4811-9971-22c7251fcba6": "lgbtq",
+}
+
+
+def admin_article_category_data(
+    values: dict[str, Any],
+    *,
+    fallback_title: str = "",
+    fallback_slug: str = "",
+) -> dict[str, Any]:
+    raw = as_dict(values.get("data"))
+    nested = as_dict(raw.get("data"))
+    if nested and not (raw.get("name") or raw.get("translations") or raw.get("slug")):
+        raw = nested
+    if not raw:
+        raw = dict(values)
+
+    slug = str(values.get("slug") or raw.get("slug") or fallback_slug or "").strip()
+    translations: list[dict[str, str]] = []
+    seen_locales: set[str] = set()
+    if isinstance(raw.get("translations"), list):
+        for item in raw["translations"]:
+            translated = as_dict(item)
+            locale = str(translated.get("locale") or "").strip().lower()
+            name = str(translated.get("name") or "").strip()
+            if not locale or not name or locale in seen_locales:
+                continue
+            translations.append({"locale": locale, "name": name})
+            seen_locales.add(locale)
+
+    name = str(raw.get("name") or values.get("name") or values.get("title") or fallback_title or "").strip()
+    english = next((item for item in translations if item["locale"] == "en"), None)
+    if english:
+        name = english["name"]
+    elif name:
+        translations.insert(0, {"locale": "en", "name": name})
+
+    return {
+        **{key: value for key, value in raw.items() if key not in {"data", "title", "status", "locale"}},
+        "name": name,
+        "slug": slug,
+        "sortOrder": int_or_none(raw.get("sortOrder")) or 0,
+        "isActive": bool(raw.get("isActive", True)),
+        "translations": translations,
+    }
+
+
+def ensure_admin_article_categories(conn, cursor) -> None:
+    cursor.execute(
+        """
+        SELECT id, source_key, title, status, locale, slug, data
+        FROM app_entities
+        WHERE entity_type = 'category'
+        ORDER BY id ASC
+        """
+    )
+    existing = cursor.fetchall()
+    changed = False
+    normalized_existing: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for row in existing:
+        normalized = admin_article_category_data(
+            {"data": row.get("data"), "slug": row.get("slug"), "title": row.get("title")},
+            fallback_title=str(row.get("title") or ""),
+            fallback_slug=str(row.get("slug") or ""),
+        )
+        normalized_existing.append((row, normalized))
+        stored = as_dict(row.get("data"))
+        if as_dict(stored.get("data")) and not (stored.get("name") or stored.get("translations")):
+            cursor.execute(
+                "UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (json.dumps(normalized, ensure_ascii=False), row["id"]),
+            )
+            changed = True
+
+    for default in ADMIN_ARTICLE_CATEGORY_DEFAULTS:
+        slug = str(default["slug"])
+        if any(str(data.get("slug") or row.get("slug") or "").casefold() == slug.casefold() for row, data in normalized_existing):
+            continue
+        translations = [dict(item) for item in default["translations"]]
+        english = next(item["name"] for item in translations if item["locale"] == "en")
+        data = {
+            "name": english,
+            "slug": slug,
+            "sortOrder": 0,
+            "isActive": True,
+            "translations": translations,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, locale, slug, data)
+            VALUES ('category', %s, %s, 'active', 'en', %s, %s)
+            """,
+            (f"article-category:{slug.casefold()}", english, slug, json.dumps(data, ensure_ascii=False)),
+        )
+        changed = True
+    if changed:
+        conn.commit()
+
+
+def synchronize_article_category_metadata(
+    cursor,
+    category_id: str,
+    old_data: dict[str, Any],
+    new_data: dict[str, Any],
+) -> None:
+    old_values = {
+        str(category_id).casefold(),
+        str(old_data.get("slug") or "").casefold(),
+        str(old_data.get("name") or "").casefold(),
+    } - {""}
+    cursor.execute("SELECT id, meta FROM articles")
+    for article in cursor.fetchall():
+        meta = as_dict(article.get("meta"))
+        category = meta.get("category")
+        candidates = {
+            str(meta.get("categorySlug") or "").casefold(),
+            str(meta.get("categoryName") or "").casefold(),
+        } - {""}
+        if isinstance(category, dict):
+            candidates.update(
+                {
+                    str(category.get("id") or category.get("sourceId") or "").casefold(),
+                    str(category.get("slug") or "").casefold(),
+                    str(category.get("name") or "").casefold(),
+                }
+                - {""}
+            )
+        elif category is not None:
+            candidates.add(str(category).casefold())
+        if not old_values.intersection(candidates):
+            continue
+        category_copy = {"id": int_or_none(category_id) or category_id, **new_data}
+        meta.update(
+            {
+                "category": category_copy,
+                "categoryName": new_data.get("name") or "",
+                "categorySlug": new_data.get("slug") or "",
+            }
+        )
+        cursor.execute(
+            "UPDATE articles SET meta = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(meta, ensure_ascii=False), article["id"]),
+        )
+
+
+def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not items:
+        return items
+    cursor.execute(
+        """
+        SELECT id, source_key, title, slug, data
+        FROM app_entities
+        WHERE entity_type = 'category'
+          AND LOWER(COALESCE(status, '')) <> 'archived'
+        ORDER BY id ASC
+        """
+    )
+    categories: list[dict[str, Any]] = []
+    category_aliases: list[set[str]] = []
+    for row in cursor.fetchall():
+        data = admin_article_category_data(
+            {"data": row.get("data"), "slug": row.get("slug"), "title": row.get("title")},
+            fallback_title=str(row.get("title") or ""),
+            fallback_slug=str(row.get("slug") or ""),
+        )
+        category = {"id": row["id"], "sourceId": row["id"], **data}
+        aliases = {
+            str(row.get("id") or "").strip().casefold(),
+            str(row.get("source_key") or "").strip().casefold(),
+            str(data.get("slug") or "").strip().casefold(),
+            str(data.get("name") or "").strip().casefold(),
+        }
+        aliases.update(
+            str(as_dict(translation).get("name") or "").strip().casefold()
+            for translation in data.get("translations") or []
+        )
+        categories.append(category)
+        category_aliases.append(aliases - {""})
+
+    inferred_aliases = {
+        "ivf": "ivf-in-vitro-fertilization",
+        "co-parenting": "co-parenting",
+        "sperm-donor": "sperm-donor",
+        "fertility": "fertility",
+        "lgbtq": "lgbtq",
+        "parenthood": "parenthood",
+    }
+    for item in items:
+        meta = as_dict(item.get("data"))
+        raw_category = meta.get("category")
+        candidates = {
+            str(meta.get("categoryId") or "").strip().casefold(),
+            str(meta.get("categorySlug") or "").strip().casefold(),
+            str(meta.get("categoryName") or "").strip().casefold(),
+        }
+        if isinstance(raw_category, dict):
+            category_value = as_dict(raw_category)
+            candidates.update(
+                str(category_value.get(key) or "").strip().casefold()
+                for key in ("id", "sourceId", "slug", "name")
+            )
+        elif raw_category is not None:
+            candidates.add(str(raw_category).strip().casefold())
+        candidates.discard("")
+        candidates.update(
+            ADMIN_ARTICLE_CATEGORY_LEGACY_IDS[candidate]
+            for candidate in tuple(candidates)
+            if candidate in ADMIN_ARTICLE_CATEGORY_LEGACY_IDS
+        )
+
+        def matching_category() -> dict[str, Any] | None:
+            return next(
+                (
+                    categories[index]
+                    for index, aliases in enumerate(category_aliases)
+                    if aliases.intersection(candidates)
+                ),
+                None,
+            )
+
+        category = matching_category()
+        if not category:
+            inferred = inferred_article_category(
+                str(item.get("title") or ""),
+                str(item.get("slug") or ""),
+                meta,
+            ).casefold()
+            candidates.add(inferred_aliases.get(inferred, inferred))
+            category = matching_category()
+        if not category:
+            continue
+        enriched_meta = {
+            **meta,
+            "category": category,
+            "categoryId": category.get("id"),
+            "categoryName": category.get("name") or "",
+            "categorySlug": category.get("slug") or "",
+        }
+        item["data"] = enriched_meta
+        item["category"] = category
+        item["categoryId"] = category.get("id")
+        item["categoryName"] = category.get("name") or ""
+        item["categorySlug"] = category.get("slug") or ""
+    return items
+
+
+def admin_verification_score(value: Any) -> float | None:
+    if isinstance(value, dict):
+        value = value.get("score")
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    return score * 100 if 0 <= score <= 1 else score
+
+
+def admin_verification_check(value: Any) -> dict[str, Any]:
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return as_dict(value)
+
+
+def admin_verification_session_id(item: dict[str, Any], data: dict[str, Any]) -> str:
+    session_id = str(
+        data.get("sessionId")
+        or data.get("session_id")
+        or data.get("diditSessionId")
+        or ""
+    ).strip()
+    if session_id:
+        return session_id
+    source_key = str(item.get("source_key") or "").strip()
+    return source_key[6:] if source_key.lower().startswith("didit-") else source_key
+
+
+def admin_enrich_verification_items(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not items:
+        return items
+
+    profile_ids: set[int] = set()
+    profile_emails: set[str] = set()
+    for item in items:
+        data = as_dict(item.get("data"))
+        payload_user = as_dict(data.get("user"))
+        payload_profile = as_dict(data.get("profile"))
+        for candidate in (
+            data.get("profileId"),
+            payload_user.get("profileId"),
+            payload_profile.get("profileId"),
+        ):
+            if (profile_id := int_or_none(candidate)):
+                profile_ids.add(profile_id)
+        for candidate in (
+            data.get("email"),
+            payload_user.get("email"),
+            payload_profile.get("email"),
+        ):
+            if candidate and str(candidate).strip():
+                profile_emails.add(str(candidate).strip().lower())
+
+    profile_rows: list[dict[str, Any]] = []
+    profile_conditions: list[str] = []
+    profile_params: list[Any] = []
+    if profile_ids:
+        placeholders = ", ".join(["%s"] * len(profile_ids))
+        profile_conditions.append(f"p.id IN ({placeholders})")
+        profile_params.extend(sorted(profile_ids))
+    if profile_emails:
+        placeholders = ", ".join(["%s"] * len(profile_emails))
+        profile_conditions.append(f"LOWER(p.email) IN ({placeholders})")
+        profile_params.extend(sorted(profile_emails))
+    if profile_conditions:
+        cursor.execute(
+            f"""
+            SELECT p.id, p.display_name, p.email, p.status, p.data,
+                   COALESCE(
+                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl')), ''),
+                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.photoUrl')), ''),
+                     (SELECT COALESCE(
+                        NULLIF(amf.public_url, ''),
+                        NULLIF(pph.public_url, ''),
+                        CASE
+                          WHEN pph.avatar_media_file_id IS NOT NULL
+                            THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                          ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                        END
+                      )
+                      FROM profile_photos pph
+                      LEFT JOIN media_files amf ON amf.id = pph.avatar_media_file_id
+                      WHERE pph.profile_id = p.id
+                        AND pph.status = 'ACTIVE'
+                        AND pph.moderation_status = 'APPROVED'
+                      ORDER BY pph.position ASC, pph.id ASC LIMIT 1)
+                   ) AS avatarUrl,
+                   (SELECT CASE
+                      WHEN pph.avatar_media_file_id IS NOT NULL
+                        THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                      ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                    END
+                    FROM profile_photos pph
+                    WHERE pph.profile_id = p.id
+                      AND pph.status = 'ACTIVE'
+                      AND pph.moderation_status = 'APPROVED'
+                    ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl
+            FROM profiles p
+            WHERE {' OR '.join(profile_conditions)}
+            """,
+            profile_params,
+        )
+        profile_rows = cursor.fetchall()
+
+    profiles_by_id = {int(row["id"]): row for row in profile_rows}
+    profiles_by_email = {
+        str(row.get("email") or "").strip().lower(): row
+        for row in profile_rows
+        if str(row.get("email") or "").strip()
+    }
+
+    for item in items:
+        data = as_dict(item.get("data"))
+        payload_user = as_dict(data.get("user"))
+        payload_profile = as_dict(data.get("profile"))
+        decision = as_dict(data.get("decision"))
+        profile_id = next(
+            (
+                value
+                for candidate in (
+                    data.get("profileId"),
+                    payload_user.get("profileId"),
+                    payload_profile.get("profileId"),
+                )
+                if (value := int_or_none(candidate))
+            ),
+            None,
+        )
+        email = next(
+            (
+                str(candidate).strip()
+                for candidate in (
+                    data.get("email"),
+                    payload_user.get("email"),
+                    payload_profile.get("email"),
+                )
+                if candidate and str(candidate).strip()
+            ),
+            "",
+        )
+        profile = profiles_by_id.get(profile_id or -1) or profiles_by_email.get(email.lower())
+        profile_meta = as_dict(profile.get("data")) if profile else {}
+        liveness_check = admin_verification_check(
+            decision.get("liveness_checks")
+            or decision.get("livenessChecks")
+            or decision.get("liveness")
+            or data.get("livenessCheck")
+        )
+        face_match_check = admin_verification_check(
+            decision.get("face_matches")
+            or decision.get("faceMatches")
+            or decision.get("face_match")
+            or decision.get("faceMatch")
+            or data.get("faceMatchCheck")
+        )
+        liveness = data.get("livenessScore", data.get("liveness"))
+        face_match = data.get("faceMatchScore", data.get("faceMatch"))
+        if liveness is None:
+            liveness = liveness_check.get("score")
+        if face_match is None:
+            face_match = face_match_check.get("score")
+        age_estimation = (
+            data.get("ageEstimation")
+            or data.get("estimatedAge")
+            or liveness_check.get("age_estimation")
+            or liveness_check.get("ageEstimation")
+            or liveness_check.get("estimated_age")
+        )
+        if isinstance(age_estimation, dict):
+            age_estimation = age_estimation.get("age") or age_estimation.get("value")
+        face_quality = (
+            data.get("faceQuality")
+            or liveness_check.get("face_quality")
+            or liveness_check.get("faceQuality")
+            or decision.get("face_quality")
+            or decision.get("faceQuality")
+        )
+        current_status = str(item.get("status") or "").upper()
+        completed_at = (
+            data.get("completedAt")
+            or data.get("completed_at")
+            or data.get("resolvedAt")
+            or data.get("verifiedAt")
+            or decision.get("completed_at")
+            or decision.get("completedAt")
+        )
+        if not completed_at and current_status not in {"PENDING", "IN_PROGRESS", "CREATED"}:
+            completed_at = item.get("updated_at")
+        item.update({
+            "profileId": profile.get("id") if profile else profile_id,
+            "profileName": (
+                profile.get("display_name") if profile else None
+            ) or payload_profile.get("displayName") or payload_user.get("displayName") or data.get("profileName") or data.get("displayName") or item.get("title") or "No profile",
+            "profileEmail": (profile.get("email") if profile else None) or email or "-",
+            "profileStatus": (profile.get("status") if profile else None) or payload_user.get("status") or "",
+            "avatarUrl": (profile.get("avatarUrl") if profile else None) or payload_profile.get("photoUrl") or payload_user.get("avatarUrl") or "",
+            "avatarFallbackUrl": (profile.get("avatarFallbackUrl") if profile else None) or "",
+            "isPremium": bool(profile_meta.get("isPremium") or payload_user.get("isPremium") or data.get("isPremium")),
+            "verificationStatus": item.get("status"),
+            "sessionId": admin_verification_session_id(item, data),
+            "verificationUrl": data.get("verificationUrl") or data.get("url") or "",
+            "liveness": admin_verification_score(liveness),
+            "livenessMethod": data.get("livenessMethod") or liveness_check.get("method") or "",
+            "ageEstimation": age_estimation,
+            "faceQuality": admin_verification_score(face_quality),
+            "livenessStatus": data.get("livenessStatus") or liveness_check.get("status") or "",
+            "faceMatch": admin_verification_score(face_match),
+            "faceMatchStatus": data.get("faceMatchStatus") or face_match_check.get("status") or "",
+            "completed_at": completed_at,
+            "created_at": data.get("createdAt") or data.get("startedAt") or item.get("created_at"),
+        })
+    return items
+
+
+def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    profile_ids: set[int] = set()
+    photo_ids: set[int] = set()
+    for item in items:
+        data = as_dict(item.get("data"))
+        if profile_id := int_or_none(data.get("profileId")):
+            profile_ids.add(profile_id)
+        if photo_id := int_or_none(data.get("photoId") or data.get("profilePhotoId")):
+            photo_ids.add(photo_id)
+
+    photos_by_id: dict[int, dict[str, Any]] = {}
+    if photo_ids:
+        placeholders = ", ".join(["%s"] * len(photo_ids))
+        cursor.execute(
+            f"""
+            SELECT id, profile_id, position, status, upload_status, moderation_status,
+                   moderation_reason, public_url, avatar_media_file_id, created_at, updated_at
+            FROM profile_photos
+            WHERE id IN ({placeholders})
+            """,
+            sorted(photo_ids),
+        )
+        photos_by_id = {int(row["id"]): row for row in cursor.fetchall()}
+        profile_ids.update(
+            profile_id
+            for row in photos_by_id.values()
+            if (profile_id := int_or_none(row.get("profile_id")))
+        )
+
+    profiles_by_id: dict[int, dict[str, Any]] = {}
+    if profile_ids:
+        placeholders = ", ".join(["%s"] * len(profile_ids))
+        cursor.execute(
+            f"SELECT id, display_name, email, status, data FROM profiles WHERE id IN ({placeholders})",
+            sorted(profile_ids),
+        )
+        profiles_by_id = {int(row["id"]): row for row in cursor.fetchall()}
+
+    for item in items:
+        data = as_dict(item.get("data"))
+        profile_id = int_or_none(data.get("profileId"))
+        photo_id = int_or_none(data.get("photoId") or data.get("profilePhotoId"))
+        media_file_id = int_or_none(data.get("mediaFileId") or data.get("avatarMediaFileId"))
+        photo = photos_by_id.get(photo_id or -1)
+        if not profile_id and photo:
+            profile_id = int_or_none(photo.get("profile_id"))
+        profile = profiles_by_id.get(profile_id or -1)
+        image_url = str(data.get("publicUrl") or "").strip()
+        if not image_url:
+            if str(data.get("kind") or "") == "avatar_crop" and media_file_id:
+                image_url = f"/api/admin/media/{media_file_id}/content"
+            elif photo_id:
+                image_url = f"/api/admin/profile-photos/{photo_id}/content"
+            else:
+                image_url = str(data.get("contentUrl") or data.get("avatarContentUrl") or "").strip()
+        photo_status = str(photo.get("status") if photo else data.get("photoStatus") or "").upper()
+        reason = (
+            (photo.get("moderation_reason") if photo else None)
+            or data.get("reason")
+            or data.get("moderationReason")
+            or as_dict(data.get("moderation")).get("reason")
+            or ""
+        )
+        item.update({
+            "profileId": profile_id,
+            "profileName": (profile.get("display_name") if profile else None) or data.get("profileName") or item.get("title") or "No profile",
+            "profileEmail": (profile.get("email") if profile else None) or data.get("email") or "",
+            "profileStatus": (profile.get("status") if profile else None) or "",
+            "photoId": photo_id,
+            "mediaFileId": media_file_id,
+            "publicUrl": image_url,
+            "isPrimary": bool((photo and int_or_none(photo.get("position")) == 0) or int_or_none(data.get("position")) == 0),
+            "isDeleted": photo_status in {"DELETED", "REPLACED"},
+            "photoStatus": photo_status,
+            "moderationReason": reason,
+            "createdAt": (photo.get("created_at") if photo else None) or item.get("created_at"),
+        })
+    return items
+
+
+def admin_enrich_moderation_report_items(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    profile_ids: set[int] = set()
+    parsed: list[tuple[dict[str, Any], dict[str, Any], int | None, int | None]] = []
+    for item in items:
+        data = as_dict(item.get("data"))
+        reporter_id = int_or_none(data.get("reporterProfileId") or data.get("reporterId") or data.get("actorProfileId"))
+        reported_id = int_or_none(data.get("targetProfileId") or data.get("reportedProfileId") or data.get("reportedId"))
+        if reporter_id:
+            profile_ids.add(reporter_id)
+        if reported_id:
+            profile_ids.add(reported_id)
+        parsed.append((item, data, reporter_id, reported_id))
+
+    profiles_by_id: dict[int, dict[str, Any]] = {}
+    if profile_ids:
+        placeholders = ", ".join(["%s"] * len(profile_ids))
+        cursor.execute(
+            f"SELECT id, display_name, email, status FROM profiles WHERE id IN ({placeholders})",
+            sorted(profile_ids),
+        )
+        profiles_by_id = {int(row["id"]): row for row in cursor.fetchall()}
+
+    for item, data, reporter_id, reported_id in parsed:
+        reporter = profiles_by_id.get(reporter_id or -1)
+        reported = profiles_by_id.get(reported_id or -1)
+        item.update({
+            "reporterProfileId": reporter_id,
+            "reporterName": (reporter.get("display_name") if reporter else None) or data.get("reporterName") or data.get("reporterEmail") or "Unknown",
+            "reporterEmail": (reporter.get("email") if reporter else None) or data.get("reporterEmail") or "",
+            "reportedProfileId": reported_id,
+            "reportedName": (reported.get("display_name") if reported else None) or data.get("reportedName") or data.get("targetName") or data.get("reportedEmail") or "Unknown",
+            "reportedEmail": (reported.get("email") if reported else None) or data.get("reportedEmail") or data.get("targetEmail") or "",
+            "reason": data.get("reason") or data.get("reportReason") or item.get("title") or "—",
+            "description": data.get("description") or data.get("details") or data.get("message") or "—",
+            "details": data.get("details") or data.get("description") or data.get("message") or "—",
+            "createdAt": data.get("createdAt") or item.get("created_at"),
+        })
+    return items
+
+
+def fetch_admin_verification(cursor, verification_id: str, for_update: bool = False) -> dict[str, Any]:
+    reference = str(verification_id or "").strip()
+    if not reference:
+        raise HTTPException(status_code=404, detail="Verification session not found")
+    cursor.execute(
+        f"""
+        SELECT id, entity_type, source_key, title, status, locale, slug, data, created_at, updated_at
+        FROM app_entities
+        WHERE entity_type = 'verification'
+          AND (
+            CAST(id AS CHAR) = %s
+            OR source_key = %s
+            OR source_key = %s
+            OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.sessionId')) = %s
+          )
+        ORDER BY id DESC
+        LIMIT 1
+        {'FOR UPDATE' if for_update else ''}
+        """,
+        (reference, reference, f"didit-{reference}", reference),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Verification session not found")
+    item = normalize_row(row)
+    admin_enrich_verification_items(cursor, [item])
+    return item
 
 
 def build_list_where(
@@ -8627,6 +10433,8 @@ def admin_list(
                 [*params, limit, offset],
             )
             items = [normalize_row(row) for row in cursor.fetchall()]
+            if view == "articles":
+                admin_enrich_article_items(cursor, items)
         return {"items": items, "total": total, "limit": limit, "offset": offset, "view": view}
 
     entity_type = ADMIN_ENTITY_VIEWS.get(view)
@@ -8635,6 +10443,8 @@ def admin_list(
 
     where_parts = ["entity_type = %s"]
     params = [entity_type]
+    if entity_type == "category" and not status_filter:
+        where_parts.append("LOWER(COALESCE(status, '')) <> 'archived'")
     if q:
         where_parts.append("(title LIKE %s OR source_key LIKE %s OR status LIKE %s OR CAST(data AS CHAR) LIKE %s)")
         like = f"%{q}%"
@@ -8652,7 +10462,10 @@ def admin_list(
         where_parts.append("UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), '')) = %s")
         params.append(source.upper())
     where = "WHERE " + " AND ".join(where_parts)
-    with db_cursor() as (_, cursor):
+    entity_order = "id ASC" if entity_type == "category" else "id DESC"
+    with db_cursor() as (conn, cursor):
+        if entity_type == "category":
+            ensure_admin_article_categories(conn, cursor)
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM app_entities {where}", params)
         total = int(cursor.fetchone()["cnt"])
         cursor.execute(
@@ -8660,31 +10473,74 @@ def admin_list(
             SELECT id, entity_type, source_key, title, status, locale, slug, data, created_at, updated_at
             FROM app_entities
             {where}
-            ORDER BY id DESC
+            ORDER BY {entity_order}
             LIMIT %s OFFSET %s
             """,
             [*params, limit, offset],
         )
         items = [normalize_row(row) for row in cursor.fetchall()]
         if entity_type == "subscription" and items:
+            for item in items:
+                subscription_data = as_dict(item.get("data"))
+                item.update({
+                    "profileId": int_or_none(subscription_data.get("profileId")),
+                    "profileName": subscription_data.get("profileName") or item.get("title"),
+                    "profileEmail": subscription_data.get("email") or "",
+                    "plan": subscription_data.get("plan"),
+                    "source": subscription_data.get("source"),
+                    "periodStart": (
+                        subscription_data.get("activeAt")
+                        or subscription_data.get("startedAt")
+                        or subscription_data.get("startDate")
+                        or subscription_data.get("currentPeriodStart")
+                        or item.get("created_at")
+                    ),
+                    "periodEnd": (
+                        subscription_data.get("expiresAt")
+                        or subscription_data.get("endsAt")
+                        or subscription_data.get("endDate")
+                        or subscription_data.get("currentPeriodEnd")
+                    ),
+                })
             profile_ids = sorted({
                 profile_id
                 for item in items
-                if (profile_id := int_or_none(as_dict(item.get("data")).get("profileId")))
+                if (profile_id := int_or_none(item.get("profileId")))
             })
             if profile_ids:
                 placeholders = ", ".join(["%s"] * len(profile_ids))
                 cursor.execute(
                     f"""
-                    SELECT p.id, p.display_name, p.email, p.status,
+                    SELECT p.id, p.display_name, p.email, p.status, p.data,
                            COALESCE(
-                             (SELECT public_url FROM profile_photos pph
+                             NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl')), ''),
+                             NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.photoUrl')), ''),
+                             (SELECT COALESCE(
+                                NULLIF(amf.public_url, ''),
+                                NULLIF(pph.public_url, ''),
+                                CASE
+                                  WHEN pph.avatar_media_file_id IS NOT NULL
+                                    THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                                  ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                                END
+                              )
+                              FROM profile_photos pph
+                              LEFT JOIN media_files amf ON amf.id = pph.avatar_media_file_id
                               WHERE pph.profile_id = p.id
                                 AND pph.status = 'ACTIVE'
                                 AND pph.moderation_status = 'APPROVED'
-                              ORDER BY pph.position ASC, pph.id ASC LIMIT 1),
-                             JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl'))
+                              ORDER BY pph.position ASC, pph.id ASC LIMIT 1)
                            ) AS avatarUrl,
+                           (SELECT CASE
+                              WHEN pph.avatar_media_file_id IS NOT NULL
+                                THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                              ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                            END
+                            FROM profile_photos pph
+                            WHERE pph.profile_id = p.id
+                              AND pph.status = 'ACTIVE'
+                              AND pph.moderation_status = 'APPROVED'
+                            ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl,
                            (SELECT v.status FROM app_entities v
                             WHERE v.entity_type = 'verification'
                               AND CAST(JSON_UNQUOTE(JSON_EXTRACT(v.data, '$.profileId')) AS CHAR) = CAST(p.id AS CHAR)
@@ -8696,125 +10552,39 @@ def admin_list(
                 )
                 profiles_by_id = {int(row["id"]): row for row in cursor.fetchall()}
                 for item in items:
-                    profile_id = int_or_none(as_dict(item.get("data")).get("profileId"))
+                    profile_id = int_or_none(item.get("profileId"))
                     profile = profiles_by_id.get(profile_id or -1)
                     if not profile:
                         continue
+                    profile_data_value = profile_data(profile)
+                    profile_type = str(profile_data_value.get("profileType") or "")
+                    donor_type = profile_data_value.get("donorType")
+                    is_donor = (
+                        (isinstance(donor_type, list) and bool(donor_type))
+                        or (isinstance(donor_type, str) and bool(donor_type.strip()))
+                        or "DONOR" in profile_type.upper()
+                    )
                     item.update({
                         "profileName": profile.get("display_name"),
                         "profileEmail": profile.get("email"),
                         "profileStatus": profile.get("status"),
+                        "profileType": profile_type,
+                        "donorType": donor_type,
+                        "isDonor": is_donor,
+                        "isPremium": profile_is_premium(profile),
+                        "isVerified": profile_is_verified(profile),
                         "avatarUrl": profile.get("avatarUrl"),
+                        "avatarFallbackUrl": profile.get("avatarFallbackUrl"),
                         "verificationStatus": profile.get("verificationStatus"),
                     })
         if entity_type == "verification" and items:
             # Verification records have been written by several generations of
-            # the application.  Normalise the user and score fields here so the
-            # admin table is a user-facing audit trail instead of exposing the
-            # implementation-specific entity title / raw provider payload.
-            profile_ids: set[int] = set()
-            profile_emails: set[str] = set()
-            for item in items:
-                data = as_dict(item.get("data"))
-                payload_user = as_dict(data.get("user"))
-                payload_profile = as_dict(data.get("profile"))
-                for candidate in (data.get("profileId"), payload_user.get("profileId"), payload_profile.get("profileId")):
-                    if (profile_id := int_or_none(candidate)):
-                        profile_ids.add(profile_id)
-                for candidate in (data.get("email"), payload_user.get("email"), payload_profile.get("email")):
-                    if candidate and str(candidate).strip():
-                        profile_emails.add(str(candidate).strip().lower())
-
-            profile_rows: list[dict[str, Any]] = []
-            profile_conditions: list[str] = []
-            profile_params: list[Any] = []
-            if profile_ids:
-                placeholders = ", ".join(["%s"] * len(profile_ids))
-                profile_conditions.append(f"p.id IN ({placeholders})")
-                profile_params.extend(sorted(profile_ids))
-            if profile_emails:
-                placeholders = ", ".join(["%s"] * len(profile_emails))
-                profile_conditions.append(f"LOWER(p.email) IN ({placeholders})")
-                profile_params.extend(sorted(profile_emails))
-            if profile_conditions:
-                cursor.execute(
-                    f"""
-                    SELECT p.id, p.display_name, p.email, p.status, p.data,
-                           COALESCE(
-                             (SELECT public_url FROM profile_photos pph
-                              WHERE pph.profile_id = p.id
-                                AND pph.status = 'ACTIVE'
-                                AND pph.moderation_status = 'APPROVED'
-                              ORDER BY pph.position ASC, pph.id ASC LIMIT 1),
-                             JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl'))
-                           ) AS avatarUrl
-                    FROM profiles p
-                    WHERE {' OR '.join(profile_conditions)}
-                    """,
-                    profile_params,
-                )
-                profile_rows = cursor.fetchall()
-
-            profiles_by_id = {int(row["id"]): row for row in profile_rows}
-            profiles_by_email = {
-                str(row.get("email") or "").strip().lower(): row
-                for row in profile_rows
-                if str(row.get("email") or "").strip()
-            }
-
-            def verification_score(value: Any) -> float | None:
-                try:
-                    score = float(value)
-                except (TypeError, ValueError):
-                    return None
-                return score * 100 if 0 <= score <= 1 else score
-
-            for item in items:
-                data = as_dict(item.get("data"))
-                payload_user = as_dict(data.get("user"))
-                payload_profile = as_dict(data.get("profile"))
-                decision = as_dict(data.get("decision"))
-                profile_id = next(
-                    (
-                        value
-                        for candidate in (data.get("profileId"), payload_user.get("profileId"), payload_profile.get("profileId"))
-                        if (value := int_or_none(candidate))
-                    ),
-                    None,
-                )
-                email = next(
-                    (
-                        str(candidate).strip()
-                        for candidate in (data.get("email"), payload_user.get("email"), payload_profile.get("email"))
-                        if candidate and str(candidate).strip()
-                    ),
-                    "",
-                )
-                profile = profiles_by_id.get(profile_id or -1) or profiles_by_email.get(email.lower())
-                profile_data = as_dict(profile.get("data")) if profile else {}
-                liveness_checks = decision.get("liveness_checks") or decision.get("livenessChecks") or []
-                face_matches = decision.get("face_matches") or decision.get("faceMatches") or []
-                liveness = data.get("livenessScore", data.get("liveness"))
-                face_match = data.get("faceMatchScore", data.get("faceMatch"))
-                if liveness is None and isinstance(liveness_checks, list) and liveness_checks:
-                    liveness = as_dict(liveness_checks[0]).get("score")
-                if face_match is None and isinstance(face_matches, list) and face_matches:
-                    face_match = as_dict(face_matches[0]).get("score")
-                item.update({
-                    "profileId": profile.get("id") if profile else profile_id,
-                    "profileName": (
-                        profile.get("display_name") if profile else None
-                    ) or payload_profile.get("displayName") or payload_user.get("displayName") or data.get("profileName") or data.get("displayName") or item.get("title") or "No profile",
-                    "profileEmail": (profile.get("email") if profile else None) or email or "-",
-                    "profileStatus": (profile.get("status") if profile else None) or payload_user.get("status") or "",
-                    "avatarUrl": (profile.get("avatarUrl") if profile else None) or payload_profile.get("photoUrl") or payload_user.get("avatarUrl") or "",
-                    "isPremium": bool((profile_data or {}).get("isPremium") or payload_user.get("isPremium") or data.get("isPremium")),
-                    "verificationStatus": item.get("status"),
-                    "liveness": verification_score(liveness),
-                    "faceMatch": verification_score(face_match),
-                    "completed_at": data.get("completedAt") or data.get("completed_at") or data.get("resolvedAt") or data.get("verifiedAt") or decision.get("completed_at") or item.get("updated_at"),
-                    "created_at": data.get("createdAt") or data.get("startedAt") or item.get("created_at"),
-                })
+            # the application. Keep list and detail output on one normalised schema.
+            admin_enrich_verification_items(cursor, items)
+        elif entity_type == "moderation_photo" and items:
+            admin_enrich_moderation_photo_items(cursor, items)
+        elif entity_type == "moderation_report" and items:
+            admin_enrich_moderation_report_items(cursor, items)
     return {
         "items": items,
         "total": total,
@@ -8823,6 +10593,89 @@ def admin_list(
         "view": view,
         "entityType": entity_type,
     }
+
+
+@app.get("/api/admin/verifications/{verification_id}")
+def admin_verification_detail(
+    verification_id: str,
+    _admin: str = Depends(require_admin),
+):
+    with db_cursor() as (_, cursor):
+        item = fetch_admin_verification(cursor, verification_id)
+    return {"item": item}
+
+
+@app.post("/api/admin/verifications/{verification_id}/approve")
+def admin_approve_verification(
+    verification_id: str,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        item = fetch_admin_verification(cursor, verification_id, for_update=True)
+        data = as_dict(item.get("data"))
+        profile_id = int_or_none(item.get("profileId") or data.get("profileId"))
+        if not profile_id:
+            raise HTTPException(status_code=409, detail="Verification session is not linked to a profile")
+        approved_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.update({
+            "completedAt": approved_at,
+            "manualApprovedAt": approved_at,
+            "manualApprovedBy": actor,
+        })
+        cursor.execute(
+            "UPDATE app_entities SET status = 'APPROVED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = 'verification'",
+            (json.dumps(data, ensure_ascii=False), item["id"]),
+        )
+        profile = fetch_profile(cursor, profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        update_profile_data(
+            cursor,
+            profile_id,
+            {
+                "isVerified": True,
+                "verifiedAt": approved_at,
+                "verificationProvider": data.get("provider") or "manual",
+            },
+        )
+        send_support_status_message(
+            cursor,
+            profile_id,
+            "Your profile verification has been approved.",
+        )
+        audit(
+            conn,
+            actor,
+            "VERIFICATION_MANUAL_APPROVED",
+            "verification",
+            item["id"],
+            {"profileId": profile_id, "sessionId": item.get("sessionId")},
+        )
+        conn.commit()
+    return {"ok": True, "id": item["id"], "status": "APPROVED"}
+
+
+@app.delete("/api/admin/verifications/{verification_id}")
+def admin_delete_verification(
+    verification_id: str,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        item = fetch_admin_verification(cursor, verification_id, for_update=True)
+        cursor.execute(
+            "DELETE FROM app_entities WHERE id = %s AND entity_type = 'verification'",
+            (item["id"],),
+        )
+        audit(
+            conn,
+            actor,
+            "delete_verification_session",
+            "verification",
+            item["id"],
+            {"profileId": item.get("profileId"), "sessionId": item.get("sessionId")},
+        )
+        conn.commit()
+    return {"ok": True, "id": item["id"], "deleted": True}
 
 
 @app.get("/api/admin/profile-photos/{photo_id}/content")
@@ -8892,9 +10745,9 @@ def admin_filter_options(_admin: str = Depends(require_admin)):
             """
         )
         user_countries = cursor.fetchall()
-        cursor.execute("SELECT country AS value, COUNT(*) AS count FROM clinics WHERE country IS NOT NULL AND country <> '' GROUP BY country ORDER BY count DESC LIMIT 250")
+        cursor.execute("SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM clinics WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY count DESC LIMIT 250")
         clinic_countries = cursor.fetchall()
-        cursor.execute("SELECT country AS value, COUNT(*) AS count FROM lawyers WHERE country IS NOT NULL AND country <> '' GROUP BY country ORDER BY count DESC LIMIT 250")
+        cursor.execute("SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM lawyers WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY count DESC LIMIT 250")
         lawyer_countries = cursor.fetchall()
         cursor.execute("SELECT status AS value, COUNT(*) AS count FROM clinics GROUP BY status ORDER BY count DESC")
         clinic_statuses = cursor.fetchall()
@@ -9056,6 +10909,8 @@ def admin_update_item(
     payload: AdminPatchPayload,
     actor: str = Depends(require_admin),
 ):
+    if view == "settings-audit-log":
+        raise HTTPException(status_code=403, detail="Audit history is read-only")
     if view == "moderation-photos":
         if not str(item_id).isdigit():
             raise HTTPException(status_code=422, detail="Photo moderation id must be numeric")
@@ -9074,7 +10929,22 @@ def admin_update_item(
             entity = cursor.fetchone()
         if not entity:
             raise HTTPException(status_code=404, detail="Photo moderation item not found")
-        photo_id = int_or_none(as_dict(entity.get("data")).get("photoId"))
+        moderation_data = as_dict(entity.get("data"))
+        photo_id = int_or_none(moderation_data.get("photoId"))
+        if str(moderation_data.get("kind") or "") == "avatar_crop":
+            media_file_id = int_or_none(moderation_data.get("mediaFileId"))
+            profile_id = int_or_none(moderation_data.get("profileId"))
+            primary_photo_id = int_or_none(moderation_data.get("profilePhotoId"))
+            if not media_file_id or not profile_id or not primary_photo_id:
+                raise HTTPException(status_code=422, detail="The moderation item is not linked to an avatar crop")
+            updated = apply_avatar_crop_moderation(
+                media_file_id,
+                profile_id,
+                primary_photo_id,
+                {"decision": decision, "reason": reason, "providerConfigured": False, "manual": True},
+                actor=f"admin:{actor}",
+            )
+            return {"ok": True, "view": view, "id": numeric_item_id, "mediaFileId": media_file_id, "updated": updated}
         if not photo_id:
             raise HTTPException(status_code=422, detail="The moderation item is not linked to a profile photo")
         updated = apply_profile_photo_moderation(
@@ -9104,17 +10974,71 @@ def admin_update_item(
             conn.commit()
         return {"ok": True, "view": view, "id": resolved_item_id, "updated": values}
 
+    if view == "categories":
+        with db_cursor() as (conn, cursor):
+            cursor.execute(
+                "SELECT id, title, slug, data FROM app_entities WHERE id = %s AND entity_type = 'category' LIMIT 1",
+                (item_id,),
+            )
+            current = cursor.fetchone()
+            if not current:
+                raise HTTPException(status_code=404, detail="Category not found")
+            current_data = admin_article_category_data(
+                {"data": current.get("data"), "slug": current.get("slug"), "title": current.get("title")}
+            )
+            category_data = admin_article_category_data(
+                payload.values,
+                fallback_title=str(current.get("title") or ""),
+                fallback_slug=str(current.get("slug") or ""),
+            )
+            title = str(category_data.get("name") or "").strip()
+            slug = str(category_data.get("slug") or "").strip()
+            if not title or not slug:
+                raise HTTPException(status_code=422, detail="Category name and slug are required")
+            cursor.execute(
+                "SELECT id FROM app_entities WHERE entity_type = 'category' AND id <> %s AND LOWER(COALESCE(slug, '')) = LOWER(%s) LIMIT 1",
+                (item_id, slug),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="A category with this slug already exists")
+            status = str(payload.values.get("status") or "active")
+            cursor.execute(
+                """
+                UPDATE app_entities
+                SET title = %s, status = %s, locale = 'en', slug = %s, data = %s, updated_at = UTC_TIMESTAMP()
+                WHERE id = %s AND entity_type = 'category'
+                """,
+                (title, status, slug, json.dumps(category_data, ensure_ascii=False), item_id),
+            )
+            synchronize_article_category_metadata(cursor, item_id, current_data, category_data)
+            audit(conn, actor, "update", view, item_id, {"title": title, "status": status, "slug": slug, "data": category_data})
+            conn.commit()
+        return {"ok": True, "view": view, "id": item_id, "updated": category_data}
+
     entity_type = ADMIN_ENTITY_VIEWS.get(view)
     if not entity_type:
         raise HTTPException(status_code=404, detail="Admin view not found")
-    allowed = {key: payload.values[key] for key in ["title", "status", "locale", "slug", "data"] if key in payload.values}
-    if "data" in allowed:
-        allowed["data"] = json.dumps(allowed["data"], ensure_ascii=False)
-    if not allowed:
-        raise HTTPException(status_code=422, detail="No allowed fields to update")
-    assignments = ", ".join([f"`{key}` = %s" for key in allowed])
-    params = [*allowed.values(), item_id, entity_type]
     with db_cursor() as (conn, cursor):
+        values = payload.values
+        if not any(key in values for key in ("title", "status", "locale", "slug", "data")):
+            raise HTTPException(status_code=422, detail="No allowed fields to update")
+        if entity_type == "setting":
+            cursor.execute(
+                "SELECT source_key, title, slug, data FROM app_entities WHERE id = %s AND entity_type = 'setting' FOR UPDATE",
+                (item_id,),
+            )
+            current = cursor.fetchone()
+            if not current:
+                raise HTTPException(status_code=404, detail="Item not found")
+            values = validate_ranking_setting(values, current)
+            values = validate_runtime_setting(values, current)
+        allowed = {key: values[key] for key in ["title", "status", "locale", "slug", "data"] if key in values}
+        if "data" in allowed:
+            allowed["data"] = json.dumps(allowed["data"], ensure_ascii=False)
+        if not allowed:
+            raise HTTPException(status_code=422, detail="No allowed fields to update")
+        assignments = ", ".join([f"`{key}` = %s" for key in allowed])
+        params = [*allowed.values(), item_id, entity_type]
         cursor.execute(
             f"UPDATE app_entities SET {assignments}, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
             params,
@@ -9132,6 +11056,8 @@ def admin_create_item(
     payload: AdminCreatePayload,
     actor: str = Depends(require_admin),
 ):
+    if view == "settings-audit-log":
+        raise HTTPException(status_code=403, detail="Audit history is read-only")
     values = payload.values
     with db_cursor() as (conn, cursor):
         if view == "articles":
@@ -9171,7 +11097,18 @@ def admin_create_item(
             )
             item_id = cursor.lastrowid
         elif view == "categories":
-            source_key = values.get("source_key") or values.get("slug") or f"category-{int(now_utc().timestamp())}"
+            category_data = admin_article_category_data(values)
+            title = str(category_data.get("name") or "").strip()
+            slug = str(category_data.get("slug") or "").strip()
+            if not title or not slug:
+                raise HTTPException(status_code=422, detail="Category name and slug are required")
+            cursor.execute(
+                "SELECT id FROM app_entities WHERE entity_type = 'category' AND LOWER(COALESCE(slug, '')) = LOWER(%s) LIMIT 1",
+                (slug,),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="A category with this slug already exists")
+            source_key = values.get("source_key") or f"article-category:{slug.casefold()}"
             cursor.execute(
                 """
                 INSERT INTO app_entities (entity_type, source_key, title, status, locale, slug, data)
@@ -9179,16 +11116,19 @@ def admin_create_item(
                 """,
                 (
                     source_key,
-                    values.get("title") or values.get("name") or "Untitled category",
+                    title,
                     values.get("status") or "active",
-                    values.get("locale"),
-                    values.get("slug"),
-                    json.dumps(values, ensure_ascii=False),
+                    values.get("locale") or "en",
+                    slug,
+                    json.dumps(category_data, ensure_ascii=False),
                 ),
             )
             item_id = cursor.lastrowid
         elif view in ADMIN_ENTITY_VIEWS:
             entity_type = ADMIN_ENTITY_VIEWS[view]
+            if entity_type == "setting":
+                values = validate_ranking_setting(values)
+                values = validate_runtime_setting(values)
             source_key = values.get("source_key") or values.get("slug") or f"{entity_type}-{int(now_utc().timestamp())}-{secrets.token_hex(3)}"
             cursor.execute(
                 """
@@ -9215,6 +11155,8 @@ def admin_create_item(
 
 @app.delete("/api/admin/item/{view}/{item_id}")
 def admin_delete_item(view: str, item_id: str, actor: str = Depends(require_admin)):
+    if view == "settings-audit-log":
+        raise HTTPException(status_code=403, detail="Audit history is read-only")
     if view in ADMIN_MUTATION_TABLES:
         if view == "users":
             with db_cursor() as (conn, cursor):
@@ -9450,6 +11392,7 @@ def public_lawyer_detail(slug: str):
 
 @app.get("/api/member/catalog")
 def member_catalog(
+    response: Response,
     limit: int = Query(24, ge=1, le=100),
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, min_length=1, max_length=200),
@@ -9578,6 +11521,7 @@ def member_catalog(
         where = "WHERE " + " AND ".join(where_parts)
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM profiles {where}", params)
         total = int(cursor.fetchone()["cnt"])
+        ranking_joins, ranking_order, ranking_params = catalog_ranking_sql(catalog_ranking_settings(cursor))
         cursor.execute(
             f"""
             SELECT id,
@@ -9604,20 +11548,16 @@ def member_catalog(
                     ) AS "likedByViewer",
                     created_at AS "createdAt"
             FROM profiles
+            {ranking_joins}
             {where}
-            ORDER BY
-              CASE WHEN LOWER(COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.isPremium')),
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.premium')),
-                'false'
-              )) = 'true' THEN 0 ELSE 1 END,
-              id DESC
+            ORDER BY {ranking_order}
             LIMIT %s OFFSET %s
             """,
-            [viewer_profile_id, *params, limit, offset],
+            [viewer_profile_id, *params, *ranking_params, limit, offset],
         )
         items = [normalize_row(row) for row in cursor.fetchall()]
         attach_profile_photos(cursor, items)
+    response.headers["Cache-Control"] = "no-store"
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
@@ -9777,6 +11717,7 @@ def member_catalog_detail(
 
 @app.get("/api/public/catalog")
 def public_catalog(
+    response: Response,
     limit: int = Query(24, ge=1, le=100),
     offset: int = Query(0, ge=0),
     q: str | None = Query(None, min_length=1, max_length=200),
@@ -9824,6 +11765,7 @@ def public_catalog(
     with db_cursor() as (_, cursor):
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM profiles {where}", params)
         total = int(cursor.fetchone()["cnt"])
+        ranking_joins, ranking_order, ranking_params = catalog_ranking_sql(catalog_ranking_settings(cursor))
         cursor.execute(
             f"""
             SELECT id,
@@ -9841,20 +11783,16 @@ def public_catalog(
                     JSON_EXTRACT(data, '$.isPremium') AS "isPremium",
                     created_at AS "createdAt"
             FROM profiles
+            {ranking_joins}
             {where}
-            ORDER BY
-              CASE WHEN LOWER(COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.isPremium')),
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.premium')),
-                'false'
-              )) = 'true' THEN 0 ELSE 1 END,
-              id DESC
+            ORDER BY {ranking_order}
             LIMIT %s OFFSET %s
             """,
-            [*params, limit, offset],
+            [*params, *ranking_params, limit, offset],
         )
         items = [normalize_row(row) for row in cursor.fetchall()]
         attach_profile_photos(cursor, items)
+    response.headers["Cache-Control"] = "no-store"
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 

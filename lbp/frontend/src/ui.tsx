@@ -18,16 +18,12 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { createApiClient } from "./api";
+import { loadKnowledgeArticles, normalizeArticle } from "./articles";
 import {
   signInWithSocial,
   socialErrorMessage,
   type SocialProvider,
 } from "./firebase-auth";
-import {
-  referenceArticleMeta,
-  referenceArticleNavigation,
-  referenceKnowledgeArticles,
-} from "./reference-article-meta";
 
 const api = createApiClient("/api");
 type Row = Record<string, unknown>;
@@ -1133,11 +1129,11 @@ function Home() {
     return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>;
   };
   const pathImage = (key: string) => {
-    if (key === "donor") return "/web-static/images/landing/path-donor.jpg";
-    if (key === "partner") return "/web-static/images/landing/path-partner.jpg";
-    if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor.jpg";
-    if (key === "exploring") return "/web-static/images/landing/path-exploring.jpg";
-    return "/web-static/images/landing/path-coparent.jpg";
+    if (key === "donor") return "/web-static/images/landing/path-donor-0dd2f3af.jpg";
+    if (key === "partner") return "/web-static/images/landing/path-partner-1df6d179.jpg";
+    if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor-bb85903a.jpg";
+    if (key === "exploring") return "/web-static/images/landing/path-exploring-607ba1f7.jpg";
+    return "/web-static/images/landing/path-coparent-50e0ccf3.png";
   };
   const features = text.features.map((feature, index) => ({ ...feature, image: LANDING_FEATURE_IMAGES[index] }));
   return (
@@ -4017,7 +4013,7 @@ function Conversations({ session }: { session: Session }) {
       );
     }
   };
-  const startCall = async (callType: "AUDIO" | "VIDEO") => {
+  const startCall = async (callType: "VOICE" | "VIDEO") => {
     if (!active?.id) return;
     try {
       const response = await api.post<Row>(
@@ -4077,7 +4073,7 @@ function Conversations({ session }: { session: Session }) {
                   <div className="call-actions">
                     <button
                       className="secondary"
-                      onClick={() => void startCall("AUDIO")}
+                      onClick={() => void startCall("VOICE")}
                     >
                       Audio call
                     </button>
@@ -4724,17 +4720,6 @@ const knowledgeHubCopy: Record<CookieLocale, {
   },
 };
 
-const latestKnowledgeArticles: Row[] = [
-  { id: "d21f57ef", slug: "co-parenting-red-flags-when-you-should-walk-away", title: "Co-Parenting Red Flags: When You Should Walk Away", excerpt: "Thinking about co-parenting? Learn which warning signs may signal an unhealthy or unsafe arrangement, from pressure and dishonesty to control and poor boundaries.", coverUrl: "/web-static/articles/1786801192887-d7333d16.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:39:19.430Z", views: 2 },
-  { id: "d69db046", slug: "can-co-parenting-work-without-a-romantic-relationship", title: "Can Co-Parenting Work Without a Romantic Relationship?", excerpt: "Can two people successfully co-parent without being a couple? Explore trust, boundaries, new partners, conflict and what makes co-parenting work.", coverUrl: "/web-static/articles/1786800884924-51087667.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:34:49.459Z", views: 1 },
-  { id: "316117d7", slug: "co-parenting-agreement-what-to-discuss-before-having-a-child", title: "Co-Parenting Agreement: What to Discuss Before Having a Child", excerpt: "Considering co-parenting? Learn what to discuss before pregnancy, from living arrangements and finances to decision-making, boundaries and future changes.", coverUrl: "/web-static/articles/1786800288283-2bb1dadc.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:25:06.599Z", views: 1 },
-  { id: "79c8f4b8", slug: "questions-to-ask-a-potential-co-parent-before-you-move-forward", title: "Questions to Ask a Potential Co-Parent Before You Move Forward", excerpt: "Thinking about co-parenting with someone? These practical questions can help you talk about parenting, money, living arrangements, boundaries and the future.", coverUrl: "/web-static/articles/1786799902679-855ba763.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:18:28.090Z", views: 2 },
-  { id: "0b9d1fac", slug: "how-to-find-a-co-parent-where-to-start-and-what-to-look-for", title: "How to Find a Co-Parent: Where to Start and What to Look For", excerpt: "Looking for a co-parent? Learn where to start, what to discuss early, how to spot compatibility and which red flags you shouldn't ignore.", coverUrl: "/web-static/articles/1786799585487-49cb88e4.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:13:10.321Z", views: 0 },
-  { id: "50a19e23", slug: "what-is-co-parenting-how-to-know-if-it-could-be-right-for-you", title: "What Is Co-Parenting? How to Know If It Could Be Right for You", excerpt: "What is co-parenting, and could it work for you? Explore relationships, boundaries, parenting decisions, finances and legal questions before you take the next step.", coverUrl: "/web-static/articles/1786799400356-2c5b1877.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:10:04.894Z", views: 3 },
-  { id: "316bf71e", slug: "how-to-choose-your-path-to-parenthood-questions-to-consider", title: "How to Choose Your Path to Parenthood: Questions to Consider", excerpt: "Not sure which path to parenthood is right for you? Explore the questions that matter around family, health, finances, support and your priorities.", coverUrl: "/web-static/articles/1786799040979-03f84347.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-15T13:04:04.950Z", views: 3 },
-  { id: "e585cffa", slug: "different-ways-to-become-a-parent-your-options-explained", title: "Different Ways to Become a Parent: Your Options Explained", excerpt: "Explore different paths to parenthood, from parenting with a partner and co-parenting to donor conception, fertility treatment, adoption and surrogacy.", coverUrl: "/web-static/articles/1786715854481-9e2ad679.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-14T13:57:51.783Z", views: 2 },
-  { id: "3e9f35f8", slug: "am-i-ready-to-become-a-parent-how-to-know-when-to-start", title: "Am I Ready to Become a Parent? How to Know When to Start", excerpt: "Thinking about becoming a parent but not sure you're ready? Explore the questions that matter most — from your reasons and lifestyle to finances, health and support — and find a clearer way forward.", coverUrl: "/web-static/articles/1786715655186-9f49a617.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-14T13:54:17.992Z", views: 2 },
-];
 
 const knowledgeCategoryName = (slug: string, locale: CookieLocale = "en") =>
   knowledgeCategoryCopy[locale][slug.toLowerCase()]
@@ -4761,37 +4746,24 @@ const knowledgeDate = (value: unknown) => {
 function KnowledgeHub() {
   const locale = localeOf();
   const copy = knowledgeHubCopy[locale];
-  const [data, setData] = useState<Page<Row> | null>(null);
+  const [data, setData] = useState<Row[] | null>(null);
+  const [error, setError] = useState("");
   const [category, setCategory] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => {
-    api
-      .get<Page<Row>>(
-        `/public/articles?locale=${encodeURIComponent(locale)}&limit=60&offset=0`,
-      )
-      .then(setData)
-      .catch(() => setData({ items: [], total: 0, limit: 60, offset: 0 }));
-  }, [locale]);
-  const backendArticles: Row[] = (data?.items ?? []).map((item) => {
-    const meta = (item.meta ?? {}) as Row;
-    const metaCategory = (meta.category ?? {}) as Row;
-    const selectedTranslation = (meta.selectedTranslation ?? {}) as Row;
-    const categorySlug = String(item.category ?? metaCategory.slug ?? "");
-    const referenceMeta = referenceArticleMeta[String(item.slug)];
-    return {
-      ...item,
-      coverUrl: referenceMeta?.coverUrl ?? item.coverUrl ?? item.cover_url ?? selectedTranslation.coverImageUrl,
-      categorySlug,
-      categoryName: knowledgeCategoryName(categorySlug, locale),
-      publishedAt: item.publishedAt ?? item.published_at ?? meta.publishedAt,
-      views: referenceMeta?.views ?? item.views ?? meta.viewCount ?? 0,
-    } as Row;
-  });
-  const latestSlugs = new Set(latestKnowledgeArticles.map((item) => String(item.slug)));
-  const allArticles: Row[] = referenceKnowledgeArticles.map((item) => ({
+    let alive = true;
+    setData(null);
+    setError("");
+    setVisibleCount(12);
+    loadKnowledgeArticles(api, locale)
+      .then((items) => { if (alive) setData(items); })
+      .catch(() => { if (alive) setError(copy.unavailable); });
+    return () => { alive = false; };
+  }, [copy.unavailable, locale]);
+  const allArticles: Row[] = (data ?? []).map((item) => ({
     ...item,
-    categoryName: knowledgeCategoryName(item.categorySlug, locale),
+    categoryName: knowledgeCategoryName(String(item.categorySlug), locale),
   }));
   const filteredArticles = category
     ? allArticles.filter((item) => String(item.categorySlug).toLowerCase() === category.toLowerCase())
@@ -4816,6 +4788,8 @@ function KnowledgeHub() {
           <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{locale === "es" ? item.name : knowledgeCategoryName(item.slug, locale)}</button>
         ))}
       </div>
+      {error && <p className="error" role="alert">{error}</p>}
+      {!data && !error && <LoadingIndicator />}
       <div className="knowledge-grid">
         {visibleArticles.map((item) => (
           <Link
@@ -4823,7 +4797,7 @@ function KnowledgeHub() {
             key={String(item.id)}
             to={`/${locale}/knowledge-hub/${encodeURIComponent(asText(item.slug))}`}
           >
-            <div className="knowledge-card-image"><img src={asText(item.coverUrl)} alt={asText(item.title)} /></div>
+            <div className="knowledge-card-image">{Boolean(item.coverUrl) && <img src={asText(item.coverUrl)} alt={asText(item.title)} />}</div>
             <div className="knowledge-card-body">
               <span className="knowledge-badge">{asText(item.categoryName)}</span>
               <h3>{asText(item.title)}</h3>
@@ -4867,13 +4841,11 @@ function Article() {
   }, [locale, slug]);
   useEffect(() => {
     let alive = true;
-    api
-      .get<Page<Row>>(
-        `/public/articles?locale=${encodeURIComponent(locale)}&limit=60&offset=0`,
-      )
-      .then((page) => {
+    setNavigationArticles([]);
+    loadKnowledgeArticles(api, locale)
+      .then((items) => {
         if (!alive) return;
-        setNavigationArticles(referenceKnowledgeArticles);
+        setNavigationArticles(items);
       })
       .catch(() => {
         if (alive) setNavigationArticles([]);
@@ -4887,23 +4859,9 @@ function Article() {
         const result = await api.get<Row>(
           `/public/articles/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}`,
         );
-        if (alive) setArticle(result);
+        if (alive) setArticle(normalizeArticle(result));
       } catch {
-        const latestIndex = latestKnowledgeArticles.findIndex((item) => item.slug === slug);
-        if (locale !== "en" || latestIndex < 0 || latestIndex > 8) {
-          if (alive) setError(copy.unavailable);
-          return;
-        }
-        try {
-          const response = await fetch(`/web-static/articles/details/${encodeURIComponent(slug)}-20260821.json`);
-          if (!response.ok) throw new Error("Article snapshot unavailable");
-          const payload = await response.json() as { result?: { data?: { json?: Row } } };
-          const result = payload.result?.data?.json;
-          if (!result) throw new Error("Article snapshot is invalid");
-          if (alive) setArticle(result);
-        } catch {
-          if (alive) setError(copy.unavailable);
-        }
+        if (alive) setError(copy.unavailable);
       }
     };
     void load();
@@ -4917,26 +4875,16 @@ function Article() {
       </section>
     );
   if (!article) return <LoadingIndicator />;
-  const staticArticle = latestKnowledgeArticles.find((item) => item.slug === slug);
-  const categoryValue = article.category;
-  const categoryName = typeof categoryValue === "object" && categoryValue
-    ? asText((categoryValue as Row).name)
-    : knowledgeCategoryName(asText(categoryValue), "en");
-  const referenceMeta = referenceArticleMeta[slug];
-  const coverUrl = referenceMeta?.coverUrl ?? staticArticle?.coverUrl ?? article.coverUrl ?? article.cover_url ?? article.coverImageUrl;
-  const publishedAt = staticArticle?.publishedAt ?? article.publishedAt ?? article.published_at;
-  const views = referenceMeta?.views ?? staticArticle?.views ?? article.views ?? article.viewCount ?? 0;
+  const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale);
+  const coverUrl = article.coverUrl;
+  const publishedAt = article.publishedAt;
+  const views = article.views;
   const bodyHtml = article.bodyHtml ?? article.body_html ?? article.content;
   const referenceBodyHtml = asText(bodyHtml).replaceAll("https://letsbeparents.com/", "/");
   const navigationIndex = navigationArticles.findIndex((item) => asText(item.slug) === slug);
-  const referenceNavigation = referenceArticleNavigation[slug];
-  const previous = referenceNavigation
-    ? referenceNavigation.previous
-    : (article.previous as Row | null | undefined)
+  const previous = (article.previous as Row | null | undefined)
       ?? (navigationIndex > 0 ? navigationArticles[navigationIndex - 1] : null);
-  const next = referenceNavigation
-    ? referenceNavigation.next
-    : (article.next as Row | null | undefined)
+  const next = (article.next as Row | null | undefined)
       ?? (navigationIndex >= 0 && navigationIndex < navigationArticles.length - 1
         ? navigationArticles[navigationIndex + 1]
         : null);
