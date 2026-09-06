@@ -17,7 +17,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import { createApiClient } from "./api";
+import { ApiError, createApiClient } from "./api";
 import { loadKnowledgeArticles, normalizeArticle } from "./articles";
 import {
   signInWithSocial,
@@ -4083,6 +4083,14 @@ function Conversations({ session }: { session: Session }) {
                     >
                       Video call
                     </button>
+                    {Boolean(active.other_profile_id) && (
+                      <Link
+                        className="secondary"
+                        to={`/${locale}/family-room/${encodeURIComponent(asText(active.other_profile_id))}`}
+                      >
+                        Family Room
+                      </Link>
+                    )}
                   </div>
                 </div>
                 <div className="message-list">
@@ -4378,6 +4386,425 @@ function Subscription({ session }: { session: Session }) {
     </section>
   );
 }
+
+const FAMILY_ROOM_SECTIONS: Array<"parenting" | "finances" | "legal" | "general"> = [
+  "parenting",
+  "finances",
+  "legal",
+  "general",
+];
+
+const FAMILY_ROOM_SECTION_LABELS: Record<string, string> = {
+  parenting: "Parenting",
+  finances: "Finances",
+  legal: "Legal",
+  general: "General",
+};
+
+function formatFamilyRoomBytes(bytes: number): string {
+  if (!Number.isFinite(bytes)) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FamilyRoom({ session }: { session: Session }) {
+  const locale = localeOf();
+  const { profileId = "" } = useParams();
+  const [status, setStatus] = useState<
+    "loading" | "ok" | "needsPremium" | "noMatch" | "error"
+  >("loading");
+  const [room, setRoom] = useState<Row | null>(null);
+  const [parenting, setParenting] = useState("");
+  const [finances, setFinances] = useState("");
+  const [legal, setLegal] = useState("");
+  const [planDirty, setPlanDirty] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [newItemText, setNewItemText] = useState<Record<string, string>>({});
+  const [addingSection, setAddingSection] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const load = () => {
+    if (!session || !profileId) return;
+    setStatus("loading");
+    api
+      .get<Row>(`/member/family-room/${encodeURIComponent(profileId)}`)
+      .then((data) => {
+        setRoom(data);
+        const plan = (data.plan as Row) || {};
+        setParenting(String(plan.parentingNotes ?? ""));
+        setFinances(String(plan.financesNotes ?? ""));
+        setLegal(String(plan.legalNotes ?? ""));
+        setPlanDirty(false);
+        setStatus("ok");
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
+        else if (err instanceof ApiError && err.status === 404) setStatus("noMatch");
+        else setStatus("error");
+      });
+  };
+  useEffect(load, [session, profileId]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const savePlan = async () => {
+    if (savingPlan || !room) return;
+    setSavingPlan(true);
+    setNotice("");
+    try {
+      const baseline = (room.plan as Row) || {};
+      const updates = Object.fromEntries(Object.entries({ parentingNotes: parenting, financesNotes: finances, legalNotes: legal })
+        .filter(([key, value]) => value !== String(baseline[key] ?? "")));
+      const response = await api.patch<Row>(
+        `/member/family-room/${encodeURIComponent(profileId)}/plan`,
+        updates,
+      );
+      setRoom((prev) => (prev ? { ...prev, plan: response.plan } : prev));
+      const savedPlan = response.plan as Row;
+      setParenting(String(savedPlan.parentingNotes ?? ""));
+      setFinances(String(savedPlan.financesNotes ?? ""));
+      setLegal(String(savedPlan.legalNotes ?? ""));
+      setPlanDirty(false);
+    } catch {
+      setNotice("Could not save the Family Plan. Please try again.");
+    } finally {
+      setSavingPlan(false);
+    }
+  };
+
+  const checklist = ((room?.checklist as Row[] | undefined) || []).slice();
+  const checklistBySection: Record<string, Row[]> = {
+    parenting: [],
+    finances: [],
+    legal: [],
+    general: [],
+  };
+  for (const item of checklist) {
+    const section = asText(item.section) || "general";
+    (checklistBySection[section] || checklistBySection.general).push(item);
+  }
+
+  const addChecklistItem = async (section: string) => {
+    const label = (newItemText[section] || "").trim();
+    if (!label) return;
+    setAddingSection(section);
+    try {
+      const response = await api.post<Row>(
+        `/member/family-room/${encodeURIComponent(profileId)}/checklist`,
+        { section, label },
+      );
+      setRoom((prev) =>
+        prev
+          ? { ...prev, checklist: [...((prev.checklist as Row[]) || []), response.item] }
+          : prev,
+      );
+      setNewItemText((prev) => ({ ...prev, [section]: "" }));
+    } catch {
+      setNotice("Could not add that checklist item.");
+    } finally {
+      setAddingSection(null);
+    }
+  };
+
+  const toggleChecklistItem = async (item: Row) => {
+    const itemId = item.id;
+    const wasDone = Boolean(item.isDone);
+    setRoom((prev) =>
+      prev
+        ? {
+            ...prev,
+            checklist: ((prev.checklist as Row[]) || []).map((i) =>
+              i.id === itemId ? { ...i, isDone: !wasDone } : i,
+            ),
+          }
+        : prev,
+    );
+    try {
+      await api.patch(
+        `/member/family-room/checklist/${encodeURIComponent(asText(itemId))}`,
+        { isDone: !wasDone },
+      );
+    } catch {
+      setRoom((prev) =>
+        prev
+          ? {
+              ...prev,
+              checklist: ((prev.checklist as Row[]) || []).map((i) =>
+                i.id === itemId ? { ...i, isDone: wasDone } : i,
+              ),
+            }
+          : prev,
+      );
+      setNotice("Could not update that checklist item.");
+    }
+  };
+
+  const deleteChecklistItem = async (item: Row) => {
+    const itemId = item.id;
+    setRoom((prev) =>
+      prev
+        ? {
+            ...prev,
+            checklist: ((prev.checklist as Row[]) || []).filter((i) => i.id !== itemId),
+          }
+        : prev,
+    );
+    try {
+      await api.delete(`/member/family-room/checklist/${encodeURIComponent(asText(itemId))}`);
+    } catch {
+      load();
+    }
+  };
+
+  const uploadDocument = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setNotice("");
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      const response = await api.upload<Row>(
+        `/member/family-room/${encodeURIComponent(profileId)}/documents`,
+        data,
+      );
+      setRoom((prev) =>
+        prev
+          ? { ...prev, documents: [response.document, ...((prev.documents as Row[]) || [])] }
+          : prev,
+      );
+    } catch {
+      setNotice("Could not upload that document.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const deleteDocument = async (doc: Row) => {
+    const docId = doc.id;
+    setRoom((prev) =>
+      prev
+        ? {
+            ...prev,
+            documents: ((prev.documents as Row[]) || []).filter((d) => d.id !== docId),
+          }
+        : prev,
+    );
+    try {
+      await api.delete(`/member/family-room/documents/${encodeURIComponent(asText(docId))}`);
+    } catch {
+      setNotice("Could not remove that document.");
+      load();
+    }
+  };
+
+  if (status === "loading") {
+    return (
+      <section className="access-card">
+        <h1>Family Room</h1>
+        <p>Loading…</p>
+      </section>
+    );
+  }
+
+  if (status === "needsPremium") {
+    return (
+      <section className="access-card">
+        <h1>Family Room</h1>
+        <p>
+          The Family Plan, Shared Family Room and document tools are part of
+          Family Builder Pro. Upgrade to plan your family together with your
+          match.
+        </p>
+        <Link className="primary" to={`/${locale}/subscription`}>
+          View Premium
+        </Link>
+      </section>
+    );
+  }
+
+  if (status === "noMatch") {
+    return (
+      <section className="access-card">
+        <h1>Family Room</h1>
+        <p>
+          You don't have an active match with this profile, so there's no
+          shared Family Room here yet.
+        </p>
+        <Link className="secondary" to={`/${locale}/messages`}>
+          Back to Messages
+        </Link>
+      </section>
+    );
+  }
+
+  if (status === "error" || !room) {
+    return (
+      <section className="access-card">
+        <h1>Family Room</h1>
+        <p className="error">Could not load your Family Room. Please try again.</p>
+      </section>
+    );
+  }
+
+  const documents = (room.documents as Row[] | undefined) || [];
+
+  return (
+    <section className="family-room">
+      <h1>Family Room</h1>
+      {notice && <p className="error">{notice}</p>}
+
+      <div className="list-card family-room-card">
+        <h2>Family Plan</h2>
+        <p>
+          Keep parenting, finances and legal notes in one shared place - only
+          you and your match can see this.
+        </p>
+        <label>
+          Parenting
+          <textarea
+            rows={4}
+            value={parenting}
+            disabled={savingPlan}
+            maxLength={20000}
+            placeholder="How do you both picture day-to-day parenting?"
+            onChange={(event) => {
+              setParenting(event.target.value);
+              setPlanDirty(true);
+            }}
+          />
+        </label>
+        <label>
+          Finances
+          <textarea
+            rows={4}
+            value={finances}
+            disabled={savingPlan}
+            maxLength={20000}
+            placeholder="How will costs be shared and planned for?"
+            onChange={(event) => {
+              setFinances(event.target.value);
+              setPlanDirty(true);
+            }}
+          />
+        </label>
+        <label>
+          Legal
+          <textarea
+            rows={4}
+            value={legal}
+            disabled={savingPlan}
+            maxLength={20000}
+            placeholder="What legal steps or agreements do you need to look into?"
+            onChange={(event) => {
+              setLegal(event.target.value);
+              setPlanDirty(true);
+            }}
+          />
+        </label>
+        <div className="plan-actions">
+          <button
+            className="primary"
+            onClick={() => void savePlan()}
+            disabled={!planDirty || savingPlan}
+          >
+            {savingPlan ? "Saving…" : "Save Family Plan"}
+          </button>
+        </div>
+      </div>
+
+      <div className="list-card family-room-card">
+        <h2>Checklist</h2>
+        {FAMILY_ROOM_SECTIONS.map((section) => (
+          <div className="family-room-section" key={section}>
+            <h3>{FAMILY_ROOM_SECTION_LABELS[section]}</h3>
+            {checklistBySection[section].length === 0 ? (
+              <p className="notice">No items yet.</p>
+            ) : (
+              <ul className="family-room-checklist">
+                {checklistBySection[section].map((item) => (
+                  <li key={asText(item.id)}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(item.isDone)}
+                        onChange={() => void toggleChecklistItem(item)}
+                      />
+                      <span className={item.isDone ? "done" : ""}>{asText(item.label)}</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void deleteChecklistItem(item)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form
+              className="family-room-add-row"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void addChecklistItem(section);
+              }}
+            >
+              <input
+                value={newItemText[section] || ""}
+                maxLength={500}
+                disabled={addingSection !== null}
+                placeholder="Add an item…"
+                onChange={(event) =>
+                  setNewItemText((prev) => ({ ...prev, [section]: event.target.value }))
+                }
+              />
+              <button className="secondary" disabled={addingSection !== null}>
+                Add
+              </button>
+            </form>
+          </div>
+        ))}
+      </div>
+
+      <div className="list-card family-room-card">
+        <h2>Documents</h2>
+        {documents.length === 0 ? (
+          <p className="notice">No documents shared yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {documents.map((doc) => (
+              <li key={asText(doc.id)}>
+                <a href={asText(doc.contentUrl)} target="_blank" rel="noreferrer">
+                  {asText(doc.displayName)}
+                </a>
+                <span>{formatFamilyRoomBytes(Number(doc.bytes) || 0)}</span>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => void deleteDocument(doc)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <label className="attachment-control">
+          {uploading ? "Uploading…" : "Upload a document"}
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            disabled={uploading}
+            onChange={(event) => void uploadDocument(event.target.files?.[0])}
+          />
+        </label>
+      </div>
+    </section>
+  );
+}
+
 
 const PRICING_TEXT = {
   en: {
@@ -6954,6 +7381,10 @@ export function WebApp() {
       <Route
         path="/:locale/delete-account"
         element={content(<AccountDeletion session={session} />)}
+      />
+      <Route
+        path="/:locale/family-room/:profileId"
+        element={content(<FamilyRoom session={session} />)}
       />
       <Route
         path="/:locale/subscription"

@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "LetsBeParents",
+    "slug": "letsbeparents-mobile",
+    "scheme": "letsbeparents",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.letsBeParents.letsBeParents",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "LetsBeParents uses the camera for video calls and for adding profile photos.",
+        "NSMicrophoneUsageDescription": "LetsBeParents uses the microphone for voice and video calls.",
+        "NSPhotoLibraryUsageDescription": "LetsBeParents needs access to your photos so you can add them to your profile."
+      },
+      "bitcode": false
+    },
+    "android": {
+      "package": "com.letsBeParents.letsBeParents",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_MEDIA_IMAGES",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
+    },
+    "plugins": [
+      "@config-plugins/react-native-webrtc"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "28000ab6-727c-4c77-a84b-92b35bbf9095"
+      }
+    }
+  }
+}

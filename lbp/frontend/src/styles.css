@@ -590,6 +590,117 @@ body {
 .danger-zone {
   border-color: #ffd3dc;
 }
+.family-room {
+  display: grid;
+  gap: 24px;
+  max-width: 760px;
+}
+.family-room-card {
+  display: grid;
+  gap: 14px;
+}
+.family-room-card label {
+  display: grid;
+  gap: 8px;
+  font-weight: 750;
+}
+.family-room-card textarea {
+  font: inherit;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  padding: 13px;
+  resize: vertical;
+}
+.family-room-section {
+  border-top: 1px solid #e3e9f1;
+  padding-top: 14px;
+  margin-top: 6px;
+  display: grid;
+  gap: 8px;
+}
+.family-room-section h3 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #63758e;
+}
+.family-room-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.family-room-checklist li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.family-room-checklist label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+.family-room-checklist input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+.family-room-checklist span.done {
+  color: #63758e;
+  text-decoration: line-through;
+}
+.family-room-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.family-room-add-row input {
+  flex: 1;
+  font: inherit;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  padding: 10px 13px;
+}
+.family-room-documents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.family-room-documents li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e3e9f1;
+  padding-bottom: 10px;
+}
+.family-room-documents li a {
+  flex: 1;
+  color: #07132c;
+  font-weight: 700;
+  text-decoration: none;
+}
+.family-room-documents li a:hover {
+  color: #f51161;
+}
+.family-room-documents li span {
+  color: #63758e;
+  font-size: 13px;
+}
+.link-button {
+  background: transparent;
+  border: 0;
+  color: #bf2742;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
 .danger-zone form {
   display: grid;
   gap: 16px;

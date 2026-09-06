@@ -138,6 +138,15 @@ CALL_RING_SECONDS = max(20, int(os.getenv("CALL_RING_SECONDS", "60")))
 SUPPORT_PROFILE_SOURCE_ID = os.getenv("SUPPORT_PROFILE_SOURCE_ID", "").strip()
 SUPPORT_PROFILE_NAME = "LetsBeParents Support"
 SUPPORT_WELCOME_MESSAGE = "Welcome to LetsBeParents! We're here to help you. Feel free to ask us anything."
+# "Priority support" (Family Builder Pro pricing-page perk) - (1) a
+# one-time note in a Premium member's own support conversation
+# confirming their messages are prioritized, sent the same idempotent way
+# as SUPPORT_WELCOME_MESSAGE above, and (2) real prioritization in the
+# admin support inbox (see admin_support_list) - Premium members' threads
+# sort ahead of non-Premium ones so staff actually see them first.
+PRIORITY_SUPPORT_MESSAGE = (
+    "Your Premium membership includes priority handling from our support team."
+)
 PARTNER_SERVICES_FILE = Path(__file__).with_name("partner_services.json")
 CATALOG_LOCATIONS_FILE = Path(__file__).with_name("catalog_locations.json")
 FREE_DAILY_LIKE_LIMIT = 3
@@ -1273,6 +1282,14 @@ class FamilyChecklistItemUpdatePayload(BaseModel):
         if value is None or (isinstance(value, str) and not value.strip()):
             raise ValueError("Explicit null and blank labels are not allowed")
         return value.strip() if isinstance(value, str) else value
+
+
+class CompatibilityAnswersPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    # {questionId: optionKey} - validated against COMPATIBILITY_QUESTIONS at
+    # save time (see member_save_compatibility_answers), not here, since the
+    # valid id/key sets live with the question bank itself.
+    answers: dict[str, str] = Field(default_factory=dict, max_length=12)
 
 
 class VerificationPayload(BaseModel):
@@ -3126,6 +3143,40 @@ def ensure_support_welcome(cursor, profile_id: int) -> int | None:
         )
         cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
     return conversation_id
+
+
+def ensure_priority_support_note(cursor, profile_id: int) -> None:
+    """Send the one-time "you have priority support" note for Premium
+    members, the same idempotent way ensure_support_welcome() sends the
+    general welcome message (a body-text existence check, no extra table)."""
+    profile = fetch_profile(cursor, profile_id)
+    if not profile or not profile_is_premium(profile):
+        return
+    support_conversation = ensure_support_conversation(cursor, profile_id)
+    if not support_conversation:
+        return
+    conversation_id, support_profile_id = support_conversation
+    # Serialize the existence check so concurrent requests cannot duplicate the note.
+    cursor.execute("SELECT id FROM conversations WHERE id = %s FOR UPDATE", (conversation_id,))
+    cursor.execute(
+        """
+        SELECT id
+        FROM conversation_messages
+        WHERE conversation_id = %s AND sender_profile_id = %s AND body = %s AND status = 'ACTIVE'
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (conversation_id, support_profile_id, PRIORITY_SUPPORT_MESSAGE),
+    )
+    if not cursor.fetchone():
+        cursor.execute(
+            """
+            INSERT INTO conversation_messages (conversation_id, sender_profile_id, body, status, created_at)
+            VALUES (%s, %s, %s, 'ACTIVE', UTC_TIMESTAMP())
+            """,
+            (conversation_id, support_profile_id, PRIORITY_SUPPORT_MESSAGE),
+        )
+        cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
 
 
 def ensure_match(cursor, profile_a_id: int, profile_b_id: int) -> int:
@@ -5921,6 +5972,7 @@ def member_conversations(user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         ensure_support_welcome(cursor, profile_id)
+        ensure_priority_support_note(cursor, profile_id)
         cursor.execute(
             """
             UPDATE conversation_messages AS m
@@ -6658,6 +6710,300 @@ def member_delete_family_document(document_id: int, user: dict[str, Any] = Depen
         logger.warning("Private Family Room media metadata cleanup requires retry")
         return {"ok": True, "storageCleanupPending": True}
     return {"ok": True}
+
+
+# =========================================================
+# COMPATIBILITY SCORE / DETAILED COMPATIBILITY REPORT
+# ("Compatibility Score & Why you match" on the Family Builder tier,
+# "Detailed Compatibility Report" on Family Builder Pro - see PRICING_TEXT
+# in frontend/src/ui.tsx). Added Sept 2026 alongside the Family Room work -
+# neither of these existed at all before this, at any tier, despite being
+# advertised on the live /pricing page (see the master brief's Open Items).
+#
+# Deliberately follows the same "no percentage, no pass/fail" rule the
+# existing Co-Parenting Compatibility Quiz already uses (see
+# CompatibilityQuizScreen.tsx / the site's CompatibilityQuiz() component) -
+# that's an explicit product decision from the strategic pivot doc (see the
+# master brief §4.5/§3), not something to quietly abandon just because this
+# version is two-sided and persisted. Instead of a score, members answer a
+# short structured questionnaire (4 dimensions, 3 questions each, one
+# neutral "still deciding" option per question that is excluded from
+# comparison rather than forced into a fake number), and a match's report
+# surfaces which dimensions you're aligned on and which are genuinely worth
+# a conversation, plus specific talking points pulled from individual
+# questions where you picked differently.
+#
+# Answering the questionnaire itself is free (no Premium needed) - same as
+# the standalone Quiz. Only the two-sided report against an actual match is
+# gated, same pattern as Family Room: profile_is_premium() (402) +
+# require_active_match() (404), pending the real Family-Builder-vs-Pro
+# tier split this backend doesn't have yet (see the comment on
+# profile_is_premium()). Once that split exists, the natural cut is: base
+# tier sees which dimensions are strongest/worth-discussing, Pro tier also
+# sees the specific per-question talking points - the "Detailed" in
+# "Detailed Compatibility Report".
+# =========================================================
+
+COMPATIBILITY_QUESTIONS: list[dict[str, Any]] = [
+    {
+        "id": "par_style",
+        "dimension": "parenting",
+        "prompt": "What's your ideal day-to-day parenting style?",
+        "options": [
+            {"key": "structured", "label": "Structured, with clear routines"},
+            {"key": "balanced", "label": "A balance of structure and flexibility"},
+            {"key": "flexible", "label": "Flexible, child-led"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "par_discipline",
+        "dimension": "parenting",
+        "prompt": "How do you feel about discipline and rules?",
+        "options": [
+            {"key": "firm", "label": "Clear rules with consistent consequences"},
+            {"key": "moderate", "label": "Mostly gentle guidance, some rules"},
+            {"key": "relaxed", "label": "Very few rules, lots of independence"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "par_values",
+        "dimension": "parenting",
+        "prompt": "What matters most to you in raising a child?",
+        "options": [
+            {"key": "achievement", "label": "Structure, achievement and responsibility"},
+            {"key": "independence", "label": "Independence and self-expression"},
+            {"key": "connection", "label": "Emotional connection and closeness"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "inv_daily",
+        "dimension": "involvement",
+        "prompt": "How involved do you want to be in day-to-day care?",
+        "options": [
+            {"key": "primary", "label": "Primary, hands-on caregiver"},
+            {"key": "equal", "label": "Equal, shared caregiving"},
+            {"key": "supportive", "label": "Supportive but not the primary caregiver"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "inv_decisions",
+        "dimension": "involvement",
+        "prompt": "How do you want to make parenting decisions together?",
+        "options": [
+            {"key": "joint", "label": "Always jointly, together on everything"},
+            {"key": "divided", "label": "Split by area (one leads health, one leads school, etc.)"},
+            {"key": "flexible", "label": "Whoever's available decides in the moment"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "inv_financial",
+        "dimension": "involvement",
+        "prompt": "How do you picture sharing financial responsibility?",
+        "options": [
+            {"key": "equal", "label": "Split equally"},
+            {"key": "proportional", "label": "Proportional to income"},
+            {"key": "oneLead", "label": "One of us takes the lead"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "time_when",
+        "dimension": "timeline",
+        "prompt": "When would you ideally want to start?",
+        "options": [
+            {"key": "asap", "label": "As soon as possible"},
+            {"key": "withinYear", "label": "Within the next year"},
+            {"key": "coupleYears", "label": "In the next couple of years"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "time_pace",
+        "dimension": "timeline",
+        "prompt": "How do you feel about the pace of getting to know each other first?",
+        "options": [
+            {"key": "fast", "label": "Ready to move quickly once we're aligned"},
+            {"key": "moderate", "label": "A few months of getting to know each other first"},
+            {"key": "slow", "label": "I'd want a longer runway before deciding"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "time_more",
+        "dimension": "timeline",
+        "prompt": "Do you see this as one child, or potentially more?",
+        "options": [
+            {"key": "one", "label": "One child"},
+            {"key": "open", "label": "Open to more than one"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "bound_contact",
+        "dimension": "boundaries",
+        "prompt": "How much contact do you want between the child and both of you as they grow up?",
+        "options": [
+            {"key": "close", "label": "Close involvement from both, all the time"},
+            {"key": "defined", "label": "Regular but clearly scheduled contact"},
+            {"key": "limited", "label": "Limited, clearly bounded contact"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "bound_conflict",
+        "dimension": "boundaries",
+        "prompt": "How do you prefer to handle disagreements?",
+        "options": [
+            {"key": "talkImmediately", "label": "Talk it through immediately"},
+            {"key": "coolOff", "label": "Take space, then talk"},
+            {"key": "mediator", "label": "Bring in a neutral third party if needed"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "bound_privacy",
+        "dimension": "boundaries",
+        "prompt": "How public do you want this arrangement to be (family, friends, online)?",
+        "options": [
+            {"key": "open", "label": "Fully open with everyone"},
+            {"key": "selective", "label": "Open with close family/friends only"},
+            {"key": "private", "label": "Very private, need-to-know only"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+]
+
+COMPATIBILITY_DIMENSION_LABELS: dict[str, str] = {
+    "parenting": "Parenting style",
+    "involvement": "Involvement & roles",
+    "timeline": "Timeline",
+    "boundaries": "Boundaries & communication",
+}
+
+_COMPATIBILITY_QUESTIONS_BY_ID = {q["id"]: q for q in COMPATIBILITY_QUESTIONS}
+_COMPATIBILITY_VALID_OPTION_KEYS = {
+    q["id"]: {opt["key"] for opt in q["options"]} for q in COMPATIBILITY_QUESTIONS
+}
+
+
+def compatibility_answers_of(profile: dict[str, Any] | None) -> dict[str, str]:
+    data = profile_data(profile)
+    raw = data.get("compatibilityAnswers")
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(v, str) and v in _COMPATIBILITY_VALID_OPTION_KEYS.get(k, set())}
+
+
+@app.get("/api/member/compatibility/questions")
+def member_compatibility_questions(user: dict[str, Any] = Depends(require_user)):
+    return {"items": COMPATIBILITY_QUESTIONS}
+
+
+@app.get("/api/member/compatibility/answers")
+def member_compatibility_answers(response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile or profile.get("status") != "ACTIVE":
+            raise HTTPException(status_code=404, detail="Profile not found")
+    return {"answers": compatibility_answers_of(profile)}
+
+
+@app.post("/api/member/compatibility/answers")
+def member_save_compatibility_answers(
+    payload: CompatibilityAnswersPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    cleaned: dict[str, str] = {}
+    for question_id, option_key in payload.answers.items():
+        valid_keys = _COMPATIBILITY_VALID_OPTION_KEYS.get(question_id)
+        if valid_keys is None:
+            raise HTTPException(status_code=422, detail=f"Unknown compatibility question: {question_id}")
+        if option_key not in valid_keys:
+            raise HTTPException(status_code=422, detail=f"Unknown option for {question_id}: {option_key}")
+        cleaned[question_id] = option_key
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id FROM profiles WHERE id = %s AND status = 'ACTIVE' FOR UPDATE", (profile_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Profile not found")
+        current = fetch_profile(cursor, profile_id)
+        existing = compatibility_answers_of(current)
+        existing.update(cleaned)
+        update_profile_data(cursor, profile_id, {"compatibilityAnswers": existing})
+        conn.commit()
+    return {"ok": True, "answers": existing}
+
+
+def _compatibility_report_from_answers(mine: dict[str, str], theirs: dict[str, str]) -> dict[str, Any]:
+    dimension_aligned: dict[str, int] = {d: 0 for d in COMPATIBILITY_DIMENSION_LABELS}
+    dimension_total: dict[str, int] = {d: 0 for d in COMPATIBILITY_DIMENSION_LABELS}
+    talking_points: list[str] = []
+    for question in COMPATIBILITY_QUESTIONS:
+        qid = question["id"]
+        mine_answer = mine.get(qid)
+        their_answer = theirs.get(qid)
+        if not mine_answer or not their_answer:
+            continue  # one side hasn't answered this question
+        if mine_answer == "undecided" or their_answer == "undecided":
+            continue  # excluded from comparison, not forced into a score
+        dimension = question["dimension"]
+        dimension_total[dimension] += 1
+        if mine_answer == their_answer:
+            dimension_aligned[dimension] += 1
+        else:
+            talking_points.append(question["prompt"])
+
+    strongest: list[str] = []
+    worth_discussing: list[str] = []
+    for dimension, total in dimension_total.items():
+        if total == 0:
+            continue
+        ratio = dimension_aligned[dimension] / total
+        if ratio >= 0.5:
+            strongest.append(COMPATIBILITY_DIMENSION_LABELS[dimension])
+        else:
+            worth_discussing.append(COMPATIBILITY_DIMENSION_LABELS[dimension])
+
+    return {
+        "strongest": strongest,
+        "worthDiscussing": worth_discussing,
+        "talkingPoints": talking_points[:5],
+    }
+
+
+@app.get("/api/member/compatibility-report/{profile_identifier}")
+def member_compatibility_report(profile_identifier: str, response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for the Compatibility Report")
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        require_active_match(cursor, profile_id, other_profile_id)
+        other_profile = fetch_profile(cursor, other_profile_id)
+        mine = compatibility_answers_of(profile)
+        theirs = compatibility_answers_of(other_profile)
+        # Both sides need to have answered at least one question before a
+        # report means anything - rendered as a distinct state client-side
+        # (e.g. "invite them to fill in their compatibility profile too")
+        # rather than a report full of empty dimensions.
+        if not mine or not theirs:
+            return {
+                "ok": True,
+                "status": "incomplete",
+                "youCompleted": bool(mine),
+                "matchCompleted": bool(theirs),
+            }
+        report = _compatibility_report_from_answers(mine, theirs)
+        return {"ok": True, "status": "ready", **report}
 
 
 def livekit_is_configured() -> bool:
@@ -9628,12 +9974,18 @@ def admin_support_list(
               END AS profileType,
               (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
               (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
-              (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount
+              (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount,
+              EXISTS (
+                SELECT 1 FROM jsonb_each(COALESCE(CASE WHEN a.role = 'SUPPORT' THEN b.data ELSE a.data END, '{{}}'::jsonb)) AS flag
+                WHERE flag.key IN ('isPremium', 'premium') AND
+                  CASE WHEN jsonb_typeof(flag.value) = 'number' THEN (flag.value #>> '{{}}')::numeric <> 0
+                  ELSE LOWER(TRIM(flag.value #>> '{{}}')) IN ('1', 'true', 'yes', 'y', 'on', 'active', 'approved') END
+              ) AS isPriority
             FROM conversations c
             JOIN profiles a ON a.id = c.profile_a_id
             JOIN profiles b ON b.id = c.profile_b_id
             {where_sql}
-            ORDER BY COALESCE(
+            ORDER BY "isPriority" DESC, COALESCE(
               (SELECT created_at FROM conversation_messages lm
                WHERE lm.conversation_id = c.id
                ORDER BY lm.created_at DESC, lm.id DESC

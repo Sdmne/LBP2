@@ -5,6 +5,12 @@ build/
 out/
 coverage/
 *.tsbuildinfo
+.expo/
+web-build/
+*.jks
+*.keystore
+*.mobileprovision
+*.p8
 .venv/
 venv/
 *.egg-info/
