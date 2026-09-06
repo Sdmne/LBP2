@@ -1234,6 +1234,47 @@ class CallCreatePayload(BaseModel):
         return "VOICE" if value == "AUDIO" else value
 
 
+# Family Room currently uses the existing Premium flag, not separate billing tiers.
+class FamilyPlanUpdatePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    parentingNotes: str | None = Field(default=None, max_length=20000)
+    financesNotes: str | None = Field(default=None, max_length=20000)
+    legalNotes: str | None = Field(default=None, max_length=20000)
+
+    @field_validator("parentingNotes", "financesNotes", "legalNotes")
+    @classmethod
+    def reject_null_notes(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("Use an empty string to clear notes; null is not allowed")
+        return value
+
+
+class FamilyChecklistItemCreatePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    section: str = Field(default="general", pattern="^(parenting|finances|legal|general)$")
+    label: str = Field(min_length=1, max_length=500)
+
+    @field_validator("label")
+    @classmethod
+    def nonblank_label(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A checklist label is required")
+        return value.strip()
+
+
+class FamilyChecklistItemUpdatePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    label: str | None = Field(default=None, min_length=1, max_length=500)
+    isDone: bool | None = Field(default=None, strict=True)
+
+    @field_validator("label", "isDone")
+    @classmethod
+    def reject_null_values(cls, value: str | bool | None) -> str | bool:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError("Explicit null and blank labels are not allowed")
+        return value.strip() if isinstance(value, str) else value
+
+
 class VerificationPayload(BaseModel):
     verificationType: str = Field(default="profile", max_length=80)
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -2708,6 +2749,114 @@ def active_match_id(cursor, profile_a_id: int, profile_b_id: int) -> int | None:
     )
     row = cursor.fetchone()
     return int(row["id"]) if row else None
+
+
+def require_active_match(cursor, profile_a_id: int, profile_b_id: int) -> int:
+    """Require an active, unblocked pair and hold its match until the transaction ends."""
+    low_id, high_id = ordered_pair(profile_a_id, profile_b_id)
+    cursor.execute(
+        """
+        SELECT pm.id
+        FROM profile_matches pm
+        JOIN profiles pa ON pa.id = pm.profile_a_id AND pa.status = 'ACTIVE'
+        JOIN profiles pb ON pb.id = pm.profile_b_id AND pb.status = 'ACTIVE'
+        WHERE pm.profile_a_id = %s AND pm.profile_b_id = %s
+          AND pm.status = 'ACTIVE' AND pm.profile_a_id <> pm.profile_b_id
+        LIMIT 1 FOR SHARE OF pm
+        """,
+        (low_id, high_id),
+    )
+    match = cursor.fetchone()
+    if not match or has_active_block(cursor, profile_a_id, profile_b_id):
+        raise HTTPException(status_code=404, detail="No match with this profile")
+    return int(match["id"])
+
+
+def require_family_premium(cursor, profile_id: int) -> None:
+    profile = fetch_profile(cursor, profile_id)
+    if not profile or profile.get("status") != "ACTIVE":
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if not profile_is_premium(profile):
+        raise HTTPException(status_code=402, detail="Premium is required for the Family Room")
+
+
+def family_document_storage_path(storage_key: str) -> Path:
+    private_root = PRIVATE_UPLOAD_DIR.resolve()
+    public_root = UPLOAD_DIR.resolve()
+    if private_root == public_root or public_root in private_root.parents:
+        raise HTTPException(status_code=503, detail="Private document storage is not configured safely")
+    if not storage_key.startswith("family-room/"):
+        raise HTTPException(status_code=404, detail="Document source is unavailable")
+    target = safe_storage_path(private_root, storage_key)
+    if target == public_root or public_root in target.parents:
+        raise HTTPException(status_code=503, detail="Private document storage is not configured safely")
+    family_root = (private_root / "family-room").resolve()
+    if family_root not in target.parents:
+        raise HTTPException(status_code=404, detail="Document source is unavailable")
+    return target
+
+
+def fetch_family_plan(cursor, match_id: int) -> dict[str, Any]:
+    cursor.execute(
+        """
+        SELECT id, match_id AS matchId, parenting_notes AS parentingNotes,
+               finances_notes AS financesNotes, legal_notes AS legalNotes,
+               updated_by_profile_id AS updatedByProfileId, updated_at AS updatedAt
+        FROM family_plans
+        WHERE match_id = %s
+        LIMIT 1
+        """,
+        (match_id,),
+    )
+    row = cursor.fetchone()
+    if row:
+        return normalize_row(row)
+    # No row yet - a couple's Family Room exists implicitly the moment
+    # they match, so this returns sensible empty defaults rather than 404,
+    # and the first PATCH creates the real row (see member_update_family_plan).
+    return {
+        "id": None,
+        "matchId": match_id,
+        "parentingNotes": "",
+        "financesNotes": "",
+        "legalNotes": "",
+        "updatedByProfileId": None,
+        "updatedAt": None,
+    }
+
+
+def fetch_family_checklist(cursor, match_id: int) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT id, match_id AS matchId, section, label, is_done AS isDone,
+               created_by_profile_id AS createdByProfileId, created_at AS createdAt,
+               updated_at AS updatedAt
+        FROM family_plan_checklist_items
+        WHERE match_id = %s
+        ORDER BY created_at ASC, id ASC
+        """,
+        (match_id,),
+    )
+    return [normalize_row(row) for row in cursor.fetchall()]
+
+
+def fetch_family_documents(cursor, match_id: int) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT fpd.id, fpd.match_id AS matchId, fpd.display_name AS displayName,
+               fpd.uploaded_by_profile_id AS uploadedByProfileId, fpd.created_at AS createdAt,
+               mf.mime_type AS mimeType, mf.bytes AS bytes
+        FROM family_plan_documents fpd
+        JOIN media_files mf ON mf.id = fpd.media_file_id
+        WHERE fpd.match_id = %s
+        ORDER BY fpd.created_at DESC, fpd.id DESC
+        """,
+        (match_id,),
+    )
+    documents = [normalize_row(row) for row in cursor.fetchall()]
+    for document in documents:
+        document["contentUrl"] = f"/api/member/family-room/documents/{document['id']}/content"
+    return documents
 
 
 def daily_like_count(cursor, profile_id: int) -> int:
@@ -6171,6 +6320,344 @@ async def member_send_attachment(
             "mediaUrl": public_url,
         },
     }
+
+
+# =========================================================
+# FAMILY ROOM (Family Plan / Shared Family Room / Document & checklist
+# tools). Gated behind the existing single Premium flag rather than a
+# separate "Family Builder Pro" entitlement. Documents are always private.
+# Scoped to profile_matches (an ACTIVE mutual match), never to a "cold"
+# conversation - this is deliberately narrower than /api/member/conversations,
+# which does allow messaging before a match for Premium members.
+# =========================================================
+
+
+@app.get("/api/member/family-room/{profile_identifier}")
+def member_family_room(profile_identifier: str, response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie, Authorization"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        return {
+            "ok": True,
+            "matchId": match_id,
+            "plan": fetch_family_plan(cursor, match_id),
+            "checklist": fetch_family_checklist(cursor, match_id),
+            "documents": fetch_family_documents(cursor, match_id),
+        }
+
+
+@app.patch("/api/member/family-room/{profile_identifier}/plan")
+def member_update_family_plan(
+    profile_identifier: str,
+    payload: FamilyPlanUpdatePayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        updates = payload.model_dump(exclude_unset=True)
+        columns = {"parentingNotes": "parenting_notes", "financesNotes": "finances_notes", "legalNotes": "legal_notes"}
+        touched = [columns[key] for key in updates if key in columns]
+        # DO UPDATE SET references EXCLUDED.<col> rather than re-binding each
+        # value a second time - the INSERT's own %s placeholders already
+        # carry them, so this keeps the placeholder count and the params
+        # tuple in sync without duplicating every value.
+        assignments = [f"{col} = EXCLUDED.{col}" for col in touched]
+        if assignments:
+            cursor.execute(
+                f"""
+                INSERT INTO family_plans (match_id, {', '.join(touched)},
+                                           updated_by_profile_id, created_at, updated_at)
+                VALUES (%s, {', '.join(['%s'] * len(touched))}, %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+                ON CONFLICT (match_id) DO UPDATE SET
+                    {', '.join(assignments)}, updated_by_profile_id = EXCLUDED.updated_by_profile_id,
+                    updated_at = UTC_TIMESTAMP()
+                """,
+                (
+                    match_id,
+                    *[updates[k] for k in updates if k in columns],
+                    profile_id,
+                ),
+            )
+        conn.commit()
+        return {"ok": True, "plan": fetch_family_plan(cursor, match_id)}
+
+
+@app.post("/api/member/family-room/{profile_identifier}/checklist")
+def member_create_family_checklist_item(
+    profile_identifier: str,
+    payload: FamilyChecklistItemCreatePayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        cursor.execute(
+            """
+            INSERT INTO family_plan_checklist_items
+                (match_id, section, label, created_by_profile_id, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+            """,
+            (match_id, payload.section, payload.label, profile_id),
+        )
+        item_id = cursor.lastrowid
+        conn.commit()
+        cursor.execute(
+            """
+            SELECT id, match_id AS matchId, section, label, is_done AS isDone,
+                   created_by_profile_id AS createdByProfileId, created_at AS createdAt,
+                   updated_at AS updatedAt
+            FROM family_plan_checklist_items WHERE id = %s
+            """,
+            (item_id,),
+        )
+        return {"ok": True, "item": normalize_row(cursor.fetchone())}
+
+
+def _load_family_checklist_item_for_member(cursor, item_id: int, profile_id: int) -> dict[str, Any]:
+    cursor.execute(
+        """
+        SELECT ci.id, ci.match_id, pm.profile_a_id, pm.profile_b_id
+        FROM family_plan_checklist_items ci
+        JOIN profile_matches pm ON pm.id = ci.match_id
+        WHERE ci.id = %s AND (pm.profile_a_id = %s OR pm.profile_b_id = %s) AND pm.status = 'ACTIVE'
+        LIMIT 1 FOR UPDATE OF ci
+        """,
+        (item_id, profile_id, profile_id),
+    )
+    item = cursor.fetchone()
+    if not item:
+        raise HTTPException(status_code=404, detail="Checklist item not found")
+    require_active_match(cursor, int(item["profile_a_id"]), int(item["profile_b_id"]))
+    return item
+
+
+@app.patch("/api/member/family-room/checklist/{item_id}")
+def member_update_family_checklist_item(
+    item_id: int,
+    payload: FamilyChecklistItemUpdatePayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        _load_family_checklist_item_for_member(cursor, item_id, profile_id)
+        updates = payload.model_dump(exclude_unset=True)
+        assignments: list[str] = []
+        params: list[Any] = []
+        if "label" in updates:
+            assignments.append("label = %s")
+            params.append(updates["label"])
+        if "isDone" in updates:
+            assignments.append("is_done = %s")
+            params.append(bool(updates["isDone"]))
+        if assignments:
+            assignments.append("updated_at = UTC_TIMESTAMP()")
+            params.append(item_id)
+            cursor.execute(f"UPDATE family_plan_checklist_items SET {', '.join(assignments)} WHERE id = %s", params)
+            conn.commit()
+        cursor.execute(
+            """
+            SELECT id, match_id AS matchId, section, label, is_done AS isDone,
+                   created_by_profile_id AS createdByProfileId, created_at AS createdAt,
+                   updated_at AS updatedAt
+            FROM family_plan_checklist_items WHERE id = %s
+            """,
+            (item_id,),
+        )
+        return {"ok": True, "item": normalize_row(cursor.fetchone())}
+
+
+@app.delete("/api/member/family-room/checklist/{item_id}")
+def member_delete_family_checklist_item(item_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        _load_family_checklist_item_for_member(cursor, item_id, profile_id)
+        cursor.execute("DELETE FROM family_plan_checklist_items WHERE id = %s", (item_id,))
+        conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/member/family-room/{profile_identifier}/documents")
+async def member_upload_family_document(
+    profile_identifier: str,
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+
+    content_type = (file.content_type or "").split(";")[0].lower()
+    ext = ALLOWED_CHAT_ATTACHMENT_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(status_code=415, detail="Unsupported file type - use JPEG, PNG, WebP or PDF")
+    body = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File is too large")
+    if not body:
+        raise HTTPException(status_code=422, detail="File is empty")
+    if content_type == "application/pdf" and not body.startswith(b"%PDF-"):
+        raise HTTPException(status_code=422, detail="The uploaded file is not a valid PDF")
+    if content_type.startswith("image/"):
+        inspection = inspect_chat_image(body)
+        expected_format = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}[content_type]
+        if inspection["sourceFormat"] != expected_format:
+            raise HTTPException(status_code=422, detail="File contents do not match the declared image type")
+    original_name = str(file.filename or f"document{ext}").replace("\\", "/").rsplit("/", 1)[-1]
+    original_name = re.sub(r"[\x00-\x1f\x7f]", "", original_name).strip()[:255]
+    if original_name in {"", ".", ".."}:
+        original_name = f"document{ext}"
+
+    storage_path: Path | None = None
+    created_file = False
+    committed = False
+    try:
+        with db_cursor() as (conn, cursor):
+            require_family_premium(cursor, profile_id)
+            match_id = require_active_match(cursor, profile_id, other_profile_id)
+            storage_key = f"family-room/{match_id}/{secrets.token_hex(16)}{ext}"
+            storage_path = family_document_storage_path(storage_key)
+            storage_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with storage_path.open("xb") as target:
+                created_file = True
+                target.write(body)
+            storage_path.chmod(0o600)
+            metadata = {"originalName": original_name, "matchId": match_id, "uploadedByProfileId": profile_id, "purpose": "family_room_document", "privateStorage": True}
+            cursor.execute(
+                """
+                INSERT INTO media_files (storage_key, public_url, mime_type, bytes, metadata)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (storage_key, None, content_type, len(body), json.dumps(metadata, ensure_ascii=False)),
+            )
+            media_file_id = cursor.lastrowid
+            cursor.execute(
+                """
+                INSERT INTO family_plan_documents (match_id, media_file_id, display_name, uploaded_by_profile_id, created_at)
+                VALUES (%s, %s, %s, %s, UTC_TIMESTAMP())
+                """,
+                (match_id, media_file_id, original_name, profile_id),
+            )
+            document_id = cursor.lastrowid
+            content_url = f"/api/member/family-room/documents/{document_id}/content"
+            cursor.execute("UPDATE media_files SET public_url = %s WHERE id = %s", (content_url, media_file_id))
+            cursor.execute(
+                """
+                SELECT fpd.id, fpd.match_id AS matchId, fpd.display_name AS displayName,
+                       fpd.uploaded_by_profile_id AS uploadedByProfileId, fpd.created_at AS createdAt,
+                       mf.mime_type AS mimeType, mf.bytes AS bytes
+                FROM family_plan_documents fpd JOIN media_files mf ON mf.id = fpd.media_file_id
+                WHERE fpd.id = %s
+                """,
+                (document_id,),
+            )
+            document = normalize_row(cursor.fetchone())
+            document["contentUrl"] = content_url
+            conn.commit()
+            committed = True
+    finally:
+        if created_file and not committed and storage_path is not None:
+            try:
+                storage_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Private Family Room upload rollback requires storage cleanup")
+    return {"ok": True, "document": document}
+
+
+def _load_family_document_for_member(cursor, document_id: int, profile_id: int) -> dict[str, Any]:
+    cursor.execute(
+        """
+        SELECT fpd.id, fpd.match_id, fpd.display_name AS displayName,
+               mf.id AS mediaFileId, mf.storage_key AS storageKey, mf.mime_type AS mimeType,
+               pm.profile_a_id, pm.profile_b_id
+        FROM family_plan_documents fpd
+        JOIN media_files mf ON mf.id = fpd.media_file_id
+        JOIN profile_matches pm ON pm.id = fpd.match_id
+        WHERE fpd.id = %s AND (pm.profile_a_id = %s OR pm.profile_b_id = %s) AND pm.status = 'ACTIVE'
+          AND mf.metadata->>'purpose' = 'family_room_document'
+        LIMIT 1 FOR UPDATE OF fpd
+        """,
+        (document_id, profile_id, profile_id),
+    )
+    document = cursor.fetchone()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    require_active_match(cursor, int(document["profile_a_id"]), int(document["profile_b_id"]))
+    return document
+
+
+@app.get("/api/member/family-room/documents/{document_id}/content")
+def member_family_document_content(document_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_family_premium(cursor, profile_id)
+        document = _load_family_document_for_member(cursor, document_id, profile_id)
+    storage_path = family_document_storage_path(str(document.get("storageKey") or ""))
+    try:
+        body = storage_path.read_bytes()
+    except OSError as error:
+        raise HTTPException(status_code=404, detail="Document source is unavailable") from error
+    return Response(
+        content=body,
+        media_type=str(document.get("mimeType") or "application/octet-stream"),
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "attachment; filename*=UTF-8''" + urllib.parse.quote(str(document.get("displayName") or "document"), safe=""),
+        },
+    )
+
+
+@app.delete("/api/member/family-room/documents/{document_id}")
+def member_delete_family_document(document_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        document = _load_family_document_for_member(cursor, document_id, profile_id)
+        storage_path = family_document_storage_path(str(document.get("storageKey") or ""))
+        cursor.execute("DELETE FROM family_plan_documents WHERE id = %s", (document_id,))
+        cursor.execute(
+            """
+            UPDATE media_files SET public_url = NULL,
+                metadata = COALESCE(metadata, '{}'::jsonb) || '{"familyRoomDeletionPending": true}'::jsonb
+            WHERE id = %s AND metadata->>'purpose' = 'family_room_document'
+            """,
+            (int(document["mediaFileId"]),),
+        )
+        conn.commit()
+    try:
+        storage_path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Private Family Room file cleanup requires retry")
+        return {"ok": True, "storageCleanupPending": True}
+    try:
+        with db_cursor() as (conn, cursor):
+            cursor.execute(
+                """
+                DELETE FROM media_files WHERE id = %s
+                  AND metadata->>'purpose' = 'family_room_document'
+                  AND metadata->>'familyRoomDeletionPending' = 'true'
+                  AND NOT EXISTS (SELECT 1 FROM family_plan_documents WHERE media_file_id = media_files.id)
+                """,
+                (int(document["mediaFileId"]),),
+            )
+            conn.commit()
+    except Exception:
+        logger.warning("Private Family Room media metadata cleanup requires retry")
+        return {"ok": True, "storageCleanupPending": True}
+    return {"ok": True}
 
 
 def livekit_is_configured() -> bool:

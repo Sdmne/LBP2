@@ -77,6 +77,7 @@ CLAUDE.md
 # Database-backed reference exports
 catalog_locations.json
 partner_services.json
+lbp/backend/sql/
 lbp/frontend/src/reference-article-meta.ts
 lbp/frontend/public/web-static/articles/
 
