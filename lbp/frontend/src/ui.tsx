@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Room, RoomEvent } from "livekit-client";
+import { MemberChatCalls } from "./member-chat-calls";
 import {
   Link,
   Navigate,
@@ -19,6 +19,13 @@ import {
 } from "react-router-dom";
 import { ApiError, createApiClient } from "./api";
 import { loadKnowledgeArticles, normalizeArticle } from "./articles";
+import { firstAvatarText, userInitials, UserAvatar } from "./user-avatar";
+import { MemberProfile } from "./member-profile";
+import { MemberAccount, ownProfileData } from "./member-account";
+import { MemberLikes } from "./member-likes";
+import { MemberChat, ChatLegacyRedirect } from "./member-chat";
+import { MemberProfileEdit } from "./member-profile-edit";
+import { MemberProfilePhotos, MemberProfileVerification } from "./member-profile-tools";
 import {
   signInWithSocial,
   socialErrorMessage,
@@ -483,170 +490,7 @@ function CookieConsent() {
   );
 }
 
-function CallManager({ session }: { session: Session }) {
-  const [incoming, setIncoming] = useState<Row | null>(null);
-  const [active, setActive] = useState<Row | null>(null);
-  const [state, setState] = useState("");
-  const media = useRef<HTMLDivElement | null>(null);
-  const roomRef = useRef<Room | null>(null);
-
-  useEffect(() => {
-    if (!session || active) return;
-    let alive = true;
-    const poll = () => {
-      void api
-        .get<{ items: Row[] }>("/member/calls/incoming")
-        .then((result) => alive && setIncoming(result.items?.[0] || null))
-        .catch(() => undefined);
-    };
-    poll();
-    const timer = window.setInterval(poll, 3000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, [session, active]);
-
-  useEffect(() => {
-    if (!active) return;
-    const serverUrl = asText(active.serverUrl);
-    const token = asText(active.token);
-    if (serverUrl === "—" || token === "—") return;
-    let cancelled = false;
-    const room = new Room();
-    roomRef.current = room;
-    room.on(RoomEvent.TrackSubscribed, (track) => {
-      const element = track.attach();
-      element.autoplay = true;
-      if (element instanceof HTMLVideoElement) element.playsInline = true;
-      media.current?.append(element);
-    });
-    room.on(RoomEvent.TrackUnsubscribed, (track) =>
-      track.detach().forEach((element) => element.remove()),
-    );
-    room.on(RoomEvent.Disconnected, () => {
-      if (!cancelled) {
-        setState("Call ended.");
-        setActive(null);
-      }
-    });
-    void (async () => {
-      try {
-        setState("Connecting…");
-        await room.connect(serverUrl, token);
-        await room.localParticipant.setMicrophoneEnabled(true);
-        if (asText(active.callType).toUpperCase() === "VIDEO")
-          await room.localParticipant.setCameraEnabled(true);
-        if (!cancelled) setState("Connected");
-      } catch {
-        if (!cancelled) {
-          setState("Unable to connect the call.");
-          setActive(null);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      room.disconnect();
-      if (roomRef.current === room) roomRef.current = null;
-      media.current?.replaceChildren();
-    };
-  }, [active]);
-
-  useEffect(() => {
-    const start = (event: Event) => {
-      const call = (event as CustomEvent<Row>).detail;
-      if (call) setActive(call);
-    };
-    window.addEventListener("lbp-call-start", start);
-    return () => window.removeEventListener("lbp-call-start", start);
-  }, []);
-
-  const decline = async () => {
-    if (!incoming?.id) return;
-    const call = incoming;
-    setIncoming(null);
-    try {
-      await api.post(
-        `/member/calls/${encodeURIComponent(asText(call.id))}/decline`,
-      );
-    } catch {
-      setState("Could not decline the call.");
-    }
-  };
-  const accept = async () => {
-    if (!incoming?.id) return;
-    const call = incoming;
-    setIncoming(null);
-    try {
-      const result = await api.post<{ call: Row }>(
-        `/member/calls/${encodeURIComponent(asText(call.id))}/accept`,
-      );
-      setActive(result.call);
-    } catch {
-      setState("This call is no longer available.");
-    }
-  };
-  const end = async () => {
-    if (!active?.id) return;
-    const call = active;
-    setActive(null);
-    roomRef.current?.disconnect();
-    try {
-      await api.post(
-        `/member/calls/${encodeURIComponent(asText(call.id))}/end`,
-      );
-    } catch {
-      setState("The call was closed locally.");
-    }
-  };
-
-  return (
-    <>
-      {incoming && (
-        <div
-          className="call-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Incoming call"
-        >
-          <section>
-            <p className="eyebrow">
-              Incoming {asText(incoming.callType).toLowerCase()} call
-            </p>
-            <h2>{asText(incoming.peerName)}</h2>
-            <div className="actions">
-              <button className="secondary" onClick={() => void decline()}>
-                Decline
-              </button>
-              <button className="primary" onClick={() => void accept()}>
-                Accept
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-      {active && (
-        <div
-          className="call-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Active call"
-        >
-          <section>
-            <p className="eyebrow">{asText(active.callType)} call</p>
-            <h2>{asText(active.peerName)}</h2>
-            <p className="notice">{state || "Calling…"}</p>
-            <div className="call-media" ref={media} />
-            <button className="secondary" onClick={() => void end()}>
-              End call
-            </button>
-          </section>
-        </div>
-      )}
-    </>
-  );
-}
+function CallManager({session}:{session:Session}) { return <MemberChatCalls session={session} locale={localeOf()} />; }
 
 const SITE_TEXT = {
   en: {
@@ -677,17 +521,18 @@ const SITE_TEXT = {
 
 function MemberCounters({
   session,
-  onLogout,
+  menu = false,
+  onNavigate,
 }: {
   session: Session;
-  onLogout: () => Promise<void>;
+  menu?: boolean;
+  onNavigate?: () => void;
 }) {
   const locale = localeOf();
   const text = SITE_TEXT[locale];
   const [counts, setCounts] = useState<Row>({});
-  const [member, setMember] = useState<Row>({});
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [memberState, setMemberState] = useState<{ userId: unknown; value: Row } | null>(null);
+  const member = memberState?.userId === session?.user.id ? memberState?.value || {} : {};
   useEffect(() => {
     if (!session) {
       setCounts({});
@@ -701,29 +546,25 @@ function MemberCounters({
         .catch(() => alive && setCounts({}));
     };
     load();
+    window.addEventListener("lbp-member-changed", load);
     const timer = window.setInterval(load, 30_000);
     return () => {
       alive = false;
+      window.removeEventListener("lbp-member-changed", load);
       window.clearInterval(timer);
     };
   }, [session]);
   useEffect(() => {
     if (!session) return;
     let alive = true;
-    void api
+    const load = () => { void api
       .get<Row>("/member/me")
-      .then((result) => alive && setMember(result || {}))
-      .catch(() => alive && setMember({}));
-    return () => { alive = false; };
+      .then((result) => alive && setMemberState({ userId: session.user.id, value: result || {} }))
+      .catch(() => alive && setMemberState(null)); };
+    load();
+    window.addEventListener("lbp-member-changed", load);
+    return () => { alive = false; window.removeEventListener("lbp-member-changed", load); };
   }, [session]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menuOpen]);
   if (!session) return null;
   const likes = Number(counts.likesYou ?? counts.likesyou ?? member.likesYou ?? member.likesyou ?? 0);
   const messages = Number(counts.unreadMessages ?? counts.unreadmessages ?? member.unreadMessages ?? member.unreadmessages ?? 0);
@@ -731,28 +572,23 @@ function MemberCounters({
   const data = profile.data && typeof profile.data === "object" ? profile.data as Row : {};
   const photos = Array.isArray(member.photos) ? member.photos : [];
   const firstPhoto = photos[0] && typeof photos[0] === "object" ? photos[0] as Row : {};
-  const avatar = String(profile.avatarUrl ?? data.avatarUrl ?? firstPhoto.publicUrl ?? firstPhoto.url ?? "");
-  const displayName = String(session.user.displayName ?? profile.displayName ?? data.displayName ?? "Member");
-  const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  const avatar = firstAvatarText(profile.avatarUrl, profile.avatar_url, data.avatarUrl, data.avatar_url, firstPhoto.publicUrl, firstPhoto.url);
+  const displayName = firstAvatarText(profile.displayName, profile.display_name, data.displayName, data.display_name, session.user.displayName, session.user.display_name, "Member");
   return (
-    <div className="member-header-actions" aria-label={text.notifications}>
-      <Link className="member-icon-link" to={`/${locale}/likes`} aria-label={text.likes}>
+    <div className={menu ? "member-menu-counters" : "member-header-actions"} aria-label={text.notifications}>
+      <Link className={menu ? "member-menu-action" : "member-icon-link"} onClick={onNavigate} to={`/${locale}/likes`} aria-label={text.likes} aria-current={window.location.pathname === `/${locale}/likes` ? "page" : undefined}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /><path d="M7 10v12" /></svg>
+        {menu && <span>{text.likes}</span>}
         {likes > 0 ? <b>{likes > 99 ? "99+" : likes}</b> : null}
       </Link>
-      <Link className="member-icon-link" to={`/${locale}/messages`} aria-label={text.messages}>
+      <Link className={menu ? "member-menu-action" : "member-icon-link"} onClick={onNavigate} to={`/${locale}/chat`} aria-label={text.messages} aria-current={new RegExp(`^/${locale}/(?:messages|chat)(?:/|$)`).test(window.location.pathname) ? "page" : undefined}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /></svg>
+        {menu && <span>{text.messages}</span>}
         {messages > 0 ? <b>{messages > 99 ? "99+" : messages}</b> : null}
       </Link>
-      <div className="member-avatar-menu" ref={menuRef}>
-        <button type="button" className="member-avatar-button" aria-label={text.profile} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}>
-          {avatar ? <img src={avatar} alt="" /> : <span>{initials}</span>}
-        </button>
-        {menuOpen ? <div className="member-avatar-dropdown">
-          <Link onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
-          <button type="button" onClick={() => void onLogout()}>{text.signOut}</button>
-        </div> : null}
-      </div>
+      {!menu && <Link className="member-avatar-button" aria-label={text.profile} to={`/${locale}/profile`}>
+          <UserAvatar src={avatar} name={displayName} fallbackClassName="member-avatar-initials" />
+      </Link>}
     </div>
   );
 }
@@ -773,8 +609,13 @@ function Shell({
   const isLanding = new RegExp(`^/${locale}/?$`).test(window.location.pathname);
   const isAuth = new RegExp(`^/${locale}/auth/`).test(window.location.pathname);
   const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(window.location.pathname);
+  const isChat = new RegExp(`^/${locale}/(?:chat|messages)(?:/|$)`).test(window.location.pathname);
+  const isProfileTool = new RegExp(`^/${locale}/(?:profile/(?:edit|photos|verification)|photos|verification)/?$`).test(window.location.pathname);
+  const hasMemberMenu = isChat || isProfileTool;
+  const isAccount = new RegExp(`^/${locale}/(?:profile(?:/(?:notifications|blocked))?|likes)/?$`).test(window.location.pathname);
   const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(window.location.pathname);
-  const isCatalog = new RegExp(`^/${locale}/catalog(?:/|$)`).test(window.location.pathname);
+  const isCatalog = !isProfileTool && new RegExp(`^/${locale}/(?:catalog(?:/|$)|profile/[^/]+/?$)`).test(window.location.pathname);
+  const isMemberDetail = !isProfileTool && new RegExp(`^/${locale}/(?:catalog|profile)/[^/]+/?$`).test(window.location.pathname);
   const isClinics = new RegExp(`^/${locale}/clinics(?:/|$)`).test(window.location.pathname);
   const isLawyers = new RegExp(`^/${locale}/lawyers(?:/|$)`).test(window.location.pathname);
   const isDirectory = isClinics || isLawyers;
@@ -786,6 +627,19 @@ function Shell({
   const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(window.location.pathname);
   const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(window.location.pathname);
   const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(window.location.pathname);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest(".mobile-menu, .web-header nav")) setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [hasMemberMenu, menuOpen]);
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
@@ -816,7 +670,7 @@ function Shell({
     window.location.assign(`/${parts.join("/")}${window.location.search}${window.location.hash}`);
   };
   const navigation = (
-    <nav className={menuOpen ? "open" : ""}>
+    <nav className={menuOpen ? "open" : ""} aria-label={locale === "ru" ? "Основная навигация" : locale === "es" ? "Navegación principal" : "Primary navigation"}>
       <Link className={isKnowledge ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/knowledge-hub`}>
         {text.knowledge}
       </Link>
@@ -839,7 +693,7 @@ function Shell({
         {text.pricing}
       </Link>
       <div className="mobile-nav-actions">
-        {session ? (
+        {session && hasMemberMenu ? (menuOpen && <MemberCounters session={session} menu onNavigate={() => setMenuOpen(false)} />) : session ? (
           <>
             <Link onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
             <button className="plain-button" onClick={() => void onLogout()}>{text.signOut}</button>
@@ -854,8 +708,8 @@ function Shell({
     </nav>
   );
   return (
-    <div className="web-app">
-      {!isStandaloneAuth && <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
+    <div className={`web-app${isChat ? " chat-app" : ""}${isProfileTool ? " profile-tools-app" : ""}`}>
+      <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
         <div className="web-header-inner">
           <Link className="logo" to={`/${locale}`} aria-label="LetsBeParents">
             <img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" />
@@ -868,13 +722,11 @@ function Shell({
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((value) => !value)}
           >
-            <span />
-            <span />
-            <span />
+            {hasMemberMenu ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" /></svg> : <><span /><span /><span /></>}
           </button>
           {session ? (
             <div className="header-actions member-header-actions-wrap">
-              <MemberCounters session={session} onLogout={onLogout} />
+              <MemberCounters session={session} />
             </div>
           ) : (
             <div className="header-actions">
@@ -887,8 +739,8 @@ function Shell({
             </div>
           )}
         </div>
-      </header>}
-      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isStaticPage ? " static-main" : ""}`}>{children}</main>
+      </header>
+      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isMemberDetail ? " member-profile-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isStaticPage ? " static-main" : ""}${isAccount ? " account-main" : ""}`}>{children}</main>
       <footer className="web-footer">
         <div className="web-footer-inner">
           <div className="footer-brand">
@@ -1353,8 +1205,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         email,
         password,
       });
-      onLogin(await refreshSession({ user: response.user }));
-      navigate(`/${locale}/catalog`);
+      const nextSession = await refreshSession({ user: response.user });
+      onLogin(nextSession);
+      navigate(`/${locale}/${nextSession?.user.emailVerified === false ? "auth/verify-email" : "catalog"}`);
     } catch {
       setError(copy.signInError);
     } finally {
@@ -1455,7 +1308,7 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
         locale,
       });
       onLogin(await refreshSession({ user: response.user }));
-      navigate(`/${locale}/profile`);
+      navigate(`/${locale}/auth/verify-email`);
     } catch {
       setError(
         copy.createError,
@@ -1617,10 +1470,14 @@ const standaloneAuthCopy = {
     resetDone: "Password updated. You can now sign in.",
     wait: "Please wait...",
     verifyTitle: "Confirm your email",
-    verifyLead: "Open the link in your email, or request a new confirmation message.",
+    verifyLead: "Enter the 6-digit code from your email. The confirmation link in the same message also works.",
     resend: "Resend email",
     verifySent: "We sent a confirmation link to your email.",
     verifyDone: "Email confirmed. You can continue to LetsBeParents.",
+    verifyCode: "6-digit code",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verify email",
+    invalidCode: "The code is invalid or has expired.",
     alreadyVerified: "Your email is already confirmed.",
     recentlySent: "A confirmation email was sent recently. Check your inbox.",
     deliveryFailed: "The email could not be delivered. Please try again later.",
@@ -1639,10 +1496,14 @@ const standaloneAuthCopy = {
     resetDone: "Пароль изменён. Теперь можно войти.",
     wait: "Подождите...",
     verifyTitle: "Подтвердите email",
-    verifyLead: "Откройте ссылку из письма или запросите новое письмо для подтверждения.",
+    verifyLead: "Введите 6-значный код из письма. Ссылка для подтверждения в том же письме тоже работает.",
     resend: "Отправить повторно",
     verifySent: "Мы отправили ссылку для подтверждения на вашу почту.",
     verifyDone: "Email подтверждён. Можно продолжить работу с LetsBeParents.",
+    verifyCode: "6-значный код",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Подтвердить email",
+    invalidCode: "Код неверен или срок его действия истёк.",
     alreadyVerified: "Ваш email уже подтверждён.",
     recentlySent: "Письмо уже было недавно отправлено. Проверьте почту.",
     deliveryFailed: "Не удалось доставить письмо. Повторите попытку позже.",
@@ -1661,10 +1522,14 @@ const standaloneAuthCopy = {
     resetDone: "Contraseña actualizada. Ya puedes iniciar sesión.",
     wait: "Espera...",
     verifyTitle: "Confirma tu correo",
-    verifyLead: "Abre el enlace del correo o solicita un nuevo mensaje de confirmación.",
+    verifyLead: "Introduce el código de 6 dígitos del correo. El enlace del mismo mensaje también funciona.",
     resend: "Reenviar correo",
     verifySent: "Hemos enviado un enlace de confirmación a tu correo.",
     verifyDone: "Correo confirmado. Ya puedes continuar en LetsBeParents.",
+    verifyCode: "Código de 6 dígitos",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verificar correo",
+    invalidCode: "El código no es válido o ha caducado.",
     alreadyVerified: "Tu correo ya está confirmado.",
     recentlySent: "El correo de confirmación se envió hace poco. Revisa tu bandeja de entrada.",
     deliveryFailed: "No se pudo enviar el correo. Inténtalo de nuevo más tarde.",
@@ -1744,6 +1609,7 @@ function VerifyEmail() {
   );
   const [busy, setBusy] = useState(Boolean(token));
   const [confirmed, setConfirmed] = useState(false);
+  const [code, setCode] = useState("");
   useEffect(() => {
     if (!token) return;
     window.history.replaceState(null, "", window.location.pathname);
@@ -1778,6 +1644,23 @@ function VerifyEmail() {
       setBusy(false);
     }
   };
+  const confirmCode = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(code)) {
+      setStatus(copy.invalidCode);
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.post("/auth/email-verification/code/confirm", { code });
+      setConfirmed(true);
+      setStatus(copy.verifyDone);
+    } catch {
+      setStatus(copy.invalidCode);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section className="standalone-auth-page">
       <div className="standalone-auth-visual"><img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" /></div>
@@ -1785,10 +1668,29 @@ function VerifyEmail() {
         <div className="standalone-auth-form-card">
           <h1>{copy.verifyTitle}</h1>
           <p>{copy.verifyLead}</p>
-          <form onSubmit={(event) => { event.preventDefault(); if (confirmed) navigate(`/${locale}/catalog`); else void resend(); }}>
-            <button className="standalone-auth-primary" disabled={busy}>{busy ? copy.wait : confirmed ? copy.continue : copy.resend}</button>
-          </form>
-          <p className="standalone-auth-message" data-kind={status === copy.invalid || status === copy.deliveryFailed || status === copy.generic ? "error" : "info"}>{status}</p>
+          {confirmed ? (
+            <form onSubmit={(event) => { event.preventDefault(); navigate(`/${locale}/catalog`); }}>
+              <button className="standalone-auth-primary">{copy.continue}</button>
+            </form>
+          ) : (
+            <form onSubmit={confirmCode}>
+              <label htmlFor="verify-email-code">{copy.verifyCode}</label>
+              <input
+                id="verify-email-code"
+                className="standalone-auth-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder={copy.verifyCodePlaceholder}
+                maxLength={6}
+                autoFocus={!token}
+              />
+              <button className="standalone-auth-primary" disabled={busy || code.length !== 6}>{busy ? copy.wait : copy.verifyCodeButton}</button>
+            </form>
+          )}
+          {!confirmed && <button className="standalone-auth-resend" type="button" disabled={busy} onClick={() => void resend()}>{copy.resend}</button>}
+          <p className="standalone-auth-message" data-kind={status === copy.invalid || status === copy.invalidCode || status === copy.deliveryFailed || status === copy.generic ? "error" : "info"}>{status}</p>
           <StandaloneAuthBackLink locale={locale} label={copy.back} />
         </div>
       </div>
@@ -2657,9 +2559,9 @@ function CatalogCard({
   const verified = catalogBoolean(item.isVerified ?? data.isVerified);
   const liked = catalogBoolean(item.likedByViewer ?? data.likedByViewer);
   const id = catalogText(item.id ?? data.id);
-  const detailPath = `/${locale}/catalog/${encodeURIComponent(id)}`;
+  const detailPath = `/${locale}/profile/${encodeURIComponent(id)}`;
   const title = age ? `${name}, ${age}` : name;
-  const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  const initials = userInitials(name);
   const activePhoto = photos[photoIndex];
   const movePhoto = (direction: number) => setPhotoIndex((current) => (current + direction + photos.length) % photos.length);
   return (
@@ -2787,26 +2689,36 @@ function CatalogFilterModal({
     const allOptions = fieldOptions(field);
     const selectedLabels = selected.map((token) => allOptions.find((option) => option.value === token)?.label || catalogOptionLabel(field, token));
     const filtered = allOptions.filter((option) => option.label.toLowerCase().startsWith(query.trim().toLowerCase()) || option.value.toLowerCase().startsWith(query.trim().toLowerCase()));
+    const controlId = `catalog-filter-${field}`;
+    const labelId = `${controlId}-label`;
+    const valueId = `${controlId}-value`;
+    const premiumId = `${controlId}-premium`;
+    const dropdownOpen = openField === field && !locked && !options.disabled;
     return (
       <div className={`catalog-filter-field${options.disabled ? " disabled" : ""}${field === "lookingFor" ? " looking-field" : ""}`} key={field}>
-        <label>{label}</label>
+        <label id={labelId} htmlFor={controlId}>{label}</label>
         <div className="catalog-filter-select-wrap">
           <button
+            id={controlId}
             className={`catalog-filter-select${locked ? " premium" : ""}`}
             type="button"
             disabled={options.disabled}
-            aria-expanded={openField === field}
+            aria-labelledby={`${labelId} ${valueId}${locked ? ` ${premiumId}` : ""}`}
+            aria-haspopup={locked || options.disabled ? undefined : "listbox"}
+            aria-expanded={locked || options.disabled ? undefined : dropdownOpen}
+            aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
             onClick={() => {
               if (locked) { onPremium(); return; }
               setOpenField((current) => current === field ? "" : field);
               setQuery("");
             }}
           >
-            {selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : <span>{placeholder}</span>}
-            {locked ? <em><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>{copy.premium}</em> : !options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
+            <span id={valueId} className="catalog-filter-value">{selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : placeholder}</span>
+            {locked ? <span id={premiumId} className="catalog-filter-premium-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg><span>{copy.premium}</span></span> : null}
+            {!options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
           </button>
-          {openField === field && !locked && !options.disabled && (
-            <div className="catalog-filter-dropdown" role="listbox" aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
+          {dropdownOpen && (
+            <div id={`${controlId}-options`} className="catalog-filter-dropdown" role="listbox" aria-labelledby={labelId} aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
               <div><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /></div>
               <section>
                 {filtered.length ? filtered.map((option) => {
@@ -2841,7 +2753,7 @@ function CatalogFilterModal({
           {filterField("religion", copy.religion, "—", { premium: true })}
         </div></div>
         <footer>
-          <button type="button" className="catalog-filter-clear" hidden={activeCatalogFilterCount(value) === 0} onClick={() => onChange(emptyCatalogFilters())}>{copy.clear}</button>
+          <button type="button" className="catalog-filter-clear" hidden={activeCatalogFilterCount(value) === 0} onClick={() => { onChange(emptyCatalogFilters()); setOpenField(""); setQuery(""); }}>{copy.clear}</button>
           <button type="button" className="catalog-filter-apply" onClick={onApply}>{copy.apply}</button>
         </footer>
       </section>
@@ -2868,7 +2780,7 @@ function Catalog({ session }: { session: Session }) {
   const [error, setError] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const loadMoreSentinel = useRef<HTMLDivElement | null>(null);
-  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; cities: CatalogOption[]; premium: boolean }>({ countries: [], cities: [], premium: Boolean(session?.user.isPremium) });
+  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; cities: CatalogOption[]; premium: boolean }>({ countries: [], cities: [], premium: catalogBoolean(session?.user.isPremium) });
   const querySignature = JSON.stringify([period, filters]);
   useEffect(() => {
     let alive = true;
@@ -2902,7 +2814,7 @@ function Catalog({ session }: { session: Session }) {
     return () => { alive = false; };
   }, [copy.failed, offset, querySignature]);
   useEffect(() => {
-    if (!filterOpen || catalogOptions.countries.length) return;
+    if (!filterOpen) return;
     let alive = true;
     api.get<{ countries?: Row[]; isPremium?: unknown }>("/member/catalog/filter-options?limit=200")
       .then((data) => {
@@ -2910,12 +2822,12 @@ function Catalog({ session }: { session: Session }) {
         setCatalogOptions((current) => ({
           ...current,
           countries: (data.countries || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })),
-          premium: catalogBoolean(data.isPremium) || current.premium,
+          premium: data.isPremium === undefined ? current.premium : catalogBoolean(data.isPremium),
         }));
       })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [catalogOptions.countries.length, filterOpen]);
+  }, [filterOpen]);
   useEffect(() => {
     if (!filterOpen || draftFilters.country.length !== 1) {
       setCatalogOptions((current) => current.cities.length ? { ...current, cities: [] } : current);
@@ -2950,8 +2862,9 @@ function Catalog({ session }: { session: Session }) {
   const message = async (item: Row) => {
     if (!requireVerified()) return;
     try {
-      await api.post("/member/conversations", { targetProfileId: catalogText(item.id) });
-      navigate(`/${locale}/messages`);
+      const conversation = await api.post<Row>("/member/conversations", { targetProfileId: catalogText(item.id) });
+      if (!conversation.conversationId) throw new Error("Conversation was not created");
+      navigate(`/${locale}/chat/${encodeURIComponent(String(conversation.conversationId))}`);
     } catch { setError(copy.actionFailed); }
   };
   const applyFilters = () => {
@@ -2993,7 +2906,17 @@ function Catalog({ session }: { session: Session }) {
           <button type="button" role="tab" aria-selected={period === 30} className={period === 30 ? "active" : ""} onClick={() => changePeriod(30)}><span>1</span><small>{copy.month}</small></button>
         </div>
         <button className="catalog-reference-filter-button" type="button" aria-label={copy.allFilters} onClick={() => { setDraftFilters({ ...filters }); setFilterOpen(true); }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 4h-7" />
+            <path d="M10 4H3" />
+            <path d="M21 12h-9" />
+            <path d="M8 12H3" />
+            <path d="M21 20h-5" />
+            <path d="M12 20H3" />
+            <path d="M14 2v4" />
+            <path d="M8 10v4" />
+            <path d="M16 18v4" />
+          </svg>
           <span>{copy.filters}</span>{filterCount > 0 ? <b>{filterCount}</b> : null}
         </button>
       </div>
@@ -3008,277 +2931,11 @@ function Catalog({ session }: { session: Session }) {
 }
 
 function CatalogProfile({ session }: { session: Session }) {
-  const { id = "" } = useParams();
-  const locale = localeOf();
-  const navigate = useNavigate();
-  const [profile, setProfile] = useState<Row | null>(null);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const endpoint = session ? "/member/catalog" : "/public/catalog";
-    api
-      .get<Row>(`${endpoint}/${encodeURIComponent(id)}`)
-      .then(setProfile)
-      .catch(() => setError("This profile is not available."));
-  }, [id, session]);
-  if (error)
-    return (
-      <section className="access-card">
-        <p className="error">{error}</p>
-        <Link to={`/${locale}/catalog`}>Back to catalog</Link>
-      </section>
-    );
-  if (!profile) return <LoadingIndicator />;
-  const action = async (kind: "like" | "message" | "block" | "report") => {
-    if (!session) {
-      navigate(`/${locale}/auth/login`);
-      return;
-    }
-    try {
-      if (kind === "like")
-        await api.post(`/member/likes/${encodeURIComponent(id)}`);
-      if (kind === "message")
-        await api.post("/member/conversations", { targetProfileId: id });
-      if (kind === "block")
-        await api.post(`/member/blocks/${encodeURIComponent(id)}`, {
-          reason: "Blocked from catalog",
-        });
-      if (kind === "report")
-        await api.post(`/member/reports/${encodeURIComponent(id)}`, {
-          reason: "Report from catalog",
-        });
-      setNotice(
-        kind === "message"
-          ? "Conversation is ready in Messages."
-          : `${kind[0].toUpperCase()}${kind.slice(1)} request completed.`,
-      );
-    } catch {
-      setNotice("This action is not currently available for your account.");
-    }
-  };
-  const data = (profile.data ?? {}) as Row;
-  const mayInteractWithMembers = session?.user.profileVerified === true;
-  return (
-    <article className="detail-card catalog-profile">
-      <Link to={`/${locale}/catalog`}>← Back to catalog</Link>
-      <div className="profile-summary">
-        {profile.avatarUrl ? (
-          <img src={asText(profile.avatarUrl)} alt="" />
-        ) : (
-          <div className="avatar-placeholder">
-            {asText(profile.displayName).slice(0, 1)}
-          </div>
-        )}
-        <div>
-          <h1>{asText(profile.displayName)}</h1>
-          <p>
-            {[profile.city, profile.country]
-              .filter(Boolean)
-              .map(asText)
-              .join(", ")}
-          </p>
-          <p>
-            {asText(
-              profile.profileType ??
-                data.profileType ??
-                profile.recipientType ??
-                profile.donorType,
-            )}
-          </p>
-        </div>
-      </div>
-      <p className="prose">{asText(data.about ?? data.bio)}</p>
-      {mayInteractWithMembers ? (
-        <div className="actions">
-          <button className="primary" onClick={() => action("like")}>
-            Like
-          </button>
-          <button className="secondary" onClick={() => action("message")}>
-            Message
-          </button>
-          <button className="secondary" onClick={() => action("block")}>
-            Block
-          </button>
-          <button className="secondary" onClick={() => action("report")}>
-            Report
-          </button>
-        </div>
-      ) : session ? (
-        <div className="access-card">
-          <p>Verify your profile before interacting with members.</p>
-          <Link className="primary" to={`/${locale}/verification`}>
-            Start verification
-          </Link>
-        </div>
-      ) : (
-        <Link className="primary" to={`/${locale}/auth/login`}>
-          Sign in to interact
-        </Link>
-      )}
-      {notice && <p className="notice">{notice}</p>}
-    </article>
-  );
+  return <MemberProfile session={session} locale={localeOf()} />;
 }
 
 function Likes({ session }: { session: Session }) {
-  const locale = localeOf();
-  const [data, setData] = useState<Row | null>(null);
-  const [tab, setTab] = useState("likesYou");
-  const [visitors, setVisitors] = useState<Row[]>([]);
-  const [visitorsLocked, setVisitorsLocked] = useState(false);
-  const [favourites, setFavourites] = useState<Row | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (session)
-      api
-        .get<Row>("/member/likes")
-        .then(setData)
-        .catch(() => setError("Could not load likes."));
-  }, [session]);
-  useEffect(() => {
-    if (!session || tab !== "likesYou" || !data?.readThroughId) return;
-    void api
-      .post("/member/notifications/likes/read", {
-        readThroughId: Number(data.readThroughId),
-      })
-      .catch(() => undefined);
-  }, [data, session, tab]);
-  useEffect(() => {
-    if (!session || tab !== "visitors") return;
-    api
-      .get<{ items: Row[]; locked?: boolean }>("/member/profile-views")
-      .then((response) => {
-        setVisitors(response.items || []);
-        setVisitorsLocked(Boolean(response.locked));
-      })
-      .catch(() => setError("Could not load profile visitors."));
-  }, [session, tab]);
-  useEffect(() => {
-    if (!session || (tab !== "clinics" && tab !== "lawyers")) return;
-    api
-      .get<Row>("/member/favourites")
-      .then(setFavourites)
-      .catch(() => setError("Could not load liked clinics and lawyers."));
-  }, [session, tab]);
-  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
-  const removeFavourite = async (
-    kind: "clinics" | "lawyers",
-    identifier: unknown,
-  ) => {
-    try {
-      await api.delete(
-        `/member/favourites/${kind}/${encodeURIComponent(asText(identifier))}`,
-      );
-      const refreshed = await api.get<Row>("/member/favourites");
-      setFavourites(refreshed);
-    } catch {
-      setError("Could not remove this item.");
-    }
-  };
-  const tabs = [
-    ["likesYou", "Likes you"],
-    ["matches", "Matches"],
-    ["myLikes", "My likes"],
-    ["visitors", "Visitors"],
-    ["clinics", "Clinics"],
-    ["lawyers", "Lawyers"],
-  ];
-  const profileItems = Array.isArray(data?.[tab])
-    ? (data?.[tab] as Row[])
-    : tab === "visitors"
-      ? visitors
-      : [];
-  const favouriteItems = (favourites?.[tab] as Row[] | undefined) || [];
-  const isLocked =
-    (tab === "likesYou" && Boolean(data?.likesYouLocked)) ||
-    (tab === "visitors" && visitorsLocked);
-  return (
-    <section>
-      <h1>Likes</h1>
-      <nav className="member-tabs">
-        {tabs.map(([key, title]) => (
-          <button
-            className={tab === key ? "active" : ""}
-            key={key}
-            onClick={() => setTab(key)}
-          >
-            {title}
-          </button>
-        ))}
-      </nav>
-      {error && <p className="error">{error}</p>}
-      {isLocked ? (
-        <div className="access-card">
-          <h2>Premium feature</h2>
-          <p>
-            Verify your profile and activate Premium to access this section.
-          </p>
-        </div>
-      ) : tab === "clinics" || tab === "lawyers" ? (
-        <div className="directory-grid">
-          {favouriteItems.map((item, index) => (
-            <article
-              className="directory-card static"
-              key={asText(item.id ?? index)}
-            >
-              {item.logoUrl || item.photoUrl ? (
-                <img src={asText(item.logoUrl ?? item.photoUrl)} alt="" />
-              ) : (
-                <div className="avatar-placeholder">
-                  {asText(item.name).slice(0, 1)}
-                </div>
-              )}
-              <div>
-                <h3>{asText(item.name)}</h3>
-                <p>
-                  {[item.city, item.country]
-                    .filter(Boolean)
-                    .map(asText)
-                    .join(", ")}
-                </p>
-                <button
-                  className="secondary"
-                  onClick={() => void removeFavourite(tab, item.id)}
-                >
-                  Liked
-                </button>
-              </div>
-            </article>
-          ))}
-          {!favouriteItems.length && (
-            <p className="notice">There are no liked {tab}.</p>
-          )}
-        </div>
-      ) : (
-        <div className="profile-grid">
-          {profileItems.map((item, index) => (
-            <article
-              className="profile-card"
-              key={String(item.profileId ?? item.id ?? index)}
-            >
-              {item.avatarUrl ? (
-                <img src={asText(item.avatarUrl)} alt="" />
-              ) : (
-                <div className="avatar-placeholder">
-                  {asText(item.displayName).slice(0, 1)}
-                </div>
-              )}
-              <h2>{asText(item.displayName)}</h2>
-              <p>
-                {[item.city, item.country]
-                  .filter(Boolean)
-                  .map(asText)
-                  .join(", ")}
-              </p>
-            </article>
-          ))}
-          {!profileItems.length && (
-            <p className="notice">There are no entries to display.</p>
-          )}
-        </div>
-      )}
-    </section>
-  );
+  return <MemberLikes session={session} locale={localeOf()} renderProfileCard={props => <CatalogCard {...props} />} />;
 }
 
 function Profile({ session }: { session: Session }) {
@@ -3290,7 +2947,7 @@ function Profile({ session }: { session: Session }) {
     if (session)
       api.get<Row>("/member/me").then((result) => {
         setData(result);
-        setDraft((result.profile ?? {}) as Row);
+        setDraft(ownProfileData(result.profile));
       });
   }, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
@@ -3554,7 +3211,7 @@ function MemberLinks({ locale }: { locale: string }) {
       <Link to={`/${locale}/profile`}>Profile</Link>
       <Link to={`/${locale}/photos`}>Photos</Link>
       <Link to={`/${locale}/verification`}>Verification</Link>
-      <Link to={`/${locale}/messages`}>Messages</Link>
+      <Link to={`/${locale}/chat`}>Messages</Link>
       <Link to={`/${locale}/visitors`}>Visitors</Link>
       <Link to={`/${locale}/favourites`}>Saved</Link>
       <Link to={`/${locale}/blocked`}>Blocked</Link>
@@ -3952,189 +3609,7 @@ function Verification({ session }: { session: Session }) {
   );
 }
 
-function Conversations({ session }: { session: Session }) {
-  const locale = localeOf();
-  const [conversations, setConversations] = useState<Row[]>([]);
-  const [active, setActive] = useState<Row | null>(null);
-  const [messages, setMessages] = useState<Row[]>([]);
-  const [body, setBody] = useState("");
-  const [notice, setNotice] = useState("");
-  const load = () => {
-    void api
-      .get<{ items: Row[] }>("/member/conversations")
-      .then((data) => setConversations(data.items || []))
-      .catch(() => setNotice("Could not load messages."));
-  };
-  const loadMessages = async (conversationId: unknown) => {
-    const response = await api.get<{ items: Row[] }>(
-      `/member/conversations/${encodeURIComponent(asText(conversationId))}/messages`,
-    );
-    setMessages(response.items || []);
-  };
-  useEffect(load, []);
-  useEffect(() => {
-    if (active?.id)
-      void loadMessages(active.id).catch(() =>
-        setNotice("Could not load this conversation."),
-      );
-  }, [active]);
-  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!active?.id || !body.trim()) return;
-    try {
-      await api.post(
-        `/member/conversations/${encodeURIComponent(asText(active.id))}/messages`,
-        { body },
-      );
-      setBody("");
-      await loadMessages(active.id);
-      load();
-    } catch {
-      setNotice(
-        "Message could not be sent. Both members must be verified before chatting.",
-      );
-    }
-  };
-  const attach = async (file: File | undefined) => {
-    if (!file || !active?.id) return;
-    try {
-      const data = new FormData();
-      data.append("file", file);
-      await api.upload(
-        `/member/conversations/${encodeURIComponent(asText(active.id))}/attachments`,
-        data,
-      );
-      await loadMessages(active.id);
-      load();
-    } catch {
-      setNotice(
-        "Attachment could not be sent. Images and PDF files are supported after verification.",
-      );
-    }
-  };
-  const startCall = async (callType: "VOICE" | "VIDEO") => {
-    if (!active?.id) return;
-    try {
-      const response = await api.post<Row>(
-        `/member/conversations/${encodeURIComponent(asText(active.id))}/calls`,
-        { callType },
-      );
-      const call = response.call as Row | undefined;
-      if (!call) throw new Error("Call was not created");
-      window.dispatchEvent(
-        new CustomEvent<Row>("lbp-call-start", { detail: call }),
-      );
-      setNotice("Calling your match…");
-    } catch {
-      setNotice(
-        "A Premium subscription and verification are required for calls.",
-      );
-    }
-  };
-  return (
-    <section className="conversations">
-      <div>
-        <h1>Messages</h1>
-        <MemberLinks locale={locale} />
-        {notice && (
-          <p className={notice.includes("started") ? "notice" : "error"}>
-            {notice}
-          </p>
-        )}
-        <div className="conversation-layout">
-          <aside>
-            {conversations.map((item) => (
-              <button
-                className={active?.id === item.id ? "active" : ""}
-                key={asText(item.id)}
-                onClick={() => setActive(item)}
-              >
-                <strong>
-                  {asText(
-                    item.peerDisplayName ?? item.displayName ?? item.title,
-                  )}
-                </strong>
-                <small>{asText(item.lastMessageBody)}</small>
-              </button>
-            ))}
-          </aside>
-          <div className="message-pane">
-            {active ? (
-              <>
-                <div className="message-title">
-                  <h2>
-                    {asText(
-                      active.peerDisplayName ??
-                        active.displayName ??
-                        active.title,
-                    )}
-                  </h2>
-                  <div className="call-actions">
-                    <button
-                      className="secondary"
-                      onClick={() => void startCall("VOICE")}
-                    >
-                      Audio call
-                    </button>
-                    <button
-                      className="secondary"
-                      onClick={() => void startCall("VIDEO")}
-                    >
-                      Video call
-                    </button>
-                    {Boolean(active.other_profile_id) && (
-                      <Link
-                        className="secondary"
-                        to={`/${locale}/family-room/${encodeURIComponent(asText(active.other_profile_id))}`}
-                      >
-                        Family Room
-                      </Link>
-                    )}
-                  </div>
-                </div>
-                <div className="message-list">
-                  {messages.map((message) => (
-                    <div className="message-bubble" key={asText(message.id)}>
-                      <span>{asText(message.body)}</span>
-                      {Boolean(message.mediaUrl) && (
-                        <a
-                          href={asText(message.mediaUrl)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open attachment
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <form onSubmit={send}>
-                  <input
-                    value={body}
-                    onChange={(event) => setBody(event.target.value)}
-                    placeholder="Write a message…"
-                  />
-                  <label className="attachment-control">
-                    Attach
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
-                      onChange={(event) => void attach(event.target.files?.[0])}
-                    />
-                  </label>
-                  <button className="primary">Send</button>
-                </form>
-              </>
-            ) : (
-              <p>Select a conversation.</p>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
+function Conversations({ session }: { session: Session }) { return <MemberChat session={session} locale={localeOf()} />; }
 
 function SimpleMemberList({
   session,
@@ -4180,13 +3655,7 @@ function SimpleMemberList({
             className="profile-card"
             key={asText(item.profileId ?? item.id ?? index)}
           >
-            {item.avatarUrl ? (
-              <img src={asText(item.avatarUrl)} alt="" />
-            ) : (
-              <div className="avatar-placeholder">
-                {asText(item.displayName).slice(0, 1)}
-              </div>
-            )}
+            <UserAvatar src={item.avatarUrl} name={firstAvatarText(item.displayName, item.display_name, item.name)} />
             <h2>{asText(item.displayName ?? item.name)}</h2>
             <p>
               {[item.city, item.country].filter(Boolean).map(asText).join(", ")}
@@ -4286,6 +3755,7 @@ function AccountDeletion({ session }: { session: Session }) {
   const locale = localeOf();
   const [reason, setReason] = useState("Prefer not to say");
   const [details, setDetails] = useState("");
+  const [confirmation, setConfirmation] = useState("");
   const [notice, setNotice] = useState("");
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
   const submit = async (event: FormEvent) => {
@@ -4294,8 +3764,10 @@ function AccountDeletion({ session }: { session: Session }) {
       const response = await api.post<Row>("/member/account-deletion", {
         reason,
         details,
+        confirmation,
       });
       setNotice(asText(response.message ?? "Deletion request submitted."));
+      window.setTimeout(() => window.location.assign(`/${locale}/auth/login`), 1200);
     } catch {
       setNotice("Could not submit the deletion request.");
     }
@@ -4304,7 +3776,7 @@ function AccountDeletion({ session }: { session: Session }) {
     <section className="member-form danger-zone">
       <h1>Delete account</h1>
       <MemberLinks locale={locale} />
-      <p>Your request is reviewed before the account is permanently removed.</p>
+      <p>Access ends immediately. Your account, matches, and conversations are permanently deleted after 30 days.</p>
       {notice && <p className="notice">{notice}</p>}
       <form onSubmit={submit}>
         <label>
@@ -4322,7 +3794,16 @@ function AccountDeletion({ session }: { session: Session }) {
             onChange={(event) => setDetails(event.target.value)}
           />
         </label>
-        <button className="primary">Request account deletion</button>
+        <label>
+          Type DELETE to confirm
+          <input
+            value={confirmation}
+            onChange={(event) => setConfirmation(event.target.value.toUpperCase().slice(0, 6))}
+            autoComplete="off"
+            required
+          />
+        </label>
+        <button className="primary" disabled={confirmation !== "DELETE"}>Delete my account</button>
       </form>
     </section>
   );
@@ -4632,7 +4113,7 @@ function FamilyRoom({ session }: { session: Session }) {
           You don't have an active match with this profile, so there's no
           shared Family Room here yet.
         </p>
-        <Link className="secondary" to={`/${locale}/messages`}>
+        <Link className="secondary" to={`/${locale}/chat`}>
           Back to Messages
         </Link>
       </section>
@@ -7252,10 +6733,12 @@ export function WebApp() {
         element={<Navigate to="/en/knowledge-hub" replace />}
       />
       <Route path="/likes" element={<Navigate to="/en/likes" replace />} />
-      <Route path="/chat" element={<Navigate to="/en/messages" replace />} />
+      <Route path="/chat" element={<ChatLegacyRedirect />} />
+      <Route path="/chat/:conversationId" element={<ChatLegacyRedirect />} />
+      <Route path="/messages/:conversationId" element={<ChatLegacyRedirect />} />
       <Route
         path="/messages"
-        element={<Navigate to="/en/messages" replace />}
+        element={<ChatLegacyRedirect />}
       />
       <Route path="/profile" element={<Navigate to="/en/profile" replace />} />
       <Route
@@ -7305,6 +6788,10 @@ export function WebApp() {
         element={session ? content(<CatalogProfile session={session} />) : <Navigate to={`/${locale}/auth/login`} replace />}
       />
       <Route
+        path="/:locale/profile/:id"
+        element={session ? content(<CatalogProfile session={session} />) : <Navigate to={`/${locale}/auth/login`} replace />}
+      />
+      <Route
         path="/:locale/clinics"
         element={session ? content(<Directory key="clinics" kind="clinics" />) : <Navigate to={`/${locale}/auth/login`} replace />}
       />
@@ -7342,11 +6829,16 @@ export function WebApp() {
       />
       <Route
         path="/:locale/profile"
-        element={content(<Profile session={session} />)}
+        element={content(<MemberAccount session={session} locale={locale} onLogout={logout} />)}
       />
+      <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={localeOf()} />)} />
+      <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={localeOf()} />)} />
+      <Route path="/:locale/profile/verification" element={content(<MemberProfileVerification locale={localeOf()} />)} />
+      <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={locale} onLogout={logout} view="notifications" />)} />
+      <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={locale} onLogout={logout} view="blocked" />)} />
       <Route
         path="/:locale/photos"
-        element={content(<Photos session={session} />)}
+        element={content(<MemberProfilePhotos locale={localeOf()} />)}
       />
       <Route
         path="/:locale/settings"
@@ -7354,16 +6846,18 @@ export function WebApp() {
       />
       <Route
         path="/:locale/verification"
-        element={content(<Verification session={session} />)}
+        element={content(<MemberProfileVerification locale={localeOf()} />)}
       />
       <Route
         path="/:locale/messages"
-        element={content(<Conversations session={session} />)}
+        element={<ChatLegacyRedirect />}
       />
       <Route
         path="/:locale/chat"
-        element={<Navigate to={`/${locale}/messages`} replace />}
+        element={content(<Conversations session={session} />)}
       />
+      <Route path="/:locale/chat/:conversationId" element={content(<Conversations session={session} />)} />
+      <Route path="/:locale/messages/:conversationId" element={<ChatLegacyRedirect />} />
       <Route
         path="/:locale/visitors"
         element={content(

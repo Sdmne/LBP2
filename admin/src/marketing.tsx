@@ -215,8 +215,10 @@ export function MarketingFeature() {
       <nav className="campaign-tabs" aria-label="Campaign status">
         {statuses.map((value) => (
           <button
+            type="button"
             key={value || "all"}
             className={status === value ? "active" : ""}
+            aria-pressed={status === value}
             onClick={() => {
               setStatus(value);
               setPage(1);
@@ -619,6 +621,7 @@ function CampaignEditor({ campaign }: { campaign?: MarketingCampaign }) {
                   type="button"
                   key={code}
                   className={contentLocale === code ? "active" : ""}
+                  aria-pressed={contentLocale === code}
                   onClick={() => setContentLocale(code)}
                 >
                   {name}

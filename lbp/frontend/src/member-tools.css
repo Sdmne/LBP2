@@ -1,0 +1,49 @@
+.web-app.profile-tools-app { min-height:100dvh; --ink:#020817; --muted:#64748b; --line:#e2e8f0; --pink:#f31260; }
+.web-app.profile-tools-app > .web-main { display:flex; flex-direction:column; width:100%; max-width:none; min-height:0; padding:0; margin:0; flex:1 0 auto; }
+.profile-tools-app > .web-main > .profile-tools-surface { display:flex; flex-direction:column; flex:1 0 auto; }
+.profile-tools-app > .web-main > .profile-verification-context > .app-shell { flex:1 0 auto; }
+.profile-tools-app > .web-footer { display:block; flex:0 0 auto; }
+.profile-tools-app .footer-column:nth-child(2) nav a:nth-child(n+5) { display:none; }
+.profile-tools-app .footer-brand p { line-height:1.625; }
+.profile-tools-app .web-header { height:81px; min-height:81px; flex:0 0 81px; padding-block:0; background:#fff; backdrop-filter:none; }
+.profile-tools-app .web-header-inner { height:80px; min-height:80px; max-width:1280px; padding-inline:16px; }
+.profile-tools-surface { color:#020817; font-family:Geologica,Arial,sans-serif; font-size:16px; line-height:24px; font-weight:400; }
+.profile-tools-surface * { box-sizing:border-box; }
+.profile-tools-surface button,.profile-tools-surface input,.profile-tools-surface textarea { font-family:inherit; letter-spacing:0; }
+.profile-tools-surface button { cursor:pointer; }
+.profile-tools-surface button:disabled { cursor:default; }
+.profile-tools-surface svg { fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; }
+.profile-tools-surface .app-shell.profile-edit-shell, .profile-tools-surface .app-shell.photo-page-shell { padding-bottom:24px; }
+.profile-tools-surface .profile-edit-form input,.profile-tools-surface .profile-edit-form textarea { width:100%; margin:0; color:var(--ink); background:#fff; }
+.profile-tools-surface .profile-edit-form input::placeholder,.profile-tools-surface .profile-edit-form textarea::placeholder { opacity:1; }
+.profile-tools-surface [hidden] { display:none!important; }
+.profile-tools-surface .language-chips input { min-width:30px; }
+.profile-tools-surface .language-chips > span { font-weight:400!important; }
+.profile-tools-surface .language-autocomplete button { text-align:left; }
+.profile-tools-surface .tools-error { color:#991b1b; background:#fef2f2; border-radius:6px; padding:12px; font-size:14px; line-height:20px; overflow-wrap:anywhere; }
+.profile-tools-surface .tools-inline-retry { padding:0; border:0; color:var(--pink); background:transparent; text-align:left; text-decoration:underline; }
+.tools-spinner { display:inline-block; width:20px; height:20px; vertical-align:middle; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:tools-spin .7s linear infinite; }
+@keyframes tools-spin { to { transform:rotate(360deg); } }
+.profile-tools-surface .tools-modal { min-height:0; max-width:none; margin:0; }
+.member-profile-surface.profile-tools-surface .tools-modal { --lbp-visual-viewport-height:100dvh; }
+.profile-tools-surface .photo-slot.filled { overflow:hidden; }
+.profile-tools-surface .tools-photo-error { display:grid; place-items:center; width:100%; height:100%; color:#64748b; font-size:12px; }
+.profile-tools-surface .avatar-crop-stage { max-width:100%; }
+.profile-tools-surface .avatar-crop-stage img { margin:0; }
+.profile-tools-surface .crop-range input { width:auto; min-height:0; margin:0; padding:0; box-shadow:none; }
+.profile-tools-surface .main-photo-actions > input { display:none; }
+@media(max-width:767px){
+ .profile-tools-app .member-header-actions { gap:8px; }
+ .profile-tools-app .web-footer-inner { grid-template-columns:1fr auto; column-gap:40px; }
+ .profile-tools-app .member-icon-link,.profile-tools-app .mobile-menu { width:40px; height:40px; }
+ .profile-tools-app .mobile-menu.has-member-actions { margin-left:8px; }
+ .profile-tools-app .mobile-menu svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+ .profile-tools-app .web-header nav.open { top:66px; border-radius:8px; gap:0; }
+ .profile-tools-app .mobile-nav-actions { margin-top:4px; padding-top:4px; border-top:1px solid #e2e8f0; }
+ .profile-tools-app .web-header nav.open .member-menu-action { display:flex; height:32px; min-height:32px; align-items:center; gap:9px; padding:0 12px; color:#020817; font-size:14px; line-height:20px; font-weight:400; text-decoration:none; }
+ .profile-tools-app .member-menu-action svg { width:14px; height:14px; flex:0 0 14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+ .profile-tools-app .member-menu-action b { margin-left:auto; padding:1px 5px; border-radius:999px; background:#f31260; color:white; font-size:10px; line-height:14px; font-weight:500; }
+}
+@media(prefers-reduced-motion:reduce){.profile-tools-surface *{transition:none!important;scroll-behavior:auto!important}.tools-spinner{animation-duration:1.5s}}
+
+.profile-tools-surface .photo-avatar-column .avatar-preview { width:100%!important; height:auto!important; }

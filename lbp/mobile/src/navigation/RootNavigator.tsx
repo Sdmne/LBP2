@@ -10,6 +10,7 @@ import WelcomeScreen from "../screens/WelcomeScreen";
 import LoginScreen from "../screens/LoginScreen";
 import SignupScreen from "../screens/SignupScreen";
 import ForgotPasswordScreen from "../screens/ForgotPasswordScreen";
+import VerifyCodeScreen from "../screens/VerifyCodeScreen";
 import ChatScreen from "../screens/ChatScreen";
 import ProfileDetailScreen from "../screens/ProfileDetailScreen";
 import SettingsScreen from "../screens/SettingsScreen";
@@ -26,6 +27,7 @@ import CompatibilityQuizScreen from "../screens/CompatibilityQuizScreen";
 import FamilyRoomScreen from "../screens/FamilyRoomScreen";
 import CompatibilityAnswersScreen from "../screens/CompatibilityAnswersScreen";
 import CompatibilityReportScreen from "../screens/CompatibilityReportScreen";
+import DeleteAccountScreen from "../screens/DeleteAccountScreen";
 import MainTabs, { type MainTabsParamList } from "./MainTabs";
 
 export type RootStackParamList = {
@@ -33,6 +35,7 @@ export type RootStackParamList = {
   Login: undefined;
   Signup: undefined;
   ForgotPassword: undefined;
+  VerifyCode: undefined;
   // NavigatorScreenParams lets screens pushed on top of MainTabs (like
   // ResourceCategory/ResourceTool below) jump to a specific tab - e.g.
   // navigate("MainTabs", { screen: "Resources" }) - rather than just
@@ -66,12 +69,13 @@ export type RootStackParamList = {
   // report needs a profile to compare against, same shape as FamilyRoom.
   CompatibilityAnswers: undefined;
   CompatibilityReport: { profileId: number; displayName?: string | null };
+  DeleteAccount: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const { t } = useI18n();
 
   if (isLoading) {
@@ -85,7 +89,9 @@ export default function RootNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {isAuthenticated ? (
+        {isAuthenticated && user && !user.emailVerified ? (
+          <Stack.Screen name="VerifyCode" component={VerifyCodeScreen} />
+        ) : isAuthenticated ? (
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen
@@ -163,6 +169,11 @@ export default function RootNavigator() {
               name="CompatibilityReport"
               component={CompatibilityReportScreen}
               options={{ headerShown: true, title: t("nav.compatibilityReportTitle") }}
+            />
+            <Stack.Screen
+              name="DeleteAccount"
+              component={DeleteAccountScreen}
+              options={{ headerShown: true, title: t("nav.deleteAccountTitle") }}
             />
           </>
         ) : (

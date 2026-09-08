@@ -4,5 +4,6 @@ import { BrowserRouter } from "react-router-dom";
 import { AdminApp } from "./ui";
 import "./styles.css";
 import "./dashboard-tables.css";
+import "./table-typography.css";
 
 createRoot(document.getElementById("root")!).render(<StrictMode><BrowserRouter><AdminApp /></BrowserRouter></StrictMode>);

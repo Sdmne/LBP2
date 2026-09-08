@@ -115,6 +115,7 @@ export default function SettingsScreen({ navigation }: Props) {
     { icon: "🚫", iconBg: "#f1f5f9", label: t("settings.blockedUsers"), onPress: () => navigation.navigate("BlockedUsers") },
     { icon: "🔖", iconBg: colors.tint, label: t("settings.savedListings"), onPress: () => navigation.navigate("Favourites") },
     { icon: "💞", iconBg: colors.tintPink, label: t("settings.compatibilityProfile"), onPress: () => navigation.navigate("CompatibilityAnswers") },
+    { icon: "🗑️", iconBg: "#feeceb", label: t("settings.deleteAccount"), onPress: () => navigation.navigate("DeleteAccount") },
   ];
 
   return (

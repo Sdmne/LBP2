@@ -1,0 +1,16 @@
+:root {
+  --admin-table-font-size: 14px;
+}
+
+/* Keep table text uniform even when legacy component styles set a local size. */
+.app :is(table, [role="table"]),
+.app :is(table, [role="table"]) :not(svg, svg *) {
+  font-size: var(--admin-table-font-size) !important;
+  line-height: 20px !important;
+}
+
+/* Responsive tables render column headings from the cell label. */
+.app table td[data-label]::before {
+  font-size: var(--admin-table-font-size) !important;
+  line-height: 20px !important;
+}

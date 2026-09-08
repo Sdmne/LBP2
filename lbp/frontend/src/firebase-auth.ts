@@ -21,6 +21,8 @@ const app = initializeApp({
 
 const auth = getAuth(app);
 const api = createApiClient("/api");
+let googleConsentRequired = false;
+const googleConsentErrors = new WeakSet<object>();
 
 export type SocialProvider = "google" | "apple";
 export type SocialSession = {
@@ -31,12 +33,36 @@ export type SocialSession = {
 export async function signInWithSocial(providerName: SocialProvider, intent: "login" | "register"): Promise<SocialSession> {
   await setPersistence(auth, browserLocalPersistence);
   const provider = providerName === "google" ? new GoogleAuthProvider() : new OAuthProvider("apple.com");
-  if (providerName === "google") provider.setCustomParameters({ prompt: "select_account" });
-  else {
+  if (providerName === "google") {
+    provider.addScope("https://www.googleapis.com/auth/userinfo.email");
+    provider.addScope("https://www.googleapis.com/auth/userinfo.profile");
+    provider.setCustomParameters({
+      prompt: googleConsentRequired ? "consent select_account" : "select_account",
+    });
+  } else {
     provider.addScope("email");
     provider.addScope("name");
   }
-  const result = await signInWithPopup(auth, provider);
+  let result;
+  try {
+    result = await signInWithPopup(auth, provider);
+  } catch (error) {
+    if (
+      providerName === "google" &&
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "auth/invalid-credential"
+    ) {
+      // Retry only after the next explicit click, which supplies a fresh user
+      // gesture for the popup. Request re-consent for rejected credentials;
+      // never retry the API login or request new permissions automatically.
+      googleConsentRequired = true;
+      googleConsentErrors.add(error);
+    }
+    throw error;
+  }
+  if (providerName === "google") googleConsentRequired = false;
   const idToken = await result.user.getIdToken();
   const response = await api.post<SocialSession>("/auth/firebase", {
     idToken,
@@ -50,6 +76,9 @@ export async function signInWithSocial(providerName: SocialProvider, intent: "lo
 }
 
 export function socialErrorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && googleConsentErrors.has(error)) {
+    return "Google could not confirm your sign-in. Click Continue with Google again to renew your permission.";
+  }
   const value = error as { code?: string; message?: string };
   const raw = String(value?.code || value?.message || "");
   let detail = raw;
@@ -69,5 +98,7 @@ export function socialErrorMessage(error: unknown): string {
   if (code.includes("account_inactive")) return "This account is not active.";
   if (code.includes("invalid or expired firebase session")) return "The social sign-in session expired before it could be confirmed. Please try again.";
   if (code.includes("firebase authentication is unavailable")) return "Social sign-in is temporarily unavailable. Please try again shortly.";
+  if (code.includes("auth/invalid-credential")) return "Your sign-in provider could not confirm your identity. Please try again.";
+  if (code.includes("auth/network-request-failed")) return "Could not reach the sign-in provider. Check your connection and try again.";
   return "Social sign-in failed. Please try again.";
 }

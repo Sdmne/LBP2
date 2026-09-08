@@ -15,6 +15,7 @@ import socket
 import smtplib
 import ssl
 import subprocess
+import time
 import uuid
 import urllib.error
 import urllib.parse
@@ -116,6 +117,8 @@ COOKIE_CIPHER = CookieCipher(os.environ["COOKIE_ENCRYPTION_SECRET"])
 EMAIL_VERIFICATION_HOURS = 24
 PASSWORD_RESET_MINUTES = 60
 AUTH_EMAIL_RESEND_SECONDS = 60
+ACCOUNT_DELETION_DAYS = 30
+ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "3600")))
 PARTNER_SESSION_DAYS = 30
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 UPLOAD_URL_PREFIX = os.getenv("UPLOAD_URL_PREFIX", "/uploads")
@@ -1183,6 +1186,10 @@ class VerifyEmailPayload(BaseModel):
     token: str = Field(min_length=20, max_length=512)
 
 
+class VerifyEmailCodePayload(BaseModel):
+    code: str = Field(pattern=r"^\d{6}$")
+
+
 class ResetPasswordPayload(BaseModel):
     token: str = Field(min_length=20, max_length=512)
     password: str = Field(min_length=8, max_length=200)
@@ -1388,6 +1395,7 @@ class MemberReportPayload(BaseModel):
 class AccountDeletionPayload(BaseModel):
     reason: str | None = Field(default=None, max_length=255)
     details: str | None = Field(default=None, max_length=5000)
+    confirmation: Literal["DELETE"]
 
 
 DEFAULT_NOTIFICATION_SETTINGS = [
@@ -1575,7 +1583,7 @@ AUTH_EMAIL_COPY = {
     "en": {
         "verifySubject": "Confirm your LetsBeParents email",
         "verifyTitle": "Confirm your email",
-        "verifyBody": "Use the button below to confirm your email address. The link is valid for 24 hours.",
+        "verifyBody": "Enter this 6-digit code in LetsBeParents, or use the button below. The code and link are valid for 24 hours.",
         "verifyButton": "Confirm email",
         "resetSubject": "Reset your LetsBeParents password",
         "resetTitle": "Reset your password",
@@ -1586,7 +1594,7 @@ AUTH_EMAIL_COPY = {
     "ru": {
         "verifySubject": "Подтвердите email в LetsBeParents",
         "verifyTitle": "Подтвердите email",
-        "verifyBody": "Нажмите кнопку ниже, чтобы подтвердить адрес электронной почты. Ссылка действует 24 часа.",
+        "verifyBody": "Введите этот 6-значный код в LetsBeParents или нажмите кнопку ниже. Код и ссылка действуют 24 часа.",
         "verifyButton": "Подтвердить email",
         "resetSubject": "Восстановление пароля LetsBeParents",
         "resetTitle": "Установите новый пароль",
@@ -1597,7 +1605,7 @@ AUTH_EMAIL_COPY = {
     "es": {
         "verifySubject": "Confirma tu correo de LetsBeParents",
         "verifyTitle": "Confirma tu correo",
-        "verifyBody": "Usa el botón para confirmar tu correo electrónico. El enlace es válido durante 24 horas.",
+        "verifyBody": "Introduce este código de 6 dígitos en LetsBeParents o usa el botón. El código y el enlace son válidos durante 24 horas.",
         "verifyButton": "Confirmar correo",
         "resetSubject": "Restablece tu contraseña de LetsBeParents",
         "resetTitle": "Restablece tu contraseña",
@@ -1631,17 +1639,33 @@ def record_auth_email_event(event_type: str, user_id: int, delivery_status: str)
         logger.exception("Could not record authentication email event")
 
 
-def send_transactional_email(recipient: str, subject: str, title: str, body: str, button: str, target_url: str, note: str) -> bool:
+def send_transactional_email(
+    recipient: str,
+    subject: str,
+    title: str,
+    body: str,
+    button: str,
+    target_url: str,
+    note: str,
+    prominent_code: str | None = None,
+) -> bool:
     if not email_notifications_configured():
         return False
     email_message = EmailMessage()
     email_message["Subject"] = subject
     email_message["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM_EMAIL))
     email_message["To"] = recipient
-    email_message.set_content(f"{title}\n\n{body}\n\n{target_url}\n\n{note}")
+    code_text = f"\n\n{prominent_code}" if prominent_code else ""
+    email_message.set_content(f"{title}\n\n{body}{code_text}\n\n{target_url}\n\n{note}")
+    code_html = (
+        f'<p style="margin:24px 0;font-size:32px;letter-spacing:10px;font-weight:800;color:#050816">{html.escape(prominent_code)}</p>'
+        if prominent_code
+        else ""
+    )
     email_message.add_alternative(
         "<html><body style=\"font-family:Arial,sans-serif;color:#050816\">"
         f"<h2>{html.escape(title)}</h2><p>{html.escape(body)}</p>"
+        f"{code_html}"
         f"<p><a href=\"{html.escape(target_url, quote=True)}\" style=\"display:inline-block;padding:12px 18px;border-radius:8px;background:#f70a68;color:#fff;text-decoration:none;font-weight:700\">{html.escape(button)}</a></p>"
         f"<p style=\"color:#667085\">{html.escape(note)}</p>"
         "</body></html>",
@@ -1679,7 +1703,28 @@ def issue_auth_action_token(cursor, user_id: int, purpose: str, lifetime: timede
     return raw_token, expires_at
 
 
-def send_auth_action_email(user_id: int, email: str, purpose: str, raw_token: str, locale_code: str) -> bool:
+def issue_email_verification_code(cursor, user_id: int, lifetime: timedelta) -> tuple[str, datetime]:
+    cursor.execute(
+        "UPDATE auth_action_tokens SET revoked_at = UTC_TIMESTAMP() WHERE user_id = %s AND purpose = 'VERIFY_EMAIL_CODE' AND used_at IS NULL AND revoked_at IS NULL",
+        (user_id,),
+    )
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    expires_at = now_utc() + lifetime
+    cursor.execute(
+        "INSERT INTO auth_action_tokens (user_id, purpose, token_hash, expires_at) VALUES (%s, 'VERIFY_EMAIL_CODE', %s, %s)",
+        (user_id, token_hash(code), database_datetime(expires_at)),
+    )
+    return code, expires_at
+
+
+def send_auth_action_email(
+    user_id: int,
+    email: str,
+    purpose: str,
+    raw_token: str,
+    locale_code: str,
+    verification_code: str | None = None,
+) -> bool:
     locale_code = auth_locale(locale_code)
     copy = AUTH_EMAIL_COPY[locale_code]
     if purpose == "VERIFY_EMAIL":
@@ -1698,6 +1743,7 @@ def send_auth_action_email(user_id: int, email: str, purpose: str, raw_token: st
         copy[keys[3]],
         target_url,
         copy["ignore"],
+        verification_code if purpose == "VERIFY_EMAIL" else None,
     )
     record_auth_email_event(event_type, user_id, "SENT" if delivered else "FAILED")
     return delivered
@@ -3401,6 +3447,11 @@ def auth_signup(payload: SignupPayload, response: Response):
             "VERIFY_EMAIL",
             timedelta(hours=EMAIL_VERIFICATION_HOURS),
         )
+        verification_code, _ = issue_email_verification_code(
+            cursor,
+            user_id,
+            timedelta(hours=EMAIL_VERIFICATION_HOURS),
+        )
         conn.commit()
         cursor.execute(
             """
@@ -3412,7 +3463,14 @@ def auth_signup(payload: SignupPayload, response: Response):
             (user_id,),
         )
         user = cursor.fetchone()
-    email_sent = send_auth_action_email(user_id, email, "VERIFY_EMAIL", verification_token, payload.locale)
+    email_sent = send_auth_action_email(
+        user_id,
+        email,
+        "VERIFY_EMAIL",
+        verification_token,
+        payload.locale,
+        verification_code,
+    )
     return auth_session_response(response, token, expires_at, user, emailVerificationRequired=True, emailSent=email_sent)
 
 
@@ -3705,6 +3763,11 @@ def auth_resend_verification(payload: AuthLocalePayload, user: dict[str, Any] = 
             "VERIFY_EMAIL",
             timedelta(hours=EMAIL_VERIFICATION_HOURS),
         )
+        verification_code, _ = issue_email_verification_code(
+            cursor,
+            int(user["id"]),
+            timedelta(hours=EMAIL_VERIFICATION_HOURS),
+        )
         conn.commit()
     delivered = send_auth_action_email(
         int(user["id"]),
@@ -3712,6 +3775,7 @@ def auth_resend_verification(payload: AuthLocalePayload, user: dict[str, Any] = 
         "VERIFY_EMAIL",
         verification_token,
         payload.locale,
+        verification_code,
     )
     return {"ok": True, "status": "EMAIL_SENT" if delivered else "EMAIL_DELIVERY_FAILED"}
 
@@ -3747,8 +3811,79 @@ def auth_confirm_email(payload: VerifyEmailPayload):
             "UPDATE auth_action_tokens SET revoked_at = UTC_TIMESTAMP() WHERE user_id = %s AND purpose = 'VERIFY_EMAIL' AND id <> %s AND used_at IS NULL AND revoked_at IS NULL",
             (action_token["user_id"], action_token["id"]),
         )
+        cursor.execute(
+            "UPDATE auth_action_tokens SET revoked_at = UTC_TIMESTAMP() WHERE user_id = %s AND purpose = 'VERIFY_EMAIL_CODE' AND used_at IS NULL AND revoked_at IS NULL",
+            (action_token["user_id"],),
+        )
         conn.commit()
     return {"ok": True, "status": "EMAIL_VERIFIED"}
+
+
+@app.post("/api/auth/email-verification/code/confirm")
+def auth_confirm_email_code(
+    payload: VerifyEmailCodePayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    if user.get("email_verified_at"):
+        return {"ok": True, "status": "EMAIL_ALREADY_VERIFIED", "user": public_user(user)}
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS attempts
+            FROM api_events
+            WHERE event_type = 'auth.email_verification_code_failed'
+              AND COALESCE(payload->>'userId', '') = %s
+              AND created_at > UTC_TIMESTAMP() - INTERVAL 15 MINUTE
+            """,
+            (str(user["id"]),),
+        )
+        attempts = int(cursor.fetchone().get("attempts") or 0)
+        if attempts >= 10:
+            raise HTTPException(status_code=429, detail="TOO_MANY_CODE_ATTEMPTS")
+        cursor.execute(
+            """
+            SELECT id
+            FROM auth_action_tokens
+            WHERE user_id = %s AND token_hash = %s AND purpose = 'VERIFY_EMAIL_CODE'
+              AND used_at IS NULL AND revoked_at IS NULL
+              AND expires_at > UTC_TIMESTAMP()
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (user["id"], token_hash(payload.code)),
+        )
+        action_token = cursor.fetchone()
+        if not action_token:
+            cursor.execute(
+                "INSERT INTO api_events (event_type, payload) VALUES ('auth.email_verification_code_failed', %s)",
+                (json.dumps({"userId": user["id"], "createdAt": now_utc().isoformat()}),),
+            )
+            conn.commit()
+            raise HTTPException(status_code=400, detail="INVALID_OR_EXPIRED_CODE")
+        cursor.execute(
+            "UPDATE local_users SET email_verified_at = COALESCE(email_verified_at, UTC_TIMESTAMP()) WHERE id = %s",
+            (user["id"],),
+        )
+        cursor.execute(
+            "UPDATE auth_action_tokens SET used_at = UTC_TIMESTAMP() WHERE id = %s",
+            (action_token["id"],),
+        )
+        cursor.execute(
+            "UPDATE auth_action_tokens SET revoked_at = UTC_TIMESTAMP() WHERE user_id = %s AND purpose IN ('VERIFY_EMAIL', 'VERIFY_EMAIL_CODE') AND id <> %s AND used_at IS NULL AND revoked_at IS NULL",
+            (user["id"], action_token["id"]),
+        )
+        cursor.execute(
+            """
+            SELECT id, profile_id, email, display_name, role, status, email_verified_at,
+                   password_login_enabled, created_at
+            FROM local_users
+            WHERE id = %s
+            """,
+            (user["id"],),
+        )
+        verified_user = cursor.fetchone()
+        conn.commit()
+    return {"ok": True, "status": "EMAIL_VERIFIED", "user": public_user(verified_user)}
 
 
 @app.post("/api/auth/reset-password")
@@ -5920,7 +6055,11 @@ def member_report_profile(profile_identifier: str, payload: MemberReportPayload,
 
 
 @app.post("/api/member/account-deletion")
-def member_account_deletion(payload: AccountDeletionPayload, user: dict[str, Any] = Depends(require_user)):
+def member_account_deletion(
+    payload: AccountDeletionPayload,
+    response: Response,
+    user: dict[str, Any] = Depends(require_user),
+):
     profile_id = require_profile_id(user)
     reason = (payload.reason or "").strip() or "Prefer not to say"
     details = (payload.details or "").strip() or None
@@ -5931,8 +6070,8 @@ def member_account_deletion(payload: AccountDeletionPayload, user: dict[str, Any
         "reason": reason,
         "details": details,
         "requestedAt": now_utc().isoformat(),
-        "deleteAfter": (now_utc() + timedelta(days=30)).isoformat(),
-        "mode": "scheduled_30_days",
+        "deleteAfter": (now_utc() + timedelta(days=ACCOUNT_DELETION_DAYS)).isoformat(),
+        "mode": f"scheduled_{ACCOUNT_DELETION_DAYS}_days",
     }
     with db_cursor() as (conn, cursor):
         cursor.execute(
@@ -5957,18 +6096,35 @@ def member_account_deletion(payload: AccountDeletionPayload, user: dict[str, Any
             "visibleInCatalog": False,
             "isVisibleInCatalog": False,
         })
-        send_support_status_message(
-            cursor,
-            profile_id,
-            "Your account deletion request has been received and is pending review.",
+        cursor.execute(
+            "UPDATE profiles SET status = 'DELETION_PENDING', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (profile_id,),
+        )
+        cursor.execute(
+            "UPDATE local_users SET status = 'DELETION_PENDING', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (user["id"],),
+        )
+        cursor.execute(
+            "UPDATE auth_sessions SET revoked_at = UTC_TIMESTAMP() WHERE user_id = %s AND revoked_at IS NULL",
+            (user["id"],),
         )
         audit(conn, user["email"], "USER_DELETION_REQUESTED", "profiles", profile_id, {"email": user["email"], "deleteAfter": body["deleteAfter"]})
         conn.commit()
-    return {"ok": True, "status": "PENDING", "message": "Deletion request saved for admin review."}
+    delete_private_cookie(response, COOKIE_SESSION_NAME)
+    delete_private_cookie(response, COOKIE_LEGACY_SESSION_NAME)
+    return {
+        "ok": True,
+        "status": "DELETION_PENDING",
+        "deleteAfter": body["deleteAfter"],
+        "message": f"Account access ended. Permanent deletion is scheduled in {ACCOUNT_DELETION_DAYS} days.",
+    }
 
 
 @app.get("/api/member/conversations")
-def member_conversations(user: dict[str, Any] = Depends(require_user)):
+def member_conversations(
+    user: dict[str, Any] = Depends(require_user),
+    conversation_id: int | None = Query(default=None, alias="conversationId", ge=1),
+):
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         ensure_support_welcome(cursor, profile_id)
@@ -5990,10 +6146,12 @@ def member_conversations(user: dict[str, Any] = Depends(require_user)):
             """,
             (profile_id, profile_id, profile_id),
         )
-        cursor.execute(
-            conversation_scope_sql() + " ORDER BY (p.role = 'SUPPORT') DESC, c.updated_at DESC, c.id DESC LIMIT 100",
-            (profile_id, profile_id, profile_id, profile_id, profile_id, profile_id, profile_id, profile_id),
-        )
+        scope = conversation_scope_sql()
+        params = (profile_id,) * 8
+        if conversation_id is not None:
+            scope += " AND c.id = %s"
+            params += (conversation_id,)
+        cursor.execute(scope + " ORDER BY (p.role = 'SUPPORT') DESC, c.updated_at DESC, c.id DESC LIMIT 100", params)
         items = cursor.fetchall()
         conn.commit()
     return {"items": items}
@@ -6127,7 +6285,11 @@ def member_hide_conversation(conversation_id: int, user: dict[str, Any] = Depend
 
 
 @app.get("/api/member/conversations/{conversation_id}/messages")
-def member_conversation_messages(conversation_id: int, user: dict[str, Any] = Depends(require_user)):
+def member_conversation_messages(
+    conversation_id: int,
+    user: dict[str, Any] = Depends(require_user),
+    before_id: int | None = Query(default=None, alias="beforeId", ge=1),
+):
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         cursor.execute(
@@ -6168,6 +6330,8 @@ def member_conversation_messages(conversation_id: int, user: dict[str, Any] = De
             (conversation_id, profile_id),
         )
         marked_read_count = max(0, int(cursor.rowcount or 0))
+        page_filter = " AND id < %s" if before_id is not None else ""
+        page_params = (conversation_id, before_id) if before_id is not None else (conversation_id,)
         cursor.execute(
             """
             SELECT id, conversation_id AS conversationId, sender_profile_id AS senderProfileId,
@@ -6175,18 +6339,19 @@ def member_conversation_messages(conversation_id: int, user: dict[str, Any] = De
                    read_at AS readAt, status
             FROM conversation_messages
             WHERE conversation_id = %s AND status = 'ACTIVE'
-            ORDER BY created_at ASC, id ASC
-            LIMIT 300
-            """,
-            (conversation_id,),
+            """ + page_filter + " ORDER BY id DESC LIMIT 301",
+            page_params,
         )
-        messages = cursor.fetchall()
+        page = cursor.fetchall()
+        has_more = len(page) > 300
+        messages = list(reversed(page[:300]))
         unread_messages = member_unread_message_count(cursor, profile_id)
         conn.commit()
     return {
         "items": messages,
         "markedReadCount": marked_read_count,
         "counts": {"unreadMessages": unread_messages},
+        "hasMore": has_more,
     }
 
 
@@ -7588,6 +7753,7 @@ def member_subscription_status(user: dict[str, Any] = Depends(require_user)):
             (profile_id,),
         )
         subscription = cursor.fetchone()
+        settings = runtime_settings(cursor)
     data = as_dict(subscription.get("data") if subscription else {})
     is_premium = profile_is_premium(profile)
     status = "ACTIVE" if is_premium else str(subscription.get("status") if subscription else "NOT_STARTED").upper()
@@ -7595,6 +7761,10 @@ def member_subscription_status(user: dict[str, Any] = Depends(require_user)):
         "isVerified": profile_is_verified(profile),
         "isPremium": is_premium,
         "status": status,
+        "limits": {
+            "freeLikesPerDay": int(settings["limits.free_likes_per_day"]),
+            "premiumLikesPerDay": int(settings["limits.premium_likes_per_day"]),
+        },
         "request": {
             "id": subscription.get("id"),
             "plan": data.get("plan"),
@@ -11723,6 +11893,7 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
         cursor.execute(f"DELETE FROM firebase_identities WHERE user_id IN ({placeholders})", local_user_ids)
     cursor.execute("DELETE FROM local_users WHERE profile_id = %s", (profile_id,))
     profile_ref = str(profile_id)
+    user_refs = [str(user_id) for user_id in local_user_ids]
     cursor.execute(
         """
         DELETE FROM app_entities
@@ -11734,11 +11905,86 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
         """,
         (profile_ref, profile_ref, profile_ref, profile_ref, profile_ref),
     )
+    cursor.execute(
+        """
+        DELETE FROM api_events
+        WHERE COALESCE(payload->>'profileId', '') = %s
+           OR COALESCE(payload->>'actorProfileId', '') = %s
+           OR COALESCE(payload->>'targetProfileId', '') = %s
+           OR COALESCE(payload->>'viewerProfileId', '') = %s
+           OR COALESCE(payload->>'viewedProfileId', '') = %s
+        """,
+        (profile_ref, profile_ref, profile_ref, profile_ref, profile_ref),
+    )
+    if user_refs:
+        placeholders = ", ".join(["%s"] * len(user_refs))
+        cursor.execute(
+            f"DELETE FROM api_events WHERE COALESCE(payload->>'userId', '') IN ({placeholders})",
+            user_refs,
+        )
+    cursor.execute(
+        "DELETE FROM admin_audit_log WHERE (target_type = 'profiles' AND target_id = %s) OR actor = %s",
+        (profile_ref, profile.get("email")),
+    )
     if media_file_ids:
         placeholders = ", ".join(["%s"] * len(media_file_ids))
         cursor.execute(f"DELETE FROM media_files WHERE id IN ({placeholders})", media_file_ids)
     cursor.execute("DELETE FROM profiles WHERE id = %s", (profile_id,))
     return {"id": profile_id, "email": profile.get("email")}
+
+
+def purge_due_account_deletions() -> None:
+    """Permanently remove self-service deletion requests after their retention window."""
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT pg_try_advisory_xact_lock(2026090801) AS locked")
+        lock_row = cursor.fetchone()
+        if not lock_row or not lock_row.get("locked"):
+            return
+        cursor.execute(
+            """
+            SELECT data
+            FROM app_entities
+            WHERE entity_type = 'account_deletion_request' AND status = 'PENDING'
+            ORDER BY id ASC
+            """
+        )
+        current_time = now_utc()
+        if current_time.tzinfo is not None:
+            current_time = current_time.astimezone(timezone.utc).replace(tzinfo=None)
+        due_profile_ids: list[int] = []
+        for row in cursor.fetchall():
+            data = as_dict(row.get("data"))
+            profile_id = int_or_none(data.get("profileId"))
+            raw_due = str(data.get("deleteAfter") or "").strip()
+            try:
+                due_at = datetime.fromisoformat(raw_due.replace("Z", "+00:00"))
+                if due_at.tzinfo is not None:
+                    due_at = due_at.astimezone(timezone.utc).replace(tzinfo=None)
+            except ValueError:
+                continue
+            if profile_id and due_at <= current_time:
+                due_profile_ids.append(profile_id)
+        for profile_id in due_profile_ids:
+            try:
+                permanently_delete_profile(cursor, profile_id)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+        conn.commit()
+
+
+def account_deletion_worker() -> None:
+    while True:
+        try:
+            purge_due_account_deletions()
+        except Exception:
+            logger.exception("Scheduled account deletion pass failed")
+        time.sleep(ACCOUNT_DELETION_POLL_SECONDS)
+
+
+@app.on_event("startup")
+def start_account_deletion_worker() -> None:
+    Thread(target=account_deletion_worker, name="account-deletion-worker", daemon=True).start()
 
 
 @app.patch("/api/admin/item/{view}/{item_id}")

@@ -25,7 +25,17 @@ export default defineConfig(({ mode, command }) => {
   return {
     base: "/",
     plugins: [react()],
-    build: { outDir: "dist", emptyOutDir: true },
+    build: {
+      outDir: "dist",
+      emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules/@firebase/") || id.includes("node_modules/firebase/")) return "firebase";
+          },
+        },
+      },
+    },
     // Local dev only (does not affect the production build) - same reasoning as
     // admin/vite.config.ts: src/api.ts calls /api/..., proxy it to wherever the
     // FastAPI backend runs locally so `npm run dev` can reach it.

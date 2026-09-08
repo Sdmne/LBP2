@@ -1,0 +1,139 @@
+.web-app.chat-app { min-height:100dvh; --ink:#020817; --muted:#64748b; --line:#e2e8f0; --pink:#f31260; }
+.web-app.chat-app .web-main { width:100%; max-width:none; min-height:0; padding:0; margin:0; flex:1 0 auto; }
+.chat-app > .web-footer { display:block; flex:0 0 auto; }
+.chat-app .footer-column:nth-child(2) nav a:nth-child(n+5) { display:none; }
+.chat-app .footer-brand p { line-height:1.625; }
+.chat-app .web-header { height:81px; min-height:81px; flex:0 0 81px; }
+.chat-app .web-header-inner { height:80px; min-height:80px; }
+.chat-page-shell { --ink:#020817; --muted:#64748b; --line:#e2e8f0; --pink:#f31260; width:100%; max-width:1280px; padding:0 16px 16px; margin:0 auto; font-family:Geologica,Arial,sans-serif; color:var(--ink); }
+.chat-page-shell button,.chat-page-shell input,.chat-page-shell textarea { font-family:inherit; box-sizing:border-box; }
+.chat-page-shell button { cursor:pointer; }
+.chat-page-shell button:disabled { cursor:default; }
+.chat-page-shell .chat-shell { height:calc(100dvh - 96px); min-height:0; }
+.chat-page-shell .chat-row { border:0; background:transparent; text-align:left; align-items:center; }
+.chat-page-shell .chat-row:hover { background:#f8fafc; }
+.chat-page-shell .chat-row.active { background:#f1f5f9; }
+.chat-page-shell .chat-row:focus-visible { outline:2px solid #f31260; outline-offset:-2px; }
+.chat-page-shell .chat-search { margin:0; }
+.chat-page-shell .chat-search input { margin:0; height:40px; }
+.chat-icon { display:block; width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.chat-empty-state > span { line-height:24px; }
+.chat-empty-state .chat-icon { display:inline; width:56px; height:56px; stroke:#d8dee7; stroke-width:1.5; }
+.chat-empty-state p { font-size:14px; line-height:20px; }
+.chat-avatar-fallback { font-size:16px; font-weight:400; }
+.chat-page-shell :is(.chat-avatar,.chat-message-avatar) { font-weight:400; }
+.chat-head-copy a { display:block; line-height:20px; color:inherit; text-decoration:none; }
+.chat-page-shell .chat-head-copy strong { display:block; font-size:14px; line-height:20px; font-weight:400; }
+.chat-page-shell .chat-head span { font-weight:400; }
+.chat-page-shell button { font-size:16px; line-height:24px; }
+.chat-page-shell .chat-messages { background-image:url('/web-static/chat/chat-bg-pattern-0cfb1ed2.png'); }
+.chat-message-group { display:contents; }
+.chat-page-shell .chat-message-media img { max-width:min(320px,100%); max-height:260px; }
+.chat-page-shell .chat-compose-wrap { padding:0; }
+.chat-page-shell .chat-compose { margin:0 auto; padding:12px; }
+.chat-page-shell .chat-compose textarea { margin:0; }
+.chat-page-shell .chat-send:disabled { opacity:1; background:var(--pink); }
+.chat-page-shell .chat-send:hover:enabled { background:#d90f56; }
+.chat-page-shell .chat-file-input { display:none; }
+.chat-emoji-mount { height:100%; width:100%; }
+.chat-page-shell .chat-emoji-panel { left:12px; bottom:calc(100% + 8px); max-width:calc(100% - 24px); }
+.chat-emoji-panel:has(.chat-emoji-mount:empty)::before { content:'…'; position:absolute; inset:0; display:grid; place-items:center; color:#64748b; }
+.chat-feedback { padding:10px 16px; margin:0; color:#b91c1c; background:#fff5f7; font-size:14px; line-height:20px; overflow-wrap:anywhere; }
+.chat-feedback button,.chat-older { margin:0 0 0 8px; border:0; background:transparent; color:#2563eb; font:inherit; text-decoration:underline; }
+.chat-older { align-self:center; margin:6px; }
+.chat-loading { min-height:80px; display:grid; place-items:center; flex:1; }
+.chat-loading span { width:24px; height:24px; border:3px solid #fee2e9; border-top-color:#f31260; border-radius:50%; animation:chat-loading-spin .7s linear infinite; }
+@keyframes chat-loading-spin { to { transform:rotate(360deg); } }
+.member-profile-surface .chat-call-modal,.member-profile-surface .chat-attachment-preview,.member-profile-surface .chat-image-lightbox { --ink:#020817; --muted:#64748b; --line:#e2e8f0; --pink:#f31260; }
+.member-profile-surface .chat-call-modal .chat-call-identity strong { color:#fff; }
+.member-profile-surface .chat-call-modal button { cursor:pointer; }
+.member-profile-surface .chat-attachment-preview-send { color:#fff; }
+.member-profile-surface .chat-attachment-preview-cancel { color:var(--muted); font-size:34px; line-height:1; font-weight:400; }
+.chat-call-error { margin:0; padding:12px 20px; color:#fecaca; background:#111827; font-size:14px; }
+.chat-call-local .chat-avatar-fallback { position:static; }
+@media(max-width:767px){
+  html:has(.chat-app) { scrollbar-gutter:auto; }
+  .web-app.chat-app { height:auto; min-height:100dvh; overflow:visible; }
+  .web-app.chat-app .web-main { display:flex; flex:0 0 auto; overflow:visible; }
+  .chat-page-shell { height:auto; flex:1 1 auto; padding:0 16px 16px; }
+  .chat-page-shell .chat-shell { height:calc(100dvh - 96px); min-height:400px; align-self:stretch; border:1px solid var(--line); border-radius:8px; }
+  .chat-page-shell .chat-list-head { padding:12px; }
+  .chat-page-shell .chat-row-copy strong { font-size:14px; }
+  .chat-page-shell .chat-compose { padding:12px; gap:8px; }
+  .chat-page-shell .chat-head { padding:12px 10px; gap:8px; }
+  .chat-page-shell .chat-head-copy strong { font-weight:800; }
+  .chat-page-shell .chat-head-action { width:34px; height:34px; }
+  .chat-page-shell .chat-message-cluster { max-width:70%; }
+  .chat-page-shell .chat-messages { padding:12px 16px 24px; }
+  .chat-page-shell .chat-emoji { display:grid; }
+  .chat-page-shell .chat-compose textarea::placeholder { color:transparent; opacity:0; }
+  .chat-app .member-header-actions { gap:8px; }
+  .chat-app .web-footer-inner { grid-template-columns:1fr auto; column-gap:40px; }
+  .chat-app .member-icon-link,.chat-app .mobile-menu { width:40px; height:40px; }
+  .chat-app .mobile-menu.has-member-actions { margin-left:8px; }
+  .chat-app .mobile-menu svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .chat-app .web-header nav.open { top:66px; border-radius:8px; gap:0; }
+  .chat-app .mobile-nav-actions { margin-top:4px; padding-top:4px; border-top:1px solid #e2e8f0; }
+  .chat-app .web-header nav.open .member-menu-action { display:flex; height:32px; min-height:32px; align-items:center; gap:9px; padding:0 12px; color:#020817; font-size:14px; line-height:20px; font-weight:400; text-decoration:none; }
+  .chat-app .member-menu-action svg { width:14px; height:14px; flex:0 0 14px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .chat-app .member-menu-action b { margin-left:auto; padding:1px 5px; border-radius:999px; background:#f31260; color:white; font-size:10px; line-height:14px; font-weight:500; }
+}
+@media(prefers-reduced-motion:reduce){.chat-loading span{animation-duration:1.5s}.chat-page-shell *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+.chat-app .web-header { padding-block:0; }
+@media(min-width:768px){html:has(.chat-app) { scrollbar-gutter:stable; }}
+.chat-app .member-icon-link[aria-current="page"] svg { color:#f31260; }
+.chat-page-shell { line-height:24px; }
+.chat-page-shell .chat-row { font-size:16px; line-height:24px; color:#000; }
+.chat-page-shell .chat-row-meta { align-self:center; margin-top:0; }
+.chat-page-shell .chat-avatar.is-support .chat-icon { width:24px; height:24px; }
+.chat-page-shell .chat-empty-state { gap:12px; }
+.chat-page-shell .chat-search-empty { display:block; height:auto; font-size:12px; line-height:18px; padding:100px 24px; }
+.chat-page-shell .chat-search input:focus,.chat-page-shell .chat-compose textarea:focus { border-color:var(--pink); box-shadow:0 0 0 2px rgba(243,18,96,.12); }
+.chat-page-shell .chat-search input::-webkit-search-cancel-button { display:none; }
+.chat-page-shell .chat-message-meta { margin-top:1px; gap:3px; }
+.chat-page-shell .chat-bubble time { line-height:12px; }
+.chat-page-shell .chat-message-media { margin-bottom:6px; }
+.member-profile-surface .chat-image-lightbox-close { font-size:30px; font-weight:300; line-height:1; }
+.chat-unavailable-media { display:flex; flex-direction:column; gap:4px; font-size:14px; line-height:20px; overflow-wrap:anywhere; }
+.chat-unavailable-media small { font-size:12px; }
+.chat-unavailable-media button { color:inherit; font:inherit; border:0; padding:0; background:transparent; text-align:left; text-decoration:underline; }
+
+/* Scoped dialog rules keep chat geometry independent of profile-page dialogs. */
+.member-profile-surface .chat-delete-confirm-modal,
+.member-profile-surface .chat-block-confirm-modal { padding:16px; max-width:none; }
+.member-profile-surface .chat-delete-confirm-modal .block-confirm-dialog,
+.member-profile-surface .chat-block-confirm-modal .block-confirm-dialog { width:512px; max-width:100%; padding:26px 24px; }
+.member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-backdrop { background:rgba(0,0,0,.52); }
+.member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-backdrop { width:100%; }
+.member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-close { top:16px; right:16px; width:16px; height:16px; border-radius:0; }
+.member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) h2 { font-size:18px; line-height:24px; }
+.member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-dialog p { max-width:none; font-size:14px; line-height:20px; }
+.member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-actions button { display:flex; align-items:center; justify-content:center; height:40px; min-height:36px; min-width:0; padding:8px 16px; font-size:14px; line-height:20px; font-weight:400; }
+.member-profile-surface .chat-report-dialog .profile-dialog-head { position:relative; justify-content:flex-start; margin-bottom:24px; }
+.member-profile-surface .chat-report-dialog .profile-dialog-head h2 { font-size:20px; line-height:28px; font-weight:600; }
+.member-profile-surface .chat-report-dialog .profile-dialog-head > button { position:absolute; top:6px; right:0; width:16px; height:16px; padding:0; border-radius:0; }
+.member-profile-surface .chat-report-dialog .profile-dialog-head > button svg { width:16px; height:16px; }
+.member-profile-surface .chat-report-dialog .report-dialog-form { gap:20px; }
+.member-profile-surface .chat-report-dialog .report-field { gap:8px; font-weight:400; }
+.member-profile-surface .chat-report-dialog .report-field span { font-weight:400; }
+.member-profile-surface .chat-report-dialog .report-field select { height:40px; min-height:40px; padding:8px 36px 8px 12px; }
+.member-profile-surface .chat-report-dialog .report-field textarea { padding:8px 12px; }
+.member-profile-surface .chat-report-dialog .report-dialog-actions button { display:flex; align-items:center; justify-content:center; height:40px; min-height:40px; padding:8px 16px; font-size:14px; line-height:20px; font-weight:400; }
+@media(max-width:767px){
+  .member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-dialog { border-radius:0; }
+  .member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) h2 { margin:0; font-size:16px; text-align:center; }
+  .member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-dialog p { font-size:13px; line-height:18px; text-align:center; }
+  .member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-actions,
+  .member-profile-surface .chat-report-dialog .report-dialog-actions { flex-direction:column; }
+  .member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-actions button,
+  .member-profile-surface .chat-report-dialog .report-dialog-actions button { width:100%; }
+  .member-profile-surface :is(.chat-delete-confirm-modal,.chat-block-confirm-modal) .block-confirm-actions .danger-primary,
+  .member-profile-surface .chat-report-dialog .report-dialog-actions .danger-primary { order:-1; }
+  .member-profile-surface .chat-report-dialog .profile-dialog-panel { width:100%; border-radius:0; }
+  .member-profile-surface .chat-report-dialog .profile-dialog-head { justify-content:center; }
+}
+@media(max-width:520px){.chat-page-shell .chat-emoji-panel { left:8px; right:8px; width:auto; max-width:none; }}
+body:has(.chat-app) .premium-paywall-dialog { width:460px; max-width:calc(100vw - 32px); border-radius:9px; }
+body:has(.chat-app) .premium-feature-label,
+body:has(.chat-app) .premium-feature-number { font-weight:400 !important; }
+body:has(.chat-app) .premium-feature-label i svg { flex-shrink:1; }

@@ -13,6 +13,9 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
+  confirmEmailCode: (code: string) => Promise<void>;
+  resendEmailVerification: (locale: string) => Promise<string>;
+  deleteAccount: (reason: string, details?: string) => Promise<void>;
   socialLogin: (idToken: string, displayName: string | null, intent: "login" | "register") => Promise<void>;
   logout: () => Promise<void>;
 };
@@ -63,6 +66,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSessionToken(res.sessionToken);
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
+      },
+      async confirmEmailCode(code) {
+        const res = await authApi.confirmEmailCode(code);
+        setUser(res.user);
+      },
+      async resendEmailVerification(locale) {
+        const res = await authApi.resendEmailVerification(locale);
+        return res.status;
+      },
+      async deleteAccount(reason, details = "") {
+        await authApi.requestAccountDeletion(reason, details);
+        setSessionToken(null);
+        await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
+        setUser(null);
       },
       async socialLogin(idToken, displayName, intent) {
         const res = await authApi.authenticateWithFirebase(idToken, displayName, intent);

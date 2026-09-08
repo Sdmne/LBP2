@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { AuthResponse } from "./types";
+import type { AuthResponse, PublicUser } from "./types";
 
 export function login(email: string, password: string) {
   return api.post<AuthResponse>("/api/auth/login", { email, password });
@@ -33,6 +33,25 @@ export function authenticateWithFirebase(idToken: string, displayName: string | 
 // account existence in the message shown to the person.
 export function forgotPassword(email: string) {
   return api.post<{ ok: true }>("/api/auth/forgot-password", { email });
+}
+
+export function confirmEmailCode(code: string) {
+  return api.post<{ ok: true; status: string; user: PublicUser }>(
+    "/api/auth/email-verification/code/confirm",
+    { code },
+  );
+}
+
+export function resendEmailVerification(locale = "en") {
+  return api.post<{ ok: true; status: string }>("/api/auth/email-verification/resend", { locale });
+}
+
+export function requestAccountDeletion(reason: string, details = "") {
+  return api.post<{ ok: true; status: string; deleteAfter: string }>("/api/member/account-deletion", {
+    reason,
+    details,
+    confirmation: "DELETE",
+  });
 }
 
 export function logout() {

@@ -1,4 +1,19 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Children,
+  FormEvent,
+  isValidElement,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  SelectHTMLAttributes,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   Link,
   NavLink,
@@ -18,6 +33,8 @@ type RecordValue = Record<string, unknown>;
 type ListResponse = {
   items: RecordValue[];
   total: number;
+  totalAll?: number;
+  totalUnanswered?: number;
   limit: number;
   offset: number;
 };
@@ -29,12 +46,22 @@ type SettingField = {
   fallback: unknown;
 };
 type FilterOption = { value?: unknown; label?: unknown; count?: unknown };
+type ContentTransitionBounds = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
 type AdminIconName =
   | "dashboard"
   | "users"
   | "crown"
   | "shield"
   | "building"
+  | "mapPin"
+  | "user"
+  | "award"
+  | "upload"
   | "scale"
   | "file"
   | "headphones"
@@ -59,6 +86,7 @@ type AdminIconName =
   | "circleCheck"
   | "circleX"
   | "check"
+  | "chevronDown"
   | "x"
   | "barChart"
   | "refresh"
@@ -248,6 +276,13 @@ function userCountryName(value: unknown) {
     "United States": "USA",
     "United Kingdom": "UK",
     "United Arab Emirates": "UAE",
+    "Democratic Republic of the Congo": "DR Congo",
+    "Congo - Kinshasa": "DR Congo",
+    "Republic of the Congo": "Rep. Congo",
+    "Congo - Brazzaville": "Rep. Congo",
+    "South Korea": "S. Korea",
+    "Dominican Republic": "Dominican Rep.",
+    "Trinidad and Tobago": "Trinidad & Tobago",
   };
   return compactNames[country] ?? country;
 }
@@ -294,6 +329,38 @@ function compactDate(value: unknown) {
     ? date.toLocaleDateString("en-GB")
     : valueOf(value);
 }
+function languageName(value: string) {
+  const language = value.trim();
+  if (!language) return "";
+  try {
+    return (
+      new Intl.DisplayNames(["en"], { type: "language" }).of(
+        language.toLowerCase(),
+      ) ?? language
+    );
+  } catch {
+    return label(language);
+  }
+}
+function directoryDate(value: unknown) {
+  return compactDate(value).replaceAll("/", ".");
+}
+function directoryOptionKey(value: unknown) {
+  if (value && typeof value === "object") {
+    const item = value as RecordValue;
+    return String(
+      item.slug ?? item.id ?? item.value ?? item.name ?? item.title ?? "",
+    );
+  }
+  return String(value ?? "");
+}
+function directoryOptionLabel(value: unknown) {
+  if (value && typeof value === "object") {
+    const item = value as RecordValue;
+    return valueOf(item.label ?? item.name ?? item.title ?? item.slug ?? item.id);
+  }
+  return label(String(value ?? ""));
+}
 function verificationDate(value: unknown) {
   const date = value ? new Date(String(value)) : null;
   return date && !Number.isNaN(date.valueOf())
@@ -308,11 +375,70 @@ function verificationDate(value: unknown) {
       })
     : valueOf(value);
 }
+function verificationDetailDate(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  return date && !Number.isNaN(date.valueOf())
+    ? date.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : valueOf(value);
+}
+function verificationData(row: RecordValue) {
+  return row.data && typeof row.data === "object"
+    ? (row.data as RecordValue)
+    : ({} as RecordValue);
+}
+function verificationRouteId(row: RecordValue) {
+  const data = verificationData(row);
+  const direct = String(
+    row.sessionId ?? data.sessionId ?? data.diditSessionId ?? "",
+  ).trim();
+  if (direct) return direct;
+  const sourceKey = String(row.source_key ?? row.sourceKey ?? "").trim();
+  if (sourceKey.toLowerCase().startsWith("didit-")) return sourceKey.slice(6);
+  return sourceKey || String(row.id ?? "");
+}
+function verificationPercent(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return valueOf(value);
+  const percent = number >= 0 && number <= 1 ? number * 100 : number;
+  return `${Math.round(percent * 10) / 10}%`;
+}
+function verificationAge(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—";
+  const text = String(value).trim();
+  return text.startsWith("~") ? text : `~${text}`;
+}
+function verificationStateLabel(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text ? label(text.toLowerCase()) : "—";
+}
+function externalHttpUrl(value: unknown) {
+  try {
+    const url = new URL(String(value ?? "").trim());
+    return ["http:", "https:"].includes(url.protocol) ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
 function auditActionLabel(value: unknown, source: unknown) {
   const action = String(value ?? "Unknown");
   const referenceLabels: Record<string, string> = {
     "verification.approved": "Verification approved",
     "verification.declined": "Verification declined",
+    "verification.expired": "Verification expired",
+    "verification.abandoned": "Verification abandoned",
+    "photo.approved": "Photo approved",
+    "photo.rejected": "Photo rejected",
+    "avatar.approved": "Avatar approved",
+    "avatar.rejected": "Avatar rejected",
+    USER_DELETION_REQUESTED: "Account deletion requested",
     VERIFICATION_MANUAL_APPROVED: "Manually approved verification",
     SEND_SUPPORT_MESSAGE: "Sent support message",
   };
@@ -329,20 +455,449 @@ function rowName(row: RecordValue) {
       row.id,
   );
 }
-function articleCategory(row: RecordValue) {
-  const meta = (row.data ?? {}) as RecordValue;
-  const category = meta.category;
-  if (!category || typeof category !== "object")
-    return valueOf(meta.categoryName ?? category);
-  const value = category as RecordValue;
-  const translations = Array.isArray(value.translations)
-    ? (value.translations as RecordValue[])
+
+function recordValue(value: unknown): RecordValue | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as RecordValue;
+  }
+  if (typeof value !== "string" || !value.trim().startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as RecordValue)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function avatarSources(row: RecordValue) {
+  const records: RecordValue[] = [row];
+  ["data", "profile", "user"].forEach((key) => {
+    const nested = recordValue(row[key]);
+    if (nested) records.push(nested);
+  });
+  records.slice(1).forEach((record) => {
+    ["data", "profile"].forEach((key) => {
+      const nested = recordValue(record[key]);
+      if (nested) records.push(nested);
+    });
+  });
+
+  const candidates: unknown[] = [];
+  const keys = [
+    "avatarUrl",
+    "avatar_url",
+    "avatarFallbackUrl",
+    "avatar_fallback_url",
+    "photoUrl",
+    "photo_url",
+    "logoUrl",
+    "logo_url",
+    "publicUrl",
+    "public_url",
+    "url",
+  ];
+  records.forEach((record) => {
+    keys.forEach((key) => candidates.push(record[key]));
+    ["photos", "images"].forEach((key) => {
+      const collection = record[key];
+      if (!Array.isArray(collection)) return;
+      collection.forEach((item) => {
+        if (typeof item === "string") candidates.push(item);
+        const photo = recordValue(item);
+        if (photo) keys.forEach((photoKey) => candidates.push(photo[photoKey]));
+      });
+    });
+  });
+
+  const sources = Array.from(
+    new Set(
+      candidates
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter(
+          (value) =>
+            value &&
+            value !== "null" &&
+            value !== "undefined" &&
+            (/^https?:\/\//i.test(value) ||
+              value.startsWith("/") ||
+              value.startsWith("blob:") ||
+              value.startsWith("data:image/")),
+        ),
+    ),
+  );
+  return Array.from(
+    new Set(
+      sources.flatMap((source) => {
+        if (source.startsWith("/uploads/") || source.startsWith("/photos/"))
+          return [source, `https://letsbeparents.com${source}`];
+        if (/^https?:\/\/api(?::\d+)?\//i.test(source))
+          return [
+            source,
+            source.replace(/^https?:\/\/api(?::\d+)?/i, "https://letsbeparents.com"),
+          ];
+        return [source];
+      }),
+    ),
+  );
+}
+
+function PersonAvatar({
+  row,
+  name,
+  className,
+  alt = "",
+}: {
+  row: RecordValue;
+  name: string;
+  className: string;
+  alt?: string;
+}) {
+  const sources = avatarSources(row);
+  const sourcesKey = sources.join("\u0000");
+  const [sourceIndex, setSourceIndex] = useState(0);
+  useEffect(() => setSourceIndex(0), [sourcesKey]);
+  const source = sources[sourceIndex];
+  return (
+    <span className={className} aria-hidden="true">
+      <i>{name.trim().slice(0, 1).toUpperCase() || "?"}</i>
+      {source && (
+        <img
+          src={source}
+          alt={alt}
+          loading="lazy"
+          onError={() => setSourceIndex((current) => current + 1)}
+        />
+      )}
+    </span>
+  );
+}
+
+type AdminSelectOption = {
+  value: string;
+  label: ReactNode;
+  disabled: boolean;
+};
+
+type AdminSelectMenuPosition = {
+  left: number;
+  top: number;
+  width: number;
+  maxHeight: number;
+  opensUp: boolean;
+};
+
+function collectSelectOptions(children: ReactNode) {
+  const options: AdminSelectOption[] = [];
+  Children.forEach(children, (child) => {
+    if (!isValidElement<{
+      value?: string | number;
+      disabled?: boolean;
+      children?: ReactNode;
+    }>(child))
+      return;
+    if (child.type === "option") {
+      options.push({
+        value: String(child.props.value ?? ""),
+        label: child.props.children,
+        disabled: Boolean(child.props.disabled),
+      });
+      return;
+    }
+    if (child.props.children) {
+      options.push(...collectSelectOptions(child.props.children));
+    }
+  });
+  return options;
+}
+
+function AdminSelect({
+  children,
+  value,
+  defaultValue,
+  onChange,
+  disabled,
+  className,
+  id,
+  name,
+  required,
+  "aria-label": ariaLabel,
+  ...nativeProps
+}: SelectHTMLAttributes<HTMLSelectElement>) {
+  const options = collectSelectOptions(children);
+  const initialValue = Array.isArray(defaultValue)
+    ? defaultValue[0]
+    : defaultValue;
+  const [fallbackValue, setFallbackValue] = useState(
+    String(initialValue ?? options[0]?.value ?? ""),
+  );
+  const selectedValue = String(value ?? fallbackValue);
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === selectedValue),
+  );
+  const selectedOption = options[selectedIndex];
+  const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] =
+    useState<AdminSelectMenuPosition | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(selectedIndex);
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const nativeRef = useRef<HTMLSelectElement>(null);
+  const menuRef = useRef<HTMLSpanElement>(null);
+  const listboxId = useId();
+
+  const openMenu = (preferredIndex = selectedIndex) => {
+    if (disabled) return;
+    const bounds = buttonRef.current?.getBoundingClientRect();
+    if (bounds) {
+      const expectedHeight = Math.min(280, options.length * 36 + 8);
+      const below = window.innerHeight - bounds.bottom - 8;
+      const above = bounds.top - 8;
+      const opensUp = below < expectedHeight && above > below;
+      const availableHeight = Math.max(64, opensUp ? above : below);
+      setMenuPosition({
+        left: Math.max(8, bounds.left),
+        top: opensUp ? bounds.top - 4 : bounds.bottom + 4,
+        width: Math.min(bounds.width, window.innerWidth - 16),
+        maxHeight: Math.min(expectedHeight, availableHeight),
+        opensUp,
+      });
+    }
+    setHighlightedIndex(preferredIndex);
+    setOpen(true);
+  };
+
+  const closeMenu = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) window.requestAnimationFrame(() => buttonRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !wrapperRef.current?.contains(target) &&
+        !menuRef.current?.contains(target)
+      )
+        closeMenu();
+    };
+    const closeOnViewportChange = () => closeMenu();
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    window.requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelector<HTMLButtonElement>(
+          `[data-option-index="${highlightedIndex}"]`,
+        )
+        ?.focus();
+    });
+  }, [highlightedIndex, open]);
+
+  const choose = (nextValue: string) => {
+    const nativeSelect = nativeRef.current;
+    setFallbackValue(nextValue);
+    if (nativeSelect) {
+      const setter = Object.getOwnPropertyDescriptor(
+        window.HTMLSelectElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(nativeSelect, nextValue);
+      nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    closeMenu(true);
+  };
+
+  const enabledIndex = (start: number, direction: 1 | -1) => {
+    if (!options.length) return 0;
+    let index = start;
+    for (let attempts = 0; attempts < options.length; attempts += 1) {
+      index = (index + direction + options.length) % options.length;
+      if (!options[index]?.disabled) return index;
+    }
+    return start;
+  };
+
+  const handleButtonKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const next =
+        event.key === "Home"
+          ? enabledIndex(-1, 1)
+          : event.key === "End"
+            ? enabledIndex(0, -1)
+            : enabledIndex(selectedIndex, event.key === "ArrowUp" ? -1 : 1);
+      openMenu(next);
+    }
+  };
+
+  const handleOptionKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMenu(true);
+      return;
+    }
+    if (event.key === "Tab") {
+      closeMenu();
+      return;
+    }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      event.preventDefault();
+      const next =
+        event.key === "Home"
+          ? enabledIndex(-1, 1)
+          : event.key === "End"
+            ? enabledIndex(0, -1)
+            : enabledIndex(index, event.key === "ArrowUp" ? -1 : 1);
+      setHighlightedIndex(next);
+    }
+  };
+
+  return (
+    <span
+      ref={wrapperRef}
+      className={`admin-select ${open ? "open" : ""} ${className ?? ""}`.trim()}
+    >
+      <button
+        ref={buttonRef}
+        id={id}
+        className="admin-select-trigger"
+        type="button"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-controls={listboxId}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        disabled={disabled}
+        onClick={() => (open ? closeMenu() : openMenu())}
+        onKeyDown={handleButtonKeyDown}
+      >
+        <span>{selectedOption?.label ?? "Select"}</span>
+        <AdminIcon name="chevronDown" />
+      </button>
+      <select
+        {...nativeProps}
+        ref={nativeRef}
+        className="admin-select-native"
+        value={value}
+        defaultValue={value === undefined ? defaultValue : undefined}
+        onChange={onChange}
+        disabled={disabled}
+        name={name}
+        required={required}
+        aria-hidden="true"
+        tabIndex={-1}
+      >
+        {children}
+      </select>
+      {open &&
+        menuPosition &&
+        createPortal(
+          <span
+            ref={menuRef}
+            className={`admin-select-menu ${menuPosition.opensUp ? "opens-up" : ""}`}
+            id={listboxId}
+            role="listbox"
+            style={{
+              left: menuPosition.left,
+              top: menuPosition.top,
+              width: menuPosition.width,
+              maxHeight: menuPosition.maxHeight,
+            }}
+          >
+          {options.map((option, index) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={option.value === selectedValue}
+              className={option.value === selectedValue ? "selected" : ""}
+              data-option-index={index}
+              tabIndex={-1}
+              disabled={option.disabled}
+              onPointerMove={() => setHighlightedIndex(index)}
+              onKeyDown={(event) => handleOptionKeyDown(event, index)}
+              onClick={() => choose(option.value)}
+              key={`${option.value}-${index}`}
+            >
+              <span className="admin-select-check">
+                {option.value === selectedValue && <AdminIcon name="check" />}
+              </span>
+              <span>{option.label}</span>
+            </button>
+          ))}
+          </span>,
+          document.body,
+        )}
+    </span>
+  );
+}
+function articleCategoryRecord(row: RecordValue) {
+  const outer = recordValue(row.data) ?? row;
+  const nested = recordValue(outer.data);
+  const data =
+    nested && !outer.name && !outer.translations && !outer.slug
+      ? nested
+      : outer;
+  return {
+    ...data,
+    id: data.id ?? row.id,
+    sourceId: data.sourceId ?? row.sourceId ?? row.id,
+    name: data.name ?? row.title,
+    slug: data.slug ?? row.slug,
+  } as RecordValue;
+}
+
+function articleCategoryKey(category: RecordValue | null | undefined) {
+  return String(category?.id ?? category?.sourceId ?? category?.slug ?? "");
+}
+
+function articleCategoryName(
+  category: RecordValue | null | undefined,
+  locale = "en",
+) {
+  if (!category) return "";
+  const translations = Array.isArray(category.translations)
+    ? (category.translations as RecordValue[])
     : [];
-  const english =
+  const translated =
+    translations.find(
+      (item) =>
+        String(item.locale ?? "").toLowerCase() === locale.toLowerCase(),
+    ) ??
     translations.find(
       (item) => String(item.locale ?? "").toLowerCase() === "en",
-    ) ?? translations[0];
-  return valueOf(english?.name ?? value.name ?? value.slug);
+    ) ??
+    translations[0];
+  return String(translated?.name ?? category.name ?? category.slug ?? "");
+}
+
+function articleCategoryFromMeta(meta: RecordValue) {
+  const objectCategory = recordValue(meta.category);
+  if (objectCategory) return objectCategory;
+  const slug = String(meta.categorySlug ?? meta.category ?? "").trim();
+  const name = String(meta.categoryName ?? meta.category ?? "").trim();
+  return slug || name ? ({ slug, name } as RecordValue) : null;
+}
+
+function articleCategory(row: RecordValue) {
+  const meta = recordValue(row.data) ?? {};
+  const category = articleCategoryFromMeta(meta);
+  return articleCategoryName(category, "en") || valueOf(meta.categoryName);
 }
 function articleDate(value: unknown) {
   return compactDate(value).replaceAll("/", ".");
@@ -405,8 +960,9 @@ function isDonorProfile(row: RecordValue) {
   const data = (
     row.data && typeof row.data === "object" ? row.data : {}
   ) as RecordValue;
-  const donorType = data.donorType;
+  const donorType = row.donorType ?? data.donorType;
   return (
+    settingBoolean(row.isDonor) ||
     (Array.isArray(donorType) && donorType.length > 0) ||
     (typeof donorType === "string" && donorType.trim().length > 0) ||
     String(row.profileType ?? "")
@@ -415,13 +971,92 @@ function isDonorProfile(row: RecordValue) {
   );
 }
 
+function subscriptionData(row: RecordValue) {
+  return recordValue(row.data) ?? {};
+}
+
+function subscriptionPlan(row: RecordValue) {
+  const data = subscriptionData(row);
+  const value = String(row.plan ?? data.plan ?? "").trim();
+  return value ? statusLabel(value) : "—";
+}
+
+function subscriptionSource(row: RecordValue) {
+  const data = subscriptionData(row);
+  const value = String(row.source ?? data.source ?? "").trim();
+  const key = value.replace(/[\s-]+/g, "_").toUpperCase();
+  if (["APP_STORE", "IOS", "APPLE"].includes(key)) return "App Store";
+  if (["PLAY_STORE", "GOOGLE_PLAY", "ANDROID"].includes(key))
+    return "Play Store";
+  if (["MANUAL", "MANUAL_REVIEW", "MEMBER_REQUEST"].includes(key))
+    return "Manual";
+  return value ? label(value) : "—";
+}
+
+function subscriptionDate(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  return date && !Number.isNaN(date.valueOf())
+    ? date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "";
+}
+
+function subscriptionPeriod(row: RecordValue) {
+  const data = subscriptionData(row);
+  const direct = row.period ?? data.period;
+  if (direct && typeof direct === "string" && !direct.trim().startsWith("{"))
+    return direct;
+  const start = subscriptionDate(
+    row.periodStart ??
+      data.activeAt ??
+      data.startedAt ??
+      data.startDate ??
+      data.currentPeriodStart ??
+      row.created_at,
+  );
+  const end = subscriptionDate(
+    row.periodEnd ??
+      data.expiresAt ??
+      data.endsAt ??
+      data.endDate ??
+      data.currentPeriodEnd,
+  );
+  if (start && end) return `${start} – ${end}`;
+  return start || end || "—";
+}
+
+function subscriptionIsVerified(row: RecordValue) {
+  const data = subscriptionData(row);
+  return (
+    settingBoolean(row.isVerified ?? data.isVerified) ||
+    String(row.verificationStatus ?? "").toUpperCase() === "APPROVED"
+  );
+}
+
+function subscriptionIsPremium(row: RecordValue) {
+  const data = subscriptionData(row);
+  return (
+    settingBoolean(row.isPremium ?? data.isPremium) ||
+    ["ACTIVE", "APPROVED"].includes(String(row.status ?? "").toUpperCase())
+  );
+}
+
 type RichTextEditorProps = {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
+  allowImages?: boolean;
 };
 
-function RichTextEditor({ value, onChange, placeholder }: RichTextEditorProps) {
+function RichTextEditor({
+  value,
+  onChange,
+  placeholder,
+  allowImages = true,
+}: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [sourceMode, setSourceMode] = useState(false);
@@ -551,14 +1186,16 @@ function RichTextEditor({ value, onChange, placeholder }: RichTextEditorProps) {
         >
           <EditorIcon name="link" />
         </button>
-        <button
-          type="button"
-          title="Upload image"
-          aria-label="Upload image"
-          onClick={() => fileRef.current?.click()}
-        >
-          <AdminIcon name="image" />
-        </button>
+        {allowImages && (
+          <button
+            type="button"
+            title="Upload image"
+            aria-label="Upload image"
+            onClick={() => fileRef.current?.click()}
+          >
+            <AdminIcon name="image" />
+          </button>
+        )}
         <button
           type="button"
           title="YouTube video"
@@ -593,6 +1230,7 @@ function RichTextEditor({ value, onChange, placeholder }: RichTextEditorProps) {
           type="button"
           title="HTML source"
           aria-label="HTML source"
+          aria-pressed={sourceMode}
           className={sourceMode ? "active" : ""}
           onClick={() => setSourceMode((current) => !current)}
         >
@@ -610,16 +1248,18 @@ function RichTextEditor({ value, onChange, placeholder }: RichTextEditorProps) {
         >
           <EditorIcon name="table" />
         </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          hidden
-          onChange={(event) => {
-            insertImage(event.target.files?.[0]);
-            event.currentTarget.value = "";
-          }}
-        />
+        {allowImages && (
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(event) => {
+              insertImage(event.target.files?.[0]);
+              event.currentTarget.value = "";
+            }}
+          />
+        )}
       </div>
       {sourceMode ? (
         <textarea
@@ -858,6 +1498,31 @@ function AdminIcon({ name }: { name: AdminIconName }) {
         <path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" />
       </>
     ),
+    mapPin: (
+      <>
+        <path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" />
+        <circle cx="12" cy="10" r="3" />
+      </>
+    ),
+    user: (
+      <>
+        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </>
+    ),
+    award: (
+      <>
+        <circle cx="12" cy="8" r="6" />
+        <path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11" />
+      </>
+    ),
+    upload: (
+      <>
+        <path d="M12 3v12" />
+        <path d="m17 8-5-5-5 5" />
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      </>
+    ),
     scale: (
       <>
         <path d="M12 3v18" />
@@ -1001,6 +1666,7 @@ function AdminIcon({ name }: { name: AdminIconName }) {
       </>
     ),
     check: <path d="M20 6 9 17l-5-5" />,
+    chevronDown: <path d="m6 9 6 6 6-6" />,
     x: (
       <>
         <path d="M18 6 6 18" />
@@ -1459,6 +2125,8 @@ function ProfileDonutPanel({
                           d={donutSector(item.start, item.end)}
                           fill={item.color}
                           stroke="#fff"
+                          tabIndex={0}
+                          aria-label={`${item.label}: ${item.count}`}
                           key={`${item.label}-${index}`}
                           onPointerEnter={(event) => {
                             const bounds =
@@ -1479,6 +2147,10 @@ function ProfileDonutPanel({
                             });
                           }}
                           onPointerLeave={() => setHovered(null)}
+                          onFocus={() =>
+                            setHovered({ index, x: 112, y: 92 })
+                          }
+                          onBlur={() => setHovered(null)}
                         />
                       ),
                   )}
@@ -1623,7 +2295,9 @@ function Dashboard() {
         <nav className="dashboard-tabs">
           {tabs.map(([key, title]) => (
             <button
+              type="button"
               className={tab === key ? "active" : ""}
+              aria-pressed={tab === key}
               key={key}
               onClick={() => setTab(key)}
             >
@@ -2216,6 +2890,7 @@ function DashboardSeries({
   mode?: "engagement";
 }) {
   const [period, setPeriod] = useState(30);
+  const [registrationPeriod, setRegistrationPeriod] = useState<1 | 7 | 30>(1);
   const engagement = Array.isArray(series?.engagement)
     ? (series.engagement as RecordValue[])
     : [];
@@ -2280,12 +2955,48 @@ function DashboardSeries({
           values: source.map((row) => Number(row.count ?? 0)),
         },
       ];
+  const registrationByDay = new Map(
+    registrations.map((row) => [
+      String(row.date ?? row.day),
+      Number(row.count ?? 0),
+    ]),
+  );
+  const registrationRows = Array.from(
+    { length: registrationPeriod },
+    (_, index) => {
+      const date = new Date();
+      date.setUTCHours(0, 0, 0, 0);
+      date.setUTCDate(date.getUTCDate() - (registrationPeriod - index - 1));
+      const dateKey = date.toISOString().slice(0, 10);
+      return {
+        date: dateKey,
+        count: registrationByDay.get(dateKey) ?? 0,
+      };
+    },
+  );
   const registrationSeries: ChartSeries[] = [
     {
       key: "registrations",
       label: "Registrations",
       color: "#f31260",
-      values: registrations.slice(-30).map((row) => Number(row.count ?? 0)),
+      values: registrationRows.map((row) => Number(row.count ?? 0)),
+    },
+  ];
+  const registrationRanges = [
+    {
+      period: 1 as const,
+      label: "Last 24h",
+      count: counts?.registrations_1d,
+    },
+    {
+      period: 7 as const,
+      label: "Last 7 days",
+      count: counts?.registrations_7d,
+    },
+    {
+      period: 30 as const,
+      label: "Last 30 days",
+      count: counts?.registrations_30d,
     },
   ];
   return (
@@ -2295,16 +3006,22 @@ function DashboardSeries({
           <div className="registration-heading">
             <h2>Registrations</h2>
             <div className="registration-badges">
-              <span className="active">
-                Last 24h: {valueOf(counts?.registrations_1d)}
-              </span>
-              <span>Last 7 days: {valueOf(counts?.registrations_7d)}</span>
-              <span>Last 30 days: {valueOf(counts?.registrations_30d)}</span>
+              {registrationRanges.map((range) => (
+                <button
+                  type="button"
+                  className={registrationPeriod === range.period ? "active" : ""}
+                  aria-pressed={registrationPeriod === range.period}
+                  onClick={() => setRegistrationPeriod(range.period)}
+                  key={range.period}
+                >
+                  {range.label}: {valueOf(range.count)}
+                </button>
+              ))}
             </div>
           </div>
           <LineChart
             title="Registrations"
-            rows={registrations.slice(-30)}
+            rows={registrationRows}
             series={registrationSeries}
           />
           <p className="chart-method-note">
@@ -2322,7 +3039,9 @@ function DashboardSeries({
         <div className="range-tabs">
           {[7, 30, 90].map((value) => (
             <button
+              type="button"
               className={period === value ? "active" : ""}
+              aria-pressed={period === value}
               onClick={() => setPeriod(value)}
               key={value}
             >
@@ -2353,13 +3072,15 @@ function LikeFlow({ ranges }: { ranges?: RecordValue }) {
     ),
   );
   return (
-    <section className="dashboard-panel">
-      <div className="panel-title">
+    <section className="like-flow-section">
+      <div className="like-flow-heading">
         <h2>Like Flow</h2>
         <div className="range-tabs">
           {["7", "30", "90"].map((value) => (
             <button
+              type="button"
               className={period === value ? "active" : ""}
+              aria-pressed={period === value}
               onClick={() => setPeriod(value)}
               key={value}
             >
@@ -2368,52 +3089,80 @@ function LikeFlow({ ranges }: { ranges?: RecordValue }) {
           ))}
         </div>
       </div>
-      <h3 className="like-flow-caption">
-        Like Flow (строка = отправитель → столбец = получатель)
-      </h3>
-      <div className="table compact-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Sender / receiver</th>
-              {headers.map((header) => (
-                <th key={header}>{header}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={String(row.label ?? index)}>
-                <th>{valueOf(row.label)}</th>
-                {(Array.isArray(row.values)
-                  ? (row.values as number[])
-                  : []
-                ).map((count, cell) => (
-                  <td
-                    className="flow-cell"
-                    style={{
-                      backgroundColor: count
-                        ? `rgba(245, 17, 104, ${0.08 + (count / max) * 0.55})`
-                        : undefined,
-                    }}
-                    key={cell}
-                  >
-                    {count ? count : "—"}
-                  </td>
+      <div className="dashboard-panel like-flow-card">
+        <header className="like-flow-card-header">
+          <h3 className="like-flow-caption">
+            Like Flow (строка = отправитель → столбец = получатель)
+          </h3>
+        </header>
+        <div className="like-flow-card-content">
+          <div className="like-flow-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>sender \ receiver</th>
+                  {headers.map((header) => (
+                    <th key={header}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, index) => (
+                  <tr key={String(row.label ?? index)}>
+                    <td className="flow-label">{valueOf(row.label)}</td>
+                    {(Array.isArray(row.values)
+                      ? (row.values as number[])
+                      : []
+                    ).map((count, cell) => {
+                      const reciprocated = Array.isArray(
+                        row.reciprocatedValues,
+                      )
+                        ? Number(row.reciprocatedValues[cell] ?? 0)
+                        : 0;
+                      const percentage = Array.isArray(
+                        row.reciprocationPcts,
+                      )
+                        ? Number(row.reciprocationPcts[cell] ?? 0)
+                        : 0;
+                      const percentageLabel = Number.isInteger(percentage)
+                        ? String(percentage)
+                        : percentage.toFixed(1).replace(/\.0$/, "");
+                      return (
+                        <td
+                          className="flow-cell"
+                          style={{
+                            backgroundColor: `rgba(240, 25, 117, ${0.08 + (count / max) * 0.55})`,
+                          }}
+                          title={`${count} sent, ${reciprocated} reciprocated`}
+                          key={cell}
+                        >
+                          {count ? `${count} / ${percentageLabel}%` : "—"}
+                        </td>
+                      );
+                    })}
+                  </tr>
                 ))}
-              </tr>
-            ))}
-            {!rows.length && (
-              <tr>
-                <td colSpan={Math.max(1, headers.length + 1)} className="empty">
-                  No likes for this period.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                {!rows.length && (
+                  <tr>
+                    <td
+                      colSpan={Math.max(1, headers.length + 1)}
+                      className="like-flow-empty"
+                    >
+                      No likes for this period.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="like-flow-total">
+            Всего лайков за период: {valueOf(source.total)}.
+            {Number(source.unknown ?? 0) > 0
+              ? ` +${valueOf(source.unknown)} с участием пользователей без заполненного профиля (не показаны в таблице).`
+              : ""}
+          </p>
+        </div>
       </div>
-      <p className="muted">Total likes for period: {valueOf(source.total)}</p>
     </section>
   );
 }
@@ -2470,55 +3219,67 @@ function Comparison({ rows }: { rows: RecordValue[] }) {
   );
 }
 function Funnel({ rows }: { rows: RecordValue[] }) {
-  const pct = (value: unknown, total: unknown) =>
-    `${valueOf(value)} (${Math.round((Number(value ?? 0) / Math.max(1, Number(total ?? 0))) * 100)}%)`;
+  const milestone = (value: unknown, total: unknown) => {
+    const count = Number(value ?? 0);
+    const registered = Number(total ?? 0);
+    const percentage = registered > 0 ? Math.round((count / registered) * 1000) / 10 : 0;
+    const percentageLabel = Number.isInteger(percentage)
+      ? String(percentage)
+      : percentage.toFixed(1);
+
+    return (
+      <>
+        {valueOf(value)}{" "}
+        <span className="funnel-percent">({percentageLabel}%)</span>
+      </>
+    );
+  };
+
   return (
-    <section className="dashboard-panel">
-      <h2>Activation milestones by registration week</h2>
-      <div className="table compact-table">
-        <table>
-          <thead>
-            <tr>
-              <th>Week</th>
-              <th>Registered</th>
-              <th>Wizard done</th>
-              <th>Verified</th>
-              <th>≥1 like</th>
-              <th>≥1 match</th>
-              <th>≥1 message</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={String(row.week ?? index)}>
-                <td>{valueOf(row.week)}</td>
-                <td>{valueOf(row.registered)}</td>
-                <td>{pct(row.wizard, row.registered)}</td>
-                <td>{pct(row.verified, row.registered)}</td>
-                <td>{pct(row.likes, row.registered)}</td>
-                <td>{pct(row.matches, row.registered)}</td>
-                <td>{pct(row.messages, row.registered)}</td>
-              </tr>
-            ))}
-            {!rows.length && (
+    <section className="dashboard-panel funnel-card">
+      <header className="funnel-card-header">
+        <h3>Activation milestones by registration week</h3>
+      </header>
+      <div className="funnel-card-content">
+        <div className="funnel-table">
+          <table>
+            <thead>
               <tr>
-                <td colSpan={7} className="empty">
-                  No cohort data.
-                </td>
+                <th>Week</th>
+                <th>Registered</th>
+                <th>Wizard done</th>
+                <th>Verified</th>
+                <th>≥1 like</th>
+                <th>≥1 match</th>
+                <th>≥1 message</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={String(row.week ?? index)}>
+                  <td>{valueOf(row.week)}</td>
+                  <td>{valueOf(row.registered)}</td>
+                  <td>{milestone(row.wizard, row.registered)}</td>
+                  <td>{milestone(row.verified, row.registered)}</td>
+                  <td>{milestone(row.likes, row.registered)}</td>
+                  <td>{milestone(row.matches, row.registered)}</td>
+                  <td>{milestone(row.messages, row.registered)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="funnel-note">
+          Каждый % — это доля <em>зарегистрированной</em>когорты той недели,
+          достигшая данной вехи (сами вехи — флаги, выставляемые в мастере
+          регистрации), и считается независимо — это НЕ последовательная
+          воронка, поэтому поздние столбцы могут быть выше ранних (например, «≥1
+          матч» может оказаться выше «верифицирован»). У когорт старше ~30 дней
+          теряются последующие события удалённых пользователей (% считается
+          среди оставшихся); число регистраций за старые недели может быть
+          занижено.
+        </p>
       </div>
-      <p className="funnel-note">
-        Каждый % — это доля зарегистрированной когорты той недели, достигшая
-        данной вехи (сами вехи — флаги, выставляемые в мастере регистрации), и
-        считается независимо — это НЕ последовательная воронка, поэтому поздние
-        столбцы могут быть выше ранних (например, «≥1 матч» может оказаться выше
-        «верифицирован»). У когорт старше ~30 дней теряются последующие события
-        удалённых пользователей (% считается среди оставшихся); число
-        регистраций за старые недели может быть занижено.
-      </p>
     </section>
   );
 }
@@ -2673,17 +3434,20 @@ function MonitorUsage({
 function MonitoringPage() {
   const [tab, setTab] = useState("System");
   const [data, setData] = useState<RecordValue | null>(null);
+  const [tabLoading, setTabLoading] = useState(false);
   const [error, setError] = useState("");
   const [minimum, setMinimum] = useState("100");
   const [appliedMinimum, setAppliedMinimum] = useState("100");
   const load = () => {
     setError("");
+    setTabLoading(true);
     api
       .get<RecordValue>(
         `/admin/monitoring?minMeanMs=${encodeURIComponent(appliedMinimum)}`,
       )
       .then(setData)
-      .catch(() => setError("Could not load monitoring data."));
+      .catch(() => setError("Could not load monitoring data."))
+      .finally(() => setTabLoading(false));
   };
   useEffect(() => {
     load();
@@ -2722,9 +3486,15 @@ function MonitoringPage() {
         {["System", "External APIs", "Cron Jobs", "Slow Queries"].map(
           (title) => (
             <button
+              type="button"
               key={title}
               className={tab === title ? "active" : ""}
-              onClick={() => setTab(title)}
+              aria-pressed={tab === title}
+              onClick={() => {
+                if (title === tab) return;
+                setTab(title);
+                load();
+              }}
             >
               {title}
             </button>
@@ -2732,7 +3502,7 @@ function MonitoringPage() {
         )}
       </nav>
       {error && <p className="error">{error}</p>}
-      {!data ? (
+      {!data || tabLoading ? (
         <p className="loading-inline">Loading…</p>
       ) : tab === "System" ? (
         <div className="monitor-system">
@@ -2798,7 +3568,11 @@ function MonitoringPage() {
                 <h3>
                   <AdminIcon name="container" /> Docker Disk Usage
                 </h3>
-                <button disabled={!docker.available}>
+                <button
+                  type="button"
+                  disabled
+                  title="Docker cleanup is not configured"
+                >
                   <AdminIcon name="trash" /> Clean Up
                 </button>
               </header>
@@ -3289,8 +4063,10 @@ function StoragePage() {
       <nav className="storage-tabs">
         {storageCategories.map(([key, title]) => (
           <button
+            type="button"
             key={key}
             className={category === key ? "active" : ""}
+            aria-pressed={category === key}
             onClick={() => {
               setCategory(key);
               setOffset(0);
@@ -3460,27 +4236,35 @@ function Support() {
   };
   const items = result?.items ?? [];
   const total = result?.total ?? 0;
+  const selectedConversation =
+    (detail?.conversation as RecordValue | undefined) ?? active ?? {};
+  const selectedName = rowName(selectedConversation);
+  const selectedAvatar = String(selectedConversation.avatarUrl ?? "");
   return (
     <div className="support-workspace">
       <section className="support-list-pane">
         <nav className="support-tabs">
           <button
+            type="button"
             className={unanswered ? "active" : ""}
+            aria-pressed={unanswered}
             onClick={() => {
               setOffset(0);
               setUnanswered(true);
             }}
           >
-            Unanswered {unanswered && result ? `(${total})` : ""}
+            Unanswered ({result?.totalUnanswered ?? (unanswered ? total : 0)})
           </button>
           <button
+            type="button"
             className={!unanswered ? "active" : ""}
+            aria-pressed={!unanswered}
             onClick={() => {
               setOffset(0);
               setUnanswered(false);
             }}
           >
-            All {!unanswered && result ? `(${total})` : ""}
+            All ({result?.totalAll ?? (!unanswered ? total : 0)})
           </button>
         </nav>
         <div className="support-search">
@@ -3500,11 +4284,22 @@ function Support() {
           ) : (
             items.map((row) => (
               <button
+                type="button"
                 className={active?.id === row.id ? "selected" : ""}
+                aria-pressed={active?.id === row.id}
                 key={String(row.id)}
                 onClick={() => setActive(row)}
               >
-                <i>{rowName(row).slice(0, 1).toUpperCase()}</i>
+                <i>
+                  <span>{rowName(row).slice(0, 1).toUpperCase()}</span>
+                  {Boolean(row.avatarUrl) && (
+                    <img
+                      src={String(row.avatarUrl)}
+                      alt=""
+                      onError={(event) => event.currentTarget.remove()}
+                    />
+                  )}
+                </i>
                 <span>
                   <b>{rowName(row)}</b>
                   <small>
@@ -3546,18 +4341,35 @@ function Support() {
       <section className="support-thread">
         {detail ? (
           <>
-            <h2>
-              {valueOf(
-                (detail.conversation as RecordValue | undefined)?.userName ??
-                  active?.userName,
-              )}
-            </h2>
-            <p className="muted">
-              {valueOf(
-                (detail.conversation as RecordValue | undefined)?.email ??
-                  active?.email,
-              )}
-            </p>
+            <header className="support-thread-profile">
+              <i>
+                <span>{selectedName.slice(0, 1).toUpperCase()}</span>
+                {selectedAvatar && (
+                  <img
+                    src={selectedAvatar}
+                    alt=""
+                    onError={(event) => event.currentTarget.remove()}
+                  />
+                )}
+              </i>
+              <div>
+                {selectedConversation.userId ? (
+                  <Link
+                    to={`/users/${encodeURIComponent(String(selectedConversation.userId))}`}
+                  >
+                    <h2>{selectedName}</h2>
+                  </Link>
+                ) : (
+                  <h2>{selectedName}</h2>
+                )}
+                <p className="muted">
+                  {valueOf(
+                    selectedConversation.profileType ??
+                      selectedConversation.email,
+                  )}
+                </p>
+              </div>
+            </header>
             <div className="message-list">
               {((detail.messages ?? []) as RecordValue[]).map(
                 (message, index) => (
@@ -3634,8 +4446,10 @@ function ModerationPhotos() {
           ["REJECTED", "Rejected"],
         ].map(([key, title]) => (
           <button
+            type="button"
             key={key}
             className={status === key ? "active" : ""}
+            aria-pressed={status === key}
             onClick={() => setStatus(key)}
           >
             <AdminIcon
@@ -3664,11 +4478,19 @@ function ModerationPhotos() {
             const imageUrl = String(
               row.publicUrl ??
                 row.url ??
+                row.contentUrl ??
                 (row.data as RecordValue | undefined)?.publicUrl ??
+                (row.data as RecordValue | undefined)?.contentUrl ??
                 "",
             );
+            const profileId = row.profileId;
+            const deleted = Boolean(row.isDeleted);
+            const rejected = status === "REJECTED";
             return (
-              <article key={String(row.id ?? index)}>
+              <article
+                key={String(row.id ?? index)}
+                className={`${rejected ? "rejected" : ""}${deleted ? " deleted" : ""}`.trim()}
+              >
                 <div className="moderation-photo-media">
                   <span>Photo unavailable</span>
                   {imageUrl && (
@@ -3678,24 +4500,47 @@ function ModerationPhotos() {
                       onError={(event) => event.currentTarget.remove()}
                     />
                   )}
+                  {Boolean(row.isPrimary) && !deleted && (
+                    <em className="moderation-photo-state">Primary</em>
+                  )}
+                  {deleted && (
+                    <em className="moderation-photo-state deleted">Deleted</em>
+                  )}
                 </div>
-                <div>
-                  <b>{rowName(row)}</b>
-                  <p>{valueOf(row.status)}</p>
-                  {status === "PENDING" && (
+                <div className="moderation-photo-details">
+                  {profileId ? (
+                    <Link to={`/users/${encodeURIComponent(String(profileId))}`}>
+                      {rowName(row)}
+                    </Link>
+                  ) : (
+                    <b>{rowName(row)}</b>
+                  )}
+                  <p>{verificationDate(row.createdAt ?? row.created_at)}</p>
+                  {Boolean(row.moderationReason) && (
+                    <p className="moderation-photo-reason">
+                      {valueOf(row.moderationReason)}
+                    </p>
+                  )}
+                  {deleted ? (
+                    <p>Photo deleted — no action available</p>
+                  ) : (
                     <p className="row-actions">
-                      <button
-                        className="primary"
-                        onClick={() => void review(row, "APPROVED")}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        className="danger"
-                        onClick={() => void review(row, "REJECTED")}
-                      >
-                        Reject
-                      </button>
+                      {status !== "APPROVED" && (
+                        <button
+                          className="primary"
+                          onClick={() => void review(row, "APPROVED")}
+                        >
+                          Approve
+                        </button>
+                      )}
+                      {status !== "REJECTED" && (
+                        <button
+                          className="danger"
+                          onClick={() => void review(row, "REJECTED")}
+                        >
+                          Reject
+                        </button>
+                      )}
                     </p>
                   )}
                 </div>
@@ -3786,8 +4631,10 @@ function ModerationReports() {
           ["DISMISSED", "Dismissed"],
         ].map(([key, title]) => (
           <button
+            type="button"
             key={key}
             className={status === key ? "active" : ""}
+            aria-pressed={status === key}
             onClick={() => setStatus(key)}
           >
             <AdminIcon
@@ -3833,8 +4680,24 @@ function ModerationReports() {
             <tbody>
               {items.map((row, index) => (
                 <tr key={String(row.id ?? index)}>
-                  <td>{valueOf(row.reporterName ?? row.reporterEmail)}</td>
-                  <td>{valueOf(row.reportedName ?? row.reportedEmail)}</td>
+                  <td>
+                    {row.reporterProfileId ? (
+                      <Link to={`/users/${encodeURIComponent(String(row.reporterProfileId))}`}>
+                        {valueOf(row.reporterName ?? row.reporterEmail)}
+                      </Link>
+                    ) : (
+                      valueOf(row.reporterName ?? row.reporterEmail)
+                    )}
+                  </td>
+                  <td>
+                    {row.reportedProfileId ? (
+                      <Link to={`/users/${encodeURIComponent(String(row.reportedProfileId))}`}>
+                        {valueOf(row.reportedName ?? row.reportedEmail)}
+                      </Link>
+                    ) : (
+                      valueOf(row.reportedName ?? row.reportedEmail)
+                    )}
+                  </td>
                   <td>{valueOf(row.reason)}</td>
                   <td>{valueOf(row.details ?? row.description)}</td>
                   <td>{verificationDate(row.createdAt ?? row.created_at)}</td>
@@ -3882,12 +4745,15 @@ function ModerationReports() {
 
 function LiveKitCalls() {
   const [tab, setTab] = useState<"live" | "history" | "statistics">("live");
+  const [historyStatus, setHistoryStatus] = useState("");
+  const [historyPage, setHistoryPage] = useState(0);
+  const [statisticsPeriod, setStatisticsPeriod] = useState<7 | 30>(7);
   const [result, setResult] = useState<ListResponse | null>(null);
   const [updatedAt, setUpdatedAt] = useState(new Date());
   const load = () => {
     setResult(null);
     api
-      .get<ListResponse>("/admin/list/livekit?limit=100&offset=0")
+      .get<ListResponse>("/admin/list/livekit?limit=200&offset=0")
       .then((data) => {
         setResult(data);
         setUpdatedAt(new Date());
@@ -3898,14 +4764,114 @@ function LiveKitCalls() {
     void load();
   }, []);
   const rows = result?.items ?? [];
+  const callData = (row: RecordValue) =>
+    row.data && typeof row.data === "object"
+      ? (row.data as RecordValue)
+      : row;
+  const callStatus = (row: RecordValue) => {
+    const data = callData(row);
+    return String(data.status ?? row.status ?? "").toUpperCase();
+  };
+  const callType = (row: RecordValue) => {
+    const data = callData(row);
+    return String(
+      data.type ?? data.callType ?? data.call_type ?? row.type ?? "",
+    ).toUpperCase();
+  };
+  const callDate = (row: RecordValue) => {
+    const data = callData(row);
+    const value =
+      data.createdAt ??
+      data.created_at ??
+      row.createdAt ??
+      row.created_at ??
+      null;
+    const date = value ? new Date(String(value)) : null;
+    return date && !Number.isNaN(date.valueOf()) ? date : null;
+  };
+  const callDurationSeconds = (row: RecordValue) => {
+    const data = callData(row);
+    const supplied = Number(
+      data.durationSeconds ?? data.duration_seconds ?? row.durationSeconds,
+    );
+    if (Number.isFinite(supplied) && supplied >= 0) return supplied;
+    const acceptedValue =
+      data.acceptedAt ?? data.accepted_at ?? row.acceptedAt ?? null;
+    const endedValue = data.endedAt ?? data.ended_at ?? row.endedAt ?? null;
+    const accepted = acceptedValue ? new Date(String(acceptedValue)) : null;
+    const ended = endedValue ? new Date(String(endedValue)) : null;
+    if (
+      accepted &&
+      ended &&
+      !Number.isNaN(accepted.valueOf()) &&
+      !Number.isNaN(ended.valueOf())
+    ) {
+      return Math.max(0, Math.round((ended.valueOf() - accepted.valueOf()) / 1000));
+    }
+    const durationText = String(data.duration ?? row.duration ?? "");
+    const durationMatch = durationText.match(/^(\d+(?:\.\d+)?)\s*s(?:ec(?:onds?)?)?$/i);
+    return durationMatch ? Number(durationMatch[1]) : null;
+  };
   const activeRows = rows.filter((row) =>
-    ["ACTIVE", "CONNECTED", "RINGING"].includes(
-      String(
-        row.status ?? (row.data as RecordValue | undefined)?.status ?? "",
-      ).toUpperCase(),
-    ),
+    ["ACTIVE", "ACCEPTED", "CONNECTED", "RINGING"].includes(callStatus(row)),
   );
   const endedRows = rows.filter((row) => !activeRows.includes(row));
+  const filteredHistoryRows = historyStatus
+    ? endedRows.filter((row) => callStatus(row) === historyStatus)
+    : endedRows;
+  const historyPageSize = 20;
+  const historyPageCount = Math.max(
+    1,
+    Math.ceil(filteredHistoryRows.length / historyPageSize),
+  );
+  const visibleHistoryRows = filteredHistoryRows.slice(
+    historyPage * historyPageSize,
+    (historyPage + 1) * historyPageSize,
+  );
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const statisticsStart = new Date(today);
+  statisticsStart.setUTCDate(today.getUTCDate() - statisticsPeriod + 1);
+  const statisticsEnd = new Date(today);
+  statisticsEnd.setUTCDate(today.getUTCDate() + 1);
+  const statisticsRows = rows.filter((row) => {
+    const date = callDate(row);
+    return Boolean(
+      date && date >= statisticsStart && date < statisticsEnd,
+    );
+  });
+  const completedDurations = statisticsRows
+    .map(callDurationSeconds)
+    .filter((value): value is number => value !== null);
+  const averageDuration = completedDurations.length
+    ? Math.round(
+        completedDurations.reduce((sum, value) => sum + value, 0) /
+          completedDurations.length,
+      )
+    : 0;
+  const missedCalls = statisticsRows.filter(
+    (row) => callStatus(row) === "MISSED",
+  ).length;
+  const videoCalls = statisticsRows.filter(
+    (row) => callType(row) === "VIDEO",
+  ).length;
+  const audioCalls = statisticsRows.filter(
+    (row) => callType(row) === "AUDIO",
+  ).length;
+  const callsByDay = new Map<string, number>();
+  statisticsRows.forEach((row) => {
+    const date = callDate(row);
+    if (!date) return;
+    const key = date.toISOString().slice(0, 10);
+    callsByDay.set(key, (callsByDay.get(key) ?? 0) + 1);
+  });
+  const dailyCalls = Array.from({ length: statisticsPeriod }, (_, index) => {
+    const date = new Date(statisticsStart);
+    date.setUTCDate(statisticsStart.getUTCDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return { date: key, count: callsByDay.get(key) ?? 0 };
+  });
+  const maxDailyCalls = Math.max(1, ...dailyCalls.map((row) => row.count));
   return (
     <>
       <header className="livekit-heading">
@@ -3914,19 +4880,25 @@ function LiveKitCalls() {
       </header>
       <nav className="livekit-tabs">
         <button
+          type="button"
           className={tab === "live" ? "active" : ""}
+          aria-pressed={tab === "live"}
           onClick={() => setTab("live")}
         >
           <AdminIcon name="phone" /> Live Calls
         </button>
         <button
+          type="button"
           className={tab === "history" ? "active" : ""}
+          aria-pressed={tab === "history"}
           onClick={() => setTab("history")}
         >
           <AdminIcon name="clock" /> Call History
         </button>
         <button
+          type="button"
           className={tab === "statistics" ? "active" : ""}
+          aria-pressed={tab === "statistics"}
           onClick={() => setTab("statistics")}
         >
           <AdminIcon name="barChart" /> Statistics
@@ -3948,25 +4920,70 @@ function LiveKitCalls() {
               <AdminIcon name="refresh" /> Refresh
             </button>
           </div>
-          <section className="livekit-empty">
-            <b>
-              <AdminIcon name="circleCheck" />
-            </b>
-            <p className="livekit-empty-title">
-              {result ? "No active calls" : "Loading..."}
-            </p>
-            <p>{result ? "All quiet right now" : ""}</p>
-          </section>
+          {result && activeRows.length ? (
+            <section className="table livekit-active-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Started</th>
+                    <th>Caller</th>
+                    <th>Callee</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeRows.map((row, index) => {
+                    const data = callData(row);
+                    return (
+                      <tr key={String(row.id ?? index)}>
+                        <td>
+                          {verificationDate(data.createdAt ?? row.created_at)}
+                        </td>
+                        <td>{valueOf(data.callerName ?? data.caller)}</td>
+                        <td>{valueOf(data.calleeName ?? data.callee)}</td>
+                        <td>{valueOf(callType(row))}</td>
+                        <td>
+                          <span
+                            className={`table-badge status-${callStatus(row).toLowerCase()}`}
+                          >
+                            {statusLabel(callStatus(row))}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </section>
+          ) : (
+            <section className="livekit-empty">
+              <b>
+                <AdminIcon name="circleCheck" />
+              </b>
+              <p className="livekit-empty-title">
+                {result ? "No active calls" : "Loading..."}
+              </p>
+              <p>{result ? "All quiet right now" : ""}</p>
+            </section>
+          )}
         </>
       )}
       {tab === "history" && (
         <section className="livekit-history">
-          <select aria-label="Call status">
-            <option>All statuses</option>
-            <option>Ended</option>
-            <option>Declined</option>
-            <option>Missed</option>
-          </select>
+          <AdminSelect
+            aria-label="Call status"
+            value={historyStatus}
+            onChange={(event) => {
+              setHistoryStatus(event.target.value);
+              setHistoryPage(0);
+            }}
+          >
+            <option value="">All statuses</option>
+            <option value="ENDED">Ended</option>
+            <option value="DECLINED">Declined</option>
+            <option value="MISSED">Missed</option>
+          </AdminSelect>
           <div className="table">
             <table>
               <thead>
@@ -3980,8 +4997,9 @@ function LiveKitCalls() {
                 </tr>
               </thead>
               <tbody>
-                {endedRows.map((row, index) => {
-                  const data = (row.data ?? row) as RecordValue;
+                {visibleHistoryRows.map((row, index) => {
+                  const data = callData(row);
+                  const duration = callDurationSeconds(row);
                   return (
                     <tr key={String(row.id ?? index)}>
                       <td>
@@ -3989,71 +5007,137 @@ function LiveKitCalls() {
                       </td>
                       <td>{valueOf(data.callerName ?? data.caller)}</td>
                       <td>{valueOf(data.calleeName ?? data.callee)}</td>
-                      <td>{valueOf(data.type)}</td>
-                      <td>{valueOf(data.duration)}</td>
+                      <td>{valueOf(callType(row))}</td>
+                      <td>
+                        {duration === null ? "—" : formatDuration(duration)}
+                      </td>
                       <td>
                         <span
-                          className={`table-badge status-${String(data.status ?? row.status ?? "").toLowerCase()}`}
+                          className={`table-badge status-${callStatus(row).toLowerCase()}`}
                         >
-                          {valueOf(data.status ?? row.status)}
+                          {statusLabel(callStatus(row))}
                         </span>
                       </td>
                     </tr>
                   );
                 })}
-                {result && !endedRows.length && (
+                {result && !visibleHistoryRows.length && (
                   <tr>
                     <td className="empty" colSpan={6}>
-                      No call history
+                      {historyStatus
+                        ? `No ${historyStatus.toLowerCase()} calls`
+                        : "No call history"}
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+          {filteredHistoryRows.length > historyPageSize && (
+            <div className="pager livekit-pager">
+              <button
+                type="button"
+                disabled={historyPage === 0}
+                aria-label="Previous page"
+                onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}
+              >
+                Previous
+              </button>
+              <span>
+                Page {historyPage + 1} of {historyPageCount}
+              </span>
+              <button
+                type="button"
+                disabled={historyPage + 1 >= historyPageCount}
+                aria-label="Next page"
+                onClick={() =>
+                  setHistoryPage((page) =>
+                    Math.min(historyPageCount - 1, page + 1),
+                  )
+                }
+              >
+                Next
+              </button>
+            </div>
+          )}
         </section>
       )}
       {tab === "statistics" && (
         <section className="livekit-statistics">
-          <select aria-label="Statistics period">
-            <option>Last 7 days</option>
-            <option>Last 30 days</option>
-          </select>
+          <AdminSelect
+            aria-label="Statistics period"
+            value={statisticsPeriod}
+            onChange={(event) =>
+              setStatisticsPeriod(Number(event.target.value) === 30 ? 30 : 7)
+            }
+          >
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+          </AdminSelect>
           <div className="metric-grid metric-grid-four">
             <MetricCard
               title="Total Calls"
-              value={rows.length}
-              hint="in last 7 days"
+              value={statisticsRows.length}
+              hint={`in last ${statisticsPeriod} days`}
               icon="phone"
             />
             <MetricCard
               title="Avg Duration"
-              value="0s"
+              value={formatDuration(averageDuration)}
               hint="per call"
               icon="activity"
             />
-            <MetricCard title="Missed Rate" value="0%" icon="alert" />
+            <MetricCard
+              title="Missed Rate"
+              value={`${statisticsRows.length ? Math.round((missedCalls / statisticsRows.length) * 100) : 0}%`}
+              icon="alert"
+            />
             <MetricCard
               title="Video / Audio"
-              value="0 / 0"
+              value={`${videoCalls} / ${audioCalls}`}
               hint="calls by type"
               icon="phone"
             />
           </div>
           <article className="dashboard-panel livekit-chart">
             <h3>Calls per day</h3>
-            <p>Last 7 days</p>
-            <div>
-              {Array.from({ length: 7 }, (_, index) => (
-                <span key={index}>
-                  {new Date(
-                    Date.now() - (6 - index) * 86400000,
-                  ).toLocaleDateString("en-CA", {
-                    month: "2-digit",
-                    day: "2-digit",
-                  })}
-                </span>
-              ))}
+            <p>Last {statisticsPeriod} days</p>
+            <div
+              key={statisticsPeriod}
+              style={{
+                gridTemplateColumns: `repeat(${statisticsPeriod}, minmax(28px, 1fr))`,
+                minWidth: `${statisticsPeriod * 32}px`,
+              }}
+            >
+              {dailyCalls.map((row, index) => {
+                const showLabel =
+                  statisticsPeriod === 7 ||
+                  index % 5 === 0 ||
+                  index === dailyCalls.length - 1;
+                return (
+                  <span
+                    className="livekit-chart-day"
+                    aria-label={`${row.date}: ${row.count} calls`}
+                    tabIndex={0}
+                    key={row.date}
+                  >
+                    <b
+                      style={{
+                        height: row.count
+                          ? `${Math.max(6, (row.count / maxDailyCalls) * 100)}%`
+                          : "0",
+                      }}
+                    >
+                      {row.count ? <em>{row.count}</em> : null}
+                    </b>
+                    <small>{showLabel ? row.date.slice(5) : ""}</small>
+                    <span className="livekit-chart-tooltip" role="tooltip">
+                      <strong>{row.date.slice(5)}</strong>
+                      <em>Calls : {row.count}</em>
+                    </span>
+                  </span>
+                );
+              })}
             </div>
           </article>
         </section>
@@ -4384,6 +5468,7 @@ function StaticPageEditor({
                 type="button"
                 key={code}
                 className={locale === code ? "active" : ""}
+                aria-pressed={locale === code}
                 onClick={() => switchLocale(code)}
               >
                 {name}
@@ -4422,14 +5507,14 @@ function StaticPageEditor({
             </label>
             <label>
               Status
-              <select
+              <AdminSelect
                 value={status}
                 onChange={(event) => setStatus(event.target.value)}
               >
                 <option value="DRAFT">Draft</option>
                 <option value="PUBLISHED">Published</option>
                 <option value="ARCHIVED">Archived</option>
-              </select>
+              </AdminSelect>
             </label>
             <label>
               Sort Order
@@ -4617,7 +5702,7 @@ function DeletionFeedback() {
           </h1>
           <p>Why users delete their accounts.</p>
         </div>
-        <select
+        <AdminSelect
           value={days}
           onChange={(event) => setDays(event.target.value)}
           aria-label="Feedback period"
@@ -4626,7 +5711,7 @@ function DeletionFeedback() {
           <option value="30">Last 30 days</option>
           <option value="90">Last 90 days</option>
           <option value="all">All time</option>
-        </select>
+        </AdminSelect>
       </header>
       {!result ? (
         <p className="loading-inline">Loading…</p>
@@ -4782,6 +5867,23 @@ function GenericList({ view }: { view: string }) {
     };
   }, []);
   useEffect(() => {
+    if (!openUserMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest(".row-menu-wrap"))
+        setOpenUserMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenUserMenu(null);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [openUserMenu]);
+  useEffect(() => {
     if (view !== "subscriptions") return;
     api
       .get<RecordValue>("/admin/stats")
@@ -4869,11 +5971,13 @@ function GenericList({ view }: { view: string }) {
       row.profileSourceId ?? row.profileId ?? data?.profileId;
     const clinicId = data?.id ?? row.id;
     if (view === "users" && userId) navigate(`/users/${userId}`);
-    if (
-      (view === "subscriptions" || view === "verifications") &&
-      linkedProfileId
-    )
+    if (view === "subscriptions" && linkedProfileId)
       navigate(`/users/${linkedProfileId}`);
+    if (view === "verifications") {
+      const verificationId = verificationRouteId(row);
+      if (verificationId)
+        navigate(`/verifications/${encodeURIComponent(verificationId)}`);
+    }
     if (view === "clinics" && clinicId) navigate(`/clinics/${clinicId}`);
     if (view === "lawyers" && clinicId) navigate(`/lawyers/${clinicId}`);
     if (view === "articles" && row.id) navigate(`/articles/${row.id}`);
@@ -5124,7 +6228,7 @@ function GenericList({ view }: { view: string }) {
             title="Manual Grants"
             value={summaryCounts.manual_subscriptions}
             hint={`${valueOf(summaryCounts.manual_subscriptions_30d)} in last 30 days`}
-            icon="userCheck"
+            icon="userPlus"
           />
           <MetricCard
             title="App Store"
@@ -5134,7 +6238,7 @@ function GenericList({ view }: { view: string }) {
           <MetricCard
             title="Play Store"
             value={summaryCounts.play_store_subscriptions}
-            icon="drive"
+            icon="creditCard"
           />
         </section>
       )}
@@ -5171,6 +6275,7 @@ function GenericList({ view }: { view: string }) {
               <button
                 type="button"
                 className={(filters.status ?? "") === status ? "active" : ""}
+                aria-pressed={(filters.status ?? "") === status}
                 key={status || "all"}
                 onClick={() => {
                   setOffset(0);
@@ -5191,7 +6296,7 @@ function GenericList({ view }: { view: string }) {
         ].includes(view) && (
           <div className="filter-row">
             {["clinics", "lawyers", "verifications"].includes(view) && (
-              <select
+              <AdminSelect
                 value={filters.status ?? ""}
                 onChange={(event) => {
                   setOffset(0);
@@ -5219,11 +6324,11 @@ function GenericList({ view }: { view: string }) {
                     </option>
                   ) : null;
                 })}
-              </select>
+              </AdminSelect>
             )}
             {["clinics", "lawyers"].includes(view) && (
               <>
-                <select
+                <AdminSelect
                   value={filters.country ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -5238,14 +6343,14 @@ function GenericList({ view }: { view: string }) {
                     const value = String(option.value ?? "");
                     return value ? (
                       <option key={value} value={value}>
-                        {label(value)}
+                        {userCountryName(value)}
                       </option>
                     ) : null;
                   })}
-                </select>
+                </AdminSelect>
                 {view === "clinics" && (
                   <>
-                    <select
+                    <AdminSelect
                       value={filters.hasWebsite ?? ""}
                       onChange={(event) => {
                         setOffset(0);
@@ -5256,10 +6361,10 @@ function GenericList({ view }: { view: string }) {
                       }}
                     >
                       <option value="">Website: Any</option>
-                      <option value="true">Website: Yes</option>
-                      <option value="false">Website: No</option>
-                    </select>
-                    <select
+                      <option value="true">Has website</option>
+                      <option value="false">No website</option>
+                    </AdminSelect>
+                    <AdminSelect
                       value={filters.hasLogo ?? ""}
                       onChange={(event) => {
                         setOffset(0);
@@ -5270,16 +6375,16 @@ function GenericList({ view }: { view: string }) {
                       }}
                     >
                       <option value="">Logo: Any</option>
-                      <option value="true">Logo: Yes</option>
-                      <option value="false">Logo: No</option>
-                    </select>
+                      <option value="true">Has logo</option>
+                      <option value="false">No logo</option>
+                    </AdminSelect>
                   </>
                 )}
               </>
             )}
             {view === "users" && (
               <>
-                <select
+                <AdminSelect
                   value={filters.profileType ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -5298,7 +6403,7 @@ function GenericList({ view }: { view: string }) {
                       </option>
                     ) : null;
                   })}
-                </select>
+                </AdminSelect>
                 <label className="inline-toggle">
                   <input
                     type="checkbox"
@@ -5327,7 +6432,7 @@ function GenericList({ view }: { view: string }) {
                   />
                   Co-parenting
                 </label>
-                <select
+                <AdminSelect
                   value={filters.country ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -5346,7 +6451,7 @@ function GenericList({ view }: { view: string }) {
                       </option>
                     ) : null;
                   })}
-                </select>
+                </AdminSelect>
                 <input
                   value={filters.city ?? ""}
                   onChange={(event) => {
@@ -5372,7 +6477,7 @@ function GenericList({ view }: { view: string }) {
                   />
                   Online
                 </label>
-                <select
+                <AdminSelect
                   value={filters.mismatch ?? "off"}
                   onChange={(event) => {
                     setOffset(0);
@@ -5383,9 +6488,10 @@ function GenericList({ view }: { view: string }) {
                   }}
                 >
                   <option value="off">Mismatch: Off</option>
-                  <option value="on">Mismatch: On</option>
-                </select>
-                <select
+                  <option value="any">Any mismatch</option>
+                  <option value="hard">Hard only</option>
+                </AdminSelect>
+                <AdminSelect
                   value={filters.orderBy ?? "newest"}
                   onChange={(event) => {
                     setOffset(0);
@@ -5397,12 +6503,12 @@ function GenericList({ view }: { view: string }) {
                 >
                   <option value="newest">Sort: Newest</option>
                   <option value="oldest">Sort: Oldest</option>
-                </select>
+                </AdminSelect>
               </>
             )}
             {view === "subscriptions" && (
               <>
-                <select
+                <AdminSelect
                   value={filters.plan ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -5416,8 +6522,8 @@ function GenericList({ view }: { view: string }) {
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
                   <option value="ANNUAL">Annual</option>
-                </select>
-                <select
+                </AdminSelect>
+                <AdminSelect
                   value={filters.status ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -5431,8 +6537,8 @@ function GenericList({ view }: { view: string }) {
                   <option value="ACTIVE">Active</option>
                   <option value="PENDING">Pending</option>
                   <option value="EXPIRED">Expired</option>
-                </select>
-                <select
+                </AdminSelect>
+                <AdminSelect
                   value={filters.source ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -5446,7 +6552,7 @@ function GenericList({ view }: { view: string }) {
                   <option value="APP_STORE">App Store</option>
                   <option value="PLAY_STORE">Play Store</option>
                   <option value="MANUAL_REVIEW">Manual</option>
-                </select>
+                </AdminSelect>
               </>
             )}
           </div>
@@ -5454,7 +6560,7 @@ function GenericList({ view }: { view: string }) {
       </section>
       {["static-pages", "marketing"].includes(view) && (
         <section className="list-controls">
-          <select
+          <AdminSelect
             value={filters.status ?? ""}
             onChange={(event) => {
               setOffset(0);
@@ -5473,7 +6579,7 @@ function GenericList({ view }: { view: string }) {
             <option value="SENT">Sent</option>
             <option value="FAILED">Failed</option>
             <option value="CANCELLED">Cancelled</option>
-          </select>
+          </AdminSelect>
         </section>
       )}
       {error ? (
@@ -5483,7 +6589,7 @@ function GenericList({ view }: { view: string }) {
           {total > limit &&
             (view === "users" ? (
               usersPager
-            ) : (
+            ) : ["clinics", "lawyers"].includes(view) ? usersPager : (
               <div className="pager">
                 <button
                   disabled={!offset}
@@ -5502,7 +6608,9 @@ function GenericList({ view }: { view: string }) {
                 </button>
               </div>
             ))}
-          <div className={`table ${view === "users" ? "users-table" : ""}`}>
+          <div
+            className={`table generic-list-table ${view === "users" ? "users-table" : view === "subscriptions" ? "subscriptions-table" : ["clinics", "lawyers"].includes(view) ? `directory-table ${view}-table` : ""}`}
+          >
             {result === null ? (
               <p className="loading-inline">Loading…</p>
             ) : (
@@ -5510,15 +6618,26 @@ function GenericList({ view }: { view: string }) {
                 <thead>
                   <tr>
                     {visibleColumns.map((column) => (
-                      <th key={column}>{columnLabel(view, column)}</th>
+                      <th
+                        key={column}
+                        className={`table-column table-column-${column}`}
+                      >
+                        {columnLabel(view, column)}
+                      </th>
                     ))}
-                    {hasRowAction && <th>Actions</th>}
+                    {hasRowAction && (
+                      <th className="table-column table-column-actions">
+                        Actions
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((row, index) => {
                     const rowKey = String(
-                      row.profileId ?? row.profile_id ?? row.id ?? index,
+                      view === "subscriptions"
+                        ? (row.id ?? row.profileId ?? index)
+                        : (row.profileId ?? row.profile_id ?? row.id ?? index),
                     );
                     return (
                       <tr
@@ -5536,7 +6655,11 @@ function GenericList({ view }: { view: string }) {
                         }
                       >
                         {visibleColumns.map((column) => (
-                          <td key={column}>
+                          <td
+                            key={column}
+                            className={`table-column table-column-${column}`}
+                            data-label={columnLabel(view, column)}
+                          >
                             {view === "articles" && column === "title" ? (
                               <div className="article-title-cell">
                                 <b>{valueOf(row.title)}</b>
@@ -5554,7 +6677,13 @@ function GenericList({ view }: { view: string }) {
                             ) : column === "location" ? (
                               (view === "users"
                                 ? [userCountryName(row.country), row.city]
-                                : [row.city, countryName(row.country)]
+                                : view === "lawyers"
+                                  ? [
+                                      row.city,
+                                      row.state,
+                                      userCountryName(row.country),
+                                    ]
+                                  : [row.city, userCountryName(row.country)]
                               )
                                 .filter(Boolean)
                                 .map(valueOf)
@@ -5584,12 +6713,36 @@ function GenericList({ view }: { view: string }) {
                               >
                                 {registrationSourceLabel(row[column])}
                               </span>
+                            ) : view === "subscriptions" &&
+                              column === "plan" ? (
+                              <span
+                                className={`subscription-plan-badge plan-${String(row.plan ?? subscriptionData(row).plan ?? "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                              >
+                                {subscriptionPlan(row)}
+                              </span>
+                            ) : view === "subscriptions" &&
+                              column === "status" ? (
+                              <span
+                                className={`table-badge subscription-status-badge status-${String(row.status ?? "").toLowerCase()}`}
+                              >
+                                {statusLabel(String(row.status ?? ""))}
+                              </span>
+                            ) : view === "subscriptions" &&
+                              column === "source" ? (
+                              subscriptionSource(row)
+                            ) : view === "subscriptions" &&
+                              column === "period" ? (
+                              <span className="subscription-period">
+                                {subscriptionPeriod(row)}
+                              </span>
                             ) : column === "status" ||
                               column === "verificationStatus" ? (
                               <span
                                 className={`table-badge status-${String(row[column] ?? "").toLowerCase()}`}
                               >
-                                {valueOf(row[column])}
+                                {["clinics", "lawyers"].includes(view)
+                                  ? statusLabel(String(row[column] ?? ""))
+                                  : valueOf(row[column])}
                               </span>
                             ) : column.toLowerCase().includes("created") ||
                               column.toLowerCase().includes("completed") ? (
@@ -5609,31 +6762,44 @@ function GenericList({ view }: { view: string }) {
                                 column,
                               ) ? (
                               <div className="person-cell">
-                                <span className="person-avatar">
-                                  <i>
-                                    {rowName(row).slice(0, 1).toUpperCase()}
-                                  </i>
-                                  {Boolean(
-                                    row.avatarUrl ||
-                                      row.logoUrl ||
-                                      row.photoUrl,
-                                  ) && (
-                                    <img
-                                      src={String(
-                                        row.avatarUrl ??
-                                          row.logoUrl ??
-                                          row.photoUrl,
-                                      )}
-                                      alt=""
-                                      onError={(event) =>
-                                        event.currentTarget.remove()
-                                      }
-                                    />
-                                  )}
-                                </span>
+                                <PersonAvatar
+                                  row={row}
+                                  name={rowName(row)}
+                                  className={`person-avatar ${view === "clinics" ? "clinic-list-logo" : view === "lawyers" ? "lawyer-list-photo" : ""}`}
+                                />
                                 <span>
                                   <span className="person-name-line">
                                     <b>{rowName(row)}</b>
+                                    {view === "subscriptions" &&
+                                      subscriptionIsVerified(row) && (
+                                        <span
+                                          className="subscription-user-icon subscription-user-verified"
+                                          title="Verified"
+                                          aria-label="Verified"
+                                        >
+                                          <AdminIcon name="circleCheck" />
+                                        </span>
+                                      )}
+                                    {view === "subscriptions" &&
+                                      subscriptionIsPremium(row) && (
+                                        <span
+                                          className="subscription-user-icon subscription-user-premium"
+                                          title="Premium"
+                                          aria-label="Premium"
+                                        >
+                                          <AdminIcon name="crown" />
+                                        </span>
+                                      )}
+                                    {view === "subscriptions" &&
+                                      isDonorProfile(row) && (
+                                        <em
+                                          className="subscription-donor-badge"
+                                          title="Donor"
+                                          aria-label="Donor"
+                                        >
+                                          D
+                                        </em>
+                                      )}
                                     {view === "users" &&
                                       isDonorProfile(row) && (
                                         <em
@@ -5657,13 +6823,19 @@ function GenericList({ view }: { view: string }) {
                           </td>
                         ))}
                         {hasRowAction && (
-                          <td>
+                          <td
+                            className="table-column table-column-actions"
+                            data-label="Actions"
+                          >
                             {view === "users" ? (
                               <span className="row-menu-wrap">
                                 <button
                                   className="row-action row-menu-button"
                                   aria-label="User actions"
                                   aria-expanded={openUserMenu === rowKey}
+                                  aria-haspopup="menu"
+                                  aria-controls={`user-actions-${rowKey}`}
+                                  type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setOpenUserMenu((current) =>
@@ -5671,15 +6843,19 @@ function GenericList({ view }: { view: string }) {
                                     );
                                   }}
                                 >
-                                  •••
+                                  <AdminIcon name="ellipsis" />
                                 </button>
                                 {openUserMenu === rowKey && (
                                   <span
                                     className="row-menu"
+                                    id={`user-actions-${rowKey}`}
+                                    role="menu"
                                     onClick={(event) => event.stopPropagation()}
                                   >
                                     <button
                                       className="danger-text"
+                                      type="button"
+                                      role="menuitem"
                                       onClick={() =>
                                         setUserAction({ row, kind: "ban" })
                                       }
@@ -5688,6 +6864,8 @@ function GenericList({ view }: { view: string }) {
                                     </button>
                                     <button
                                       className="danger-text"
+                                      type="button"
+                                      role="menuitem"
                                       onClick={() =>
                                         setUserAction({ row, kind: "delete" })
                                       }
@@ -5703,6 +6881,9 @@ function GenericList({ view }: { view: string }) {
                                   className="row-action row-menu-button"
                                   aria-label="Subscription actions"
                                   aria-expanded={openUserMenu === rowKey}
+                                  aria-haspopup="menu"
+                                  aria-controls={`subscription-actions-${rowKey}`}
+                                  type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setOpenUserMenu((current) =>
@@ -5710,17 +6891,31 @@ function GenericList({ view }: { view: string }) {
                                     );
                                   }}
                                 >
-                                  •••
+                                  <AdminIcon name="ellipsis" />
                                 </button>
                                 {openUserMenu === rowKey && (
                                   <span
                                     className="row-menu"
+                                    id={`subscription-actions-${rowKey}`}
+                                    role="menu"
                                     onClick={(event) => event.stopPropagation()}
                                   >
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => {
+                                        setOpenUserMenu(null);
+                                        choose(row);
+                                      }}
+                                    >
+                                      View User
+                                    </button>
                                     {String(row.status ?? "").toUpperCase() ===
                                       "PENDING" && (
                                       <>
                                         <button
+                                          type="button"
+                                          role="menuitem"
                                           onClick={() => {
                                             setOpenUserMenu(null);
                                             setSubscriptionReview({
@@ -5732,6 +6927,8 @@ function GenericList({ view }: { view: string }) {
                                           Approve
                                         </button>
                                         <button
+                                          type="button"
+                                          role="menuitem"
                                           onClick={() => {
                                             setOpenUserMenu(null);
                                             setSubscriptionReview({
@@ -5744,15 +6941,21 @@ function GenericList({ view }: { view: string }) {
                                         </button>
                                       </>
                                     )}
-                                    <button
-                                      className="danger-text"
-                                      onClick={() => {
-                                        setOpenUserMenu(null);
-                                        setSubscriptionToRevoke(row);
-                                      }}
-                                    >
-                                      Revoke Premium
-                                    </button>
+                                    {["ACTIVE", "APPROVED"].includes(
+                                      String(row.status ?? "").toUpperCase(),
+                                    ) && (
+                                      <button
+                                        className="danger-text"
+                                        type="button"
+                                        role="menuitem"
+                                        onClick={() => {
+                                          setOpenUserMenu(null);
+                                          setSubscriptionToRevoke(row);
+                                        }}
+                                      >
+                                        Revoke Premium
+                                      </button>
+                                    )}
                                   </span>
                                 )}
                               </span>
@@ -5789,7 +6992,7 @@ function GenericList({ view }: { view: string }) {
               </table>
             )}
           </div>
-          {view === "users" && usersPager}
+          {["users", "clinics", "lawyers"].includes(view) && usersPager}
         </>
       )}
       {grantOpen && (
@@ -5817,14 +7020,14 @@ function GenericList({ view }: { view: string }) {
             </label>
             <label>
               Plan
-              <select
+              <AdminSelect
                 value={grantPlan}
                 onChange={(event) => setGrantPlan(event.target.value)}
               >
                 <option value="MONTHLY">Premium Monthly</option>
                 <option value="QUARTERLY">Premium Quarterly</option>
                 <option value="ANNUAL">Premium Annual</option>
-              </select>
+              </AdminSelect>
             </label>
             <label>
               Duration (days)
@@ -5924,6 +7127,282 @@ function GenericList({ view }: { view: string }) {
   );
 }
 
+function VerificationDetail() {
+  const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const [detail, setDetail] = useState<RecordValue | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [reload, setReload] = useState(0);
+  const [confirmAction, setConfirmAction] = useState<
+    "approve" | "delete" | null
+  >(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setDetail(null);
+    setError("");
+    api
+      .get<{ item?: RecordValue }>(
+        `/admin/verifications/${encodeURIComponent(id)}`,
+      )
+      .then((response) => {
+        if (!live) return;
+        if (!response.item) throw new Error("Missing verification session");
+        setDetail(response.item);
+      })
+      .catch(() => live && setError("Could not load this verification session."));
+    return () => {
+      live = false;
+    };
+  }, [id, reload]);
+
+  const runConfirmedAction = async () => {
+    if (!confirmAction) return;
+    setBusy(true);
+    setError("");
+    try {
+      if (confirmAction === "approve") {
+        await api.post(
+          `/admin/verifications/${encodeURIComponent(id)}/approve`,
+        );
+        setNotice("Verification manually approved.");
+        setConfirmAction(null);
+        setReload((value) => value + 1);
+      } else {
+        await api.delete(`/admin/verifications/${encodeURIComponent(id)}`);
+        navigate("/verifications");
+      }
+    } catch {
+      setError(
+        confirmAction === "approve"
+          ? "Could not approve this verification."
+          : "Could not delete this verification session.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!detail) {
+    return (
+      <section className="verification-detail-page">
+        <Link className="back" to="/verifications">
+          <AdminIcon name="arrowLeft" /> Back to Verifications
+        </Link>
+        {error ? (
+          <p className="error">{error}</p>
+        ) : (
+          <p className="loading-inline">Loading…</p>
+        )}
+      </section>
+    );
+  }
+
+  const data = verificationData(detail);
+  const profileId = detail.profileId ?? data.profileId;
+  const profileName = String(detail.profileName ?? data.profileName ?? "No profile");
+  const profileEmail = valueOf(detail.profileEmail ?? data.email);
+  const status = String(
+    detail.verificationStatus ?? detail.status ?? "PENDING",
+  ).toUpperCase();
+  const statusClass = status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const sessionId = valueOf(
+    detail.sessionId ?? data.sessionId ?? verificationRouteId(detail),
+  );
+  const providerUrl = externalHttpUrl(
+    detail.verificationUrl ?? data.verificationUrl ?? data.url ?? "",
+  );
+  const liveness = detail.liveness ?? data.livenessScore ?? data.liveness;
+  const faceMatch = detail.faceMatch ?? data.faceMatchScore ?? data.faceMatch;
+  const faceQuality = detail.faceQuality ?? data.faceQuality;
+  const faceQualityNumber = Number(faceQuality);
+  const faceQualityClass = Number.isFinite(faceQualityNumber)
+    ? faceQualityNumber >= 70
+      ? "good"
+      : faceQualityNumber >= 45
+        ? "warning"
+        : "danger"
+    : "";
+
+  return (
+    <>
+      <section className="verification-detail-page">
+        <Link className="back verification-detail-back" to="/verifications">
+          <AdminIcon name="arrowLeft" /> Back to Verifications
+        </Link>
+        {notice && <p className="notice">{notice}</p>}
+        {error && <p className="error">{error}</p>}
+        <header className="verification-detail-heading">
+          <div className="verification-detail-identity">
+            <PersonAvatar
+              row={detail}
+              name={profileName}
+              className="verification-detail-avatar"
+            />
+            <div>
+              <h1>{profileName}</h1>
+              <p>{profileEmail}</p>
+            </div>
+          </div>
+          <span
+            className={`verification-detail-status status-${statusClass}`}
+          >
+            {verificationStateLabel(status)}
+          </span>
+        </header>
+
+        <div className="verification-detail-grid">
+          <section className="verification-detail-card verification-session-card">
+            <h2>Session Info</h2>
+            <dl className="verification-detail-list">
+              <div>
+                <dt>Didit Session ID</dt>
+                <dd className="verification-session-id">{sessionId}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>
+                  <span
+                    className={`verification-detail-status status-${statusClass}`}
+                  >
+                    {verificationStateLabel(status)}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>Liveness Score</dt>
+                <dd>{verificationPercent(liveness)}</dd>
+              </div>
+              <div>
+                <dt>Face Match Score</dt>
+                <dd>{verificationPercent(faceMatch)}</dd>
+              </div>
+              <div>
+                <dt>Created</dt>
+                <dd>{verificationDetailDate(detail.created_at)}</dd>
+              </div>
+              <div>
+                <dt>Completed</dt>
+                <dd>{verificationDetailDate(detail.completed_at)}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="verification-detail-card verification-actions-card">
+            <h2>Actions</h2>
+            <div className="verification-detail-actions">
+              <button
+                type="button"
+                disabled={!profileId}
+                onClick={() => profileId && navigate(`/users/${profileId}`)}
+              >
+                View User Profile
+              </button>
+              <button
+                type="button"
+                disabled={!providerUrl}
+                onClick={() =>
+                  providerUrl &&
+                  window.open(providerUrl, "_blank", "noopener,noreferrer")
+                }
+              >
+                <AdminIcon name="externalLink" /> Open in Didit
+              </button>
+              <button
+                className="primary"
+                type="button"
+                disabled={status === "APPROVED" || busy}
+                onClick={() => setConfirmAction("approve")}
+              >
+                Manual Approve
+              </button>
+              <button
+                className="danger-text"
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmAction("delete")}
+              >
+                Delete Session
+              </button>
+            </div>
+          </section>
+
+          <section className="verification-detail-card">
+            <h2>Liveness</h2>
+            <dl className="verification-detail-list">
+              <div>
+                <dt>Score</dt>
+                <dd className="good">{verificationPercent(liveness)}</dd>
+              </div>
+              <div>
+                <dt>Method</dt>
+                <dd>{valueOf(detail.livenessMethod ?? data.livenessMethod)}</dd>
+              </div>
+              <div>
+                <dt>Age Estimation</dt>
+                <dd>{verificationAge(detail.ageEstimation ?? data.ageEstimation)}</dd>
+              </div>
+              <div>
+                <dt>Face Quality</dt>
+                <dd className={faceQualityClass}>
+                  {verificationPercent(faceQuality)}
+                </dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>
+                  {verificationStateLabel(
+                    detail.livenessStatus ?? data.livenessStatus,
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="verification-detail-card">
+            <h2>Face Match</h2>
+            <dl className="verification-detail-list">
+              <div>
+                <dt>Score</dt>
+                <dd className="good">{verificationPercent(faceMatch)}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>
+                  {verificationStateLabel(
+                    detail.faceMatchStatus ?? data.faceMatchStatus,
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </section>
+        </div>
+      </section>
+      <ConfirmModal
+        open={confirmAction === "approve"}
+        title="Manual Approve"
+        message={`Approve the verification session for ${profileName}? The user will be marked as verified.`}
+        confirmLabel="Manual Approve"
+        confirmClassName="primary"
+        busy={busy}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={runConfirmedAction}
+      />
+      <ConfirmModal
+        open={confirmAction === "delete"}
+        title="Delete Session"
+        message={`Delete the verification session for ${profileName}? This action cannot be undone.`}
+        confirmLabel="Delete Session"
+        busy={busy}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={runConfirmedAction}
+      />
+    </>
+  );
+}
+
 function ArticlesList({ view }: { view: "articles" | "categories" }) {
   return view === "categories" ? (
     <Navigate to="/articles" replace />
@@ -6013,18 +7492,50 @@ function CategoryManager({
   const [slug, setSlug] = useState("");
   const [editing, setEditing] = useState<RecordValue | null>(null);
   const [busy, setBusy] = useState(false);
-  const load = () =>
-    api
-      .get<ListResponse>("/admin/list/categories?limit=100&offset=0")
-      .then((data) => setItems(data.items));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const reset = () => {
+    setEditing(null);
+    setNameEn("");
+    setNameRu("");
+    setSlug("");
+  };
+  const close = () => {
+    if (busy) return;
+    reset();
+    setError("");
+    onClose();
+  };
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api.get<ListResponse>(
+        "/admin/list/categories?limit=100&offset=0",
+      );
+      setItems(data.items.map(articleCategoryRecord));
+    } catch {
+      setItems([]);
+      setError("Could not load categories.");
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
-    if (open) void load();
+    if (!open) return;
+    reset();
+    void load();
+    window.requestAnimationFrame(() => nameInputRef.current?.focus());
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
   }, [open]);
   if (!open) return null;
   const fields = (row: RecordValue) => {
-    const data = (
-      row.data && typeof row.data === "object" ? row.data : row
-    ) as RecordValue;
+    const data = articleCategoryRecord(row);
     const translations = Array.isArray(data.translations)
       ? (data.translations as RecordValue[])
       : [];
@@ -6041,26 +7552,28 @@ function CategoryManager({
       slug: valueOf(data.slug ?? row.slug ?? row.title),
     };
   };
-  const reset = () => {
-    setEditing(null);
-    setNameEn("");
-    setNameRu("");
-    setSlug("");
-  };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (!nameEn.trim() || !slug.trim()) return;
     setBusy(true);
+    setError("");
     const original = editing ? fields(editing).data : {};
+    const {
+      id: _id,
+      sourceId: _sourceId,
+      source_key: _sourceKey,
+      ...preserved
+    } = original;
     const values = {
       title: nameEn.trim(),
       slug: slug.trim(),
       status: "active",
       locale: "en",
       data: {
-        ...original,
+        ...preserved,
         name: nameEn.trim(),
         slug: slug.trim(),
+        sortOrder: Number(preserved.sortOrder ?? 0),
         isActive: true,
         translations: [
           { locale: "en", name: nameEn.trim() },
@@ -6077,36 +7590,60 @@ function CategoryManager({
       else await api.post("/admin/create/categories", { values });
       reset();
       await load();
+    } catch {
+      setError(
+        editing
+          ? "Could not update this category. Check that its slug is unique."
+          : "Could not add this category. Check that its slug is unique.",
+      );
     } finally {
       setBusy(false);
     }
   };
   return (
-    <div className="modal-backdrop category-backdrop" role="presentation">
+    <div
+      className="modal-backdrop category-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+    >
       <section
         className="modal category-manager"
         role="dialog"
         aria-modal="true"
         aria-label="Manage Categories"
+        aria-busy={busy || loading}
       >
         <h2>Manage Categories</h2>
+        <button
+          type="button"
+          className="category-manager-close"
+          aria-label="Close"
+          onClick={close}
+        >
+          <AdminIcon name="x" />
+        </button>
         <form className="category-add-row" onSubmit={save}>
-          <label>
-            Name (EN)
-            <input
-              value={nameEn}
-              onChange={(event) => setNameEn(event.target.value)}
-              placeholder="Category name"
-            />
-          </label>
-          <label>
-            Name (RU)
-            <input
-              value={nameRu}
-              onChange={(event) => setNameRu(event.target.value)}
-              placeholder="Название категории"
-            />
-          </label>
+          <div className="category-name-fields">
+            <label>
+              Name (EN)
+              <input
+                ref={nameInputRef}
+                value={nameEn}
+                onChange={(event) => setNameEn(event.target.value)}
+                placeholder="Category name"
+              />
+            </label>
+            <label>
+              Name (RU)
+              <input
+                value={nameRu}
+                onChange={(event) => setNameRu(event.target.value)}
+                placeholder="Название категории"
+              />
+            </label>
+          </div>
           <label>
             Slug
             <input
@@ -6115,18 +7652,44 @@ function CategoryManager({
               placeholder="category-slug"
             />
           </label>
-          <button
-            className="primary"
-            disabled={busy || !nameEn.trim() || !slug.trim()}
-          >
-            {editing ? "Save" : "Add"}
-          </button>
+          <div className="category-form-actions">
+            <button
+              className="primary"
+              disabled={busy || !nameEn.trim() || !slug.trim()}
+            >
+              {editing ? "Update" : "Add"}
+            </button>
+            {editing && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={reset}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </form>
-        <div className="category-list">
+        {error && (
+          <p className="category-manager-error" role="alert">
+            {error}
+          </p>
+        )}
+        {loading ? (
+          <div className="category-list-loading" aria-label="Loading categories">
+            <span />
+          </div>
+        ) : (
+          <div className="category-list">
           {items.map((item) => {
             const data = fields(item);
+            const selected = String(editing?.id ?? "") === String(item.id ?? "");
             return (
-              <div className="category-row" key={String(item.id)}>
+              <div
+                className={`category-row${selected ? " editing" : ""}`}
+                key={String(item.id ?? data.slug)}
+              >
                 <span>
                   <b>{data.en}</b>
                   <small>{data.slug}</small>
@@ -6134,6 +7697,7 @@ function CategoryManager({
                 <div>
                   <button
                     type="button"
+                    className={selected ? "selected" : ""}
                     aria-label={`Edit ${data.en}`}
                     onClick={() => {
                       setEditing(item);
@@ -6149,10 +7713,19 @@ function CategoryManager({
                     aria-label={`Delete ${data.en}`}
                     onClick={async () => {
                       if (!window.confirm(`Archive ${data.en}?`)) return;
-                      await api.delete(
-                        `/admin/item/categories/${encodeURIComponent(String(item.id))}`,
-                      );
-                      await load();
+                      setBusy(true);
+                      setError("");
+                      try {
+                        await api.delete(
+                          `/admin/item/categories/${encodeURIComponent(String(item.id))}`,
+                        );
+                        if (selected) reset();
+                        await load();
+                      } catch {
+                        setError("Could not delete this category.");
+                      } finally {
+                        setBusy(false);
+                      }
                     }}
                   >
                     <AdminIcon name="trash" />
@@ -6161,12 +7734,11 @@ function CategoryManager({
               </div>
             );
           })}
-        </div>
-        <div className="category-footer">
-          <button type="button" className="secondary-button" onClick={onClose}>
-            Close
-          </button>
-        </div>
+          {!items.length && !error && (
+            <p className="category-empty">No categories yet.</p>
+          )}
+          </div>
+        )}
       </section>
     </div>
   );
@@ -6185,9 +7757,7 @@ function ArticleEditor({
   onClose: () => void;
   onSave: (values: RecordValue) => Promise<void>;
 }) {
-  const initialMeta = (
-    row.data && typeof row.data === "object" ? row.data : {}
-  ) as RecordValue;
+  const initialMeta = recordValue(row.data) ?? {};
   const [locale, setLocale] = useState(String(row.locale ?? "en"));
   const [title, setTitle] = useState(String(row.title ?? ""));
   const [excerpt, setExcerpt] = useState(String(row.excerpt ?? ""));
@@ -6209,16 +7779,32 @@ function ArticleEditor({
     String(initialMeta.metaDescription ?? initialMeta.seoDescription ?? ""),
   );
   const [ogImage, setOgImage] = useState(String(initialMeta.ogImage ?? ""));
-  const [category, setCategory] = useState<RecordValue | null>(
-    initialMeta.category && typeof initialMeta.category === "object"
-      ? (initialMeta.category as RecordValue)
-      : null,
+  const [category, setCategory] = useState<RecordValue | null>(() =>
+    articleCategoryFromMeta(initialMeta),
   );
   const [categories, setCategories] = useState<RecordValue[]>([]);
   useEffect(() => {
     api
       .get<ListResponse>("/admin/list/categories?limit=100&offset=0")
-      .then((data) => setCategories(data.items))
+      .then((data) => {
+        const nextCategories = data.items.map(articleCategoryRecord);
+        setCategories(nextCategories);
+        setCategory((current) => {
+          if (!current) return null;
+          const currentKeys = new Set(
+            [current.id, current.sourceId, current.slug, current.name]
+              .map((value) => String(value ?? "").trim().toLowerCase())
+              .filter(Boolean),
+          );
+          return (
+            nextCategories.find((item) =>
+              [item.id, item.sourceId, item.slug, item.name].some((value) =>
+                currentKeys.has(String(value ?? "").trim().toLowerCase()),
+              ),
+            ) ?? current
+          );
+        });
+      })
       .catch(() => setCategories([]));
   }, []);
   const switchLocale = (next: string) => {
@@ -6253,20 +7839,40 @@ function ArticleEditor({
       ),
     );
     setOgImage(String(translatedMeta.ogImage ?? ""));
-    setCategory(
-      translatedMeta.category && typeof translatedMeta.category === "object"
-        ? (translatedMeta.category as RecordValue)
-        : null,
-    );
+    const nextCategory = articleCategoryFromMeta(translatedMeta);
+    if (!nextCategory) {
+      setCategory(null);
+    } else {
+      const keys = new Set(
+        [nextCategory.id, nextCategory.sourceId, nextCategory.slug, nextCategory.name]
+          .map((value) => String(value ?? "").trim().toLowerCase())
+          .filter(Boolean),
+      );
+      setCategory(
+        categories.find((item) =>
+          [item.id, item.sourceId, item.slug, item.name].some((value) =>
+            keys.has(String(value ?? "").trim().toLowerCase()),
+          ),
+        ) ?? nextCategory,
+      );
+    }
   };
-  const categoryId = String(
-    category?.id ?? category?.sourceId ?? category?.slug ?? "",
-  );
+  const categoryId = articleCategoryKey(category);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    const normalizedCategory = category
+      ? {
+          ...category,
+          id: category.id ?? category.sourceId,
+          name: articleCategoryName(category, "en"),
+          slug: String(category.slug ?? ""),
+        }
+      : null;
     const meta: RecordValue = {
       ...initialMeta,
-      category,
+      category: normalizedCategory,
+      categoryName: normalizedCategory?.name ?? "",
+      categorySlug: normalizedCategory?.slug ?? "",
       tags: tags
         .split(",")
         .map((item) => item.trim())
@@ -6311,6 +7917,7 @@ function ArticleEditor({
                 type="button"
                 key={code}
                 className={locale === code ? "active" : ""}
+                aria-pressed={locale === code}
                 onClick={() => switchLocale(code)}
               >
                 {name}
@@ -6381,39 +7988,28 @@ function ArticleEditor({
             </label>
             <label>
               Category
-              <select
+              <AdminSelect
                 value={categoryId}
                 onChange={(event) => {
                   const next =
                     categories.find(
                       (item) =>
-                        String(item.id ?? item.sourceId ?? item.slug ?? "") ===
-                        event.target.value,
+                        articleCategoryKey(item) === event.target.value,
                     ) ?? null;
-                  setCategory(
-                    next
-                      ? ((next.data && typeof next.data === "object"
-                          ? next.data
-                          : next) as RecordValue)
-                      : null,
-                  );
+                  setCategory(next);
                 }}
               >
                 <option value="">Select category</option>
                 {categories.map((item, index) => {
-                  const data = (
-                    item.data && typeof item.data === "object"
-                      ? item.data
-                      : item
-                  ) as RecordValue;
-                  const id = String(data.id ?? item.id ?? data.slug ?? index);
+                  const data = articleCategoryRecord(item);
+                  const id = articleCategoryKey(data) || String(index);
                   return (
                     <option value={id} key={id}>
-                      {valueOf(data.name ?? item.title ?? data.slug)}
+                      {articleCategoryName(data, locale)}
                     </option>
                   );
                 })}
-              </select>
+              </AdminSelect>
             </label>
             <label>
               Tags
@@ -6425,14 +8021,14 @@ function ArticleEditor({
             </label>
             <label>
               Status
-              <select
+              <AdminSelect
                 value={status}
                 onChange={(event) => setStatus(event.target.value)}
               >
                 <option value="DRAFT">Draft</option>
                 <option value="PUBLISHED">Published</option>
                 <option value="ARCHIVED">Archived</option>
-              </select>
+              </AdminSelect>
             </label>
           </section>
           <section className="article-settings-card">
@@ -6494,6 +8090,38 @@ function ArticleEditor({
   );
 }
 
+type AdminAccountAction =
+  | "role"
+  | "permissions"
+  | "password"
+  | "status";
+
+const adminPermissionOptions: ReadonlyArray<readonly [string, string]> = [
+  ["dashboard", "Dashboard"],
+  ["users", "Users"],
+  ["subscriptions", "Subscriptions"],
+  ["verifications", "Verifications"],
+  ["clinics", "Clinics"],
+  ["lawyers", "Lawyers"],
+  ["articles", "Articles"],
+  ["support", "Support Chat"],
+  ["moderation-photos", "Photo Moderation"],
+  ["moderation-reports", "Reports"],
+  ["livekit", "LiveKit Calls"],
+  ["monitoring", "Monitoring"],
+  ["storage", "Storage"],
+  ["static-pages", "Static Pages"],
+  ["marketing", "Marketing"],
+  ["settings", "Settings"],
+];
+
+function adminPermissionLabel(permission: string) {
+  return (
+    adminPermissionOptions.find(([key]) => key === permission)?.[1] ??
+    label(permission)
+  );
+}
+
 function SettingsList({ view }: { view: string }) {
   const initial =
     (
@@ -6511,11 +8139,18 @@ function SettingsList({ view }: { view: string }) {
   const [auditRows, setAuditRows] = useState<RecordValue[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditPage, setAuditPage] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [auditRetry, setAuditRetry] = useState(0);
   const [operations, setOperations] = useState<RecordValue>({});
   const [session, setSession] = useState<Session | null>(null);
   const [adminAccounts, setAdminAccounts] = useState<RecordValue[]>([]);
   const [addingAdmin, setAddingAdmin] = useState(false);
-  const [editingAdmin, setEditingAdmin] = useState<RecordValue | null>(null);
+  const [adminActionMenu, setAdminActionMenu] = useState("");
+  const [adminDialog, setAdminDialog] = useState<{
+    action: AdminAccountAction;
+    account: RecordValue;
+  } | null>(null);
   const [savingKey, setSavingKey] = useState("");
   const [saveMessage, setSaveMessage] = useState<{
     kind: "success" | "error";
@@ -6545,23 +8180,65 @@ function SettingsList({ view }: { view: string }) {
         setAdminAccounts(accountsResult.items);
       },
     );
-  const loadAudit = (page: number) =>
-    api
-      .get<ListResponse>(`/admin/audit-log?limit=100&offset=${page * 100}`)
-      .then((result) => {
-        setAuditRows(result.items);
-        setAuditTotal(result.total);
-      })
-      .catch(() => {
-        setAuditRows([]);
-        setAuditTotal(0);
-      });
   useEffect(() => {
     void reload().catch(() => undefined);
   }, []);
   useEffect(() => {
-    void loadAudit(auditPage);
-  }, [auditPage]);
+    if (!adminActionMenu) return;
+    const closeMenu = () => setAdminActionMenu("");
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [adminActionMenu]);
+  useEffect(() => {
+    if (tab !== "Audit Log") return;
+    let active = true;
+    let inFlight = false;
+    const loadAudit = async (background = false) => {
+      if (inFlight) return;
+      inFlight = true;
+      if (!background) setAuditLoading(true);
+      setAuditError("");
+      try {
+        const result = await api.get<ListResponse>(
+          `/admin/audit-log?limit=100&offset=${auditPage * 100}`,
+        );
+        if (!active) return;
+        if (!Array.isArray(result.items) || !Number.isFinite(result.total)) {
+          throw new Error("Invalid audit response");
+        }
+        const lastPage = Math.max(0, Math.ceil(result.total / 100) - 1);
+        if (auditPage > lastPage) {
+          setAuditPage(lastPage);
+          return;
+        }
+        setAuditRows(result.items);
+        setAuditTotal(result.total);
+      } catch {
+        if (active) setAuditError("Unable to load the audit log. Please try again.");
+      } finally {
+        inFlight = false;
+        if (active) setAuditLoading(false);
+      }
+    };
+    void loadAudit();
+    const refresh = () => {
+      if (document.visibilityState === "visible") void loadAudit(true);
+    };
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [tab, auditPage, auditRetry]);
   const findSetting = (key: string) =>
     settings.find(
       (row) =>
@@ -6669,8 +8346,10 @@ function SettingsList({ view }: { view: string }) {
       <nav className="settings-tabs">
         {tabs.map((title) => (
           <button
+            type="button"
             key={title}
             className={tab === title ? "active" : ""}
+            aria-pressed={tab === title}
             onClick={() => setTab(title)}
           >
             {title}
@@ -6700,8 +8379,17 @@ function SettingsList({ view }: { view: string }) {
               <AdminIcon name="plus" /> Add Admin
             </button>
           </header>
-          <div className="table">
+          <div className="table admin-users-table">
             <table>
+              <colgroup>
+                <col className="admin-email-column" />
+                <col className="admin-role-column" />
+                <col className="admin-permissions-column" />
+                <col className="admin-status-column" />
+                <col className="admin-login-column" />
+                <col className="admin-created-column" />
+                <col className="admin-actions-column" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Email</th>
@@ -6718,63 +8406,132 @@ function SettingsList({ view }: { view: string }) {
                   const permissions = Array.isArray(account.permissions)
                     ? (account.permissions as string[])
                     : [];
+                  const accountKey = String(
+                    account.id ?? account.email ?? index,
+                  );
+                  const currentAccount =
+                    String(account.email).toLowerCase() ===
+                    String(session?.email ?? "").toLowerCase();
+                  const openAction = (action: AdminAccountAction) => {
+                    setAdminActionMenu("");
+                    setSaveMessage(null);
+                    setAdminDialog({ action, account });
+                  };
                   return (
                     <tr key={String(account.id ?? account.email ?? index)}>
-                      <td>
-                        {valueOf(account.email)}{" "}
-                        {String(account.email) === session?.email && (
+                      <td className="admin-email-cell">
+                        <span>{valueOf(account.email)}</span>
+                        {currentAccount && (
                           <small className="you-badge">You</small>
                         )}
                       </td>
                       <td>
-                        <span className="table-badge">
+                        <span
+                          className={`table-badge admin-role-badge role-${String(account.role ?? "staff").toLowerCase()}`}
+                        >
                           {valueOf(account.role)}
                         </span>
                       </td>
-                      <td>
+                      <td className="admin-permissions-cell">
                         {permissions.includes("*") ? (
-                          "All (super)"
+                          <span className="admin-super-permission">
+                            All (super)
+                          </span>
                         ) : (
                           <div className="permission-badges">
                             {permissions.map((permission) => (
                               <small key={permission}>
-                                {label(permission)}
+                                {adminPermissionLabel(permission)}
                               </small>
                             ))}
                           </div>
                         )}
                       </td>
                       <td>
-                        <span className="table-badge status-active">
+                        <span
+                          className={`table-badge admin-status-badge status-${String(account.status ?? "active").toLowerCase()}`}
+                        >
                           {valueOf(account.status)}
                         </span>
                       </td>
-                      <td>
-                        {String(account.email) === session?.email
-                          ? "Current session"
-                          : account.lastLoginAt
-                            ? verificationDate(account.lastLoginAt)
-                            : "—"}
+                      <td className="admin-date-cell">
+                        {account.lastLoginAt
+                          ? verificationDate(account.lastLoginAt)
+                          : "—"}
                       </td>
-                      <td>
+                      <td className="admin-date-cell">
                         {account.createdAt
-                          ? verificationDate(account.createdAt)
+                          ? new Date(String(account.createdAt)).toLocaleDateString(
+                              "ru-RU",
+                              {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                              },
+                            )
                           : "—"}
                       </td>
                       <td>
-                        <button
-                          className="row-action"
-                          aria-label={`Actions for ${String(account.email)}`}
-                          onClick={() =>
-                            account.configured
-                              ? window.alert(
-                                  "This protected account is managed through server configuration.",
-                                )
-                              : setEditingAdmin(account)
-                          }
+                        <div
+                          className="admin-row-actions"
+                          onClick={(event) => event.stopPropagation()}
                         >
-                          <AdminIcon name="ellipsis" />
-                        </button>
+                          <button
+                            type="button"
+                            className="admin-action-trigger"
+                            aria-label={`Actions for ${String(account.email)}`}
+                            aria-haspopup="menu"
+                            aria-expanded={adminActionMenu === accountKey}
+                            onClick={() =>
+                              setAdminActionMenu((current) =>
+                                current === accountKey ? "" : accountKey,
+                              )
+                            }
+                          >
+                            <AdminIcon name="ellipsis" />
+                          </button>
+                          {adminActionMenu === accountKey && (
+                            <div className="admin-actions-menu" role="menu">
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => openAction("role")}
+                              >
+                                Change Role
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => openAction("permissions")}
+                              >
+                                Edit Permissions
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => openAction("password")}
+                              >
+                                Reset Password
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className={
+                                  String(account.status).toUpperCase() ===
+                                  "ACTIVE"
+                                    ? "danger"
+                                    : ""
+                                }
+                                onClick={() => openAction("status")}
+                              >
+                                {String(account.status).toUpperCase() ===
+                                "ACTIVE"
+                                  ? "Deactivate Admin"
+                                  : "Activate Admin"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -7124,15 +8881,25 @@ function SettingsList({ view }: { view: string }) {
           ],
         )}
       {tab === "Audit Log" && (
-        <section className="settings-section">
+        <section className="settings-section settings-audit-section" aria-busy={auditLoading}>
           <header className="settings-audit-heading">
             <h2>Audit Log</h2>
             <p>
-              {auditTotal
+              {auditLoading || auditError
+                ? "Administrative and system activity"
+                : auditTotal
                 ? `Showing ${auditPage * 100 + 1}–${Math.min((auditPage + 1) * 100, auditTotal)} of ${auditTotal} entries`
-                : "Administrative and system activity"}
+                : "Showing 0 entries"}
             </p>
           </header>
+          {auditError && (
+            <div className="settings-audit-error" role="alert">
+              <span>{auditError}</span>
+              <button type="button" className="secondary-button" onClick={() => setAuditRetry((value) => value + 1)}>Retry</button>
+            </div>
+          )}
+          {auditLoading && <p className="loading-inline" role="status">Loading audit log…</p>}
+          {!auditLoading && !auditError && <>
           <div className="table settings-audit-table">
             <table>
               <thead>
@@ -7154,10 +8921,10 @@ function SettingsList({ view }: { view: string }) {
                     row.source_key;
                   return (
                     <tr key={String(row.id ?? index)}>
-                      <td>
+                      <td data-label="Date">
                         {verificationDate(data.createdAt ?? row.created_at)}
                       </td>
-                      <td>
+                      <td data-label="Admin">
                         {valueOf(
                           data.adminEmail ??
                             row.actor ??
@@ -7165,7 +8932,7 @@ function SettingsList({ view }: { view: string }) {
                             "Unknown",
                         )}
                       </td>
-                      <td>
+                      <td data-label="Action">
                         <span className="settings-audit-action">
                           {auditActionLabel(
                             data.action ?? row.action ?? row.title,
@@ -7173,7 +8940,7 @@ function SettingsList({ view }: { view: string }) {
                           )}
                         </span>
                       </td>
-                      <td>{details ? valueOf(details) : ""}</td>
+                      <td data-label="Details">{details ? valueOf(details) : ""}</td>
                     </tr>
                   );
                 })}
@@ -7206,6 +8973,7 @@ function SettingsList({ view }: { view: string }) {
               </button>
             </div>
           )}
+          </>}
         </section>
       )}
       {addingAdmin && (
@@ -7217,17 +8985,276 @@ function SettingsList({ view }: { view: string }) {
           }}
         />
       )}
-      {editingAdmin && (
-        <AdminAccountModal
-          account={editingAdmin}
-          onClose={() => setEditingAdmin(null)}
+      {adminDialog && (
+        <AdminAccountActionModal
+          action={adminDialog.action}
+          account={adminDialog.account}
+          currentAccount={String(adminDialog.account.email).toLowerCase() === String(session?.email ?? "").toLowerCase()}
+          onClose={() => setAdminDialog(null)}
           onSaved={async () => {
-            setEditingAdmin(null);
+            setAdminDialog(null);
             await reload();
           }}
         />
       )}
     </>
+  );
+}
+
+function AdminAccountActionModal({
+  action,
+  account,
+  currentAccount,
+  onClose,
+  onSaved,
+}: {
+  action: AdminAccountAction;
+  account: RecordValue;
+  currentAccount: boolean;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const initialRole = String(account.role ?? "STAFF").toUpperCase();
+  const initialPermissions = initialRole === "ADMIN"
+    ? adminPermissionOptions.map(([key]) => key)
+    : Array.isArray(account.permissions)
+    ? (account.permissions as string[]).filter((item) => item !== "*")
+    : [];
+  const [role, setRole] = useState(initialRole);
+  const [permissions, setPermissions] = useState(initialPermissions);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const readOnlyPermissions = action === "permissions" && initialRole === "ADMIN";
+  const selfAccessChange = currentAccount && (action === "status" || (action === "role" && role !== "ADMIN"));
+  const email = String(account.email ?? "");
+  const active = String(account.status ?? "ACTIVE").toUpperCase() === "ACTIVE";
+  const samePermissions =
+    [...permissions].sort().join("|") ===
+    [...initialPermissions].sort().join("|");
+  const passwordValid =
+    password.length >= 8 && /[A-Z]/.test(password) && /\d/.test(password);
+  const saveDisabled =
+    busy ||
+    readOnlyPermissions ||
+    selfAccessChange ||
+    (action === "role" && role === initialRole) ||
+    (action === "permissions" && samePermissions) ||
+    (action === "password" && !passwordValid);
+  const details = {
+    role: {
+      title: "Change Role",
+      subtitle: `Change the role for ${email}`,
+      save: "Save",
+    },
+    permissions: {
+      title: `Edit Permissions — ${email}`,
+      subtitle: "Choose which admin sections this user can access.",
+      save: "Save",
+    },
+    password: {
+      title: "Reset Password",
+      subtitle: `Set a new password for ${email}`,
+      save: "Reset Password",
+    },
+    status: {
+      title: active ? "Deactivate Admin" : "Activate Admin",
+      subtitle: active
+        ? `Deactivate access for ${email}?`
+        : `Restore admin access for ${email}?`,
+      save: active ? "Deactivate" : "Activate",
+    },
+  }[action];
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    if (!dialogRef.current?.contains(document.activeElement)) dialogRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented && !busy) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onClose]);
+  const togglePermission = (key: string) =>
+    setPermissions((current) =>
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key],
+    );
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (saveDisabled) return;
+    setBusy(true);
+    setError("");
+    try {
+      const payload: RecordValue =
+        action === "role"
+          ? { role }
+          : action === "permissions"
+            ? { permissions }
+            : action === "password"
+              ? { password }
+              : { status: active ? "INACTIVE" : "ACTIVE" };
+      await api.patch(
+        `/admin/accounts/${encodeURIComponent(String(account.id))}`,
+        payload,
+      );
+      await onSaved();
+    } catch (reason) {
+      let message =
+        reason instanceof Error
+          ? reason.message
+          : "Could not update the admin account.";
+      try {
+        message = String(
+          (JSON.parse(message) as RecordValue).detail ?? message,
+        );
+      } catch {}
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div
+      className="modal-backdrop admin-action-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target && !busy) onClose();
+      }}
+    >
+      <form
+        ref={dialogRef}
+        tabIndex={-1}
+        className={`modal admin-action-modal admin-${action}-modal`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={details.title}
+        onSubmit={submit}
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]')).filter((item) => item.getClientRects().length > 0);
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (!first) { event.preventDefault(); return; }
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && (document.activeElement === last || document.activeElement === event.currentTarget)) { event.preventDefault(); first.focus(); }
+        }}
+      >
+        <button
+          className="modal-close"
+          type="button"
+          aria-label="Close"
+          disabled={busy}
+          onClick={onClose}
+        >
+          <AdminIcon name="x" />
+        </button>
+        <header className="admin-action-modal-header">
+          <h2>{details.title}</h2>
+          <p>{details.subtitle}</p>
+        </header>
+        {error && <p className="error admin-account-error" role="alert">{error}</p>}
+        {selfAccessChange && <p className="admin-status-confirmation" role="status">You cannot deactivate your own account or remove your administrator role. Ask another administrator.</p>}
+        {action === "permissions" && (
+          <>
+            {readOnlyPermissions && <p className="admin-status-confirmation">Administrators have access to all sections. Change the role to Staff to assign individual permissions.</p>}
+            <div className="admin-permissions admin-edit-permissions">
+              {adminPermissionOptions.map(([key, title]) => (
+                <label key={key}>
+                  <input
+                    type="checkbox"
+                    checked={permissions.includes(key)}
+                    disabled={busy || readOnlyPermissions}
+                    onChange={() => togglePermission(key)}
+                  />
+                  <span>{title}</span>
+                </label>
+              ))}
+            </div>
+            <div className="admin-permissions-summary">
+              <span>
+                {permissions.length} of {adminPermissionOptions.length} sections
+                granted
+              </span>
+              <div>
+                <button
+                  type="button"
+                  disabled={busy || readOnlyPermissions}
+                  onClick={() =>
+                    setPermissions(
+                      adminPermissionOptions.map(([key]) => key),
+                    )
+                  }
+                >
+                  Select all
+                </button>
+                <button type="button" disabled={busy || readOnlyPermissions} onClick={() => setPermissions([])}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+        {action === "password" && (
+          <div className="admin-action-field">
+            <label htmlFor="admin-reset-password">New password</label>
+            <input
+              id="admin-reset-password"
+              type="password"
+              value={password}
+              autoFocus
+              autoComplete="new-password"
+              disabled={busy}
+              minLength={8}
+              maxLength={200}
+              placeholder="Min 8 chars, uppercase + number"
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </div>
+        )}
+        {action === "role" && (
+          <div className="admin-action-field">
+            <label htmlFor="admin-change-role">New Role</label>
+            <AdminSelect
+              id="admin-change-role"
+              value={role}
+              disabled={busy}
+              onChange={(event) => setRole(event.target.value)}
+            >
+              <option value="STAFF">Staff</option>
+              <option value="ADMIN">Admin</option>
+            </AdminSelect>
+          </div>
+        )}
+        {action === "status" && (
+          <p className="admin-status-confirmation">
+            {active
+              ? "This user will immediately lose access to the admin panel."
+              : "This user will be able to sign in with the existing password."}
+          </p>
+        )}
+        <div className="modal-actions admin-action-modal-actions">
+          <button type="button" disabled={busy} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className={`primary${action === "status" && active ? " danger" : ""}`}
+            disabled={saveDisabled}
+          >
+            {busy ? "Saving…" : details.save}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -7251,24 +9278,6 @@ function AdminAccountModal({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const options: Array<[string, string]> = [
-    ["dashboard", "Dashboard"],
-    ["users", "Users"],
-    ["subscriptions", "Subscriptions"],
-    ["verifications", "Verifications"],
-    ["clinics", "Clinics"],
-    ["lawyers", "Lawyers"],
-    ["articles", "Articles"],
-    ["support", "Support Chat"],
-    ["moderation-photos", "Photo Moderation"],
-    ["moderation-reports", "Reports"],
-    ["livekit", "LiveKit Calls"],
-    ["monitoring", "Monitoring"],
-    ["storage", "Storage"],
-    ["static-pages", "Static Pages"],
-    ["marketing", "Marketing"],
-    ["settings", "Settings"],
-  ];
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -7359,14 +9368,14 @@ function AdminAccountModal({
           </div>
           <div className="admin-account-field admin-account-role">
             <label htmlFor="admin-account-role">Role</label>
-            <select
+            <AdminSelect
               id="admin-account-role"
               value={role}
               onChange={(event) => setRole(event.target.value)}
             >
               <option value="STAFF">Staff</option>
               <option value="ADMIN">Admin</option>
-            </select>
+            </AdminSelect>
             {role === "STAFF" && (
               <p className="admin-role-note">
                 Staff can only access the sections explicitly granted below.
@@ -7379,7 +9388,7 @@ function AdminAccountModal({
                 Initial permissions
               </span>
               <div className="admin-permissions">
-                {options.map(([key, title]) => (
+                {adminPermissionOptions.map(([key, title]) => (
                   <label key={key}>
                     <input
                       type="checkbox"
@@ -7612,14 +9621,16 @@ function ConfirmModal({
   title,
   message,
   confirmLabel,
+  confirmClassName = "danger",
   busy,
   onClose,
   onConfirm,
 }: {
   open: boolean;
   title: string;
-  message: string;
+  message: ReactNode;
   confirmLabel: string;
+  confirmClassName?: "primary" | "danger";
   busy?: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void>;
@@ -7637,13 +9648,13 @@ function ConfirmModal({
           <AdminIcon name="x" />
         </button>
         <h2>{title}</h2>
-        <p>{message}</p>
+        <div className="confirm-modal-message">{message}</div>
         <div className="modal-actions">
           <button type="button" onClick={onClose}>
             Cancel
           </button>
           <button
-            className="danger"
+            className={confirmClassName}
             type="button"
             disabled={busy}
             onClick={onConfirm}
@@ -7703,7 +9714,7 @@ function ActionModal({
             </p>
             <label>
               Reason
-              <select
+              <AdminSelect
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}
               >
@@ -7720,7 +9731,7 @@ function ActionModal({
                   Spam / commercial abuse
                 </option>
                 <option value="OTHER_SEE_NOTES">Other (see notes)</option>
-              </select>
+              </AdminSelect>
             </label>
             <label>
               Details (optional)
@@ -7738,14 +9749,14 @@ function ActionModal({
             <p>Grant a verified profile a manual Premium subscription.</p>
             <label>
               Plan
-              <select
+              <AdminSelect
                 value={plan}
                 onChange={(event) => setPlan(event.target.value)}
               >
                 <option value="MONTHLY">Monthly</option>
                 <option value="QUARTERLY">Quarterly</option>
                 <option value="ANNUAL">Annual</option>
-              </select>
+              </AdminSelect>
             </label>
             <label>
               Duration (days)
@@ -7816,7 +9827,9 @@ function UserTabContent({
     "visible",
   );
   const [selectedConversation, setSelectedConversation] = useState<string>("");
+  const [revealedSubscriptionId, setRevealedSubscriptionId] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => setRevealedSubscriptionId(""), [tab]);
   if (error) return <p className="error">{error}</p>;
   const nested = (row: RecordValue, key = "data") =>
     row[key] && typeof row[key] === "object" ? (row[key] as RecordValue) : {};
@@ -7849,7 +9862,11 @@ function UserTabContent({
     );
     return id ? (
       <Link className="user-mini-link" to={`/users/${id}`}>
-        <span className="mini-avatar">{name.slice(0, 1).toUpperCase()}</span>
+        <PersonAvatar
+          row={{ ...row, ...item }}
+          name={name}
+          className="mini-avatar"
+        />
         <span>
           <b>{name}</b>
           <small>{valueOf(item.email ?? row.email)}</small>
@@ -8110,13 +10127,19 @@ function UserTabContent({
     );
   }
   if (tab === "messages") {
-    const conversations = (
+    const visibleConversations = (
       (overview.conversations ?? []) as RecordValue[]
     ).filter((row) =>
       rowName(person(row)).toLowerCase().includes(messageSearch.toLowerCase()),
     );
-    const currentId =
-      selectedConversation || String(conversations[0]?.id ?? "");
+    const conversations =
+      messageMode === "visible" ? visibleConversations : [];
+    const selectedConversationIsVisible = conversations.some(
+      (row) => String(row.id) === selectedConversation,
+    );
+    const currentId = selectedConversationIsVisible
+      ? selectedConversation
+      : String(conversations[0]?.id ?? "");
     const messages = rows
       .filter(
         (row) =>
@@ -8137,14 +10160,24 @@ function UserTabContent({
           />
           <nav>
             <button
+              type="button"
               className={messageMode === "visible" ? "active" : ""}
-              onClick={() => setMessageMode("visible")}
+              aria-pressed={messageMode === "visible"}
+              onClick={() => {
+                setMessageMode("visible");
+                setSelectedConversation("");
+              }}
             >
-              Visible ({conversations.length})
+              Visible ({visibleConversations.length})
             </button>
             <button
+              type="button"
               className={messageMode === "hidden" ? "active" : ""}
-              onClick={() => setMessageMode("hidden")}
+              aria-pressed={messageMode === "hidden"}
+              onClick={() => {
+                setMessageMode("hidden");
+                setSelectedConversation("");
+              }}
             >
               Hidden (0)
             </button>
@@ -8152,11 +10185,13 @@ function UserTabContent({
           {messageMode === "visible" &&
             conversations.map((row) => (
               <button
+                type="button"
                 className={
                   String(row.id) === currentId
                     ? "conversation active"
                     : "conversation"
                 }
+                aria-pressed={String(row.id) === currentId}
                 key={String(row.id)}
                 onClick={() => setSelectedConversation(String(row.id))}
               >
@@ -8166,7 +10201,9 @@ function UserTabContent({
             ))}
         </aside>
         <div className="message-thread">
-          {currentId ? (
+          {messageMode === "hidden" ? (
+            <p>No hidden conversations</p>
+          ) : currentId ? (
             messages.map((row, index) => (
               <article key={String(row.id ?? index)}>
                 <b>{valueOf(row.sender_name ?? "Member")}</b>
@@ -8327,6 +10364,20 @@ function UserTabContent({
       rows.find((row) => String(row.status ?? "").toUpperCase() === "ACTIVE") ??
       rows[0];
     if (!rows.length) return emptyState("Free — no subscription history");
+    const currentData = current ? nested(current) : {};
+    const currentSubscriptionId = String(
+      current?.id ?? current?.source_key ?? "subscription",
+    );
+    const subscriptionReference = valueOf(
+      currentData.originalTransactionId ??
+        currentData.transactionId ??
+        currentData.purchaseToken ??
+        currentData.receiptId ??
+        current?.source_key ??
+        current?.id,
+    );
+    const subscriptionRevealed =
+      revealedSubscriptionId === currentSubscriptionId;
     return (
       <section className="profile-subscriptions">
         {current && (
@@ -8350,8 +10401,29 @@ function UserTabContent({
                 {compactDate(nested(current).startedAt ?? current.created_at)} —{" "}
                 {compactDate(nested(current).expiresAt)}
               </p>
-              <button type="button">Reveal</button>
-              <button type="button" disabled>
+              {subscriptionRevealed && (
+                <p className="subscription-reference">
+                  Reference: <code>{subscriptionReference}</code>
+                </p>
+              )}
+              <button
+                type="button"
+                aria-pressed={subscriptionRevealed}
+                onClick={() =>
+                  setRevealedSubscriptionId(
+                    subscriptionRevealed ? "" : currentSubscriptionId,
+                  )
+                }
+              >
+                {subscriptionRevealed ? "Hide" : "Reveal"}
+              </button>
+              <button
+                type="button"
+                disabled={!subscriptionRevealed || subscriptionReference === "—"}
+                onClick={() =>
+                  void navigator.clipboard.writeText(subscriptionReference)
+                }
+              >
                 Copy
               </button>
             </div>
@@ -8462,6 +10534,7 @@ function UserDetail() {
   const [detail, setDetail] = useState<RecordValue | null>(null);
   const [tab, setTab] = useState("profile");
   const [tabRows, setTabRows] = useState<RecordValue[]>([]);
+  const [tabLoading, setTabLoading] = useState(false);
   const [error, setError] = useState("");
   const [tabError, setTabError] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
@@ -8479,20 +10552,34 @@ function UserDetail() {
       .catch(() => setError("Could not load the user profile."));
   }, [id, reload]);
   useEffect(() => {
+    let cancelled = false;
     setTabError("");
     if (tab === "profile") {
       setTabRows([]);
-      return;
+      setTabLoading(false);
+      return () => {
+        cancelled = true;
+      };
     }
     setTabRows([]);
+    setTabLoading(true);
     api
       .get<{ items: RecordValue[] }>(
         `/admin/users/${encodeURIComponent(id)}/tabs/${encodeURIComponent(tab)}`,
       )
-      .then((payload) =>
-        setTabRows(Array.isArray(payload.items) ? payload.items : []),
-      )
-      .catch(() => setTabError("Could not load the selected user tab."));
+      .then((payload) => {
+        if (!cancelled)
+          setTabRows(Array.isArray(payload.items) ? payload.items : []);
+      })
+      .catch(() => {
+        if (!cancelled) setTabError("Could not load the selected user tab.");
+      })
+      .finally(() => {
+        if (!cancelled) setTabLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id, tab, reload]);
   if (error) return <p className="error">{error}</p>;
   if (!detail) return <p className="loading-inline">Loading user…</p>;
@@ -8650,20 +10737,13 @@ function UserDetail() {
       {notice && <p className="notice">{notice}</p>}
       <header className="detail-heading user-detail-heading">
         <div className="user-detail-identity">
-          <div className="user-detail-avatar">
-            <i>
-              {String(profile.display_name ?? profile.displayName ?? "U")
-                .slice(0, 1)
-                .toUpperCase()}
-            </i>
-            {avatarUrl && (
-              <img
-                src={avatarUrl}
-                alt=""
-                onError={(event) => event.currentTarget.remove()}
-              />
+          <PersonAvatar
+            row={{ ...profile, data: profileData, avatarUrl }}
+            name={String(
+              profile.display_name ?? profile.displayName ?? "User",
             )}
-          </div>
+            className="user-detail-avatar"
+          />
           <div>
             <h1>
               {valueOf(
@@ -8724,11 +10804,17 @@ function UserDetail() {
           </button>
         </div>
       </header>
-      <nav className="detail-tabs">
+      <nav className="detail-tabs user-detail-tabs">
         {detailTabs.map(([key, title, countKey, icon, showCount]) => (
           <button
+            type="button"
             className={tab === key ? "active" : ""}
-            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            onClick={() => {
+              if (key === tab) return;
+              setTabLoading(key !== "profile");
+              setTab(key);
+            }}
             key={key}
           >
             <AdminIcon name={icon} />
@@ -8737,7 +10823,18 @@ function UserDetail() {
           </button>
         ))}
       </nav>
-      {tab === "profile" ? (
+      <div className="user-detail-tab-region" aria-busy={tabLoading}>
+        {tabLoading && (
+          <div
+            className="user-detail-tab-loading-overlay"
+            role="status"
+            aria-label="Loading tab content"
+          >
+            <span />
+          </div>
+        )}
+        {!tabLoading &&
+          (tab === "profile" ? (
         <section className="detail-grid user-profile-grid">
           <article>
             {section("IDs", [
@@ -8878,16 +10975,17 @@ function UserDetail() {
             ])}
           </article>
         </section>
-      ) : (
-        <UserTabContent
-          profileId={profileId}
-          tab={tab}
-          rows={list}
-          overview={detail}
-          error={tabError}
-          onReload={() => setReload((value) => value + 1)}
-        />
-      )}
+          ) : (
+            <UserTabContent
+              profileId={profileId}
+              tab={tab}
+              rows={list}
+              overview={detail}
+              error={tabError}
+              onReload={() => setReload((value) => value + 1)}
+            />
+          ))}
+      </div>
       <ActionModal
         state={modal}
         onClose={() => setModal(null)}
@@ -8906,6 +11004,7 @@ function ClinicDetail() {
   const [languageEntry, setLanguageEntry] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const load = () => {
@@ -8927,8 +11026,20 @@ function ClinicDetail() {
     Array<RecordValue>
   >;
   const languages = Array.isArray(draft.languages)
-    ? (draft.languages as string[])
+    ? (draft.languages as unknown[])
+        .map((item) =>
+          typeof item === "object" && item
+            ? String(
+                (item as RecordValue).code ??
+                  (item as RecordValue).name ??
+                  (item as RecordValue).label ??
+                  "",
+              )
+            : String(item ?? ""),
+        )
+        .filter(Boolean)
     : [];
+  const countryOptions = (data.countryOptions ?? []) as RecordValue[];
   const services = Array.isArray(draft.services)
     ? (draft.services as unknown[])
         .map((item) =>
@@ -8945,9 +11056,16 @@ function ClinicDetail() {
   const setValue = (key: string, value: unknown) =>
     setDraft((current) => ({ ...current, [key]: value }));
   const save = async (values = draft) => {
-    await api.patch(`/admin/clinics/${encodeURIComponent(id)}`, { values });
-    setNotice("Changes saved.");
-    load();
+    setBusy(true);
+    try {
+      await api.patch(`/admin/clinics/${encodeURIComponent(id)}`, { values });
+      setNotice("Changes saved.");
+      load();
+    } catch {
+      setNotice("Could not save changes.");
+    } finally {
+      setBusy(false);
+    }
   };
   const toggleService = async (slug: string) => {
     const next = services.includes(slug)
@@ -8988,38 +11106,53 @@ function ClinicDetail() {
     if (!file) return;
     const form = new FormData();
     form.append("file", file);
-    const result = await api.upload<{ publicUrl: string }>(
-      `/admin/clinics/${encodeURIComponent(id)}/logo`,
-      form,
-    );
-    setDraft((current) => ({ ...current, logoUrl: result.publicUrl }));
-    setNotice("Logo uploaded.");
-    load();
+    setBusy(true);
+    try {
+      const result = await api.upload<{ publicUrl: string }>(
+        `/admin/clinics/${encodeURIComponent(id)}/logo`,
+        form,
+      );
+      setDraft((current) => ({ ...current, logoUrl: result.publicUrl }));
+      setNotice("Logo uploaded.");
+      load();
+    } catch {
+      setNotice("Could not upload the logo.");
+    } finally {
+      setBusy(false);
+      event.currentTarget.value = "";
+    }
   };
   return (
-    <>
+    <div className="directory-detail clinic-detail">
       <Link className="back" to="/clinics">
         <AdminIcon name="arrowLeft" /> Back to Clinics
       </Link>
       {notice && <p className="notice">{notice}</p>}
       <header className="clinic-heading">
-        <div className="clinic-logo">
-          {draft.logoUrl ? (
-            <img src={String(draft.logoUrl)} alt="" />
-          ) : (
-            <AdminIcon name="building" />
-          )}
-        </div>
+        <PersonAvatar
+          row={draft}
+          name={valueOf(clinic.name)}
+          className="clinic-logo directory-heading-image"
+          alt="Logo"
+        />
         <div>
           <h1>{valueOf(clinic.name)}</h1>
-          <p>
+          <p className="directory-location">
+            <AdminIcon name="mapPin" />
             {[clinic.city, clinic.region, countryName(clinic.country)]
               .filter(Boolean)
               .join(", ") || "—"}
           </p>
         </div>
-        <p className="clinic-partner">Partner: {valueOf(clinic.partnerName)}</p>
-        <span className="status">{valueOf(clinic.status)}</span>
+        <p className="clinic-partner">
+          Partner: {valueOf(clinic.partnerName)}
+          {clinic.partnerEmail ? ` (${valueOf(clinic.partnerEmail)})` : ""}
+        </p>
+        <span
+          className={`table-badge status-${String(clinic.status ?? "").toLowerCase()}`}
+        >
+          {statusLabel(String(clinic.status ?? ""))}
+        </span>
       </header>
       <nav className="detail-tabs clinic-tabs">
         {[
@@ -9030,8 +11163,10 @@ function ClinicDetail() {
           ["visitors", `Visitors (${valueOf(data.visitorCount ?? 0)})`],
         ].map(([key, title]) => (
           <button
+            type="button"
             key={key}
             className={tab === key ? "active" : ""}
+            aria-pressed={tab === key}
             onClick={() => setTab(key)}
           >
             {title}
@@ -9041,31 +11176,37 @@ function ClinicDetail() {
       {tab === "info" && (
         <section className="clinic-form">
           <article>
-            <h2>Logo</h2>
+            <h3 className="directory-card-title">
+              <AdminIcon name="building" /> Logo
+            </h3>
             <div className="logo-editor">
-              <div className="clinic-logo">
-                {draft.logoUrl ? (
-                  <img src={String(draft.logoUrl)} alt="" />
-                ) : (
-                  <AdminIcon name="building" />
-                )}
+              <PersonAvatar
+                row={draft}
+                name={valueOf(clinic.name)}
+                className="clinic-logo directory-upload-image"
+                alt="Logo"
+              />
+              <div>
+                <label className="secondary-button directory-upload-button">
+                  <AdminIcon name="upload" /> Upload Logo
+                  <input
+                    onChange={onLogo}
+                    accept="image/jpeg,image/png,image/webp"
+                    type="file"
+                    hidden
+                  />
+                </label>
+                <p>JPEG, PNG or WebP. Max 5MB. Will be resized to 400×400.</p>
               </div>
-              <label className="secondary-button">
-                Upload Logo
-                <input
-                  onChange={onLogo}
-                  accept="image/jpeg,image/png,image/webp"
-                  type="file"
-                  hidden
-                />
-              </label>
             </div>
           </article>
           <article>
-            <h2>General Info</h2>
+            <h3 className="directory-card-title">
+              <AdminIcon name="building" /> General Info
+            </h3>
             <div className="form-grid">
               {[
-                ["name", "Name"],
+                ["name", "Name *"],
                 ["website", "Website"],
                 ["phone", "Phone"],
                 ["email", "Email"],
@@ -9092,7 +11233,11 @@ function ClinicDetail() {
                 Partner
                 <input
                   value={valueOf(
-                    draft.partnerName === "—" ? "" : draft.partnerName,
+                    draft.partnerEmail
+                      ? `${draft.partnerName ?? ""} (${draft.partnerEmail})`
+                      : draft.partnerName === "—"
+                        ? ""
+                        : draft.partnerName,
                   )}
                   disabled
                   readOnly
@@ -9101,15 +11246,12 @@ function ClinicDetail() {
             </div>
           </article>
           <article>
-            <h2>Location</h2>
+            <h3 className="directory-card-title">
+              <AdminIcon name="mapPin" /> Location
+            </h3>
             <div className="form-grid">
               {[
                 ["location", "Address"],
-                ["country", "Country"],
-                ["region", "Region"],
-                ["city", "City"],
-                ["latitude", "Latitude"],
-                ["longitude", "Longitude"],
               ].map(([key, title]) => (
                 <label key={key}>
                   {title}
@@ -9119,10 +11261,54 @@ function ClinicDetail() {
                   />
                 </label>
               ))}
+              <label className="directory-country-field">
+                Country
+                <AdminSelect
+                  value={String(draft.country ?? "")}
+                  onChange={(event) => setValue("country", event.target.value)}
+                >
+                  <option value="">Select country</option>
+                  {countryOptions.map((option) => {
+                    const value = String(option.value ?? "");
+                    return value ? (
+                      <option value={value} key={value}>
+                        {userCountryName(option.label ?? value)}
+                      </option>
+                    ) : null;
+                  })}
+                </AdminSelect>
+              </label>
+              {[
+                ["region", "Region"],
+                ["city", "City"],
+              ].map(([key, title]) => (
+                <label key={key}>
+                  {title}
+                  <input
+                    value={valueOf(draft[key] === "—" ? "" : draft[key])}
+                    onChange={(event) => setValue(key, event.target.value)}
+                  />
+                </label>
+              ))}
+              <label>
+                Coordinates
+                <input
+                  value={[draft.latitude, draft.longitude]
+                    .filter(
+                      (value) =>
+                        value !== undefined && value !== null && value !== "",
+                    )
+                    .join(", ")}
+                  disabled
+                  readOnly
+                />
+              </label>
             </div>
           </article>
           <article>
-            <h2>Hours & Credentials</h2>
+            <h3 className="directory-card-title">
+              <AdminIcon name="clock" /> Hours &amp; Credentials
+            </h3>
             <div className="form-grid">
               {[
                 ["establishedYear", "Established Year"],
@@ -9146,6 +11332,9 @@ function ClinicDetail() {
                   ) : (
                     <input
                       type={key === "establishedYear" ? "number" : "text"}
+                      placeholder={
+                        key === "hours" ? "Mon-Fri 9:00-18:00" : undefined
+                      }
                       value={valueOf(draft[key] === "—" ? "" : draft[key])}
                       onChange={(event) => setValue(key, event.target.value)}
                     />
@@ -9156,7 +11345,7 @@ function ClinicDetail() {
           </article>
           <article className="settings-row">
             <div>
-              <h2>Chat with Clinic</h2>
+              <h3>Chat with Clinic</h3>
               <p>Allow users to start a chat with this clinic</p>
             </div>
             <button
@@ -9175,7 +11364,7 @@ function ClinicDetail() {
           </article>
           <article className="settings-row">
             <div>
-              <h2>Clinic Status</h2>
+              <h3>Clinic Status</h3>
               <p>Toggle whether this clinic is visible in the public catalog</p>
             </div>
             <button
@@ -9193,47 +11382,47 @@ function ClinicDetail() {
           <div className="form-actions">
             <button
               className="primary"
-              disabled={!clinicDirty}
+              disabled={busy || !clinicDirty}
               onClick={() => void save()}
             >
-              Save Changes
+              {busy ? "Saving…" : "Save Changes"}
             </button>
           </div>
         </section>
       )}
       {tab === "services" && (
         <section className="clinic-form">
-          <article>
-            <h2>Services</h2>
-            {Object.entries(serviceGroups).map(([group, entries]) => (
-              <fieldset key={group}>
-                <legend>{group}</legend>
-                <div className="service-grid">
-                  {entries.map((entry) => {
-                    const slug = String(entry.slug);
-                    return (
-                      <label key={slug} className="check">
-                        <input
-                          type="checkbox"
-                          checked={services.includes(slug)}
-                          onChange={() => void toggleService(slug)}
-                        />
-                        {valueOf(entry.label)}
-                      </label>
-                    );
-                  })}
-                </div>
-              </fieldset>
-            ))}
-          </article>
+          {Object.entries(serviceGroups).map(([group, entries]) => (
+            <article key={group} className="directory-option-card">
+              <h3 className="directory-card-title">
+                <AdminIcon name="award" /> {group}
+              </h3>
+              <div className="service-grid">
+                {entries.map((entry) => {
+                  const slug = String(entry.slug);
+                  return (
+                    <label key={slug} className="check">
+                      <input
+                        type="checkbox"
+                        checked={services.includes(slug)}
+                        disabled={busy}
+                        onChange={() => void toggleService(slug)}
+                      />
+                      {valueOf(entry.label)}
+                    </label>
+                  );
+                })}
+              </div>
+            </article>
+          ))}
         </section>
       )}
       {tab === "languages" && (
         <section className="clinic-form">
           <article>
-            <h2>Languages</h2>
+            <h3 className="directory-card-title">Languages</h3>
             <div className="language-editor">
-              <div className="language-chips">
+              <div className="language-chips directory-language-input">
                 {languages.map((language) => (
                   <button
                     type="button"
@@ -9246,16 +11435,12 @@ function ClinicDetail() {
                       )
                     }
                   >
-                    {new Intl.DisplayNames(["en"], { type: "language" }).of(
-                      language,
-                    ) ?? language}{" "}
+                    {languageName(language)}{" "}
                     <span aria-label={`Remove ${language}`}>
                       <AdminIcon name="x" />
                     </span>
                   </button>
                 ))}
-              </div>
-              <div className="language-add">
                 <input
                   value={languageEntry}
                   placeholder="Add language"
@@ -9275,27 +11460,11 @@ function ClinicDetail() {
                     }
                   }}
                 />
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => {
-                    const value = languageEntry.trim();
-                    if (
-                      value &&
-                      !languages.some(
-                        (item) => item.toLowerCase() === value.toLowerCase(),
-                      )
-                    )
-                      setValue("languages", [...languages, value]);
-                    setLanguageEntry("");
-                  }}
-                >
-                  Add
-                </button>
               </div>
             </div>
             <button
               className="primary"
+              disabled={busy}
               onClick={() => void save({ languages })}
             >
               Save Languages
@@ -9306,17 +11475,16 @@ function ClinicDetail() {
       {tab === "about" && (
         <section className="clinic-form">
           <article>
-            <h2>About</h2>
-            <label>
-              About
-              <RichTextEditor
-                value={valueOf(draft.aboutHtml === "—" ? "" : draft.aboutHtml)}
-                onChange={(value) => setValue("aboutHtml", value)}
-                placeholder="Write clinic description..."
-              />
-            </label>
+            <h3 className="directory-card-title">About</h3>
+            <RichTextEditor
+              value={valueOf(draft.aboutHtml === "—" ? "" : draft.aboutHtml)}
+              onChange={(value) => setValue("aboutHtml", value)}
+              placeholder="Write clinic description..."
+              allowImages={false}
+            />
             <button
               className="primary"
+              disabled={busy}
               onClick={() => save({ aboutHtml: draft.aboutHtml })}
             >
               Save About
@@ -9326,35 +11494,50 @@ function ClinicDetail() {
       )}
       {tab === "visitors" && (
         <section className="profile-visitors clinic-visitors">
-          <h3>Visitors ({valueOf(data.visitorCount ?? 0)})</h3>
-          {((data.visitors ?? []) as RecordValue[]).map((visitor, index) => (
-            <article key={String(visitor.id ?? index)}>
-              <span className="mini-avatar">
-                {rowName(visitor).slice(0, 1).toUpperCase()}
-              </span>
-              <div>
-                <b>
-                  {rowName(visitor)}{" "}
-                  {settingBoolean(visitor.verified) && (
-                    <span className="verified-mark">
-                      <AdminIcon name="circleCheck" />
-                    </span>
-                  )}
-                </b>
-                <p>{valueOf(visitor.profileEmail)}</p>
-              </div>
-              <p>
-                {valueOf(visitor.viewCount)}{" "}
-                {Number(visitor.viewCount) === 1 ? "view" : "views"}
-              </p>
-              <small>
-                {compactDate(visitor.updatedAt ?? visitor.createdAt)}
-              </small>
-            </article>
-          ))}
-          {!(data.visitors as unknown[] | undefined)?.length && (
-            <p className="empty">No visitors.</p>
-          )}
+          <h3 className="directory-card-title">
+            <AdminIcon name="eye" /> Visitors ({valueOf(data.visitorCount ?? 0)})
+          </h3>
+          <div className="clinic-visitor-list">
+            {((data.visitors ?? []) as RecordValue[]).map((visitor, index) => (
+              <article key={String(visitor.id ?? index)}>
+                <PersonAvatar
+                  row={visitor}
+                  name={rowName(visitor)}
+                  className="mini-avatar"
+                />
+                <div className="clinic-visitor-identity">
+                  <span className="clinic-visitor-name">
+                    <b>{rowName(visitor)}</b>
+                    {settingBoolean(visitor.verified) && (
+                      <span className="verified-mark" title="Verified">
+                        <AdminIcon name="circleCheck" />
+                      </span>
+                    )}
+                    {settingBoolean(visitor.premium) && (
+                      <span
+                        className="subscription-user-icon subscription-user-premium"
+                        title="Premium"
+                      >
+                        <AdminIcon name="crown" />
+                      </span>
+                    )}
+                    {String(visitor.profileStatus ?? "").toUpperCase() ===
+                      "BANNED" && <em className="visitor-banned">B</em>}
+                  </span>
+                  <p>{valueOf(visitor.profileEmail)}</p>
+                </div>
+                <div className="clinic-visitor-stats">
+                  <p>{valueOf(visitor.viewCount)} views</p>
+                  <small>
+                    {directoryDate(visitor.updatedAt ?? visitor.createdAt)}
+                  </small>
+                </div>
+              </article>
+            ))}
+            {!(data.visitors as unknown[] | undefined)?.length && (
+              <p className="empty">No visitors.</p>
+            )}
+          </div>
         </section>
       )}
       <section className="clinic-danger-zone">
@@ -9366,19 +11549,33 @@ function ClinicDetail() {
           </p>
         </div>
         <button className="danger" onClick={() => setConfirmDelete(true)}>
-          Delete Permanently
+          <AdminIcon name="trash" /> Delete Permanently
         </button>
       </section>
       <ConfirmModal
         open={confirmDelete}
         title="Permanently Delete Clinic"
-        message="This action cannot be undone. It will permanently delete this clinic and its connected data."
+        message={
+          <>
+            <p>
+              Are you sure you want to permanently delete{" "}
+              <strong>{valueOf(clinic.name)}</strong>? This will delete:
+            </p>
+            <ul>
+              <li>All clinic chats and messages</li>
+              <li>The clinic record and all associated data</li>
+              <li>The partner account and user</li>
+              <li>All S3 files (logos, etc.)</li>
+            </ul>
+            <p className="confirm-modal-warning">This action cannot be undone.</p>
+          </>
+        }
         confirmLabel="Delete Permanently"
         busy={deleting}
         onClose={() => setConfirmDelete(false)}
         onConfirm={permanentDelete}
       />
-    </>
+    </div>
   );
 }
 
@@ -9405,14 +11602,11 @@ function LawyerDetail() {
   if (!data) return <p className="loading-inline">Loading lawyer…</p>;
   const lawyer = (data.lawyer ?? {}) as RecordValue;
   const options = (data.practiceAreaOptions ?? []) as RecordValue[];
+  const countryOptions = (data.countryOptions ?? []) as RecordValue[];
   const selected = Array.isArray(draft.practiceAreas)
     ? (draft.practiceAreas as unknown[])
     : [];
-  const selectedSlugs = selected.map((area) =>
-    typeof area === "object" && area
-      ? String((area as RecordValue).slug ?? (area as RecordValue).name ?? "")
-      : String(area),
-  );
+  const selectedSlugs = selected.map(directoryOptionKey);
   const lawyerDirty = JSON.stringify(draft) !== JSON.stringify(lawyer);
   const setValue = (key: string, value: unknown) =>
     setDraft((current) => ({ ...current, [key]: value }));
@@ -9444,39 +11638,30 @@ function LawyerDetail() {
     }
   };
   const toggleArea = async (option: RecordValue) => {
-    const slug = String(option.slug ?? option.name ?? "");
+    const slug = directoryOptionKey(option);
     const next = selectedSlugs.includes(slug)
-      ? selected.filter(
-          (area) =>
-            (typeof area === "object" && area
-              ? String(
-                  (area as RecordValue).slug ??
-                    (area as RecordValue).name ??
-                    "",
-                )
-              : String(area)) !== slug,
-        )
-      : [...selected, { slug, name: option.name ?? label(slug) }];
+      ? selected.filter((area) => directoryOptionKey(area) !== slug)
+      : [...selected, { slug, name: directoryOptionLabel(option) }];
     setValue("practiceAreas", next);
     await save({ practiceAreas: next });
   };
   return (
-    <>
+    <div className="directory-detail lawyer-detail">
       <Link className="back" to="/lawyers">
         <AdminIcon name="arrowLeft" /> Back to Lawyers
       </Link>
       {notice && <p className="notice">{notice}</p>}
       <header className="clinic-heading lawyer-heading">
-        <div className="clinic-logo lawyer-photo">
-          {draft.photoUrl ? (
-            <img src={String(draft.photoUrl)} alt="" />
-          ) : (
-            <AdminIcon name="scale" />
-          )}
-        </div>
+        <PersonAvatar
+          row={draft}
+          name={valueOf(lawyer.name)}
+          className="clinic-logo lawyer-photo directory-heading-image"
+          alt="Photo"
+        />
         <div>
           <h1>{valueOf(lawyer.name)}</h1>
-          <p>
+          <p className="directory-location">
+            <AdminIcon name="mapPin" />
             {[lawyer.city, lawyer.state, userCountryName(lawyer.country)]
               .filter(Boolean)
               .join(", ") || "—"}
@@ -9485,18 +11670,22 @@ function LawyerDetail() {
         <span
           className={`table-badge status-${String(lawyer.status ?? "").toLowerCase()}`}
         >
-          {valueOf(lawyer.status)}
+          {statusLabel(String(lawyer.status ?? ""))}
         </span>
       </header>
       <nav className="detail-tabs clinic-tabs">
         <button
+          type="button"
           className={tab === "info" ? "active" : ""}
+          aria-pressed={tab === "info"}
           onClick={() => setTab("info")}
         >
           Info
         </button>
         <button
+          type="button"
           className={tab === "areas" ? "active" : ""}
+          aria-pressed={tab === "areas"}
           onClick={() => setTab("areas")}
         >
           Practice Areas ({selected.length})
@@ -9505,18 +11694,19 @@ function LawyerDetail() {
       {tab === "info" && (
         <section className="clinic-form lawyer-form">
           <article>
-            <h3>Photo</h3>
+            <h3 className="directory-card-title">
+              <AdminIcon name="user" /> Photo
+            </h3>
             <div className="logo-editor">
-              <div className="clinic-logo lawyer-photo">
-                {draft.photoUrl ? (
-                  <img src={String(draft.photoUrl)} alt="Photo" />
-                ) : (
-                  <AdminIcon name="scale" />
-                )}
-              </div>
+              <PersonAvatar
+                row={draft}
+                name={valueOf(lawyer.name)}
+                className="clinic-logo lawyer-photo directory-upload-image"
+                alt="Photo"
+              />
               <div>
-                <label className="secondary-button">
-                  Upload Photo
+                <label className="secondary-button directory-upload-button">
+                  <AdminIcon name="upload" /> Upload Photo
                   <input
                     type="file"
                     hidden
@@ -9524,12 +11714,14 @@ function LawyerDetail() {
                     onChange={upload}
                   />
                 </label>
-                <p>JPEG, PNG or WebP. Max 5MB. Will be resized to 400x400.</p>
+                <p>JPEG, PNG or WebP. Max 5MB. Will be resized to 400×400.</p>
               </div>
             </div>
           </article>
           <article>
-            <h3>General Info</h3>
+            <h3 className="directory-card-title">
+              <AdminIcon name="building" /> General Info
+            </h3>
             <div className="form-grid">
               {[
                 ["name", "Name *"],
@@ -9541,6 +11733,13 @@ function LawyerDetail() {
                 <label key={key}>
                   {title}
                   <input
+                    placeholder={
+                      key === "website"
+                        ? "https://"
+                        : key === "phone"
+                          ? "+1-555-123-4567"
+                          : undefined
+                    }
                     value={
                       valueOf(draft[key]) === "—" ? "" : valueOf(draft[key])
                     }
@@ -9551,14 +11750,12 @@ function LawyerDetail() {
             </div>
           </article>
           <article>
-            <h3>Location</h3>
+            <h3 className="directory-card-title">
+              <AdminIcon name="mapPin" /> Location
+            </h3>
             <div className="form-grid">
               {[
                 ["location", "Address"],
-                ["country", "Country"],
-                ["state", "State"],
-                ["city", "City"],
-                ["zip", "ZIP Code"],
               ].map(([key, title]) => (
                 <label key={key}>
                   {title}
@@ -9566,6 +11763,36 @@ function LawyerDetail() {
                     value={
                       valueOf(draft[key]) === "—" ? "" : valueOf(draft[key])
                     }
+                    onChange={(event) => setValue(key, event.target.value)}
+                  />
+                </label>
+              ))}
+              <label className="directory-country-field">
+                Country
+                <AdminSelect
+                  value={String(draft.country ?? "")}
+                  onChange={(event) => setValue("country", event.target.value)}
+                >
+                  <option value="">Select country</option>
+                  {countryOptions.map((option) => {
+                    const value = String(option.value ?? "");
+                    return value ? (
+                      <option value={value} key={value}>
+                        {userCountryName(option.label ?? value)}
+                      </option>
+                    ) : null;
+                  })}
+                </AdminSelect>
+              </label>
+              {[
+                ["state", "State"],
+                ["city", "City"],
+                ["zip", "ZIP Code"],
+              ].map(([key, title]) => (
+                <label key={key}>
+                  {title}
+                  <input
+                    value={valueOf(draft[key] === "—" ? "" : draft[key])}
                     onChange={(event) => setValue(key, event.target.value)}
                   />
                 </label>
@@ -9589,13 +11816,14 @@ function LawyerDetail() {
             <h3>Social Links</h3>
             <div className="form-grid">
               {[
-                ["facebookUrl", "Facebook"],
-                ["instagramUrl", "Instagram"],
-                ["linkedinUrl", "LinkedIn"],
-              ].map(([key, title]) => (
+                ["facebookUrl", "Facebook", "https://facebook.com/..."],
+                ["instagramUrl", "Instagram", "https://instagram.com/..."],
+                ["linkedinUrl", "LinkedIn", "https://linkedin.com/in/..."],
+              ].map(([key, title, placeholder]) => (
                 <label key={key}>
                   {title}
                   <input
+                    placeholder={placeholder}
                     value={
                       valueOf(draft[key]) === "—" ? "" : valueOf(draft[key])
                     }
@@ -9634,11 +11862,13 @@ function LawyerDetail() {
       )}
       {tab === "areas" && (
         <section className="clinic-form lawyer-form">
-          <article>
-            <h3>Practice Areas</h3>
+          <article className="directory-option-card">
+            <h3 className="directory-card-title">
+              <AdminIcon name="award" /> Practice Areas
+            </h3>
             <div className="service-grid lawyer-areas">
               {options.map((option) => {
-                const slug = String(option.slug ?? option.name ?? "");
+                const slug = directoryOptionKey(option);
                 return (
                   <label className="check" key={slug}>
                     <input
@@ -9647,7 +11877,7 @@ function LawyerDetail() {
                       disabled={busy}
                       onChange={() => void toggleArea(option)}
                     />
-                    {valueOf(option.name ?? label(slug))}
+                    {directoryOptionLabel(option)}
                   </label>
                 );
               })}
@@ -9655,7 +11885,7 @@ function LawyerDetail() {
           </article>
         </section>
       )}
-    </>
+    </div>
   );
 }
 
@@ -9663,6 +11893,8 @@ export function AdminApp() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [navCounts, setNavCounts] = useState<RecordValue>({});
   const [contentTransitioning, setContentTransitioning] = useState(false);
+  const [contentTransitionBounds, setContentTransitionBounds] =
+    useState<ContentTransitionBounds | null>(null);
   const transitionTimer = useRef<number | null>(null);
   const transitionStarted = useRef(0);
   const location = useLocation();
@@ -9675,11 +11907,23 @@ export function AdminApp() {
   }, []);
   useEffect(() => {
     if (!session) return;
-    api
-      .get<RecordValue>("/admin/stats")
-      .then((payload) => setNavCounts((payload.counts ?? {}) as RecordValue))
-      .catch(() => setNavCounts({}));
-  }, [session]);
+    let live = true;
+    const loadNavCounts = () =>
+      api
+        .get<RecordValue>("/admin/stats")
+        .then((payload) => {
+          if (live) setNavCounts((payload.counts ?? {}) as RecordValue);
+        })
+        .catch(() => {
+          if (live) setNavCounts({});
+        });
+    void loadNavCounts();
+    const timer = window.setInterval(loadNavCounts, 30000);
+    return () => {
+      live = false;
+      window.clearInterval(timer);
+    };
+  }, [session, location.pathname]);
   useEffect(
     () => () => {
       if (transitionTimer.current !== null)
@@ -9687,8 +11931,11 @@ export function AdminApp() {
     },
     [],
   );
-  const beginContentTransition = () => {
+  const beginContentTransition = (
+    bounds: ContentTransitionBounds | null = null,
+  ) => {
     setContentTransitioning(true);
+    setContentTransitionBounds(bounds);
     transitionStarted.current = performance.now();
     if (transitionTimer.current !== null)
       window.clearTimeout(transitionTimer.current);
@@ -9699,6 +11946,7 @@ export function AdminApp() {
       );
       if ((elapsed >= 240 && !contentIsLoading) || elapsed >= 10_000) {
         setContentTransitioning(false);
+        setContentTransitionBounds(null);
         transitionTimer.current = null;
         return;
       }
@@ -9722,6 +11970,8 @@ export function AdminApp() {
     (path === "/clinics" && location.pathname.startsWith("/clinics/")) ||
     (path === "/lawyers" && location.pathname.startsWith("/lawyers/")) ||
     (path === "/articles" && location.pathname.startsWith("/articles/")) ||
+    (path === "/verifications" &&
+      location.pathname.startsWith("/verifications/")) ||
     (path === "/static-pages" &&
       location.pathname.startsWith("/static-pages/")) ||
     (path === "/marketing" && location.pathname.startsWith("/marketing/")) ||
@@ -9758,11 +12008,35 @@ export function AdminApp() {
       className="app"
       onClickCapture={(event) => {
         const target = event.target as HTMLElement;
+        const sectionSelector =
+          ".dashboard-tabs button, .member-tabs a, .member-tabs button, .detail-tabs button, .support-tabs button, .moderation-tabs button, .livekit-tabs button, .monitor-tabs button, .storage-tabs button, .article-language-tabs button, .campaign-tabs button, .campaign-language-tabs button, .settings-tabs button";
         const control = target.closest(
-          "aside nav a, .brand, .dashboard-tabs button, .range-tabs button, .member-tabs a, .member-tabs button, .detail-tabs button, .support-tabs button, .moderation-tabs button, .livekit-tabs button, .monitor-tabs button, .storage-tabs button, .status-segments button, .article-language-tabs button, .campaign-tabs button, .campaign-language-tabs button, .settings-tabs button",
+          `aside nav a, .brand, ${sectionSelector}`,
         );
         if (!control) return;
+        if (control.closest(".user-detail-tabs")) return;
         if (control instanceof HTMLButtonElement && control.disabled) return;
+        if (
+          control.getAttribute("aria-pressed") === "true" ||
+          (control.matches("a") && control.classList.contains("active"))
+        )
+          return;
+        const sectionControl = target.closest(sectionSelector);
+        if (sectionControl) {
+          const tabs = sectionControl.closest("nav");
+          const main = sectionControl.closest("main.content");
+          if (tabs instanceof HTMLElement && main instanceof HTMLElement) {
+            const tabsBounds = tabs.getBoundingClientRect();
+            const mainBounds = main.getBoundingClientRect();
+            beginContentTransition({
+              top: Math.max(0, tabsBounds.bottom),
+              right: Math.max(0, window.innerWidth - mainBounds.right),
+              bottom: 0,
+              left: Math.max(0, mainBounds.left),
+            });
+            return;
+          }
+        }
         beginContentTransition();
       }}
     >
@@ -9811,9 +12085,10 @@ export function AdminApp() {
       >
         {contentTransitioning && (
           <div
-            className="content-loading-overlay"
+            className={`content-loading-overlay ${contentTransitionBounds ? "content-loading-overlay-section" : ""}`}
             role="status"
             aria-label="Loading content"
+            style={contentTransitionBounds ?? undefined}
           >
             <span />
           </div>
@@ -9856,6 +12131,10 @@ export function AdminApp() {
             <Route
               path="/users/partners"
               element={<GenericList view="users" />}
+            />
+            <Route
+              path="/verifications/:id"
+              element={<VerificationDetail />}
             />
             <Route path="/users/:id" element={<UserDetail />} />
             <Route path="/clinics/:id" element={<ClinicDetail />} />
