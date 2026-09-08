@@ -11851,10 +11851,47 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail="Administrative and support accounts cannot be permanently deleted here")
 
     cursor.execute(
-        "SELECT media_file_id FROM profile_photos WHERE profile_id = %s",
-        (profile_id,),
+        "SELECT id FROM conversations WHERE profile_a_id = %s OR profile_b_id = %s",
+        (profile_id, profile_id),
     )
-    media_file_ids = [int(row["media_file_id"]) for row in cursor.fetchall() if row.get("media_file_id")]
+    conversation_ids = [int(row["id"]) for row in cursor.fetchall()]
+    cursor.execute(
+        "SELECT id FROM profile_matches WHERE profile_a_id = %s OR profile_b_id = %s",
+        (profile_id, profile_id),
+    )
+    match_ids = [int(row["id"]) for row in cursor.fetchall()]
+    cursor.execute(
+        """
+        SELECT id, storage_key
+        FROM media_files
+        WHERE id IN (
+          SELECT media_file_id FROM profile_photos WHERE profile_id = %s
+          UNION
+          SELECT avatar_media_file_id FROM profile_photos WHERE profile_id = %s AND avatar_media_file_id IS NOT NULL
+        )
+        """,
+        (profile_id, profile_id),
+    )
+    media_files = {int(row["id"]): str(row.get("storage_key") or "") for row in cursor.fetchall()}
+    if conversation_ids:
+        placeholders = ", ".join(["%s"] * len(conversation_ids))
+        cursor.execute(
+            f"SELECT id, storage_key FROM media_files WHERE COALESCE(metadata->>'conversationId', '') IN ({placeholders})",
+            [str(conversation_id) for conversation_id in conversation_ids],
+        )
+        media_files.update({int(row["id"]): str(row.get("storage_key") or "") for row in cursor.fetchall()})
+    if match_ids:
+        placeholders = ", ".join(["%s"] * len(match_ids))
+        cursor.execute(
+            f"""
+            SELECT mf.id, mf.storage_key
+            FROM media_files mf
+            JOIN family_plan_documents fpd ON fpd.media_file_id = mf.id
+            WHERE fpd.match_id IN ({placeholders})
+            """,
+            match_ids,
+        )
+        media_files.update({int(row["id"]): str(row.get("storage_key") or "") for row in cursor.fetchall()})
 
     # Conversations have child rows, so remove them before the conversation itself.
     cursor.execute("DELETE FROM member_calls WHERE caller_profile_id = %s OR callee_profile_id = %s", (profile_id, profile_id))
@@ -11926,15 +11963,41 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
         "DELETE FROM admin_audit_log WHERE (target_type = 'profiles' AND target_id = %s) OR actor = %s",
         (profile_ref, profile.get("email")),
     )
-    if media_file_ids:
+    if media_files:
+        media_file_ids = list(media_files)
         placeholders = ", ".join(["%s"] * len(media_file_ids))
         cursor.execute(f"DELETE FROM media_files WHERE id IN ({placeholders})", media_file_ids)
     cursor.execute("DELETE FROM profiles WHERE id = %s", (profile_id,))
-    return {"id": profile_id, "email": profile.get("email")}
+    return {
+        "id": profile_id,
+        "email": profile.get("email"),
+        "_storageKeys": [storage_key for storage_key in media_files.values() if storage_key],
+    }
+
+
+def remove_deleted_profile_files(storage_keys: list[str]) -> None:
+    for storage_key in set(storage_keys):
+        normalized = str(storage_key or "").strip().lstrip("/")
+        if not normalized:
+            continue
+        if normalized.startswith("quarantine/"):
+            root = PRIVATE_UPLOAD_DIR
+            relative_key = normalized.removeprefix("quarantine/")
+        elif normalized.startswith("family-room/"):
+            root = PRIVATE_UPLOAD_DIR
+            relative_key = normalized
+        else:
+            root = UPLOAD_DIR
+            relative_key = normalized
+        try:
+            safe_storage_path(root, relative_key).unlink(missing_ok=True)
+        except Exception:
+            logger.exception("Could not remove deleted profile file")
 
 
 def purge_due_account_deletions() -> None:
     """Permanently remove self-service deletion requests after their retention window."""
+    deleted_storage_keys: list[str] = []
     with db_cursor() as (conn, cursor):
         cursor.execute("SELECT pg_try_advisory_xact_lock(2026090801) AS locked")
         lock_row = cursor.fetchone()
@@ -11966,11 +12029,13 @@ def purge_due_account_deletions() -> None:
                 due_profile_ids.append(profile_id)
         for profile_id in due_profile_ids:
             try:
-                permanently_delete_profile(cursor, profile_id)
+                deleted = permanently_delete_profile(cursor, profile_id)
+                deleted_storage_keys.extend(deleted.get("_storageKeys") or [])
             except HTTPException as exc:
                 if exc.status_code != 404:
                     raise
         conn.commit()
+    remove_deleted_profile_files(deleted_storage_keys)
 
 
 def account_deletion_worker() -> None:
@@ -12247,8 +12312,9 @@ def admin_delete_item(view: str, item_id: str, actor: str = Depends(require_admi
             with db_cursor() as (conn, cursor):
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
                 deleted = permanently_delete_profile(cursor, resolved_item_id)
-                audit(conn, actor, "permanent_delete", view, resolved_item_id, {"email": deleted.get("email")})
+                audit(conn, actor, "permanent_delete", view, resolved_item_id, {"profileDeleted": True})
                 conn.commit()
+            remove_deleted_profile_files(deleted.get("_storageKeys") or [])
             return {"ok": True, "view": view, "id": resolved_item_id, "deleted": True}
         archive_values = ADMIN_MUTATION_TABLES[view].get("archive") or {}
         if not archive_values:
