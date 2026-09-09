@@ -7,3 +7,4 @@ cryptography==46.0.3
 firebase-admin==7.5.0
 google-cloud-vision==3.10.2
 Pillow==11.1.0
+redis==6.2.0

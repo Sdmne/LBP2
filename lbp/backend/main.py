@@ -34,6 +34,11 @@ except ImportError:  # pragma: no cover - optional until the image is rebuilt
     bcrypt = None
 
 try:
+    import redis as redis_client
+except ImportError:  # pragma: no cover - optional until the image is rebuilt
+    redis_client = None
+
+try:
     from PIL import Image, ImageOps, UnidentifiedImageError
 except ImportError:  # pragma: no cover - optional until the image is rebuilt
     Image = None
@@ -119,6 +124,15 @@ PASSWORD_RESET_MINUTES = 60
 AUTH_EMAIL_RESEND_SECONDS = 60
 ACCOUNT_DELETION_DAYS = 30
 ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "3600")))
+MARKETING_CAMPAIGN_POLL_SECONDS = max(15, int(os.getenv("MARKETING_CAMPAIGN_POLL_SECONDS", "30")))
+DOCKER_METRICS_FILE = Path(os.getenv("DOCKER_METRICS_FILE", "/run/metrics/docker-system-df.jsonl"))
+DOCKER_METRICS_MAX_AGE_SECONDS = max(60, int(os.getenv("DOCKER_METRICS_MAX_AGE_SECONDS", "180")))
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+REDIS_SOCKET_TIMEOUT_SECONDS = max(0.25, float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2")))
+REDIS_CONNECTION_LOCK = Lock()
+REDIS_CONNECTION = None
+CRON_SECRET = os.getenv("CRON_SECRET", "").strip()
+SYSTEM_CRON_JOBS_FILE = Path(os.getenv("SYSTEM_CRON_JOBS_FILE", "/run/metrics/system-cron-jobs.json"))
 PARTNER_SESSION_DAYS = 30
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 UPLOAD_URL_PREFIX = os.getenv("UPLOAD_URL_PREFIX", "/uploads")
@@ -627,6 +641,84 @@ def auth_session_response(response: Response, token: str, expires_at: str, user:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
     return {"sessionToken": token, "expiresAt": expires_at, "user": public_user(user), **extra}
+
+
+def app_redis():
+    global REDIS_CONNECTION
+    if not REDIS_URL or redis_client is None:
+        return None
+    if REDIS_CONNECTION is None:
+        with REDIS_CONNECTION_LOCK:
+            if REDIS_CONNECTION is None:
+                REDIS_CONNECTION = redis_client.Redis.from_url(
+                    REDIS_URL,
+                    socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+                    socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+                    decode_responses=True,
+                )
+    return REDIS_CONNECTION
+
+
+def redis_cooldown_started(key: str, seconds: int) -> bool | None:
+    client = app_redis()
+    if client is None:
+        return None
+    try:
+        return bool(client.set(key, "1", ex=seconds, nx=True))
+    except Exception as error:
+        logger.warning("Redis cooldown is unavailable: %s", type(error).__name__)
+        return None
+
+
+def redis_counter(key: str) -> int | None:
+    client = app_redis()
+    if client is None:
+        return None
+    try:
+        return int(client.get(key) or 0)
+    except Exception as error:
+        logger.warning("Redis counter read is unavailable: %s", type(error).__name__)
+        return None
+
+
+def redis_increment_counter(key: str, seconds: int) -> int | None:
+    client = app_redis()
+    if client is None:
+        return None
+    try:
+        value = client.eval(
+            "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
+            1,
+            key,
+            seconds,
+        )
+        return int(value)
+    except Exception as error:
+        logger.warning("Redis counter update is unavailable: %s", type(error).__name__)
+        return None
+
+
+def redis_delete(key: str) -> None:
+    client = app_redis()
+    if client is None:
+        return
+    try:
+        client.delete(key)
+    except Exception as error:
+        logger.warning("Redis key cleanup is unavailable: %s", type(error).__name__)
+
+
+def require_cron_secret(
+    x_cron_secret: str | None = Header(None, alias="X-Cron-Secret"),
+    authorization: str | None = Header(None),
+) -> None:
+    if not CRON_SECRET:
+        raise HTTPException(status_code=503, detail="Cron authentication is not configured")
+    supplied = str(x_cron_secret or "").strip()
+    if not supplied and authorization and authorization.lower().startswith("bearer "):
+        supplied = authorization.split(" ", 1)[1].strip()
+    if not supplied or not secrets.compare_digest(supplied, CRON_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid cron credentials")
 
 
 def request_session_tokens(request: Request, authorization: str | None) -> list[str]:
@@ -1359,6 +1451,89 @@ class AdminNotificationTestPayload(BaseModel):
     respectPreference: bool = False
 
 
+class CronRunHistoryPayload(BaseModel):
+    job: str = Field(min_length=1, max_length=100)
+    status: Literal["OK", "FAILED"]
+    durationSeconds: float = Field(ge=0, le=86_400)
+    results: str = Field(min_length=1, max_length=500)
+
+
+def normalize_marketing_content_variants(values: dict[str, str]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for locale_code, message in values.items():
+        locale_code = str(locale_code).strip().lower()
+        message = str(message or "").strip()
+        if locale_code not in {"en", "ru", "es"}:
+            raise ValueError(f"Unsupported campaign locale: {locale_code}")
+        if len(message) > 5000:
+            raise ValueError(f"Campaign content for {locale_code} exceeds 5000 characters")
+        if message:
+            normalized[locale_code] = message
+    if not normalized.get("en"):
+        raise ValueError("English campaign content is required")
+    return normalized
+
+
+class AdminMarketingCohortFilter(BaseModel):
+    model_config = {"extra": "forbid"}
+    locales: list[Literal["en", "ru", "es"]] = Field(default_factory=lambda: ["en", "ru", "es"], min_length=1, max_length=3)
+    wizardCompleted: bool | None = None
+    isPremium: bool | None = None
+
+    @field_validator("locales")
+    @classmethod
+    def unique_marketing_locales(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(values))
+
+
+class AdminMarketingCampaignPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    title: str = Field(min_length=1, max_length=200)
+    contentVariants: dict[str, str] = Field(min_length=1, max_length=3)
+    cohortFilter: AdminMarketingCohortFilter
+    channel: Literal["CHAT_AND_PUSH", "CHAT_MESSAGE", "PUSH_ONLY"] = "CHAT_AND_PUSH"
+    respectMarketingPref: bool = True
+
+    @field_validator("title")
+    @classmethod
+    def nonblank_campaign_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Campaign title is required")
+        return value
+
+    @field_validator("contentVariants")
+    @classmethod
+    def valid_campaign_content(cls, values: dict[str, str]) -> dict[str, str]:
+        return normalize_marketing_content_variants(values)
+
+
+class AdminMarketingSchedulePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    scheduledFor: datetime
+
+
+class AdminMarketingTestPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    email: str = Field(min_length=3, max_length=320)
+    contentVariants: dict[str, str] = Field(min_length=1, max_length=3)
+    channel: Literal["CHAT_AND_PUSH", "CHAT_MESSAGE", "PUSH_ONLY"] = "CHAT_MESSAGE"
+    respectMarketingPref: bool = True
+
+    @field_validator("email")
+    @classmethod
+    def valid_test_recipient_email(cls, value: str) -> str:
+        value = normalize_email(value)
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+            raise ValueError("Enter a valid recipient email")
+        return value
+
+    @field_validator("contentVariants")
+    @classmethod
+    def valid_test_content(cls, values: dict[str, str]) -> dict[str, str]:
+        return normalize_marketing_content_variants(values)
+
+
 class PartnerLoginPayload(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=1, max_length=200)
@@ -1543,7 +1718,7 @@ def send_profile_notification(
     preview = re.sub(r"\s+", " ", str(message_preview or "")).strip()
     if len(preview) > 180:
         preview = preview[:177] + "..."
-    body = body_template.format(actor=actor, message=preview)
+    body = preview if notification_type == "MARKETING" and preview else body_template.format(actor=actor, message=preview)
     target_url = notification_target_path(notification_type, locale_code)
 
     email_message = EmailMessage()
@@ -3733,6 +3908,10 @@ def auth_logout(request: Request, response: Response, authorization: str | None 
 @app.post("/api/auth/forgot-password")
 def auth_forgot_password(payload: ForgotPasswordPayload):
     email = normalize_email(payload.email)
+    cooldown_key = f"auth:forgot-password:{hashlib.sha256(email.encode('utf-8')).hexdigest()}"
+    redis_cooldown = redis_cooldown_started(cooldown_key, AUTH_EMAIL_RESEND_SECONDS)
+    if redis_cooldown is False:
+        return {"ok": True, "status": "PASSWORD_RESET_EMAIL_SENT"}
     reset_delivery = None
     with db_cursor() as (conn, cursor):
         cursor.execute(
@@ -3746,13 +3925,24 @@ def auth_forgot_password(payload: ForgotPasswordPayload):
         )
         user = cursor.fetchone()
         if user and user["status"] == "ACTIVE":
-            reset_token, _ = issue_auth_action_token(
-                cursor,
-                int(user["id"]),
-                "RESET_PASSWORD",
-                timedelta(minutes=PASSWORD_RESET_MINUTES),
+            cursor.execute(
+                """
+                SELECT id
+                FROM auth_action_tokens
+                WHERE user_id = %s AND purpose = 'RESET_PASSWORD'
+                  AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
+                LIMIT 1
+                """,
+                (user["id"], AUTH_EMAIL_RESEND_SECONDS),
             )
-            reset_delivery = (int(user["id"]), user["email"], reset_token)
+            if not cursor.fetchone():
+                reset_token, _ = issue_auth_action_token(
+                    cursor,
+                    int(user["id"]),
+                    "RESET_PASSWORD",
+                    timedelta(minutes=PASSWORD_RESET_MINUTES),
+                )
+                reset_delivery = (int(user["id"]), user["email"], reset_token)
         conn.commit()
     if reset_delivery:
         send_auth_action_email(reset_delivery[0], reset_delivery[1], "RESET_PASSWORD", reset_delivery[2], payload.locale)
@@ -3766,6 +3956,9 @@ def auth_forgot_password(payload: ForgotPasswordPayload):
 def auth_resend_verification(payload: AuthLocalePayload, user: dict[str, Any] = Depends(require_user)):
     if user.get("email_verified_at"):
         return {"ok": True, "status": "EMAIL_ALREADY_VERIFIED"}
+    cooldown_key = f"auth:email-verification-resend:{int(user['id'])}"
+    if redis_cooldown_started(cooldown_key, AUTH_EMAIL_RESEND_SECONDS) is False:
+        return {"ok": True, "status": "EMAIL_RECENTLY_SENT"}
     with db_cursor() as (conn, cursor):
         cursor.execute(
             """
@@ -3838,6 +4031,7 @@ def auth_confirm_email(payload: VerifyEmailPayload):
             (action_token["user_id"],),
         )
         conn.commit()
+    redis_delete(f"auth:email-verification-code-attempts:{int(action_token['user_id'])}")
     return {"ok": True, "status": "EMAIL_VERIFIED"}
 
 
@@ -3847,7 +4041,12 @@ def auth_confirm_email_code(
     user: dict[str, Any] = Depends(require_user),
 ):
     if user.get("email_verified_at"):
+        redis_delete(f"auth:email-verification-code-attempts:{int(user['id'])}")
         return {"ok": True, "status": "EMAIL_ALREADY_VERIFIED", "user": public_user(user)}
+    attempts_key = f"auth:email-verification-code-attempts:{int(user['id'])}"
+    cached_attempts = redis_counter(attempts_key)
+    if cached_attempts is not None and cached_attempts >= 10:
+        raise HTTPException(status_code=429, detail="TOO_MANY_CODE_ATTEMPTS")
     with db_cursor() as (conn, cursor):
         cursor.execute(
             """
@@ -3881,6 +4080,7 @@ def auth_confirm_email_code(
                 (json.dumps({"userId": user["id"], "createdAt": now_utc().isoformat()}),),
             )
             conn.commit()
+            redis_increment_counter(attempts_key, 15 * 60)
             raise HTTPException(status_code=400, detail="INVALID_OR_EXPIRED_CODE")
         cursor.execute(
             "UPDATE local_users SET email_verified_at = COALESCE(email_verified_at, UTC_TIMESTAMP()) WHERE id = %s",
@@ -3905,6 +4105,7 @@ def auth_confirm_email_code(
         )
         verified_user = cursor.fetchone()
         conn.commit()
+    redis_delete(attempts_key)
     return {"ok": True, "status": "EMAIL_VERIFIED", "user": public_user(verified_user)}
 
 
@@ -8218,6 +8419,509 @@ def admin_update_account(account_id: str, payload: AdminAccountUpdatePayload, re
     return {"ok": True, "id": saved_id, "email": email, "role": role, "permissions": permissions, "status": account_status}
 
 
+MARKETING_CAMPAIGN_ENTITY = "marketing_campaign"
+MARKETING_CAMPAIGN_STATUSES = {"DRAFT", "SCHEDULED", "SENDING", "SENT", "FAILED", "CANCELLED"}
+
+
+def marketing_locale(profile_data_value: dict[str, Any]) -> str:
+    locale_code = str(profile_data_value.get("interfaceLanguage") or profile_data_value.get("locale") or "en").strip().lower()
+    return locale_code if locale_code in {"en", "ru", "es"} else "en"
+
+
+def marketing_campaign_public(row: dict[str, Any]) -> dict[str, Any]:
+    data = as_dict(row.get("data"))
+    return {
+        "id": int(row["id"]),
+        "title": str(row.get("title") or ""),
+        "status": str(row.get("status") or "DRAFT").upper(),
+        "createdAt": row.get("created_at"),
+        "updatedAt": row.get("updated_at"),
+        "createdBy": data.get("createdBy"),
+        "scheduledFor": data.get("scheduledFor"),
+        "sentAt": data.get("sentAt"),
+        "recipientCount": int_or_none(data.get("recipientCount")) or 0,
+        "channel": data.get("channel") or "CHAT_AND_PUSH",
+        "contentVariants": data.get("contentVariants") if isinstance(data.get("contentVariants"), dict) else {},
+        "cohortFilter": data.get("cohortFilter") if isinstance(data.get("cohortFilter"), dict) else {},
+        "respectMarketingPref": data.get("respectMarketingPref") is not False,
+        "deliveryStats": data.get("deliveryStats") if isinstance(data.get("deliveryStats"), dict) else None,
+        "lastError": data.get("lastError"),
+    }
+
+
+def fetch_marketing_campaign(cursor, campaign_id: int, *, lock: bool = False) -> dict[str, Any]:
+    cursor.execute(
+        f"""
+        SELECT id, title, status, data, created_at, updated_at
+        FROM app_entities
+        WHERE id = %s AND entity_type = %s
+        LIMIT 1{" FOR UPDATE" if lock else ""}
+        """,
+        (campaign_id, MARKETING_CAMPAIGN_ENTITY),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Marketing campaign not found")
+    return row
+
+
+def marketing_campaign_data(payload: AdminMarketingCampaignPayload, actor: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = as_dict(current).copy()
+    data.update(
+        {
+            "createdBy": data.get("createdBy") or actor,
+            "contentVariants": payload.contentVariants,
+            "cohortFilter": payload.cohortFilter.model_dump(exclude_none=True),
+            "channel": payload.channel,
+            "respectMarketingPref": payload.respectMarketingPref,
+            "recipientCount": int_or_none(data.get("recipientCount")) or 0,
+            "scheduledFor": data.get("scheduledFor"),
+            "sentAt": data.get("sentAt"),
+            "deliveryStats": data.get("deliveryStats"),
+            "lastError": None,
+            "cancelRequested": False,
+        }
+    )
+    return data
+
+
+def marketing_recipients(
+    cohort_filter: dict[str, Any],
+    respect_marketing_preference: bool,
+    *,
+    exact_emails: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT DISTINCT ON (p.id)
+                   p.id, p.display_name, p.role, p.status, p.data, u.email
+            FROM profiles p
+            JOIN local_users u ON u.profile_id = p.id AND u.status = 'ACTIVE'
+            WHERE p.status = 'ACTIVE' AND UPPER(COALESCE(p.role, '')) = 'USER'
+            ORDER BY p.id ASC, u.id ASC
+            """
+        )
+        rows = cursor.fetchall()
+
+    selected_locales = {
+        str(value).lower()
+        for value in cohort_filter.get("locales", ["en", "ru", "es"])
+        if str(value).lower() in {"en", "ru", "es"}
+    }
+    wizard_filter = cohort_filter.get("wizardCompleted")
+    premium_filter = cohort_filter.get("isPremium")
+    recipients: list[dict[str, Any]] = []
+    for row in rows:
+        email = normalize_email(str(row.get("email") or ""))
+        if exact_emails is not None and email not in exact_emails:
+            continue
+        data = as_dict(row.get("data"))
+        locale_code = marketing_locale(data)
+        if locale_code not in selected_locales:
+            continue
+        if isinstance(wizard_filter, bool) and profile_has_completed_onboarding(row) != wizard_filter:
+            continue
+        if isinstance(premium_filter, bool) and profile_is_premium(row) != premium_filter:
+            continue
+        if respect_marketing_preference and not notification_preference_enabled(data, "MARKETING"):
+            continue
+        recipients.append(
+            {
+                "profileId": int(row["id"]),
+                "displayName": str(row.get("display_name") or "").strip(),
+                "email": email,
+                "locale": locale_code,
+            }
+        )
+    return recipients
+
+
+def marketing_message(content_variants: dict[str, Any], recipient: dict[str, Any]) -> str:
+    locale_code = str(recipient.get("locale") or "en")
+    template = str(content_variants.get(locale_code) or content_variants.get("en") or "").strip()
+    first_name = str(recipient.get("displayName") or "").strip().split(" ", 1)[0]
+    return template.replace("{firstName}", first_name)
+
+
+def update_marketing_campaign_state(
+    campaign_id: int,
+    *,
+    status_value: str | None = None,
+    data_updates: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with db_cursor() as (conn, cursor):
+        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
+        data = as_dict(row.get("data")).copy()
+        data.update(data_updates or {})
+        next_status = status_value or str(row.get("status") or "DRAFT").upper()
+        cursor.execute(
+            "UPDATE app_entities SET status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
+            (next_status, json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
+        )
+        conn.commit()
+        row["status"] = next_status
+        row["data"] = data
+        row["updated_at"] = now_utc()
+        return marketing_campaign_public(row)
+
+
+def marketing_campaign_cancelled(campaign_id: int) -> bool:
+    with db_cursor() as (_, cursor):
+        row = fetch_marketing_campaign(cursor, campaign_id)
+    return str(row.get("status") or "").upper() == "CANCELLED" or bool(as_dict(row.get("data")).get("cancelRequested"))
+
+
+def deliver_marketing_message(
+    recipient: dict[str, Any],
+    message: str,
+    channel: str,
+    respect_marketing_preference: bool,
+) -> dict[str, Any]:
+    result = {"chatSent": 0, "notificationsSent": 0, "notificationsSkipped": 0, "failed": 0}
+    if channel in {"CHAT_AND_PUSH", "CHAT_MESSAGE"}:
+        try:
+            with db_cursor() as (conn, cursor):
+                message_id = send_support_status_message(cursor, int(recipient["profileId"]), message)
+                if message_id:
+                    conn.commit()
+                    result["chatSent"] = 1
+                else:
+                    result["failed"] += 1
+        except Exception:
+            logger.exception("Marketing chat delivery failed for profile %s", recipient.get("profileId"))
+            result["failed"] += 1
+    if channel in {"CHAT_AND_PUSH", "PUSH_ONLY"}:
+        notification = send_profile_notification(
+            int(recipient["profileId"]),
+            "MARKETING",
+            message_preview=message,
+            force=not respect_marketing_preference,
+        )
+        if notification.get("status") == "SENT":
+            result["notificationsSent"] = 1
+        elif notification.get("status") == "PREFERENCE_DISABLED":
+            result["notificationsSkipped"] = 1
+        else:
+            result["failed"] += 1
+    return result
+
+
+def process_marketing_campaign(campaign_id: int) -> None:
+    try:
+        with db_cursor() as (_, cursor):
+            row = fetch_marketing_campaign(cursor, campaign_id)
+        if str(row.get("status") or "").upper() != "SENDING":
+            return
+        data = as_dict(row.get("data"))
+        cohort_filter = data.get("cohortFilter") if isinstance(data.get("cohortFilter"), dict) else {}
+        respect_preference = data.get("respectMarketingPref") is not False
+        recipients = marketing_recipients(cohort_filter, respect_preference)
+        stats = {
+            "targeted": len(recipients),
+            "processed": 0,
+            "chatSent": 0,
+            "notificationsSent": 0,
+            "notificationsSkipped": 0,
+            "failed": 0,
+        }
+        update_marketing_campaign_state(campaign_id, data_updates={"recipientCount": len(recipients), "deliveryStats": stats})
+        for recipient in recipients:
+            if marketing_campaign_cancelled(campaign_id):
+                return
+            message = marketing_message(as_dict(data.get("contentVariants")), recipient)
+            delivery = deliver_marketing_message(
+                recipient,
+                message,
+                str(data.get("channel") or "CHAT_AND_PUSH"),
+                respect_preference,
+            )
+            stats["processed"] += 1
+            for key in ("chatSent", "notificationsSent", "notificationsSkipped", "failed"):
+                stats[key] += int(delivery.get(key) or 0)
+            if stats["processed"] % 25 == 0:
+                update_marketing_campaign_state(campaign_id, data_updates={"deliveryStats": stats})
+        successful = stats["chatSent"] + stats["notificationsSent"]
+        last_error = f"{stats['failed']} delivery attempt(s) failed" if stats["failed"] else None
+        update_marketing_campaign_state(
+            campaign_id,
+            status_value="SENT" if successful or not recipients else "FAILED",
+            data_updates={
+                "recipientCount": len(recipients),
+                "deliveryStats": stats,
+                "sentAt": now_utc().isoformat(),
+                "lastError": last_error,
+            },
+        )
+    except Exception as exc:
+        logger.exception("Marketing campaign %s failed", campaign_id)
+        try:
+            update_marketing_campaign_state(
+                campaign_id,
+                status_value="FAILED",
+                data_updates={"lastError": f"Campaign processing failed: {type(exc).__name__}"},
+            )
+        except Exception:
+            logger.exception("Could not record failure for marketing campaign %s", campaign_id)
+
+
+def claim_due_marketing_campaigns() -> list[int]:
+    claimed: list[int] = []
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT id, data
+            FROM app_entities
+            WHERE entity_type = %s AND status = 'SCHEDULED'
+            ORDER BY created_at ASC
+            FOR UPDATE SKIP LOCKED
+            """,
+            (MARKETING_CAMPAIGN_ENTITY,),
+        )
+        for row in cursor.fetchall():
+            raw_scheduled = str(as_dict(row.get("data")).get("scheduledFor") or "").strip()
+            try:
+                scheduled_for = datetime.fromisoformat(raw_scheduled.replace("Z", "+00:00"))
+                if scheduled_for.tzinfo is None:
+                    scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+            if scheduled_for <= now_utc():
+                campaign_id = int(row["id"])
+                cursor.execute(
+                    "UPDATE app_entities SET status = 'SENDING', updated_at = UTC_TIMESTAMP() WHERE id = %s AND status = 'SCHEDULED'",
+                    (campaign_id,),
+                )
+                if cursor.rowcount:
+                    claimed.append(campaign_id)
+        conn.commit()
+    return claimed
+
+
+def marketing_campaign_worker() -> None:
+    while True:
+        try:
+            for campaign_id in claim_due_marketing_campaigns():
+                process_marketing_campaign(campaign_id)
+        except Exception:
+            logger.exception("Scheduled marketing campaign pass failed")
+        time.sleep(MARKETING_CAMPAIGN_POLL_SECONDS)
+
+
+@app.on_event("startup")
+def start_marketing_campaign_worker() -> None:
+    Thread(target=marketing_campaign_worker, name="marketing-campaign-worker", daemon=True).start()
+
+
+@app.get("/api/admin/marketing/campaigns")
+def admin_marketing_campaigns(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(50, ge=1, le=100),
+    status_value: str | None = Query(None, alias="status"),
+    _admin: str = Depends(require_admin),
+):
+    normalized_status = str(status_value or "").strip().upper()
+    if normalized_status and normalized_status not in MARKETING_CAMPAIGN_STATUSES:
+        raise HTTPException(status_code=422, detail="Unsupported campaign status")
+    where = "WHERE entity_type = %s"
+    params: list[Any] = [MARKETING_CAMPAIGN_ENTITY]
+    if normalized_status:
+        where += " AND status = %s"
+        params.append(normalized_status)
+    with db_cursor() as (_, cursor):
+        cursor.execute(f"SELECT COUNT(*) AS cnt FROM app_entities {where}", params)
+        total = int(cursor.fetchone()["cnt"])
+        cursor.execute(
+            f"""
+            SELECT id, title, status, data, created_at, updated_at
+            FROM app_entities {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT %s OFFSET %s
+            """,
+            [*params, pageSize, (page - 1) * pageSize],
+        )
+        items = [marketing_campaign_public(row) for row in cursor.fetchall()]
+    return {"items": items, "total": total, "page": page, "totalPages": max(1, math.ceil(total / pageSize))}
+
+
+@app.get("/api/admin/marketing/preview")
+def admin_marketing_preview(
+    locales: str = Query("en,ru,es"),
+    wizardCompleted: bool | None = Query(None),
+    isPremium: bool | None = Query(None),
+    respectMarketingPref: bool = Query(True),
+    _admin: str = Depends(require_admin),
+):
+    locale_values = list(dict.fromkeys(value.strip().lower() for value in locales.split(",") if value.strip()))
+    if not locale_values or any(value not in {"en", "ru", "es"} for value in locale_values):
+        raise HTTPException(status_code=422, detail="Choose at least one supported locale")
+    cohort_filter: dict[str, Any] = {"locales": locale_values}
+    if wizardCompleted is not None:
+        cohort_filter["wizardCompleted"] = wizardCompleted
+    if isPremium is not None:
+        cohort_filter["isPremium"] = isPremium
+    recipients = marketing_recipients(cohort_filter, respectMarketingPref)
+    by_locale = {locale_code: 0 for locale_code in ("en", "ru", "es")}
+    for recipient in recipients:
+        by_locale[str(recipient["locale"])] += 1
+    return {
+        "total": len(recipients),
+        "byLocale": by_locale,
+        "notificationConfigured": email_notifications_configured(),
+    }
+
+
+@app.post("/api/admin/marketing/campaigns")
+def admin_create_marketing_campaign(
+    payload: AdminMarketingCampaignPayload,
+    actor: str = Depends(require_admin),
+):
+    data = marketing_campaign_data(payload, actor)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at)
+            VALUES (%s, %s, %s, 'DRAFT', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+            """,
+            (MARKETING_CAMPAIGN_ENTITY, f"marketing-campaign-{uuid.uuid4()}", payload.title, json.dumps(data, ensure_ascii=False)),
+        )
+        campaign_id = int(cursor.lastrowid)
+        audit(conn, actor, "create_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"title": payload.title, "channel": payload.channel})
+        conn.commit()
+        row = fetch_marketing_campaign(cursor, campaign_id)
+    return marketing_campaign_public(row)
+
+
+@app.get("/api/admin/marketing/campaigns/{campaign_id}")
+def admin_marketing_campaign(campaign_id: int, _admin: str = Depends(require_admin)):
+    with db_cursor() as (_, cursor):
+        row = fetch_marketing_campaign(cursor, campaign_id)
+    return marketing_campaign_public(row)
+
+
+@app.patch("/api/admin/marketing/campaigns/{campaign_id}")
+def admin_update_marketing_campaign(
+    campaign_id: int,
+    payload: AdminMarketingCampaignPayload,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
+        if str(row.get("status") or "").upper() != "DRAFT":
+            raise HTTPException(status_code=409, detail="Only draft campaigns can be edited")
+        data = marketing_campaign_data(payload, actor, as_dict(row.get("data")))
+        cursor.execute(
+            "UPDATE app_entities SET title = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
+            (payload.title, json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
+        )
+        audit(conn, actor, "update_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"title": payload.title, "channel": payload.channel})
+        conn.commit()
+        row["title"] = payload.title
+        row["data"] = data
+        row["updated_at"] = now_utc()
+    return marketing_campaign_public(row)
+
+
+@app.post("/api/admin/marketing/campaigns/{campaign_id}/send-now")
+def admin_send_marketing_campaign_now(
+    campaign_id: int,
+    background_tasks: BackgroundTasks,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
+        if str(row.get("status") or "").upper() != "DRAFT":
+            raise HTTPException(status_code=409, detail="Only draft campaigns can be sent")
+        data = as_dict(row.get("data")).copy()
+        data.update({"scheduledFor": None, "sentAt": None, "lastError": None, "cancelRequested": False})
+        cursor.execute(
+            "UPDATE app_entities SET status = 'SENDING', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
+            (json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
+        )
+        audit(conn, actor, "send_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"title": row.get("title")})
+        conn.commit()
+    background_tasks.add_task(process_marketing_campaign, campaign_id)
+    return update_marketing_campaign_state(campaign_id)
+
+
+@app.post("/api/admin/marketing/campaigns/{campaign_id}/schedule")
+def admin_schedule_marketing_campaign(
+    campaign_id: int,
+    payload: AdminMarketingSchedulePayload,
+    actor: str = Depends(require_admin),
+):
+    scheduled_for = payload.scheduledFor
+    if scheduled_for.tzinfo is None:
+        scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+    scheduled_for = scheduled_for.astimezone(timezone.utc)
+    if scheduled_for <= now_utc():
+        raise HTTPException(status_code=422, detail="Scheduled time must be in the future")
+    with db_cursor() as (conn, cursor):
+        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
+        if str(row.get("status") or "").upper() != "DRAFT":
+            raise HTTPException(status_code=409, detail="Only draft campaigns can be scheduled")
+        data = as_dict(row.get("data")).copy()
+        data.update({"scheduledFor": scheduled_for.isoformat(), "sentAt": None, "lastError": None, "cancelRequested": False})
+        cursor.execute(
+            "UPDATE app_entities SET status = 'SCHEDULED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
+            (json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
+        )
+        audit(conn, actor, "schedule_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"scheduledFor": scheduled_for.isoformat()})
+        conn.commit()
+        row["status"] = "SCHEDULED"
+        row["data"] = data
+        row["updated_at"] = now_utc()
+    return marketing_campaign_public(row)
+
+
+@app.post("/api/admin/marketing/campaigns/{campaign_id}/cancel")
+def admin_cancel_marketing_campaign(campaign_id: int, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
+        current_status = str(row.get("status") or "").upper()
+        if current_status not in {"SCHEDULED", "SENDING"}:
+            raise HTTPException(status_code=409, detail="Only scheduled or in-progress campaigns can be cancelled")
+        data = as_dict(row.get("data")).copy()
+        data["cancelRequested"] = True
+        cursor.execute(
+            "UPDATE app_entities SET status = 'CANCELLED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
+            (json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
+        )
+        audit(conn, actor, "cancel_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"previousStatus": current_status})
+        conn.commit()
+        row["status"] = "CANCELLED"
+        row["data"] = data
+        row["updated_at"] = now_utc()
+    return marketing_campaign_public(row)
+
+
+@app.post("/api/admin/marketing/test-send")
+def admin_test_marketing_delivery(payload: AdminMarketingTestPayload, actor: str = Depends(require_admin)):
+    recipients = marketing_recipients(
+        {"locales": ["en", "ru", "es"]},
+        payload.respectMarketingPref,
+        exact_emails={payload.email},
+    )
+    if not recipients:
+        raise HTTPException(status_code=404, detail="An active user profile with this email was not found or opted out of marketing")
+    recipient = recipients[0]
+    message = marketing_message(payload.contentVariants, recipient)
+    delivery = deliver_marketing_message(recipient, message, payload.channel, payload.respectMarketingPref)
+    with db_cursor() as (conn, _):
+        audit(
+            conn,
+            actor,
+            "test_marketing_delivery",
+            "profiles",
+            recipient["profileId"],
+            {"channel": payload.channel, "status": delivery},
+        )
+        conn.commit()
+    if delivery["chatSent"] + delivery["notificationsSent"] == 0:
+        raise HTTPException(status_code=503, detail="Marketing test delivery failed")
+    return {"ok": True, "recipientCount": 1, "delivery": delivery}
+
+
 @app.post("/api/admin/notifications/test")
 def admin_test_notification(
     payload: AdminNotificationTestPayload,
@@ -8881,16 +9585,79 @@ ADMIN_CLEANUP_JOBS = [
     {"task": "emailTokens", "description": "Delete expired email verification tokens", "schedule": "Daily 05:00 UTC"},
     {"task": "passwordTokens", "description": "Delete expired password reset tokens", "schedule": "Daily 05:00 UTC"},
     {"task": "refreshTokens", "description": "Delete expired mobile refresh tokens", "schedule": "Daily 05:00 UTC"},
-    {"task": "verificationSessions", "description": "Delete stale pending verification sessions", "schedule": "Daily 05:00 UTC"},
-    {"task": "staleCalls", "description": "Mark stuck ringing calls as missed", "schedule": "Daily 05:00 UTC"},
-    {"task": "orphanNotifications", "description": "Delete notifications from deleted users", "schedule": "Daily 05:00 UTC"},
+    {"task": "verificationSessions", "description": "Delete stale PENDING/ABANDONED verification sessions (30 days)", "schedule": "Daily 05:00 UTC"},
+    {"task": "staleCalls", "description": "Mark stuck RINGING calls as MISSED (5 min timeout)", "schedule": "Daily 05:00 UTC"},
+    {"task": "orphanNotifications", "description": "Delete notifications from DELETED users (30 days)", "schedule": "Daily 05:00 UTC"},
     {"task": "auditLogs", "description": "Delete audit logs older than one year", "schedule": "Daily 05:00 UTC"},
-    {"task": "staleActiveCalls", "description": "End active calls older than two hours", "schedule": "Daily 05:00 UTC"},
-    {"task": "oldUnreadNotifications", "description": "Delete unread notifications older than one year", "schedule": "Daily 05:00 UTC"},
-    {"task": "orphanDeviceInfo", "description": "Delete device records from deleted users", "schedule": "Daily 05:00 UTC"},
+    {"task": "staleActiveCalls", "description": "End ACTIVE calls longer than 2 hours", "schedule": "Daily 05:00 UTC"},
+    {"task": "oldUnreadNotifications", "description": "Delete unread notifications older than 1 year", "schedule": "Daily 05:00 UTC"},
+    {"task": "orphanDeviceInfo", "description": "Delete device info from soft-deleted users (30 days)", "schedule": "Daily 05:00 UTC"},
     {"task": "oldCronLogs", "description": "Delete cron logs older than 90 days", "schedule": "Daily 05:00 UTC"},
-    {"task": "honeymoonExpiry", "description": "Expire completed free trial periods", "schedule": "Daily 05:00 UTC"},
+    {"task": "honeymoonExpiry", "description": "Demote users whose 14-day honeymoon free trial has expired", "schedule": "Daily 05:00 UTC"},
 ]
+
+
+def record_cron_run(job: str, status_value: str, duration_seconds: float, results: str) -> None:
+    event_payload = {
+        "job": job,
+        "status": status_value,
+        "durationSeconds": round(duration_seconds, 3),
+        "results": results,
+    }
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO api_events (event_type, payload) VALUES ('cron.host_job', %s)",
+            (json.dumps(event_payload, ensure_ascii=False),),
+        )
+        conn.commit()
+
+
+def run_app_cleanup(*, dry_run: bool = False) -> dict[str, Any]:
+    started = time.perf_counter()
+    counts = {row["task"]: 0 for row in ADMIN_CLEANUP_JOBS}
+    statements: list[tuple[str, str, str]] = [
+        ("emailTokens", "DELETE FROM auth_action_tokens WHERE purpose IN ('VERIFY_EMAIL', 'VERIFY_EMAIL_CODE') AND expires_at < CURRENT_TIMESTAMP", "SELECT COUNT(*) AS cnt FROM auth_action_tokens WHERE purpose IN ('VERIFY_EMAIL', 'VERIFY_EMAIL_CODE') AND expires_at < CURRENT_TIMESTAMP"),
+        ("passwordTokens", "DELETE FROM auth_action_tokens WHERE purpose = 'RESET_PASSWORD' AND expires_at < CURRENT_TIMESTAMP", "SELECT COUNT(*) AS cnt FROM auth_action_tokens WHERE purpose = 'RESET_PASSWORD' AND expires_at < CURRENT_TIMESTAMP"),
+        ("refreshTokens", "DELETE FROM auth_sessions WHERE expires_at < CURRENT_TIMESTAMP OR (revoked_at IS NOT NULL AND revoked_at < CURRENT_TIMESTAMP - INTERVAL '30 days')", "SELECT COUNT(*) AS cnt FROM auth_sessions WHERE expires_at < CURRENT_TIMESTAMP OR (revoked_at IS NOT NULL AND revoked_at < CURRENT_TIMESTAMP - INTERVAL '30 days')"),
+        ("verificationSessions", "DELETE FROM app_entities WHERE entity_type = 'verification' AND UPPER(status) IN ('PENDING', 'ABANDONED') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '30 days'", "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND UPPER(status) IN ('PENDING', 'ABANDONED') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '30 days'"),
+        ("staleCalls", "UPDATE member_calls SET status = 'MISSED', ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE UPPER(status) = 'RINGING' AND created_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'", "SELECT COUNT(*) AS cnt FROM member_calls WHERE UPPER(status) = 'RINGING' AND created_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'"),
+        ("auditLogs", "DELETE FROM admin_audit_log WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '1 year'", "SELECT COUNT(*) AS cnt FROM admin_audit_log WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '1 year'"),
+        ("staleActiveCalls", "UPDATE member_calls SET status = 'ENDED', ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE UPPER(status) IN ('ACTIVE', 'ACCEPTED') AND COALESCE(accepted_at, created_at) < CURRENT_TIMESTAMP - INTERVAL '2 hours'", "SELECT COUNT(*) AS cnt FROM member_calls WHERE UPPER(status) IN ('ACTIVE', 'ACCEPTED') AND COALESCE(accepted_at, created_at) < CURRENT_TIMESTAMP - INTERVAL '2 hours'"),
+        ("orphanDeviceInfo", "DELETE FROM app_entities d WHERE d.entity_type = 'device_session' AND d.created_at < CURRENT_TIMESTAMP - INTERVAL '30 days' AND NOT EXISTS (SELECT 1 FROM profiles p WHERE CAST(p.id AS TEXT) = COALESCE(d.data->>'profileId', ''))", "SELECT COUNT(*) AS cnt FROM app_entities d WHERE d.entity_type = 'device_session' AND d.created_at < CURRENT_TIMESTAMP - INTERVAL '30 days' AND NOT EXISTS (SELECT 1 FROM profiles p WHERE CAST(p.id AS TEXT) = COALESCE(d.data->>'profileId', ''))"),
+        ("oldCronLogs", "DELETE FROM api_events WHERE event_type LIKE 'cron.%' AND created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'", "SELECT COUNT(*) AS cnt FROM api_events WHERE event_type LIKE 'cron.%' AND created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'"),
+    ]
+    try:
+        with db_cursor() as (conn, cursor):
+            for task, statement, preview_statement in statements:
+                if dry_run:
+                    cursor.execute(preview_statement)
+                    counts[task] = max(0, int((cursor.fetchone() or {}).get("cnt") or 0))
+                else:
+                    cursor.execute(statement)
+                    counts[task] = max(0, int(cursor.rowcount or 0))
+            total = sum(counts.values())
+            duration = round(time.perf_counter() - started, 3)
+            result = {
+                "ok": True,
+                "dryRun": dry_run,
+                "total": total,
+                "tasks": counts,
+                "durationSeconds": duration,
+                "results": f"{total} items {'matched' if dry_run else 'cleaned'}",
+            }
+            cursor.execute(
+                "INSERT INTO api_events (event_type, payload) VALUES ('cron.cleanup', %s)",
+                (json.dumps({"job": "Cleanup Dry Run" if dry_run else "Cleanup", "status": "OK", "durationSeconds": duration, "results": result["results"], "tasks": counts}, ensure_ascii=False),),
+            )
+            conn.commit()
+        return result
+    except Exception as error:
+        if not dry_run:
+            try:
+                record_cron_run("Cleanup", "FAILED", time.perf_counter() - started, f"{type(error).__name__}: cleanup failed")
+            except Exception:
+                logger.exception("Cleanup failure could not be added to cron history")
+        raise
 
 
 def admin_host_memory() -> dict[str, int]:
@@ -8933,18 +9700,32 @@ def admin_parse_size(value: Any) -> int:
     return int(float(match.group(1)) * units.get((match.group(2) or "b").lower(), 1))
 
 
-def admin_docker_usage() -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "available": False,
-        "message": "Docker statistics are not exposed to the application container.",
-        "images": 0,
-        "containers": 0,
-        "volumes": 0,
-        "imageBytes": 0,
-        "cacheBytes": 0,
-        "reclaimableBytes": 0,
-        "reclaimablePercent": 0,
-    }
+def admin_docker_rows() -> list[dict[str, Any]]:
+    if DOCKER_METRICS_FILE.is_file():
+        try:
+            age_seconds = max(0, time.time() - DOCKER_METRICS_FILE.stat().st_mtime)
+            if age_seconds > DOCKER_METRICS_MAX_AGE_SECONDS:
+                return []
+            raw = DOCKER_METRICS_FILE.read_text(encoding="utf-8").strip()
+            if not raw:
+                return []
+        except OSError:
+            return []
+        try:
+            parsed = json.loads(raw)
+            rows = parsed.get("rows") if isinstance(parsed, dict) else parsed
+            if isinstance(rows, list):
+                return [row for row in rows if isinstance(row, dict)]
+        except json.JSONDecodeError:
+            pass
+        try:
+            return [
+                json.loads(line)
+                for line in raw.splitlines()
+                if line.strip()
+            ]
+        except (ValueError, json.JSONDecodeError):
+            return []
     try:
         completed = subprocess.run(
             ["docker", "system", "df", "--format", "{{json .}}"],
@@ -8953,15 +9734,35 @@ def admin_docker_usage() -> dict[str, Any]:
             text=True,
             timeout=4,
         )
-        rows = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
+        return [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return []
+
+
+def admin_docker_usage() -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "available": False,
+        "message": "Docker statistics are waiting for the host metrics collector.",
+        "images": 0,
+        "containers": 0,
+        "volumes": 0,
+        "imageBytes": 0,
+        "cacheBytes": 0,
+        "reclaimableBytes": 0,
+        "reclaimablePercent": 0,
+    }
+    rows = admin_docker_rows()
+    if not rows:
         return result
+    reclaimable_total = 0
+    occupied_total = 0
     for row in rows:
         kind = str(row.get("Type") or "").lower()
         count = int_or_none(row.get("TotalCount")) or 0
         size = admin_parse_size(row.get("Size"))
         reclaimable = admin_parse_size(row.get("Reclaimable"))
-        result["reclaimableBytes"] += reclaimable
+        occupied_total += size
+        reclaimable_total += reclaimable
         if "image" in kind:
             result["images"] = count
             result["imageBytes"] = size
@@ -8971,17 +9772,67 @@ def admin_docker_usage() -> dict[str, Any]:
             result["volumes"] = count
         elif "build" in kind:
             result["cacheBytes"] = size
-    occupied = int(result["imageBytes"]) + int(result["cacheBytes"])
     result.update({
         "available": True,
         "message": "",
-        "reclaimablePercent": round(100 * int(result["reclaimableBytes"]) / max(1, occupied), 1),
+        "reclaimableBytes": reclaimable_total,
+        "reclaimablePercent": round(100 * reclaimable_total / max(1, occupied_total), 1),
     })
     return result
 
 
+def admin_redis_usage() -> dict[str, Any]:
+    unavailable = {
+        "status": "Not configured" if not REDIS_URL else "Unavailable",
+        "version": "—",
+        "memoryUsed": "—",
+        "memoryPeak": "—",
+        "totalKeys": 0,
+        "clients": 0,
+        "uptimeSeconds": 0,
+        "totalCommands": 0,
+    }
+    if not REDIS_URL or redis_client is None:
+        return unavailable
+    try:
+        client = app_redis()
+        if client is None:
+            return unavailable
+        server = client.info(section="server")
+        memory = client.info(section="memory")
+        clients = client.info(section="clients")
+        stats = client.info(section="stats")
+        return {
+            "status": "Connected",
+            "version": f"Redis {server.get('redis_version', '—')}",
+            "memoryUsed": str(memory.get("used_memory_human") or "—"),
+            "memoryPeak": str(memory.get("used_memory_peak_human") or "—"),
+            "totalKeys": int(client.dbsize()),
+            "clients": int(clients.get("connected_clients") or 0),
+            "uptimeSeconds": int(server.get("uptime_in_seconds") or 0),
+            "totalCommands": int(stats.get("total_commands_processed") or 0),
+        }
+    except Exception as error:
+        logger.warning("Redis monitoring is unavailable: %s", type(error).__name__)
+        return unavailable
+
+
 def admin_system_cron_jobs() -> list[dict[str, str]]:
     jobs: list[dict[str, str]] = []
+    if SYSTEM_CRON_JOBS_FILE.is_file():
+        try:
+            configured = json.loads(SYSTEM_CRON_JOBS_FILE.read_text(encoding="utf-8"))
+            if isinstance(configured, list):
+                for row in configured:
+                    if not isinstance(row, dict):
+                        continue
+                    task = str(row.get("task") or "").strip()
+                    description = str(row.get("description") or "").strip()
+                    schedule = str(row.get("schedule") or "").strip()
+                    if task and description and schedule:
+                        jobs.append({"task": task, "description": description, "schedule": schedule})
+        except (OSError, ValueError, json.JSONDecodeError):
+            logger.warning("System cron metadata file could not be read")
     cron_root = Path("/etc/cron.d")
     if not cron_root.is_dir():
         return jobs
@@ -9007,20 +9858,48 @@ def admin_system_cron_jobs() -> list[dict[str, str]]:
     return jobs
 
 
-def admin_event_metric(cursor, pattern: str) -> dict[str, int]:
+def admin_event_metric(
+    cursor,
+    pattern: str,
+    *,
+    notification_type: str | None = None,
+    delivery_status: str | None = None,
+) -> dict[str, int]:
+    conditions = ["event_type ILIKE %s"]
+    params: list[Any] = [pattern]
+    if notification_type:
+        conditions.append("COALESCE(payload->>'notificationType', '') = %s")
+        params.append(notification_type)
+    if delivery_status:
+        conditions.append("COALESCE(payload->>'status', '') = %s")
+        params.append(delivery_status)
     cursor.execute(
-        """
+        f"""
         SELECT
           COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) AS today,
           COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)) AS month,
           COUNT(*) AS "all"
         FROM api_events
-        WHERE event_type ILIKE %s
+        WHERE {' AND '.join(conditions)}
         """,
-        (pattern,),
+        params,
     )
     row = cursor.fetchone() or {}
     return {key: int(row.get(key) or 0) for key in ("today", "month", "all")}
+
+
+@app.post("/api/cron/cleanup")
+def cron_cleanup(
+    dry_run: bool = Query(False, alias="dryRun"),
+    _cron: None = Depends(require_cron_secret),
+):
+    return run_app_cleanup(dry_run=dry_run)
+
+
+@app.post("/api/cron/history")
+def cron_history(payload: CronRunHistoryPayload, _cron: None = Depends(require_cron_secret)):
+    record_cron_run(payload.job, payload.status, payload.durationSeconds, payload.results)
+    return {"ok": True}
 
 
 @app.get("/api/admin/monitoring")
@@ -9085,10 +9964,13 @@ def admin_monitoring(
                 "name": "Email API",
                 "description": "Transactional email delivery",
                 "metrics": {
-                    "Email Verification": admin_event_metric(cursor, "%email%verification%"),
-                    "Welcome": admin_event_metric(cursor, "%email%welcome%"),
-                    "Forgot Password": admin_event_metric(cursor, "%password%reset%"),
-                    "New Message": admin_event_metric(cursor, "%message%notification%"),
+                    "Email Verification": admin_event_metric(cursor, "%email%verification%", delivery_status="SENT"),
+                    "Welcome": admin_event_metric(cursor, "%email%welcome%", delivery_status="SENT"),
+                    "Forgot Password": admin_event_metric(cursor, "%password%reset%", delivery_status="SENT"),
+                    "Password Changed": admin_event_metric(cursor, "%password%changed%", delivery_status="SENT"),
+                    "New Match": admin_event_metric(cursor, "%member.email_notification%", notification_type="NEW_MATCH", delivery_status="SENT"),
+                    "New Like": admin_event_metric(cursor, "%member.email_notification%", notification_type="NEW_LIKE", delivery_status="SENT"),
+                    "New Message": admin_event_metric(cursor, "%member.email_notification%", notification_type="NEW_MESSAGE", delivery_status="SENT"),
                 },
             },
             {
@@ -9136,7 +10018,7 @@ def admin_monitoring(
             "uptimeSeconds": int(database.get("uptime_seconds") or 0),
             "tableSizes": database.get("tableSizes") or [],
         },
-        "redis": {"status": "Not configured", "version": "—", "memoryUsed": "—", "memoryPeak": "—", "totalKeys": 0, "clients": 0, "uptimeSeconds": 0, "totalCommands": 0},
+        "redis": admin_redis_usage(),
         "externalApis": external_apis,
         "appCleanupJobs": ADMIN_CLEANUP_JOBS,
         "systemCronJobs": admin_system_cron_jobs(),
@@ -10597,7 +11479,10 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
             updated_at AS updatedAt,
             CASE
                 WHEN accepted_at IS NOT NULL AND ended_at IS NOT NULL
-                THEN GREATEST(0, TIMESTAMPDIFF(SECOND, accepted_at, ended_at))
+                THEN GREATEST(
+                    0,
+                    FLOOR(EXTRACT(EPOCH FROM (ended_at - accepted_at)))
+                )::bigint
                 ELSE NULL
             END AS durationSeconds,
             (SELECT display_name FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerName,
@@ -11382,25 +12267,88 @@ def admin_enrich_moderation_report_items(cursor, items: list[dict[str, Any]]) ->
     if profile_ids:
         placeholders = ", ".join(["%s"] * len(profile_ids))
         cursor.execute(
-            f"SELECT id, display_name, email, status FROM profiles WHERE id IN ({placeholders})",
+            f"""
+            SELECT p.id, p.display_name, p.email, p.status, p.data,
+                   COALESCE(
+                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl')), ''),
+                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.photoUrl')), ''),
+                     (SELECT COALESCE(
+                        NULLIF(amf.public_url, ''),
+                        NULLIF(pph.public_url, ''),
+                        CASE
+                          WHEN pph.avatar_media_file_id IS NOT NULL
+                            THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                          ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                        END
+                      )
+                      FROM profile_photos pph
+                      LEFT JOIN media_files amf ON amf.id = pph.avatar_media_file_id
+                      WHERE pph.profile_id = p.id
+                        AND pph.status = 'ACTIVE'
+                        AND pph.moderation_status = 'APPROVED'
+                      ORDER BY pph.position ASC, pph.id ASC LIMIT 1)
+                   ) AS avatarUrl,
+                   (SELECT CASE
+                      WHEN pph.avatar_media_file_id IS NOT NULL
+                        THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
+                      ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
+                    END
+                    FROM profile_photos pph
+                    WHERE pph.profile_id = p.id
+                      AND pph.status = 'ACTIVE'
+                      AND pph.moderation_status = 'APPROVED'
+                    ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl
+            FROM profiles p
+            WHERE p.id IN ({placeholders})
+            """,
             sorted(profile_ids),
         )
         profiles_by_id = {int(row["id"]): row for row in cursor.fetchall()}
 
+    report_ids = [str(item["id"]) for item in items if item.get("id") is not None]
+    audit_by_report_id: dict[str, dict[str, Any]] = {}
+    if report_ids:
+        placeholders = ", ".join(["%s"] * len(report_ids))
+        cursor.execute(
+            f"""
+            SELECT DISTINCT ON (target_id) target_id, actor, created_at
+            FROM admin_audit_log
+            WHERE target_type = 'moderation-reports'
+              AND target_id IN ({placeholders})
+              AND action IN ('update', 'resolve_report', 'dismiss_report')
+            ORDER BY target_id, created_at DESC, id DESC
+            """,
+            report_ids,
+        )
+        audit_by_report_id = {
+            str(row["target_id"]): row for row in cursor.fetchall()
+        }
+
     for item, data, reporter_id, reported_id in parsed:
         reporter = profiles_by_id.get(reporter_id or -1)
         reported = profiles_by_id.get(reported_id or -1)
+        audit_entry = audit_by_report_id.get(str(item.get("id"))) or {}
         item.update({
             "reporterProfileId": reporter_id,
             "reporterName": (reporter.get("display_name") if reporter else None) or data.get("reporterName") or data.get("reporterEmail") or "Unknown",
             "reporterEmail": (reporter.get("email") if reporter else None) or data.get("reporterEmail") or "",
+            "reporterAvatarUrl": (reporter.get("avatarUrl") if reporter else None) or "",
+            "reporterAvatarFallbackUrl": (reporter.get("avatarFallbackUrl") if reporter else None) or "",
+            "reporterIsVerified": profile_is_verified(reporter),
             "reportedProfileId": reported_id,
             "reportedName": (reported.get("display_name") if reported else None) or data.get("reportedName") or data.get("targetName") or data.get("reportedEmail") or "Unknown",
             "reportedEmail": (reported.get("email") if reported else None) or data.get("reportedEmail") or data.get("targetEmail") or "",
+            "reportedAvatarUrl": (reported.get("avatarUrl") if reported else None) or "",
+            "reportedAvatarFallbackUrl": (reported.get("avatarFallbackUrl") if reported else None) or "",
+            "reportedIsVerified": profile_is_verified(reported),
             "reason": data.get("reason") or data.get("reportReason") or item.get("title") or "—",
             "description": data.get("description") or data.get("details") or data.get("message") or "—",
             "details": data.get("details") or data.get("description") or data.get("message") or "—",
             "createdAt": data.get("createdAt") or item.get("created_at"),
+            "resolvedBy": data.get("resolvedBy") or data.get("reviewedBy") or audit_entry.get("actor") or "",
+            "resolvedByName": data.get("resolvedByName") or data.get("reviewedByName") or "",
+            "resolutionNote": data.get("resolutionNote") or data.get("resolution") or data.get("actionNote") or data.get("note") or "",
+            "resolvedAt": data.get("resolvedAt") or data.get("reviewedAt") or audit_entry.get("created_at") or item.get("updated_at"),
         })
     return items
 
@@ -12541,6 +13489,42 @@ def admin_update_item(
 ):
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
+    if view == "moderation-reports":
+        if not str(item_id).isdigit():
+            raise HTTPException(status_code=422, detail="Report id must be numeric")
+        decision = str(payload.values.get("status") or "").upper()
+        if decision not in {"RESOLVED", "DISMISSED"}:
+            raise HTTPException(status_code=422, detail="Choose RESOLVED or DISMISSED for a report")
+        with db_cursor() as (conn, cursor):
+            cursor.execute(
+                "SELECT status, data FROM app_entities WHERE id = %s AND entity_type = 'moderation_report' FOR UPDATE",
+                (int(item_id),),
+            )
+            report = cursor.fetchone()
+            if not report:
+                raise HTTPException(status_code=404, detail="Report not found")
+            if str(report.get("status") or "").upper() != "PENDING":
+                raise HTTPException(status_code=409, detail="This report has already been reviewed")
+            reviewed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+            data = as_dict(report.get("data")).copy()
+            data.update({
+                "resolvedBy": actor,
+                "resolvedAt": reviewed_at,
+            })
+            cursor.execute(
+                "UPDATE app_entities SET status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = 'moderation_report'",
+                (decision, json.dumps(data, ensure_ascii=False), int(item_id)),
+            )
+            audit(
+                conn,
+                actor,
+                "resolve_report" if decision == "RESOLVED" else "dismiss_report",
+                "moderation-reports",
+                int(item_id),
+                {"status": decision},
+            )
+            conn.commit()
+        return {"ok": True, "view": view, "id": int(item_id), "updated": {"status": decision}}
     if view == "moderation-photos":
         if not str(item_id).isdigit():
             raise HTTPException(status_code=422, detail="Photo moderation id must be numeric")

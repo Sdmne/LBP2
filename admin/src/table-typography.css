@@ -14,3 +14,24 @@
   font-size: var(--admin-table-font-size) !important;
   line-height: 20px !important;
 }
+
+/* Settings > Admins uses compact chips from the desktop reference. */
+.app .admin-users-table :is(
+    .admin-role-badge,
+    .admin-status-badge,
+    .permission-badges small
+  ) {
+  font-size: 12px !important;
+}
+
+.app .settings-audit-table tbody td,
+.app .settings-audit-table tbody td :not(svg, svg *) {
+  font-size: 12px !important;
+}
+
+/* PUBLISHED has one semantic treatment across all admin data rows. */
+.app .table-badge.status-published {
+  border-color: #22c55e !important;
+  background: #22c55e !important;
+  color: #fff !important;
+}

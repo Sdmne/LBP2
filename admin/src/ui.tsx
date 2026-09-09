@@ -65,6 +65,8 @@ type AdminIconName =
   | "scale"
   | "file"
   | "paperclip"
+  | "smile"
+  | "send"
   | "headphones"
   | "image"
   | "flag"
@@ -372,6 +374,21 @@ function verificationDate(value: unknown) {
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
+      })
+    : valueOf(value);
+}
+
+function auditDate(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  return date && !Number.isNaN(date.valueOf())
+    ? date.toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
       })
     : valueOf(value);
 }
@@ -1643,6 +1660,20 @@ function AdminIcon({ name }: { name: AdminIconName }) {
     ),
     paperclip: (
       <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    ),
+    smile: (
+      <>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+        <path d="M9 9h.01" />
+        <path d="M15 9h.01" />
+      </>
+    ),
+    send: (
+      <>
+        <path d="m22 2-7 20-4-9-9-4Z" />
+        <path d="M22 2 11 13" />
+      </>
     ),
     headphones: (
       <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" />
@@ -3891,8 +3922,14 @@ function MonitoringPage() {
             <p className="monitor-muted">
               Runs via POST /api/cron/cleanup (authorized with CRON_SECRET)
             </p>
-            <div className="table monitor-table">
+            <div className="table monitor-table monitor-cleanup-table">
               <table>
+                <colgroup>
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "22%" }} />
+                  <col style={{ width: "55%" }} />
+                  <col style={{ width: "17%" }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>#</th>
@@ -3919,8 +3956,13 @@ function MonitoringPage() {
           <section className="monitor-card">
             <h2>System Cron Jobs</h2>
             <p className="monitor-muted">Server-level crontab (root)</p>
-            <div className="table monitor-table">
+            <div className="table monitor-table monitor-system-cron-table">
               <table>
+                <colgroup>
+                  <col style={{ width: "24%" }} />
+                  <col style={{ width: "58%" }} />
+                  <col style={{ width: "18%" }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Task</th>
@@ -3952,8 +3994,15 @@ function MonitoringPage() {
           </section>
           <section className="monitor-card">
             <h2>Run History</h2>
-            <div className="table monitor-table">
+            <div className="table monitor-table monitor-run-history-table">
               <table>
+                <colgroup>
+                  <col style={{ width: "30%" }} />
+                  <col style={{ width: "15%" }} />
+                  <col style={{ width: "13%" }} />
+                  <col style={{ width: "15%" }} />
+                  <col style={{ width: "27%" }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Time</th>
@@ -3968,7 +4017,7 @@ function MonitoringPage() {
                     const payload = (row.payload ?? {}) as RecordValue;
                     return (
                       <tr key={String(row.id ?? index)}>
-                        <td>{verificationDate(row.created_at)}</td>
+                        <td>{auditDate(row.created_at)}</td>
                         <td>{valueOf(payload.job ?? row.event_type)}</td>
                         <td>
                           <span
@@ -4041,6 +4090,14 @@ function MonitoringPage() {
           </header>
           <div className="table monitor-table slow-query-table">
             <table>
+              <colgroup>
+                <col style={{ width: "59%" }} />
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "8%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Query</th>
@@ -4048,7 +4105,7 @@ function MonitoringPage() {
                   <th>Mean (ms)</th>
                   <th>Max (ms)</th>
                   <th>Total (ms)</th>
-                  <th>Rows / call</th>
+                  <th>Rows/call</th>
                 </tr>
               </thead>
               <tbody>
@@ -4057,16 +4114,18 @@ function MonitoringPage() {
                     <td>
                       <code>{valueOf(row.query)}</code>
                     </td>
-                    <td>{Number(row.calls ?? 0).toLocaleString()}</td>
+                    <td>{Number(row.calls ?? 0).toLocaleString("ru-RU")}</td>
                     <td>{Number(row.mean_ms ?? 0).toFixed(2)}</td>
                     <td>{Number(row.max_ms ?? 0).toFixed(2)}</td>
                     <td>
-                      {Math.round(Number(row.total_ms ?? 0)).toLocaleString()}
+                      {Math.round(Number(row.total_ms ?? 0)).toLocaleString(
+                        "ru-RU",
+                      )}
                     </td>
                     <td>
                       {Math.round(
                         Number(row.rows_per_call ?? 0),
-                      ).toLocaleString()}
+                      ).toLocaleString("ru-RU")}
                     </td>
                   </tr>
                 ))}
@@ -4321,8 +4380,71 @@ function Operations({ kind }: { kind: "monitoring" | "storage" }) {
   return kind === "monitoring" ? <MonitoringPage /> : <StoragePage />;
 }
 
+function supportProfileType(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function supportDate(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  return date && !Number.isNaN(date.valueOf()) ? date : null;
+}
+
+function supportDayKey(value: unknown) {
+  const date = supportDate(value);
+  if (!date) return "";
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function supportDayLabel(value: unknown) {
+  const date = supportDate(value);
+  if (!date) return "";
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (supportDayKey(date) === supportDayKey(today)) return "Today";
+  if (supportDayKey(date) === supportDayKey(yesterday)) return "Yesterday";
+  return date.toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "short",
+    year: date.getFullYear() === today.getFullYear() ? undefined : "numeric",
+  });
+}
+
+function supportTime(value: unknown) {
+  const date = supportDate(value);
+  return date
+    ? date.toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : "";
+}
+
+function supportListDate(value: unknown) {
+  const date = supportDate(value);
+  if (!date) return "";
+  return supportDayKey(date) === supportDayKey(new Date())
+    ? supportTime(date)
+    : date.toLocaleDateString(undefined, {
+        day: "numeric",
+        month: "short",
+        year:
+          date.getFullYear() === new Date().getFullYear()
+            ? undefined
+            : "numeric",
+      });
+}
+
 function Support() {
   const { id: requestedThreadId } = useParams();
+  const navigate = useNavigate();
   const [result, setResult] = useState<ListResponse | null>(null);
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
@@ -4331,6 +4453,7 @@ function Support() {
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [unanswered, setUnanswered] = useState(true);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const limit = 25;
   const load = () => {
     const params = new URLSearchParams({
@@ -4362,15 +4485,28 @@ function Support() {
         .catch(() => setError("Could not load the conversation."));
   }, [requestedThreadId, result, active]);
   useEffect(() => {
-    if (active?.id)
+    let current = true;
+    if (active?.id) {
+      setDetail(null);
       api
         .get<RecordValue>(
           `/admin/support/${encodeURIComponent(String(active.id))}`,
         )
-        .then(setDetail)
-        .catch(() => setError("Could not load the conversation."));
-    else setDetail(null);
+        .then((loaded) => {
+          if (current) setDetail(loaded);
+        })
+        .catch(() => {
+          if (current) setError("Could not load the conversation.");
+        });
+    } else setDetail(null);
+    return () => {
+      current = false;
+    };
   }, [active]);
+  useEffect(() => {
+    const list = messageListRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [detail]);
   const send = async (event: FormEvent) => {
     event.preventDefault();
     if (!active?.id || !body.trim()) return;
@@ -4394,7 +4530,19 @@ function Support() {
   const selectedConversation =
     (detail?.conversation as RecordValue | undefined) ?? active ?? {};
   const selectedName = rowName(selectedConversation);
-  const selectedAvatar = String(selectedConversation.avatarUrl ?? "");
+  const selectedEmail = valueOf(selectedConversation.email);
+  const selectedType = supportProfileType(selectedConversation.profileType);
+  const messages = ((detail?.messages ?? []) as RecordValue[]);
+  const supportProfile = (detail?.supportProfile ?? {}) as RecordValue;
+  const resetThread = (nextUnanswered: boolean) => {
+    setOffset(0);
+    setUnanswered(nextUnanswered);
+    setActive(null);
+    setDetail(null);
+    setBody("");
+    setError("");
+    if (requestedThreadId) navigate("/support", { replace: true });
+  };
   return (
     <div className="support-workspace">
       <section className="support-list-pane">
@@ -4403,10 +4551,7 @@ function Support() {
             type="button"
             className={unanswered ? "active" : ""}
             aria-pressed={unanswered}
-            onClick={() => {
-              setOffset(0);
-              setUnanswered(true);
-            }}
+            onClick={() => resetThread(true)}
           >
             Unanswered ({result?.totalUnanswered ?? (unanswered ? total : 0)})
           </button>
@@ -4414,10 +4559,7 @@ function Support() {
             type="button"
             className={!unanswered ? "active" : ""}
             aria-pressed={!unanswered}
-            onClick={() => {
-              setOffset(0);
-              setUnanswered(false);
-            }}
+            onClick={() => resetThread(false)}
           >
             All ({result?.totalAll ?? (!unanswered ? total : 0)})
           </button>
@@ -4445,24 +4587,21 @@ function Support() {
                 key={String(row.id)}
                 onClick={() => setActive(row)}
               >
-                <i>
-                  <span>{rowName(row).slice(0, 1).toUpperCase()}</span>
-                  {Boolean(row.avatarUrl) && (
-                    <img
-                      src={String(row.avatarUrl)}
-                      alt=""
-                      onError={(event) => event.currentTarget.remove()}
-                    />
-                  )}
-                </i>
-                <span>
-                  <b>{rowName(row)}</b>
-                  <small>
-                    {valueOf(row.profileType ?? row.type ?? row.email)}
-                  </small>
+                <PersonAvatar
+                  row={row}
+                  name={rowName(row)}
+                  className="support-conversation-avatar"
+                />
+                <span className="support-conversation-copy">
+                  <span className="support-conversation-heading">
+                    <b>{rowName(row)}</b>
+                    {Boolean(row.profileType ?? row.type) && (
+                      <small>{supportProfileType(row.profileType ?? row.type)}</small>
+                    )}
+                  </span>
                   <p>{valueOf(row.lastMessage)}</p>
                 </span>
-                <time>{compactDate(row.lastMessageAt ?? row.updated_at)}</time>
+                <time>{supportListDate(row.lastMessageAt ?? row.updated_at)}</time>
                 {Number(row.unreadCount ?? 0) > 0 && (
                   <em>{valueOf(row.unreadCount)}</em>
                 )}
@@ -4497,53 +4636,103 @@ function Support() {
         {detail ? (
           <>
             <header className="support-thread-profile">
-              <i>
-                <span>{selectedName.slice(0, 1).toUpperCase()}</span>
-                {selectedAvatar && (
-                  <img
-                    src={selectedAvatar}
-                    alt=""
-                    onError={(event) => event.currentTarget.remove()}
-                  />
-                )}
-              </i>
-              <div>
-                {selectedConversation.userId ? (
-                  <Link
-                    to={`/users/${encodeURIComponent(String(selectedConversation.userId))}`}
-                  >
-                    <h2>{selectedName}</h2>
-                  </Link>
-                ) : (
+              <PersonAvatar
+                row={selectedConversation}
+                name={selectedName}
+                className="support-thread-avatar"
+              />
+              <div className="support-thread-identity">
+                <div>
                   <h2>{selectedName}</h2>
-                )}
-                <p className="muted">
-                  {valueOf(
-                    selectedConversation.profileType ??
-                      selectedConversation.email,
-                  )}
-                </p>
+                  {selectedType && <span>{selectedType}</span>}
+                </div>
+                <p>{selectedEmail}</p>
               </div>
-            </header>
-            <div className="message-list">
-              {((detail.messages ?? []) as RecordValue[]).map(
-                (message, index) => (
-                  <article key={String(message.id ?? index)}>
-                    <b>{valueOf(message.senderName)}</b>
-                    <p>{valueOf(message.body)}</p>
-                    <small>{compactDate(message.created_at)}</small>
-                  </article>
-                ),
+              {Boolean(selectedConversation.userId) && (
+                <Link
+                  className="support-view-profile"
+                  to={`/users/${encodeURIComponent(String(selectedConversation.userId))}`}
+                >
+                  <AdminIcon name="externalLink" /> View Profile
+                </Link>
               )}
+            </header>
+            <div className="message-list" ref={messageListRef}>
+              {messages.map((message, index) => {
+                const previous = messages[index - 1];
+                const createdAt = message.created_at ?? message.createdAt;
+                const showDay =
+                  !previous ||
+                  supportDayKey(createdAt) !==
+                    supportDayKey(previous.created_at ?? previous.createdAt);
+                const isSupport =
+                  String(message.senderRole ?? "").toUpperCase() === "SUPPORT" ||
+                  String(message.senderProfileId ?? message.sender_profile_id ?? "") ===
+                    String(supportProfile.id ?? "");
+                return (
+                  <div
+                    className="support-message-entry"
+                    key={String(message.id ?? index)}
+                  >
+                    {showDay && (
+                      <div className="support-message-day">
+                        {supportDayLabel(createdAt)}
+                      </div>
+                    )}
+                    <article
+                      className={`support-message ${isSupport ? "is-support" : "is-user"}`}
+                    >
+                      <p>{valueOf(message.body)}</p>
+                      <time>{supportTime(createdAt)}</time>
+                    </article>
+                  </div>
+                );
+              })}
             </div>
-            <form onSubmit={send}>
+            <form className="support-composer" onSubmit={send}>
+              <button
+                className="support-composer-tool"
+                type="button"
+                aria-label="Emoji"
+                title="Emoji are not available in support chat"
+                disabled
+              >
+                <AdminIcon name="smile" />
+              </button>
+              <button
+                className="support-composer-tool"
+                type="button"
+                aria-label="Attach file"
+                title="File attachments are not available in support chat"
+                disabled
+              >
+                <AdminIcon name="paperclip" />
+              </button>
               <textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
-                rows={3}
-                placeholder="Write a response…"
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                rows={1}
+                maxLength={4000}
+                placeholder="Type a message as support..."
               />
-              <button className="primary">Send reply</button>
+              <button
+                className="support-send"
+                type="submit"
+                aria-label="Send reply"
+                disabled={!body.trim()}
+              >
+                <AdminIcon name="send" />
+              </button>
             </form>
           </>
         ) : (
@@ -4710,6 +4899,93 @@ function ModerationPhotos() {
   );
 }
 
+function reportDate(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  if (!date || Number.isNaN(date.valueOf())) return valueOf(value);
+  return `${date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  })}, ${date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  })}`;
+}
+
+function reportReasonClass(value: unknown) {
+  return (
+    String(value ?? "other")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "other"
+  );
+}
+
+function reportModeratorName(row: RecordValue) {
+  const data = recordValue(row.data) ?? {};
+  const explicit = String(
+    row.resolvedByName ?? data.resolvedByName ?? data.reviewedByName ?? "",
+  ).trim();
+  if (explicit) return explicit;
+  const identity = String(
+    row.resolvedBy ?? data.resolvedBy ?? data.reviewedBy ?? "",
+  ).trim();
+  if (!identity) return "—";
+  const localPart = identity.split("@")[0].replace(/^admin[._-]?/i, "");
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || identity;
+}
+
+function ReportPerson({
+  row,
+  kind,
+}: {
+  row: RecordValue;
+  kind: "reporter" | "reported";
+}) {
+  const profileId = row[`${kind}ProfileId`];
+  const name = valueOf(row[`${kind}Name`] ?? row[`${kind}Email`]);
+  const avatarRow: RecordValue = {
+    avatarUrl: row[`${kind}AvatarUrl`],
+    avatarFallbackUrl: row[`${kind}AvatarFallbackUrl`],
+  };
+  const content = (
+    <>
+      <PersonAvatar
+        row={avatarRow}
+        name={name}
+        className="moderation-report-avatar"
+      />
+      <span className="moderation-report-person-name">
+        {name}
+        {settingBoolean(row[`${kind}IsVerified`]) && (
+          <span
+            className="moderation-report-verified"
+            title="Verified"
+            aria-label="Verified"
+          >
+            <AdminIcon name="circleCheck" />
+          </span>
+        )}
+      </span>
+    </>
+  );
+  return profileId ? (
+    <Link
+      className="moderation-report-person"
+      to={`/users/${encodeURIComponent(String(profileId))}`}
+    >
+      {content}
+    </Link>
+  ) : (
+    <span className="moderation-report-person">{content}</span>
+  );
+}
+
 function ModerationReports() {
   const [status, setStatus] = useState("PENDING");
   const [result, setResult] = useState<ListResponse | null>(null);
@@ -4719,6 +4995,8 @@ function ModerationReports() {
     DISMISSED: 0,
   });
   const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [reviewingId, setReviewingId] = useState("");
   const loadCounts = () =>
     Promise.all(
       ["PENDING", "RESOLVED", "DISMISSED"].map(
@@ -4732,15 +5010,18 @@ function ModerationReports() {
             ).total,
           ] as const,
       ),
-    ).then((items) => setCounts(Object.fromEntries(items)));
+    )
+      .then((items) => setCounts(Object.fromEntries(items)))
+      .catch(() => setNotice("Could not load report counts."));
   const load = () => {
     setResult(null);
+    setLoadError("");
     api
       .get<ListResponse>(
         `/admin/list/moderation-reports?limit=100&offset=0&status=${encodeURIComponent(status)}`,
       )
       .then(setResult)
-      .catch(() => setNotice("Could not load reports."));
+      .catch(() => setLoadError("Could not load reports."));
   };
   useEffect(load, [status]);
   useEffect(() => {
@@ -4748,6 +5029,7 @@ function ModerationReports() {
   }, []);
   const review = async (row: RecordValue, next: "RESOLVED" | "DISMISSED") => {
     if (!window.confirm(`Mark this report as ${next.toLowerCase()}?`)) return;
+    setReviewingId(String(row.id));
     try {
       await api.patch(
         `/admin/item/moderation-reports/${encodeURIComponent(String(row.id))}`,
@@ -4758,6 +5040,8 @@ function ModerationReports() {
       void loadCounts();
     } catch {
       setNotice("Could not update this report.");
+    } finally {
+      setReviewingId("");
     }
   };
   const items = result?.items ?? [];
@@ -4789,11 +5073,9 @@ function ModerationReports() {
               }
             />{" "}
             {title}
-            {counts[key] ? (
-              <span className="moderation-tab-count">
-                {key === "PENDING" ? counts[key] : `(${counts[key]})`}
-              </span>
-            ) : null}
+            <span className="moderation-tab-count">
+              {key === "PENDING" ? counts[key] : `(${counts[key]})`}
+            </span>
           </button>
         ))}
       </nav>
@@ -4803,60 +5085,101 @@ function ModerationReports() {
         </p>
       )}
       <section
-        className={`table moderation-report-table${result && !items.length ? " is-empty" : ""}`}
+        className={`table moderation-report-table moderation-report-table-${status.toLowerCase()}${result && !items.length ? " is-empty" : ""}`}
       >
-        {!result ? (
+        {loadError ? (
+          <div className="moderation-report-load-error">
+            <span>{loadError}</span>
+            <button type="button" className="secondary-button" onClick={load}>
+              Retry
+            </button>
+          </div>
+        ) : !result ? (
           <p className="loading-inline">Loading reports…</p>
         ) : (
           <table>
+            <colgroup>
+              <col className="report-col-reporter" />
+              <col className="report-col-reported" />
+              <col className="report-col-reason" />
+              <col className="report-col-description" />
+              <col className="report-col-date" />
+              {status !== "PENDING" && <col className="report-col-resolved-by" />}
+              <col className="report-col-actions" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Reporter</th>
-                <th>Reported user</th>
+                <th>Reported User</th>
                 <th>Reason</th>
                 <th>Description</th>
                 <th>Date</th>
-                {status === "PENDING" && <th>Actions</th>}
+                {status !== "PENDING" && <th>Resolved By</th>}
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.map((row, index) => (
                 <tr key={String(row.id ?? index)}>
                   <td>
-                    {row.reporterProfileId ? (
-                      <Link to={`/users/${encodeURIComponent(String(row.reporterProfileId))}`}>
-                        {valueOf(row.reporterName ?? row.reporterEmail)}
-                      </Link>
-                    ) : (
-                      valueOf(row.reporterName ?? row.reporterEmail)
-                    )}
+                    <ReportPerson row={row} kind="reporter" />
                   </td>
                   <td>
-                    {row.reportedProfileId ? (
-                      <Link to={`/users/${encodeURIComponent(String(row.reportedProfileId))}`}>
-                        {valueOf(row.reportedName ?? row.reportedEmail)}
-                      </Link>
-                    ) : (
-                      valueOf(row.reportedName ?? row.reportedEmail)
-                    )}
+                    <ReportPerson row={row} kind="reported" />
                   </td>
-                  <td>{valueOf(row.reason)}</td>
-                  <td>{valueOf(row.details ?? row.description)}</td>
-                  <td>{verificationDate(row.createdAt ?? row.created_at)}</td>
+                  <td>
+                    <span
+                      className={`moderation-report-reason reason-${reportReasonClass(row.reason)}`}
+                    >
+                      {valueOf(row.reason).toUpperCase()}
+                    </span>
+                  </td>
+                  <td>
+                    <span
+                      className="moderation-report-description"
+                      title={valueOf(row.details ?? row.description)}
+                    >
+                      {valueOf(row.details ?? row.description)}
+                    </span>
+                  </td>
+                  <td className="moderation-report-date">
+                    {reportDate(row.createdAt ?? row.created_at)}
+                  </td>
+                  {status !== "PENDING" && (
+                    <td>
+                      <span className="moderation-report-moderator">
+                        <b>{reportModeratorName(row)}</b>
+                        {Boolean(row.resolutionNote) && (
+                          <small>{valueOf(row.resolutionNote)}</small>
+                        )}
+                      </span>
+                    </td>
+                  )}
                   {status === "PENDING" && (
                     <td className="row-actions">
                       <button
                         className="primary"
+                        disabled={reviewingId === String(row.id)}
                         onClick={() => void review(row, "RESOLVED")}
                       >
                         <AdminIcon name="check" /> Resolve
                       </button>
                       <button
                         className="secondary-button"
+                        disabled={reviewingId === String(row.id)}
                         onClick={() => void review(row, "DISMISSED")}
                       >
                         <AdminIcon name="x" /> Dismiss
                       </button>
+                    </td>
+                  )}
+                  {status !== "PENDING" && (
+                    <td>
+                      <span
+                        className={`moderation-report-status status-${status.toLowerCase()}`}
+                      >
+                        {status === "RESOLVED" ? "Resolved" : "Dismissed"}
+                      </span>
                     </td>
                   )}
                 </tr>
@@ -4866,7 +5189,7 @@ function ModerationReports() {
           </table>
         )}
       </section>
-      {result && !items.length && (
+      {result && !items.length && !loadError && (
         <section className="moderation-report-empty">
           <AdminIcon name="flag" />
           <h2>
@@ -4891,16 +5214,21 @@ function LiveKitCalls() {
   const [historyPage, setHistoryPage] = useState(0);
   const [statisticsPeriod, setStatisticsPeriod] = useState<7 | 30>(7);
   const [result, setResult] = useState<ListResponse | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [updatedAt, setUpdatedAt] = useState(new Date());
   const load = () => {
     setResult(null);
+    setLoadError("");
     api
       .get<ListResponse>("/admin/list/livekit?limit=200&offset=0")
       .then((data) => {
         setResult(data);
         setUpdatedAt(new Date());
       })
-      .catch(() => setResult({ items: [], total: 0, limit: 100, offset: 0 }));
+      .catch(() => {
+        setLoadError("Could not load LiveKit call data.");
+        setResult({ items: [], total: 0, limit: 200, offset: 0 });
+      });
   };
   useEffect(() => {
     void load();
@@ -4998,7 +5326,7 @@ function LiveKitCalls() {
     (row) => callType(row) === "VIDEO",
   ).length;
   const audioCalls = statisticsRows.filter(
-    (row) => callType(row) === "AUDIO",
+    (row) => ["VOICE", "AUDIO"].includes(callType(row)),
   ).length;
   const callsByDay = new Map<string, number>();
   statisticsRows.forEach((row) => {
@@ -5046,7 +5374,15 @@ function LiveKitCalls() {
           <AdminIcon name="barChart" /> Statistics
         </button>
       </nav>
-      {tab === "live" && (
+      {loadError && (
+        <section className="livekit-load-error" role="alert">
+          <span>{loadError}</span>
+          <button type="button" className="secondary-button" onClick={load}>
+            <AdminIcon name="refresh" /> Try again
+          </button>
+        </section>
+      )}
+      {!loadError && tab === "live" && (
         <>
           <div className="livekit-toolbar">
             <span>
@@ -5111,7 +5447,7 @@ function LiveKitCalls() {
           )}
         </>
       )}
-      {tab === "history" && (
+      {!loadError && tab === "history" && (
         <section className="livekit-history">
           <AdminSelect
             aria-label="Call status"
@@ -5204,7 +5540,7 @@ function LiveKitCalls() {
           )}
         </section>
       )}
-      {tab === "statistics" && (
+      {!loadError && tab === "statistics" && (
         <section className="livekit-statistics">
           <AdminSelect
             aria-label="Statistics period"
@@ -9293,7 +9629,7 @@ function SettingsList({ view }: { view: string }) {
                   return (
                     <tr key={String(row.id ?? index)}>
                       <td data-label="Date">
-                        {verificationDate(data.createdAt ?? row.created_at)}
+                        {auditDate(data.createdAt ?? row.created_at)}
                       </td>
                       <td data-label="Admin">
                         {valueOf(

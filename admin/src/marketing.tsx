@@ -4,7 +4,11 @@ import { createApiClient } from "./api";
 
 const api = createApiClient("/admin/api");
 type RecordValue = Record<string, unknown>;
-type MarketingPreview = { total: number; byLocale: Record<string, number> };
+type MarketingPreview = {
+  total: number;
+  byLocale: Record<string, number>;
+  notificationConfigured?: boolean;
+};
 type MarketingIconName =
   | "plus"
   | "ellipsis"
@@ -155,6 +159,16 @@ function fieldLabel(value: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function marketingError(reason: unknown, fallback: string) {
+  if (!(reason instanceof Error)) return fallback;
+  try {
+    const parsed = JSON.parse(reason.message) as { detail?: unknown };
+    return typeof parsed.detail === "string" ? parsed.detail : reason.message;
+  } catch {
+    return reason.message || fallback;
+  }
+}
+
 export function MarketingFeature() {
   const navigate = useNavigate();
   const [result, setResult] = useState<{
@@ -183,11 +197,7 @@ export function MarketingFeature() {
       .catch(
         (reason: unknown) =>
           live &&
-          setError(
-            reason instanceof Error
-              ? reason.message
-              : "Could not load campaigns",
-          ),
+          setError(marketingError(reason, "Could not load campaigns")),
       );
     return () => {
       live = false;
@@ -330,12 +340,7 @@ export function MarketingCampaignPage({ isNew = false }: { isNew?: boolean }) {
       .then((value) => live && setCampaign(value))
       .catch(
         (reason: unknown) =>
-          live &&
-          setError(
-            reason instanceof Error
-              ? reason.message
-              : "Could not load campaign",
-          ),
+          live && setError(marketingError(reason, "Could not load campaign")),
       );
     return () => {
       live = false;
@@ -470,11 +475,7 @@ function CampaignEditor({ campaign }: { campaign?: MarketingCampaign }) {
         .catch((reason: unknown) => {
           if (live) {
             setPreview(null);
-            setPreviewError(
-              reason instanceof Error
-                ? reason.message
-                : "Could not load recipients",
-            );
+            setPreviewError(marketingError(reason, "Could not load recipients"));
           }
         });
     }, 300);
@@ -530,11 +531,7 @@ function CampaignEditor({ campaign }: { campaign?: MarketingCampaign }) {
       await persist();
       navigate("/marketing");
     } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Could not save the campaign",
-      );
+      setError(marketingError(reason, "Could not save the campaign"));
     } finally {
       setBusy(false);
     }
@@ -556,11 +553,7 @@ function CampaignEditor({ campaign }: { campaign?: MarketingCampaign }) {
         );
       navigate(`/marketing/${id}`);
     } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Could not dispatch the campaign",
-      );
+      setError(marketingError(reason, "Could not dispatch the campaign"));
       setConfirming(false);
     } finally {
       setBusy(false);
@@ -793,6 +786,14 @@ function CampaignEditor({ campaign }: { campaign?: MarketingCampaign }) {
                 {preview?.total === 0 && (
                   <p>No matching users — narrow or broaden the cohort.</p>
                 )}
+                {preview &&
+                  preview.notificationConfigured === false &&
+                  delivery !== "CHAT_MESSAGE" && (
+                    <p className="campaign-delivery-warning">
+                      Push transport is not configured. Chat delivery remains
+                      available.
+                    </p>
+                  )}
               </>
             )}
           </section>
@@ -806,7 +807,13 @@ function CampaignEditor({ campaign }: { campaign?: MarketingCampaign }) {
             </button>
             <button
               className="primary"
-              disabled={busy || !formValid || !preview?.total}
+              disabled={
+                busy ||
+                !formValid ||
+                !preview?.total ||
+                (delivery === "PUSH_ONLY" &&
+                  preview.notificationConfigured === false)
+              }
               onClick={() => {
                 setConfirmation("");
                 setConfirming(true);
@@ -999,11 +1006,7 @@ function CampaignDetail({
         ),
       );
     } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Could not cancel the campaign",
-      );
+      setError(marketingError(reason, "Could not cancel the campaign"));
     } finally {
       setBusy(false);
     }
