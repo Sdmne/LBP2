@@ -2425,6 +2425,27 @@ def profile_is_verified(profile: dict[str, Any] | None) -> bool:
     return json_bool(data, "isVerified") or bool(data.get("verifiedAt"))
 
 
+def profile_completeness_percent(profile: dict[str, Any] | None) -> int:
+    """Same 7-factor completeness catalog_profile_completeness_sql() computes
+    in SQL for ranking (profileType/avatarUrl/dateOfBirth/country/city/
+    lookingFor, plus about-or-bio), done in Python so /api/auth/me can hand
+    it to the mobile/web "Profile strength" bar without a second SQL round
+    trip - kept in sync with that function's own field list on purpose, so
+    if one changes the other should too."""
+    data = profile_data(profile)
+
+    def filled(key: str) -> bool:
+        value = data.get(key)
+        if value is None:
+            return False
+        text = str(value).strip()
+        return text not in ("", "null", "[]", "{}")
+
+    factors = [filled(f) for f in ("profileType", "avatarUrl", "dateOfBirth", "country", "city", "lookingFor")]
+    factors.append(filled("about") or filled("bio"))
+    return round(100 * sum(1 for f in factors if f) / len(factors))
+
+
 def profile_has_completed_onboarding(profile: dict[str, Any] | None) -> bool:
     data = profile_data(profile)
     return json_bool(data, "isWizardCompleted") or bool(str(data.get("avatarUrl") or "").strip())
@@ -3675,6 +3696,7 @@ def auth_me(user: dict[str, Any] = Depends(require_user)):
     result = public_user(user)
     result["profileVerified"] = profile_is_verified(profile)
     result["isPremium"] = profile_is_premium(profile)
+    result["profileCompleteness"] = profile_completeness_percent(profile)
     return {"user": result}
 
 
