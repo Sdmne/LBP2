@@ -71,6 +71,7 @@ type AdminIconName =
   | "image"
   | "flag"
   | "phone"
+  | "video"
   | "activity"
   | "drive"
   | "code"
@@ -391,6 +392,15 @@ function auditDate(value: unknown) {
         hourCycle: "h23",
       })
     : valueOf(value);
+}
+function liveKitDate(value: unknown) {
+  const date = value ? new Date(String(value)) : null;
+  if (!date || Number.isNaN(date.valueOf())) return valueOf(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return [
+    `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join(", ");
 }
 function verificationDetailDate(value: unknown) {
   const date = value ? new Date(String(value)) : null;
@@ -1690,6 +1700,12 @@ function AdminIcon({ name }: { name: AdminIconName }) {
     ),
     phone: (
       <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384" />
+    ),
+    video: (
+      <>
+        <rect width="14" height="12" x="2" y="6" rx="2" />
+        <path d="m16 10 4.553-2.276A1 1 0 0 1 22 8.618v6.764a1 1 0 0 1-1.447.894L16 14" />
+      </>
     ),
     activity: (
       <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
@@ -4454,8 +4470,10 @@ function Support() {
   const [error, setError] = useState("");
   const [unanswered, setUnanswered] = useState(true);
   const messageListRef = useRef<HTMLDivElement>(null);
+  const loadSequenceRef = useRef(0);
   const limit = 25;
   const load = () => {
+    const sequence = ++loadSequenceRef.current;
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
@@ -4464,8 +4482,15 @@ function Support() {
     if (unanswered) params.set("unanswered", "true");
     api
       .get<ListResponse>(`/admin/support?${params}`)
-      .then(setResult)
-      .catch(() => setError("Could not load support conversations."));
+      .then((value) => {
+        if (sequence !== loadSequenceRef.current) return;
+        setResult(value);
+        setError("");
+      })
+      .catch(() => {
+        if (sequence === loadSequenceRef.current)
+          setError("Could not load support conversations.");
+      });
   };
   useEffect(load, [query, offset, unanswered]);
   useEffect(() => {
@@ -4571,7 +4596,7 @@ function Support() {
               setOffset(0);
               setQuery(event.target.value);
             }}
-            placeholder="Search by name or email..."
+            placeholder="Search by name, email or message..."
           />
         </div>
         {error && <p className="error">{error}</p>}
@@ -4587,21 +4612,31 @@ function Support() {
                 key={String(row.id)}
                 onClick={() => setActive(row)}
               >
-                <PersonAvatar
-                  row={row}
-                  name={rowName(row)}
-                  className="support-conversation-avatar"
-                />
+                <span className="support-conversation-avatar-wrap">
+                  <PersonAvatar
+                    row={row}
+                    name={rowName(row)}
+                    className="support-conversation-avatar"
+                  />
+                  {settingBoolean(row.isOnline) && (
+                    <span
+                      className="support-online-dot"
+                      role="img"
+                      aria-label="Online"
+                      title="Online"
+                    />
+                  )}
+                </span>
                 <span className="support-conversation-copy">
+                  {Boolean(row.profileType ?? row.type) && (
+                    <small>{supportProfileType(row.profileType ?? row.type)}</small>
+                  )}
                   <span className="support-conversation-heading">
                     <b>{rowName(row)}</b>
-                    {Boolean(row.profileType ?? row.type) && (
-                      <small>{supportProfileType(row.profileType ?? row.type)}</small>
-                    )}
+                    <time>{supportListDate(row.lastMessageAt ?? row.updated_at)}</time>
                   </span>
                   <p>{valueOf(row.lastMessage)}</p>
                 </span>
-                <time>{supportListDate(row.lastMessageAt ?? row.updated_at)}</time>
                 {Number(row.unreadCount ?? 0) > 0 && (
                   <em>{valueOf(row.unreadCount)}</em>
                 )}
@@ -4636,11 +4671,21 @@ function Support() {
         {detail ? (
           <>
             <header className="support-thread-profile">
-              <PersonAvatar
-                row={selectedConversation}
-                name={selectedName}
-                className="support-thread-avatar"
-              />
+              <span className="support-thread-avatar-wrap">
+                <PersonAvatar
+                  row={selectedConversation}
+                  name={selectedName}
+                  className="support-thread-avatar"
+                />
+                {settingBoolean(selectedConversation.isOnline) && (
+                  <span
+                    className="support-online-dot"
+                    role="img"
+                    aria-label="Online"
+                    title="Online"
+                  />
+                )}
+              </span>
               <div className="support-thread-identity">
                 <div>
                   <h2>{selectedName}</h2>
@@ -4953,6 +4998,7 @@ function ReportPerson({
     avatarUrl: row[`${kind}AvatarUrl`],
     avatarFallbackUrl: row[`${kind}AvatarFallbackUrl`],
   };
+  const profileStatus = String(row[`${kind}Status`] ?? "").toUpperCase();
   const content = (
     <>
       <PersonAvatar
@@ -4969,6 +5015,33 @@ function ReportPerson({
             aria-label="Verified"
           >
             <AdminIcon name="circleCheck" />
+          </span>
+        )}
+        {settingBoolean(row[`${kind}IsPremium`]) && (
+          <span
+            className="moderation-report-premium"
+            title="Premium"
+            aria-label="Premium"
+          >
+            <AdminIcon name="crown" />
+          </span>
+        )}
+        {profileStatus === "BANNED" && (
+          <span
+            className="moderation-report-profile-status is-banned"
+            title="Banned"
+            aria-label="Banned"
+          >
+            B
+          </span>
+        )}
+        {["DELETED", "PENDING_DELETION"].includes(profileStatus) && (
+          <span
+            className="moderation-report-profile-status is-deleted"
+            title="Deleted"
+            aria-label="Deleted"
+          >
+            D
           </span>
         )}
       </span>
@@ -5059,7 +5132,7 @@ function ModerationReports() {
           <button
             type="button"
             key={key}
-            className={status === key ? "active" : ""}
+            className={`${status === key ? "active " : ""}moderation-tab-${key.toLowerCase()}`}
             aria-pressed={status === key}
             onClick={() => setStatus(key)}
           >
@@ -5282,6 +5355,51 @@ function LiveKitCalls() {
     const durationMatch = durationText.match(/^(\d+(?:\.\d+)?)\s*s(?:ec(?:onds?)?)?$/i);
     return durationMatch ? Number(durationMatch[1]) : null;
   };
+  const callParticipant = (
+    row: RecordValue,
+    participant: "caller" | "callee",
+  ) => {
+    const data = callData(row);
+    const isCaller = participant === "caller";
+    const name = valueOf(
+      isCaller ? data.callerName ?? data.caller : data.calleeName ?? data.callee,
+    );
+    const verified = settingBoolean(
+      isCaller
+        ? data.callerIsVerified ?? data.caller_is_verified
+        : data.calleeIsVerified ?? data.callee_is_verified,
+    );
+    const premium = settingBoolean(
+      isCaller
+        ? data.callerIsPremium ?? data.caller_is_premium
+        : data.calleeIsPremium ?? data.callee_is_premium,
+    );
+    return (
+      <span className="livekit-call-person">
+        <span>{name}</span>
+        {verified && (
+          <span className="livekit-call-verified" title="Verified">
+            <AdminIcon name="circleCheck" />
+          </span>
+        )}
+        {premium && (
+          <span className="livekit-call-premium" title="Premium">
+            <AdminIcon name="crown" />
+          </span>
+        )}
+      </span>
+    );
+  };
+  const callTypeCell = (row: RecordValue) => {
+    const type = callType(row);
+    const isVideo = type === "VIDEO";
+    return (
+      <span className="livekit-call-type">
+        <AdminIcon name={isVideo ? "video" : "phone"} />
+        {isVideo ? "VIDEO" : "AUDIO"}
+      </span>
+    );
+  };
   const activeRows = rows.filter((row) =>
     ["ACTIVE", "ACCEPTED", "CONNECTED", "RINGING"].includes(callStatus(row)),
   );
@@ -5416,11 +5534,11 @@ function LiveKitCalls() {
                     return (
                       <tr key={String(row.id ?? index)}>
                         <td>
-                          {verificationDate(data.createdAt ?? row.created_at)}
+                          {liveKitDate(data.createdAt ?? row.created_at)}
                         </td>
-                        <td>{valueOf(data.callerName ?? data.caller)}</td>
-                        <td>{valueOf(data.calleeName ?? data.callee)}</td>
-                        <td>{valueOf(callType(row))}</td>
+                        <td>{callParticipant(row, "caller")}</td>
+                        <td>{callParticipant(row, "callee")}</td>
+                        <td>{callTypeCell(row)}</td>
                         <td>
                           <span
                             className={`table-badge status-${callStatus(row).toLowerCase()}`}
@@ -5460,6 +5578,7 @@ function LiveKitCalls() {
             <option value="">All statuses</option>
             <option value="ENDED">Ended</option>
             <option value="DECLINED">Declined</option>
+            <option value="CANCELLED">Cancelled</option>
             <option value="MISSED">Missed</option>
           </AdminSelect>
           <div className="table">
@@ -5481,11 +5600,11 @@ function LiveKitCalls() {
                   return (
                     <tr key={String(row.id ?? index)}>
                       <td>
-                        {verificationDate(data.createdAt ?? row.created_at)}
+                        {liveKitDate(data.createdAt ?? row.created_at)}
                       </td>
-                      <td>{valueOf(data.callerName ?? data.caller)}</td>
-                      <td>{valueOf(data.calleeName ?? data.callee)}</td>
-                      <td>{valueOf(callType(row))}</td>
+                      <td>{callParticipant(row, "caller")}</td>
+                      <td>{callParticipant(row, "callee")}</td>
+                      <td>{callTypeCell(row)}</td>
                       <td>
                         {duration === null ? "—" : formatDuration(duration)}
                       </td>
@@ -8202,6 +8321,10 @@ function CategoryManager({
   };
   useEffect(() => {
     if (!open) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
     reset();
     void load();
     window.requestAnimationFrame(() => nameInputRef.current?.focus());
@@ -8209,7 +8332,11 @@ function CategoryManager({
       if (event.key === "Escape") close();
     };
     document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousRootOverflow;
+    };
   }, [open]);
   if (!open) return null;
   const fields = (row: RecordValue) => {
@@ -8232,7 +8359,7 @@ function CategoryManager({
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!nameEn.trim() || !slug.trim()) return;
+    if (!nameEn.trim() || !nameRu.trim() || !slug.trim()) return;
     setBusy(true);
     setError("");
     const original = editing ? fields(editing).data : {};
@@ -8311,6 +8438,7 @@ function CategoryManager({
                 value={nameEn}
                 onChange={(event) => setNameEn(event.target.value)}
                 placeholder="Category name"
+                required
               />
             </label>
             <label>
@@ -8319,6 +8447,7 @@ function CategoryManager({
                 value={nameRu}
                 onChange={(event) => setNameRu(event.target.value)}
                 placeholder="Название категории"
+                required
               />
             </label>
           </div>
@@ -8328,12 +8457,15 @@ function CategoryManager({
               value={slug}
               onChange={(event) => setSlug(event.target.value)}
               placeholder="category-slug"
+              required
             />
           </label>
           <div className="category-form-actions">
             <button
               className="primary"
-              disabled={busy || !nameEn.trim() || !slug.trim()}
+              disabled={
+                busy || !nameEn.trim() || !nameRu.trim() || !slug.trim()
+              }
             >
               {editing ? "Update" : "Add"}
             </button>
@@ -8777,7 +8909,7 @@ function ArticleEditor({
               disabled={!slug}
               onClick={() =>
                 window.open(
-                  `https://test.letsbeparents.com/${locale}/knowledge-hub/${slug}`,
+                  `https://test.letsbeparents.com/${locale}/knowledge-hub/${slug}?preview=true`,
                   "_blank",
                 )
               }

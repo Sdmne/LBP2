@@ -52,7 +52,7 @@ body {
   min-height: 100vh;
   display: flex;
 }
-.app aside {
+.app > aside {
   position: sticky;
   top: 0;
   flex: 0 0 var(--admin-sidebar-width);
@@ -128,7 +128,7 @@ body {
   width: 16px;
   height: 16px;
 }
-.app aside nav {
+.app > aside nav {
   flex: 1 1 auto;
   display: grid;
   align-content: start;
@@ -138,7 +138,7 @@ body {
   scrollbar-gutter: stable;
   padding: 4px 12px 12px;
 }
-.app aside nav a {
+.app > aside nav a {
   display: flex;
   min-height: 36px;
   align-items: center;
@@ -154,12 +154,12 @@ body {
     color 150ms,
     background-color 150ms;
 }
-.app aside nav a svg {
+.app > aside nav a svg {
   flex: 0 0 16px;
   width: 16px;
   height: 16px;
 }
-.app aside nav a span {
+.app > aside nav a span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -178,7 +178,7 @@ body {
   line-height: 20px;
   text-align: center;
 }
-.app aside nav a.active {
+.app > aside nav a.active {
   background: #f31260;
   color: #fff;
 }
@@ -1309,7 +1309,7 @@ body {
   .app {
     min-width: max-content;
   }
-  .app aside {
+  .app > aside {
     flex: 0 0 var(--admin-sidebar-width);
     width: var(--admin-sidebar-width);
     min-width: var(--admin-sidebar-width);
@@ -1318,7 +1318,7 @@ body {
     border-bottom: 1px solid #e6ebf3;
     padding: 0;
   }
-  .app aside nav {
+  .app > aside nav {
     grid-template-columns: repeat(3, 1fr);
   }
   .content {
@@ -1879,11 +1879,25 @@ body {
 }
 .article-editor-actions button {
   display: inline-flex;
+  width: 100%;
+  height: 40px;
   align-items: center;
   justify-content: center;
+  justify-self: stretch;
   gap: 8px;
   min-height: 40px;
+  padding: 8px 16px;
   border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.article-editor-actions .secondary-button {
+  border-color: #e2e8f0;
+  color: #020817;
+}
+.article-editor-actions .primary {
+  background: #f31260;
 }
 .article-editor-actions button svg {
   width: 16px;
@@ -1914,6 +1928,7 @@ body {
 .category-backdrop {
   padding: 0;
   background: rgba(0, 0, 0, 0.8);
+  overscroll-behavior: contain;
 }
 .category-manager {
   width: min(512px, 100vw);
@@ -1922,6 +1937,7 @@ body {
   padding: 24px;
   border-radius: 8px;
   color: #020817;
+  overscroll-behavior: contain;
   box-shadow:
     0 10px 15px -3px rgba(0, 0, 0, 0.1),
     0 4px 6px -4px rgba(0, 0, 0, 0.1);
@@ -2992,7 +3008,7 @@ body {
 .support-conversation-list > button {
   position: relative;
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr);
   gap: 10px;
   width: 100%;
   min-height: 80px;
@@ -3023,6 +3039,26 @@ body {
   color: #64748b;
   font-weight: 600;
 }
+.support-conversation-avatar-wrap,
+.support-thread-avatar-wrap {
+  position: relative;
+  display: block;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+}
+.support-online-dot {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  z-index: 2;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f31260;
+  box-sizing: border-box;
+}
 .support-conversation-avatar i,
 .support-thread-avatar i {
   display: grid;
@@ -3043,12 +3079,13 @@ body {
   display: grid;
   min-width: 0;
   align-content: center;
-  gap: 5px;
+  gap: 3px;
 }
 .support-conversation-heading {
   display: flex;
   min-width: 0;
-  align-items: center;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 7px;
 }
 .support-conversation-list b {
@@ -3060,6 +3097,7 @@ body {
   font-weight: 600;
 }
 .support-conversation-list small {
+  justify-self: start;
   flex: 0 1 auto;
   max-width: 112px;
   overflow: hidden;
@@ -3081,8 +3119,8 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.support-conversation-list time {
-  padding-top: 2px;
+.support-conversation-heading time {
+  flex: 0 0 auto;
   color: #64748b;
   font-size: 10px;
   line-height: 16px;
@@ -3144,6 +3182,7 @@ body {
   border-bottom: 1px solid #e2e8f0;
 }
 .support-thread-identity {
+  flex: 1 1 auto;
   min-width: 0;
 }
 .support-thread-identity > div {
@@ -3183,7 +3222,7 @@ body {
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  margin-left: 18px;
+  margin-left: auto;
   color: #0f172a;
   font-size: 12px;
   font-weight: 500;
@@ -3228,11 +3267,12 @@ body {
   box-shadow: none;
 }
 .support-thread .message-list article.support-message.is-support {
+  align-self: flex-start;
   background: #f31260;
   color: #fff;
 }
 .support-thread .message-list article.support-message.is-user {
-  align-self: flex-start;
+  align-self: flex-end;
   border: 1px solid #e2e8f0;
   background: #fff;
 }
@@ -3454,6 +3494,23 @@ body {
 .moderation-tab-count {
   margin-left: -3px;
 }
+.moderation-tab-pending .moderation-tab-count {
+  display: inline-flex;
+  min-width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 12px;
+  line-height: 20px;
+}
+.moderation-tab-pending.active .moderation-tab-count {
+  background: rgba(255, 255, 255, 0.18);
+}
 .moderation-report-table.is-empty {
   display: none;
 }
@@ -3523,46 +3580,44 @@ body {
   white-space: nowrap;
 }
 .moderation-report-table-pending .report-col-reporter,
-.moderation-report-table-pending .report-col-reported {
+.moderation-report-table-pending .report-col-actions {
   width: 17%;
 }
-.moderation-report-table-pending .report-col-reason {
+.moderation-report-table-pending .report-col-reported,
+.moderation-report-table-pending .report-col-date {
   width: 16%;
 }
+.moderation-report-table-pending .report-col-reason {
+  width: 17%;
+}
 .moderation-report-table-pending .report-col-description {
-  width: 21%;
-}
-.moderation-report-table-pending .report-col-date {
-  width: 14%;
-}
-.moderation-report-table-pending .report-col-actions {
-  width: 15%;
+  width: 17%;
 }
 .moderation-report-table-resolved .report-col-reporter,
+.moderation-report-table-dismissed .report-col-reporter {
+  width: 18%;
+}
 .moderation-report-table-resolved .report-col-reported,
-.moderation-report-table-dismissed .report-col-reporter,
 .moderation-report-table-dismissed .report-col-reported {
-  width: 14.5%;
+  width: 16%;
 }
 .moderation-report-table-resolved .report-col-reason,
-.moderation-report-table-dismissed .report-col-reason {
-  width: 14%;
-}
+.moderation-report-table-dismissed .report-col-reason,
 .moderation-report-table-resolved .report-col-description,
 .moderation-report-table-dismissed .report-col-description {
-  width: 18%;
+  width: 16%;
 }
 .moderation-report-table-resolved .report-col-date,
 .moderation-report-table-dismissed .report-col-date {
-  width: 13%;
+  width: 11%;
 }
 .moderation-report-table-resolved .report-col-resolved-by,
 .moderation-report-table-dismissed .report-col-resolved-by {
-  width: 15%;
+  width: 14%;
 }
 .moderation-report-table-resolved .report-col-actions,
 .moderation-report-table-dismissed .report-col-actions {
-  width: 11%;
+  width: 9%;
 }
 .moderation-report-person {
   display: inline-flex;
@@ -3605,16 +3660,42 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.moderation-report-verified {
+.moderation-report-verified,
+.moderation-report-premium {
   display: inline-flex;
   width: 15px;
   height: 15px;
   flex: 0 0 15px;
   color: #3b82f6;
 }
+.moderation-report-premium {
+  color: #f59e0b;
+}
 .moderation-report-verified svg {
   width: 15px;
   height: 15px;
+}
+.moderation-report-premium svg {
+  width: 15px;
+  height: 15px;
+}
+.moderation-report-profile-status {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 16px;
+}
+.moderation-report-profile-status.is-banned {
+  background: #ef4444;
+}
+.moderation-report-profile-status.is-deleted {
+  background: #f59e0b;
 }
 .moderation-report-reason,
 .moderation-report-status {
@@ -3635,16 +3716,16 @@ body {
   text-overflow: ellipsis;
 }
 .moderation-report-reason.reason-scam {
-  background: #fee2e2;
-  color: #dc2626;
+  background: #ef4444;
+  color: #fff;
 }
 .moderation-report-reason.reason-fake-profile {
-  background: #fce7f3;
-  color: #db2777;
+  background: #f31260;
+  color: #fff;
 }
 .moderation-report-reason.reason-inappropriate-content {
-  background: #fef3c7;
-  color: #a16207;
+  background: #fbbf24;
+  color: #fff;
 }
 .moderation-report-description {
   display: block;
@@ -3679,8 +3760,8 @@ body {
   font-weight: 400;
 }
 .moderation-report-status.status-resolved {
-  background: #fce7f3;
-  color: #db2777;
+  background: #f31260;
+  color: #fff;
 }
 .moderation-report-status.status-dismissed {
   background: #e2e8f0;
@@ -3875,6 +3956,86 @@ body {
   border-radius: 6px;
   background: #fff;
   font: inherit;
+}
+.livekit-history > .admin-select {
+  width: 180px;
+}
+.livekit-history .table {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.livekit-history table {
+  table-layout: fixed;
+}
+.livekit-history th,
+.livekit-history td,
+.livekit-history th *,
+.livekit-history td * {
+  font-size: 14px;
+  line-height: 20px;
+}
+.livekit-history th,
+.livekit-history td {
+  padding: 12px 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.livekit-history th {
+  color: #64748b;
+  font-weight: 600;
+}
+.livekit-history th {
+  width: 16.6667%;
+}
+.livekit-history td:first-child {
+  color: #64748b;
+}
+.livekit-call-person,
+.livekit-call-type {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.livekit-call-person > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #0f172a;
+  font-weight: 600;
+}
+.livekit-call-verified,
+.livekit-call-premium {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  place-items: center;
+}
+.livekit-call-verified {
+  color: #3b82f6;
+}
+.livekit-call-premium {
+  color: #f59e0b;
+}
+.livekit-call-verified svg,
+.livekit-call-premium svg,
+.livekit-call-type svg {
+  width: 14px;
+  height: 14px;
+}
+.livekit-history .table-badge {
+  min-height: 22px;
+  padding: 1px 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.livekit-history .table-badge.status-cancelled {
+  background: #ef4444;
+  color: #fff;
 }
 .livekit-chart {
   min-height: 240px;
@@ -7752,10 +7913,10 @@ body {
     font-size: 18px;
     line-height: 24px;
   }
-  .app aside nav {
+  .app > aside nav {
     padding: 0 8px;
   }
-  .app aside nav a {
+  .app > aside nav a {
     min-height: 29px;
     gap: 9px;
     padding: 4px 8px;
@@ -9026,7 +9187,7 @@ body,
     min-width: 0;
     flex-direction: column;
   }
-  .app aside {
+  .app > aside {
     position: relative;
     width: 100%;
     min-width: 0;
@@ -9278,8 +9439,10 @@ body,
 .modal label > .admin-select {
   width: 100%;
 }
-.livekit-history > .admin-select,
 .livekit-statistics > .admin-select {
+  width: 180px;
+}
+.livekit-history > .admin-select {
   width: 180px;
 }
 .deletion-heading > .admin-select {

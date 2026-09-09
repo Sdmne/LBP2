@@ -126,7 +126,7 @@ ACCOUNT_DELETION_DAYS = 30
 ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "3600")))
 MARKETING_CAMPAIGN_POLL_SECONDS = max(15, int(os.getenv("MARKETING_CAMPAIGN_POLL_SECONDS", "30")))
 DOCKER_METRICS_FILE = Path(os.getenv("DOCKER_METRICS_FILE", "/run/metrics/docker-system-df.jsonl"))
-DOCKER_METRICS_MAX_AGE_SECONDS = max(60, int(os.getenv("DOCKER_METRICS_MAX_AGE_SECONDS", "180")))
+DOCKER_METRICS_MAX_AGE_SECONDS = max(60, int(os.getenv("DOCKER_METRICS_MAX_AGE_SECONDS", "3900")))
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0").strip()
 REDIS_SOCKET_TIMEOUT_SECONDS = max(0.25, float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2")))
 REDIS_CONNECTION_LOCK = Lock()
@@ -6361,6 +6361,7 @@ def member_account_deletion(
 def member_conversations(
     user: dict[str, Any] = Depends(require_user),
     conversation_id: int | None = Query(default=None, alias="conversationId", ge=1),
+    q: str | None = Query(default=None, min_length=1, max_length=200),
 ):
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
@@ -6388,6 +6389,22 @@ def member_conversations(
         if conversation_id is not None:
             scope += " AND c.id = %s"
             params += (conversation_id,)
+        search = (q or "").strip()
+        if search:
+            like = f"%{search}%"
+            scope += """
+              AND (
+                p.display_name ILIKE %s
+                OR EXISTS (
+                  SELECT 1
+                  FROM conversation_messages search_message
+                  WHERE search_message.conversation_id = c.id
+                    AND search_message.status = 'ACTIVE'
+                    AND search_message.body ILIKE %s
+                )
+              )
+            """
+            params += (like, like)
         cursor.execute(scope + " ORDER BY (p.role = 'SUPPORT') DESC, c.updated_at DESC, c.id DESC LIMIT 100", params)
         items = cursor.fetchall()
         conn.commit()
@@ -11022,9 +11039,25 @@ def admin_support_list(
     base_where = ["(a.role = 'SUPPORT' OR b.role = 'SUPPORT')"]
     base_params: list[Any] = []
     if q:
-        base_where.append("(a.display_name LIKE %s OR b.display_name LIKE %s OR a.email LIKE %s OR b.email LIKE %s)")
-        like = f"%{q}%"
-        base_params.extend([like, like, like, like])
+        search = q.strip()
+        if search:
+            base_where.append("""
+              (
+                a.display_name ILIKE %s
+                OR b.display_name ILIKE %s
+                OR a.email ILIKE %s
+                OR b.email ILIKE %s
+                OR EXISTS (
+                  SELECT 1
+                  FROM conversation_messages search_message
+                  WHERE search_message.conversation_id = c.id
+                    AND search_message.status = 'ACTIVE'
+                    AND search_message.body ILIKE %s
+                )
+              )
+            """)
+            like = f"%{search}%"
+            base_params.extend([like, like, like, like, like])
     unanswered_clause = "EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')"
     where = list(base_where)
     if unanswered:
@@ -11060,6 +11093,15 @@ def admin_support_list(
                 THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                 ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
               END AS profileType,
+              EXISTS (
+                SELECT 1
+                FROM local_users online_user
+                JOIN auth_sessions online_session ON online_session.user_id = online_user.id
+                WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
+                  AND online_user.status = 'ACTIVE'
+                  AND online_session.revoked_at IS NULL
+                  AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
+              ) AS isOnline,
               (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
               (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
               (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount,
@@ -11118,7 +11160,16 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
                    CASE WHEN a.role = 'SUPPORT'
                      THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                      ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
-                   END AS profileType
+                   END AS profileType,
+                   EXISTS (
+                     SELECT 1
+                     FROM local_users online_user
+                     JOIN auth_sessions online_session ON online_session.user_id = online_user.id
+                     WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
+                       AND online_user.status = 'ACTIVE'
+                       AND online_session.revoked_at IS NULL
+                       AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
+                   ) AS isOnline
             FROM conversations c
             JOIN profiles a ON a.id = c.profile_a_id
             JOIN profiles b ON b.id = c.profile_b_id
@@ -11493,7 +11544,21 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                 ELSE NULL
             END AS durationSeconds,
             (SELECT display_name FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerName,
-            (SELECT display_name FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeName
+            (SELECT display_name FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeName,
+            (SELECT
+                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isVerified')), 'false') = 'true'
+                OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.verifiedAt')), ''), 'null') IS NOT NULL
+             FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerIsVerified,
+            (SELECT
+                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isPremium')), 'false') = 'true'
+             FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerIsPremium,
+            (SELECT
+                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isVerified')), 'false') = 'true'
+                OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.verifiedAt')), ''), 'null') IS NOT NULL
+             FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeIsVerified,
+            (SELECT
+                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isPremium')), 'false') = 'true'
+             FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeIsPremium
         """,
         "search": [
             "CAST(conversation_id AS CHAR)",
@@ -12342,12 +12407,16 @@ def admin_enrich_moderation_report_items(cursor, items: list[dict[str, Any]]) ->
             "reporterAvatarUrl": (reporter.get("avatarUrl") if reporter else None) or "",
             "reporterAvatarFallbackUrl": (reporter.get("avatarFallbackUrl") if reporter else None) or "",
             "reporterIsVerified": profile_is_verified(reporter),
+            "reporterIsPremium": profile_is_premium(reporter),
+            "reporterStatus": (reporter.get("status") if reporter else None) or "",
             "reportedProfileId": reported_id,
             "reportedName": (reported.get("display_name") if reported else None) or data.get("reportedName") or data.get("targetName") or data.get("reportedEmail") or "Unknown",
             "reportedEmail": (reported.get("email") if reported else None) or data.get("reportedEmail") or data.get("targetEmail") or "",
             "reportedAvatarUrl": (reported.get("avatarUrl") if reported else None) or "",
             "reportedAvatarFallbackUrl": (reported.get("avatarFallbackUrl") if reported else None) or "",
             "reportedIsVerified": profile_is_verified(reported),
+            "reportedIsPremium": profile_is_premium(reported),
+            "reportedStatus": (reported.get("status") if reported else None) or "",
             "reason": data.get("reason") or data.get("reportReason") or item.get("title") or "—",
             "description": data.get("description") or data.get("details") or data.get("message") or "—",
             "details": data.get("details") or data.get("description") or data.get("message") or "—",
@@ -14529,8 +14598,8 @@ def public_articles(
 
 
 @app.get("/api/public/articles/{locale}/{slug}")
-def public_article(locale: str, slug: str):
-    """Return one published article for the React public reader."""
+def public_article(locale: str, slug: str, preview: bool = Query(False)):
+    """Return one article for the React reader, including drafts in preview mode."""
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
@@ -14538,13 +14607,18 @@ def public_article(locale: str, slug: str):
                    published_at, created_at, updated_at
             FROM articles
             WHERE locale = CASE
-                WHEN EXISTS (SELECT 1 FROM articles locale_check WHERE locale_check.locale = %s AND locale_check.status = 'PUBLISHED') THEN %s
+                WHEN EXISTS (
+                  SELECT 1 FROM articles locale_check
+                  WHERE locale_check.locale = %s
+                    AND (%s OR locale_check.status = 'PUBLISHED')
+                ) THEN %s
                 ELSE 'en'
               END
-              AND slug = %s AND status = 'PUBLISHED'
+              AND slug = %s
+              AND (%s OR status = 'PUBLISHED')
             LIMIT 1
             """,
-            (locale, locale, slug),
+            (locale, preview, locale, slug, preview),
         )
         row = cursor.fetchone()
     if not row:

@@ -4640,6 +4640,12 @@ const knowledgeLoadMoreCopy: Record<
   es: { idle: "Cargar más", loading: "Cargando ..." },
 };
 
+const articlePreviewCopy: Record<CookieLocale, string> = {
+  en: "Preview Mode — This article is not published yet",
+  ru: "Режим предпросмотра — Эта статья ещё не опубликована",
+  es: "Modo de vista previa — Este artículo aún no está publicado",
+};
+
 const knowledgeDate = (value: unknown) => {
   const date = new Date(String(value));
   if (Number.isNaN(date.getTime())) return "—";
@@ -4734,8 +4740,10 @@ function KnowledgeHub() {
 
 function Article() {
   const { locale = "en", slug = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const activeLocale = locale as CookieLocale;
   const copy = knowledgeHubCopy[activeLocale];
+  const previewMode = searchParams.get("preview") === "true";
   const [article, setArticle] = useState<Row | null>(null);
   const [navigationArticles, setNavigationArticles] = useState<Row[]>([]);
   const [error, setError] = useState("");
@@ -4762,7 +4770,7 @@ function Article() {
     const load = async () => {
       try {
         const result = await api.get<Row>(
-          `/public/articles/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}`,
+          `/public/articles/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}${previewMode ? "?preview=true" : ""}`,
         );
         if (alive) setArticle(normalizeArticle(result));
       } catch {
@@ -4771,15 +4779,23 @@ function Article() {
     };
     void load();
     return () => { alive = false; };
-  }, [copy.unavailable, locale, slug]);
+  }, [copy.unavailable, locale, previewMode, slug]);
+  const previewBanner = previewMode ? (
+    <div className="article-preview-banner" role="status">
+      {articlePreviewCopy[activeLocale]}
+    </div>
+  ) : null;
   if (error)
     return (
-      <section className="access-card">
-        <p className="error">{error}</p>
-        <Link to={`/${locale}/knowledge-hub`}>{copy.back}</Link>
-      </section>
+      <>
+        {previewBanner}
+        <section className="access-card">
+          <p className="error">{error}</p>
+          <Link to={`/${locale}/knowledge-hub`}>{copy.back}</Link>
+        </section>
+      </>
     );
-  if (!article) return <LoadingIndicator />;
+  if (!article) return <>{previewBanner}<LoadingIndicator /></>;
   const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale);
   const coverUrl = article.coverUrl;
   const publishedAt = article.publishedAt;
@@ -4803,7 +4819,9 @@ function Article() {
     },
   );
   return (
-    <article className="article-page">
+    <>
+      {previewBanner}
+      <article className="article-page">
       <Link className="article-back" to={`/${locale}/knowledge-hub`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg><span>{copy.back}</span></Link>
       <header className="article-heading">
         <span className="knowledge-badge">{categoryName}</span>
@@ -4835,7 +4853,8 @@ function Article() {
           ) : <span className="article-navigation-placeholder" />}
         </nav>
       )}
-    </article>
+      </article>
+    </>
   );
 }
 
