@@ -127,11 +127,12 @@ ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SEC
 MARKETING_CAMPAIGN_POLL_SECONDS = max(15, int(os.getenv("MARKETING_CAMPAIGN_POLL_SECONDS", "30")))
 DOCKER_METRICS_FILE = Path(os.getenv("DOCKER_METRICS_FILE", "/run/metrics/docker-system-df.jsonl"))
 DOCKER_METRICS_MAX_AGE_SECONDS = max(60, int(os.getenv("DOCKER_METRICS_MAX_AGE_SECONDS", "180")))
-REDIS_URL = os.getenv("REDIS_URL", "").strip()
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0").strip()
 REDIS_SOCKET_TIMEOUT_SECONDS = max(0.25, float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2")))
 REDIS_CONNECTION_LOCK = Lock()
 REDIS_CONNECTION = None
 CRON_SECRET = os.getenv("CRON_SECRET", "").strip()
+CRON_SECRET_FILE = Path(os.getenv("CRON_SECRET_FILE", "/run/secrets/cron-secret"))
 SYSTEM_CRON_JOBS_FILE = Path(os.getenv("SYSTEM_CRON_JOBS_FILE", "/run/metrics/system-cron-jobs.json"))
 PARTNER_SESSION_DAYS = 30
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
@@ -712,12 +713,18 @@ def require_cron_secret(
     x_cron_secret: str | None = Header(None, alias="X-Cron-Secret"),
     authorization: str | None = Header(None),
 ) -> None:
-    if not CRON_SECRET:
+    expected = CRON_SECRET
+    if not expected and CRON_SECRET_FILE.is_file():
+        try:
+            expected = CRON_SECRET_FILE.read_text(encoding="utf-8").strip()
+        except OSError:
+            expected = ""
+    if not expected:
         raise HTTPException(status_code=503, detail="Cron authentication is not configured")
     supplied = str(x_cron_secret or "").strip()
     if not supplied and authorization and authorization.lower().startswith("bearer "):
         supplied = authorization.split(" ", 1)[1].strip()
-    if not supplied or not secrets.compare_digest(supplied, CRON_SECRET):
+    if not supplied or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="Invalid cron credentials")
 
 
