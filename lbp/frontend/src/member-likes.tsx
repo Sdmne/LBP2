@@ -320,10 +320,6 @@ function LikesContent({
         (memberBoolean(item.likedByViewer) || memberBoolean(item.likeReadOnly)))
     )
       return;
-    if (session.user.profileVerified === false) {
-      setDialog("verification");
-      return;
-    }
     inFlight.current = true;
     setPendingId(id);
     setError(false);
@@ -361,6 +357,12 @@ function LikesContent({
           navigate(`/${locale}/auth/login`);
         else if (failure instanceof ApiError && failure.status === 402)
           setDialog("premium");
+        else if (
+          failure instanceof ApiError &&
+          failure.status === 403 &&
+          /verif/i.test(failure.message)
+        )
+          setDialog("verification");
         else setError(true);
       }
     } finally {

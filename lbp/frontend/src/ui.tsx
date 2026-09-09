@@ -2842,30 +2842,27 @@ function Catalog({ session }: { session: Session }) {
   const persist = (nextFilters: CatalogFilters, nextPeriod = period) => {
     try { sessionStorage.setItem(storageKey, JSON.stringify({ period: nextPeriod, filters: nextFilters })); } catch { /* optional */ }
   };
-  const requireVerified = () => {
-    if (session?.user.profileVerified === true) return true;
-    navigate(`/${locale}/verification`);
-    return false;
-  };
   const like = async (item: Row) => {
-    if (!requireVerified()) return;
     const id = catalogText(item.id);
     if (catalogBoolean(item.likedByViewer ?? catalogData(item).likedByViewer)) return;
     setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: true } : profile));
     try {
       await api.post(`/member/likes/${encodeURIComponent(id)}`);
-    } catch {
+    } catch (failure) {
       setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: false } : profile));
-      setError(copy.actionFailed);
+      if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      else setError(copy.actionFailed);
     }
   };
   const message = async (item: Row) => {
-    if (!requireVerified()) return;
     try {
       const conversation = await api.post<Row>("/member/conversations", { targetProfileId: catalogText(item.id) });
       if (!conversation.conversationId) throw new Error("Conversation was not created");
       navigate(`/${locale}/chat/${encodeURIComponent(String(conversation.conversationId))}`);
-    } catch { setError(copy.actionFailed); }
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      else setError(copy.actionFailed);
+    }
   };
   const applyFilters = () => {
     const min = Number(draftFilters.ageMin || 0);
@@ -6690,13 +6687,27 @@ function PartnerClinic() {
 
 export function WebApp() {
   const locale = localeOf();
+  const location = useLocation();
   const [session, setSession] = useState<Session | undefined>(undefined);
   useEffect(() => {
-    api
-      .get<{ user: Row }>("/auth/me")
-      .then((response) => setSession({ user: response.user }))
-      .catch(() => setSession(null));
-  }, []);
+    let active = true;
+    const load = () => {
+      void api
+        .get<{ user: Row }>("/auth/me")
+        .then((response) => {
+          if (active) setSession({ user: response.user });
+        })
+        .catch(() => {
+          if (active) setSession(null);
+        });
+    };
+    load();
+    window.addEventListener("lbp-member-changed", load);
+    return () => {
+      active = false;
+      window.removeEventListener("lbp-member-changed", load);
+    };
+  }, [location.pathname]);
   const logout = async () => {
     await api.post("/auth/logout");
     setSession(null);

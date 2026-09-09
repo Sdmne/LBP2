@@ -64,6 +64,7 @@ type AdminIconName =
   | "upload"
   | "scale"
   | "file"
+  | "paperclip"
   | "headphones"
   | "image"
   | "flag"
@@ -364,14 +365,13 @@ function directoryOptionLabel(value: unknown) {
 function verificationDate(value: unknown) {
   const date = value ? new Date(String(value)) : null;
   return date && !Number.isNaN(date.valueOf())
-    ? date.toLocaleString("ru-RU", {
-        day: "2-digit",
-        month: "2-digit",
+    ? date.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
         year: "numeric",
         hour: "2-digit",
         minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
+        hour12: true,
       })
     : valueOf(value);
 }
@@ -408,12 +408,14 @@ function verificationPercent(value: unknown) {
   const number = Number(value);
   if (!Number.isFinite(number)) return valueOf(value);
   const percent = number >= 0 && number <= 1 ? number * 100 : number;
-  return `${Math.round(percent * 10) / 10}%`;
+  return `${Math.round(percent)}%`;
 }
 function verificationAge(value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
   const text = String(value).trim();
-  return text.startsWith("~") ? text : `~${text}`;
+  if (text.startsWith("~")) return text;
+  const number = Number(text);
+  return Number.isFinite(number) ? `~${Math.round(number)}` : `~${text}`;
 }
 function verificationStateLabel(value: unknown) {
   const text = String(value ?? "").trim();
@@ -571,6 +573,58 @@ function PersonAvatar({
         />
       )}
     </span>
+  );
+}
+
+function moderationPhotoSources(row: RecordValue) {
+  const data = recordValue(row.data);
+  const photoId = row.photoId ?? data?.photoId ?? data?.profilePhotoId;
+  const mediaFileId =
+    row.mediaFileId ?? data?.mediaFileId ?? data?.avatarMediaFileId;
+  const candidates: unknown[] = [
+    row.contentUrl,
+    data?.contentUrl,
+    data?.avatarContentUrl,
+    photoId
+      ? `/api/admin/profile-photos/${encodeURIComponent(String(photoId))}/content`
+      : "",
+    mediaFileId
+      ? `/api/admin/media/${encodeURIComponent(String(mediaFileId))}/content`
+      : "",
+    row.publicUrl,
+    row.url,
+    data?.publicUrl,
+    data?.url,
+  ];
+  return Array.from(
+    new Set(
+      candidates
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter(
+          (value) =>
+            value &&
+            (/^https?:\/\//i.test(value) ||
+              value.startsWith("/") ||
+              value.startsWith("blob:") ||
+              value.startsWith("data:image/")),
+        ),
+    ),
+  );
+}
+
+function ModerationPhotoImage({ sources }: { sources: string[] }) {
+  const sourcesKey = sources.join("\u0000");
+  const [sourceIndex, setSourceIndex] = useState(0);
+  useEffect(() => setSourceIndex(0), [sourcesKey]);
+  const source = sources[sourceIndex];
+  if (!source) return null;
+  return (
+    <img
+      src={source}
+      alt="User photo"
+      loading="lazy"
+      onError={() => setSourceIndex((current) => current + 1)}
+    />
   );
 }
 
@@ -892,6 +946,52 @@ function articleCategoryFromMeta(meta: RecordValue) {
   const slug = String(meta.categorySlug ?? meta.category ?? "").trim();
   const name = String(meta.categoryName ?? meta.category ?? "").trim();
   return slug || name ? ({ slug, name } as RecordValue) : null;
+}
+
+function articleEditorMeta(value: unknown) {
+  const meta = recordValue(value) ?? {};
+  const translation = recordValue(meta.translation) ?? {};
+  let tags: string[] = [];
+  if (Array.isArray(meta.tags)) {
+    tags = meta.tags.map(String).map((tag) => tag.trim()).filter(Boolean);
+  } else if (meta.tags && typeof meta.tags === "object") {
+    tags = Object.entries(meta.tags as Record<string, unknown>)
+      .filter(([, enabled]) => Boolean(enabled))
+      .map(([tag]) => tag.trim())
+      .filter(Boolean);
+  } else if (typeof meta.tags === "string" && meta.tags.trim()) {
+    try {
+      const decoded = JSON.parse(meta.tags);
+      if (Array.isArray(decoded)) {
+        tags = decoded.map(String).map((tag) => tag.trim()).filter(Boolean);
+      } else if (decoded && typeof decoded === "object") {
+        tags = Object.entries(decoded as Record<string, unknown>)
+          .filter(([, enabled]) => Boolean(enabled))
+          .map(([tag]) => tag.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      tags = meta.tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+    }
+  }
+  return {
+    ...meta,
+    tags,
+    metaTitle:
+      meta.metaTitle ?? meta.seoTitle ?? translation.metaTitle ?? translation.seoTitle ?? "",
+    metaDescription:
+      meta.metaDescription ??
+      meta.seoDescription ??
+      translation.metaDescription ??
+      translation.seoDescription ??
+      "",
+    ogImage:
+      meta.ogImage ??
+      meta.ogImageUrl ??
+      translation.ogImage ??
+      translation.ogImageUrl ??
+      "",
+  } as RecordValue;
 }
 
 function articleCategory(row: RecordValue) {
@@ -1540,6 +1640,9 @@ function AdminIcon({ name }: { name: AdminIconName }) {
         <path d="M16 13H8" />
         <path d="M16 17H8" />
       </>
+    ),
+    paperclip: (
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
     ),
     headphones: (
       <path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3" />
@@ -3985,15 +4088,35 @@ function MonitoringPage() {
   );
 }
 
-const storageCategories: Array<[string, string]> = [
-  ["all", "All Files"],
-  ["profile_photos", "Profile Photos"],
-  ["chat_images", "Chat Images"],
-  ["chat_files", "Chat Files"],
-  ["clinic_logos", "Clinic Logos"],
-  ["lawyer_photos", "Lawyer Photos"],
-  ["article_images", "Article Images"],
+const storageCategories: Array<[string, string, AdminIconName]> = [
+  ["all", "All Files", "drive"],
+  ["profile_photos", "Profile Photos", "image"],
+  ["chat_images", "Chat Images", "messageSquare"],
+  ["chat_files", "Chat Files", "paperclip"],
+  ["clinic_logos", "Clinic Logos", "building"],
+  ["lawyer_photos", "Lawyer Photos", "scale"],
+  ["article_images", "Article Images", "file"],
 ];
+
+function StorageFilePreview({ row }: { row: RecordValue }) {
+  const [failed, setFailed] = useState(false);
+  const image = String(row.mimeType ?? "").startsWith("image/");
+  if (!image || !row.contentUrl || failed) {
+    return (
+      <div className="storage-file-placeholder">
+        <AdminIcon name={image ? "image" : "file"} />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={String(row.contentUrl)}
+      alt={String(row.name ?? "")}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 function StoragePage() {
   const [category, setCategory] = useState("all");
@@ -4001,8 +4124,11 @@ function StoragePage() {
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState<RecordValue | null>(null);
   const [error, setError] = useState("");
-  const limit = 24;
+  const [loading, setLoading] = useState(true);
+  const requestSequence = useRef(0);
+  const limit = 50;
   const load = () => {
+    const requestId = ++requestSequence.current;
     const params = new URLSearchParams({
       category,
       limit: String(limit),
@@ -4010,38 +4136,62 @@ function StoragePage() {
     });
     if (userId.trim()) params.set("userId", userId.trim());
     setData(null);
+    setLoading(true);
     setError("");
     api
       .get<RecordValue>(`/admin/storage?${params}`)
-      .then(setData)
-      .catch(() => setError("Could not load storage data."));
+      .then((nextData) => {
+        if (requestId === requestSequence.current) setData(nextData);
+      })
+      .catch(() => {
+        if (requestId === requestSequence.current) {
+          setError("Could not load storage data.");
+        }
+      })
+      .finally(() => {
+        if (requestId === requestSequence.current) setLoading(false);
+      });
   };
-  useEffect(load, [category, userId, offset]);
+  useEffect(() => {
+    setData(null);
+    setLoading(true);
+    const timer = window.setTimeout(load, userId.trim() ? 250 : 0);
+    return () => {
+      window.clearTimeout(timer);
+      requestSequence.current += 1;
+    };
+  }, [category, userId, offset]);
   const total = Number(data?.total ?? 0);
   const summary = (data?.summary ?? {}) as RecordValue;
   return (
     <>
       <header className="page-heading storage-heading">
-        <div>
+        <div className="storage-title-row">
           <h1>Storage</h1>
-          <p>
-            {formatBytes(data?.totalBytes)} /{" "}
-            {Number(data?.totalFiles ?? 0).toLocaleString()} files
-          </p>
+          <span className="storage-total-badge">
+            {data
+              ? `${formatBytes(data.totalBytes)} / ${Number(data.totalFiles ?? 0).toLocaleString()} files`
+              : "Loading…"}
+          </span>
         </div>
-        <button onClick={load}>
+        <button onClick={load} disabled={loading}>
           <AdminIcon name="refresh" /> Refresh Stats
         </button>
       </header>
       {error && <p className="error">{error}</p>}
       <section className="storage-summary">
-        {storageCategories.slice(1).map(([key, title]) => {
+        {storageCategories.slice(1).map(([key, title, icon]) => {
           const item = (summary[key] ?? {}) as RecordValue;
           return (
             <article key={key}>
-              <span>{title}</span>
-              <strong>{Number(item.files ?? 0).toLocaleString()}</strong>
-              <small>{formatBytes(item.bytes)}</small>
+              <header>
+                <span>{title}</span>
+                <AdminIcon name={icon} />
+              </header>
+              <div>
+                <strong>{Number(item.files ?? 0).toLocaleString()}</strong>
+                <small>{formatBytes(item.bytes)}</small>
+              </div>
             </article>
           );
         })}
@@ -4059,6 +4209,7 @@ function StoragePage() {
           }}
           placeholder="Filter by User ID (UUID)"
         />
+        {userId.trim() && <span>Filter active</span>}
       </div>
       <nav className="storage-tabs">
         {storageCategories.map(([key, title]) => (
@@ -4078,75 +4229,59 @@ function StoragePage() {
       </nav>
       {total > limit && (
         <div className="storage-pager">
-          <span>
-            Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}
-          </span>
-          <div>
-            <button
-              className="secondary-button"
-              disabled={!offset}
-              onClick={() => setOffset(Math.max(0, offset - limit))}
-            >
-              Previous
-            </button>
-            <button
-              className="secondary-button"
-              disabled={offset + limit >= total}
-              onClick={() => setOffset(offset + limit)}
-            >
-              Next
-            </button>
-          </div>
+          <button
+            className="secondary-button storage-page-previous"
+            disabled={!offset || loading}
+            onClick={() => setOffset(Math.max(0, offset - limit))}
+          >
+            <AdminIcon name="chevronDown" /> Previous
+          </button>
+          <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
+          <button
+            className="secondary-button storage-page-next"
+            disabled={offset + limit >= total || loading}
+            onClick={() => setOffset(offset + limit)}
+          >
+            Next <AdminIcon name="chevronDown" />
+          </button>
         </div>
       )}
-      {!data ? (
+      {!data && !error ? (
         <p className="loading-inline">Loading…</p>
-      ) : (
+      ) : data ? (
+        <>
         <section className="storage-file-grid">
           {arrayOf(data.items).map((row) => {
-            const preview =
-              String(row.mimeType ?? "").startsWith("image/") &&
-              row.contentUrl ? (
-                <img src={String(row.contentUrl)} alt="" loading="lazy" />
-              ) : (
-                <div className="storage-file-placeholder">
-                  <AdminIcon
-                    name={
-                      String(row.mimeType ?? "").startsWith("image/")
-                        ? "image"
-                        : "file"
-                    }
-                  />
-                </div>
-              );
             return (
               <article key={String(row.id)}>
-                {row.contentUrl ? (
-                  <a
-                    className="storage-file-preview"
-                    href={String(row.contentUrl)}
-                    target="_blank"
-                    rel="noreferrer"
-                    aria-label={`Open ${String(row.name ?? "file")}`}
-                  >
-                    {preview}
-                  </a>
-                ) : (
-                  preview
-                )}
-                <div className="storage-file-info">
-                  <span className="table-badge">
-                    {label(String(row.category ?? "other"))}
-                  </span>
-                  <b title={String(row.name ?? "")}>{valueOf(row.name)}</b>
-                  <small>
-                    {formatBytes(row.bytes)} · {compactDate(row.createdAt)}
-                  </small>
-                  {Boolean(row.profileId) && (
-                    <Link
-                      to={`/users/${encodeURIComponent(String(row.profileId))}`}
+                <div className="storage-file-media">
+                  {row.contentUrl ? (
+                    <a
+                      className="storage-file-preview"
+                      href={String(row.contentUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`Open ${String(row.name ?? "file")}`}
                     >
-                      User {valueOf(row.profileId)}
+                      <StorageFilePreview row={row} />
+                    </a>
+                  ) : (
+                    <StorageFilePreview row={row} />
+                  )}
+                  <span className="storage-file-badge">
+                    {valueOf(row.categoryLabel ?? label(String(row.category ?? "file")))}
+                  </span>
+                </div>
+                <div className="storage-file-info">
+                  <b title={String(row.name ?? "")}>{valueOf(row.name)}</b>
+                  <small className="storage-file-meta">
+                    <span>{Number(row.bytes ?? 0) > 0 ? formatBytes(row.bytes) : "—"}</span>
+                    <span>{directoryDate(row.createdAt)}</span>
+                  </small>
+                  {Boolean(row.relatedUrl && row.relatedLabel) && (
+                    <Link to={String(row.relatedUrl)}>
+                      <AdminIcon name="externalLink" />
+                      <span>{valueOf(row.relatedLabel)}</span>
                     </Link>
                   )}
                 </div>
@@ -4154,10 +4289,30 @@ function StoragePage() {
             );
           })}
           {!arrayOf(data.items).length && (
-            <p className="storage-empty">No files found.</p>
+            <p className="storage-empty">No files in this category</p>
           )}
         </section>
-      )}
+        {total > limit && (
+          <div className="storage-pager storage-pager-bottom">
+            <button
+              className="secondary-button storage-page-previous"
+              disabled={!offset || loading}
+              onClick={() => setOffset(Math.max(0, offset - limit))}
+            >
+              <AdminIcon name="chevronDown" /> Previous
+            </button>
+            <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
+            <button
+              className="secondary-button storage-page-next"
+              disabled={offset + limit >= total || loading}
+              onClick={() => setOffset(offset + limit)}
+            >
+              Next <AdminIcon name="chevronDown" />
+            </button>
+          </div>
+        )}
+        </>
+      ) : null}
     </>
   );
 }
@@ -4475,14 +4630,7 @@ function ModerationPhotos() {
       ) : (
         <section className="moderation-photo-grid">
           {items.map((row, index) => {
-            const imageUrl = String(
-              row.publicUrl ??
-                row.url ??
-                row.contentUrl ??
-                (row.data as RecordValue | undefined)?.publicUrl ??
-                (row.data as RecordValue | undefined)?.contentUrl ??
-                "",
-            );
+            const imageSources = moderationPhotoSources(row);
             const profileId = row.profileId;
             const deleted = Boolean(row.isDeleted);
             const rejected = status === "REJECTED";
@@ -4493,13 +4641,7 @@ function ModerationPhotos() {
               >
                 <div className="moderation-photo-media">
                   <span>Photo unavailable</span>
-                  {imageUrl && (
-                    <img
-                      src={imageUrl}
-                      alt=""
-                      onError={(event) => event.currentTarget.remove()}
-                    />
-                  )}
+                  <ModerationPhotoImage sources={imageSources} />
                   {Boolean(row.isPrimary) && !deleted && (
                     <em className="moderation-photo-state">Primary</em>
                   )}
@@ -5815,7 +5957,7 @@ function GenericList({ view }: { view: string }) {
   const [grantOpen, setGrantOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [grantUser, setGrantUser] = useState("");
-  const [grantPlan, setGrantPlan] = useState("MONTHLY");
+  const [grantPlan, setGrantPlan] = useState("PREMIUM_MONTHLY");
   const [grantDays, setGrantDays] = useState(30);
   const [editing, setEditing] = useState<RecordValue | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
@@ -6158,7 +6300,9 @@ function GenericList({ view }: { view: string }) {
   }
   return (
     <>
-      <header className="page-heading">
+      <header
+        className={`page-heading ${view === "articles" ? "article-list-heading" : ""}`}
+      >
         <h1>
           {label(view)}{" "}
           {!["subscriptions", "articles"].includes(view) && result ? (
@@ -6182,7 +6326,7 @@ function GenericList({ view }: { view: string }) {
               type="button"
               onClick={() => setCategoriesOpen(true)}
             >
-              <AdminIcon name="file" /> Categories
+              <AdminIcon name="sliders" /> Categories
             </button>
           )}
           {view === "users" && (
@@ -6192,7 +6336,7 @@ function GenericList({ view }: { view: string }) {
           )}
           {creatable && (
             <button
-              className="primary"
+              className={`primary ${view === "articles" ? "article-new-button" : ""}`}
               onClick={() => {
                 if (view === "articles") {
                   navigate("/articles/new");
@@ -6211,6 +6355,7 @@ function GenericList({ view }: { view: string }) {
                 });
               }}
             >
+              {view === "articles" && <AdminIcon name="plus" />}
               New {label(view).replace(/s$/, "")}
             </button>
           )}
@@ -6320,7 +6465,9 @@ function GenericList({ view }: { view: string }) {
                   const value = String(option.value ?? "");
                   return value ? (
                     <option key={value} value={value}>
-                      {label(value)}
+                      {view === "verifications"
+                        ? statusLabel(value)
+                        : label(value)}
                     </option>
                   ) : null;
                 })}
@@ -6609,10 +6756,12 @@ function GenericList({ view }: { view: string }) {
               </div>
             ))}
           <div
-            className={`table generic-list-table ${view === "users" ? "users-table" : view === "subscriptions" ? "subscriptions-table" : ["clinics", "lawyers"].includes(view) ? `directory-table ${view}-table` : ""}`}
+            className={`table generic-list-table ${view === "users" ? "users-table" : view === "subscriptions" ? "subscriptions-table" : view === "verifications" ? "verifications-table" : view === "articles" ? "articles-table" : ["clinics", "lawyers"].includes(view) ? `directory-table ${view}-table` : ""}`}
           >
             {result === null ? (
-              <p className="loading-inline">Loading…</p>
+              <p className="loading-inline">
+                {view === "articles" ? "Loading..." : "Loading…"}
+              </p>
             ) : (
               <table>
                 <thead>
@@ -6735,6 +6884,9 @@ function GenericList({ view }: { view: string }) {
                               <span className="subscription-period">
                                 {subscriptionPeriod(row)}
                               </span>
+                            ) : view === "verifications" &&
+                              ["liveness", "faceMatch"].includes(column) ? (
+                              verificationPercent(row[column])
                             ) : column === "status" ||
                               column === "verificationStatus" ? (
                               <span
@@ -6774,6 +6926,16 @@ function GenericList({ view }: { view: string }) {
                                       subscriptionIsVerified(row) && (
                                         <span
                                           className="subscription-user-icon subscription-user-verified"
+                                          title="Verified"
+                                          aria-label="Verified"
+                                        >
+                                          <AdminIcon name="circleCheck" />
+                                        </span>
+                                      )}
+                                    {view === "verifications" &&
+                                      settingBoolean(row.isVerified) && (
+                                        <span
+                                          className="verification-user-verified"
                                           title="Verified"
                                           aria-label="Verified"
                                         >
@@ -6975,7 +7137,7 @@ function GenericList({ view }: { view: string }) {
                       </tr>
                     );
                   })}
-                  {!items.length && (
+                  {!items.length && view !== "articles" && (
                     <tr>
                       <td
                         colSpan={Math.max(
@@ -6990,6 +7152,9 @@ function GenericList({ view }: { view: string }) {
                   )}
                 </tbody>
               </table>
+            )}
+            {result !== null && view === "articles" && !items.length && (
+              <div className="article-empty-state">No articles found</div>
             )}
           </div>
           {["users", "clinics", "lawyers"].includes(view) && usersPager}
@@ -7024,9 +7189,9 @@ function GenericList({ view }: { view: string }) {
                 value={grantPlan}
                 onChange={(event) => setGrantPlan(event.target.value)}
               >
-                <option value="MONTHLY">Premium Monthly</option>
-                <option value="QUARTERLY">Premium Quarterly</option>
-                <option value="ANNUAL">Premium Annual</option>
+                <option value="PREMIUM_MONTHLY">Premium Monthly</option>
+                <option value="PREMIUM_QUARTERLY">Premium Quarterly</option>
+                <option value="PREMIUM_ANNUAL">Premium Annual</option>
               </AdminSelect>
             </label>
             <label>
@@ -7135,7 +7300,7 @@ function VerificationDetail() {
   const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
   const [confirmAction, setConfirmAction] = useState<
-    "approve" | "delete" | null
+    "approve" | "revoke" | "delete" | null
   >(null);
   const [busy, setBusy] = useState(false);
 
@@ -7170,6 +7335,13 @@ function VerificationDetail() {
         setNotice("Verification manually approved.");
         setConfirmAction(null);
         setReload((value) => value + 1);
+      } else if (confirmAction === "revoke") {
+        await api.post(
+          `/admin/verifications/${encodeURIComponent(id)}/revoke`,
+        );
+        setNotice("Verification revoked.");
+        setConfirmAction(null);
+        setReload((value) => value + 1);
       } else {
         await api.delete(`/admin/verifications/${encodeURIComponent(id)}`);
         navigate("/verifications");
@@ -7178,7 +7350,9 @@ function VerificationDetail() {
       setError(
         confirmAction === "approve"
           ? "Could not approve this verification."
-          : "Could not delete this verification session.",
+          : confirmAction === "revoke"
+            ? "Could not revoke this verification."
+            : "Could not delete this verification session.",
       );
     } finally {
       setBusy(false);
@@ -7225,6 +7399,75 @@ function VerificationDetail() {
         ? "warning"
         : "danger"
     : "";
+  const decision = recordValue(data.decision) ?? {};
+  const firstRecord = (value: unknown) => {
+    if (Array.isArray(value)) return recordValue(value[0]) ?? {};
+    return recordValue(value) ?? {};
+  };
+  const ipAnalysis = firstRecord(
+    detail.ipAnalysis ??
+      data.ipAnalysis ??
+      data.ip_analysis ??
+      decision.ipAnalyses ??
+      decision.ip_analyses,
+  );
+  const rawDevice =
+    recordValue(ipAnalysis.rawDeviceData ?? ipAnalysis.raw_device_data) ?? {};
+  const scoreClass = (value: unknown) => {
+    const score = Number(value);
+    if (!Number.isFinite(score)) return "";
+    return score >= 70 ? "good" : score >= 45 ? "warning" : "danger";
+  };
+  const hasLiveness = [
+    liveness,
+    detail.livenessMethod,
+    data.livenessMethod,
+    detail.ageEstimation,
+    data.ageEstimation,
+    faceQuality,
+    detail.livenessStatus,
+    data.livenessStatus,
+  ].some((value) => value !== null && value !== undefined && value !== "");
+  const hasFaceMatch = [
+    faceMatch,
+    detail.faceMatchStatus,
+    data.faceMatchStatus,
+  ].some((value) => value !== null && value !== undefined && value !== "");
+  const livenessCheck = firstRecord(
+    decision.livenessChecks ?? decision.liveness_checks,
+  );
+  const faceMatchCheck = firstRecord(
+    decision.faceMatches ?? decision.face_matches,
+  );
+  const reasonLabel = (value: unknown) => {
+    const record = recordValue(value);
+    return valueOf(
+      record?.message ?? record?.reason ?? record?.description ?? record?.code ?? value,
+    );
+  };
+  const declineReasons = [
+    ...(Array.isArray(detail.declineReasons) ? detail.declineReasons : []),
+    ...(Array.isArray(data.declineReasons) ? data.declineReasons : []),
+    ...(Array.isArray(decision.declineReasons)
+      ? decision.declineReasons
+      : []),
+    ...(Array.isArray(faceMatchCheck.warnings)
+      ? faceMatchCheck.warnings
+      : []),
+    ...(Array.isArray(livenessCheck.warnings)
+      ? livenessCheck.warnings
+      : []),
+  ]
+    .map(reasonLabel)
+    .filter((value) => value !== "—");
+  const isProfileVerified = settingBoolean(
+    detail.isVerified ?? data.isVerified ?? status === "APPROVED",
+  );
+  const rawDecision = detail.decisionRawData ?? data;
+  const showRawDecision =
+    ["APPROVED", "DECLINED", "FAILED"].includes(status) &&
+    rawDecision &&
+    typeof rawDecision === "object";
 
   return (
     <>
@@ -7249,8 +7492,13 @@ function VerificationDetail() {
           <span
             className={`verification-detail-status status-${statusClass}`}
           >
-            {verificationStateLabel(status)}
+            {status}
           </span>
+          {isProfileVerified && (
+            <span className="verification-detail-status status-approved verification-profile-verified">
+              Profile Verified
+            </span>
+          )}
         </header>
 
         <div className="verification-detail-grid">
@@ -7267,7 +7515,7 @@ function VerificationDetail() {
                   <span
                     className={`verification-detail-status status-${statusClass}`}
                   >
-                    {verificationStateLabel(status)}
+                    {status}
                   </span>
                 </dd>
               </div>
@@ -7281,11 +7529,22 @@ function VerificationDetail() {
               </div>
               <div>
                 <dt>Created</dt>
-                <dd>{verificationDetailDate(detail.created_at)}</dd>
+                <dd>
+                  {verificationDate(
+                    detail.created_at ?? data.createdAt ?? data.startedAt,
+                  )}
+                </dd>
               </div>
               <div>
                 <dt>Completed</dt>
-                <dd>{verificationDetailDate(detail.completed_at)}</dd>
+                <dd>
+                  {verificationDate(
+                    detail.completed_at ??
+                      data.completedAt ??
+                      data.resolvedAt ??
+                      data.verifiedAt,
+                  )}
+                </dd>
               </div>
             </dl>
           </section>
@@ -7293,31 +7552,42 @@ function VerificationDetail() {
           <section className="verification-detail-card verification-actions-card">
             <h2>Actions</h2>
             <div className="verification-detail-actions">
-              <button
-                type="button"
-                disabled={!profileId}
-                onClick={() => profileId && navigate(`/users/${profileId}`)}
+              <a
+                href={profileId ? `/users/${profileId}` : undefined}
+                aria-disabled={!profileId}
+                target="_blank"
+                rel="noopener noreferrer"
               >
                 View User Profile
-              </button>
-              <button
-                type="button"
-                disabled={!providerUrl}
-                onClick={() =>
-                  providerUrl &&
-                  window.open(providerUrl, "_blank", "noopener,noreferrer")
-                }
+              </a>
+              <a
+                href={providerUrl || undefined}
+                aria-disabled={!providerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
               >
                 <AdminIcon name="externalLink" /> Open in Didit
-              </button>
-              <button
-                className="primary"
-                type="button"
-                disabled={status === "APPROVED" || busy}
-                onClick={() => setConfirmAction("approve")}
-              >
-                Manual Approve
-              </button>
+              </a>
+              {["PENDING", "DECLINED", "FAILED"].includes(status) && (
+                <button
+                  className="primary"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmAction("approve")}
+                >
+                  Manual Approve
+                </button>
+              )}
+              {status === "APPROVED" && (
+                <button
+                  className="danger"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmAction("revoke")}
+                >
+                  Revoke Verification
+                </button>
+              )}
               <button
                 className="danger-text"
                 type="button"
@@ -7329,12 +7599,14 @@ function VerificationDetail() {
             </div>
           </section>
 
-          <section className="verification-detail-card">
+          {hasLiveness && <section className="verification-detail-card">
             <h2>Liveness</h2>
             <dl className="verification-detail-list">
               <div>
                 <dt>Score</dt>
-                <dd className="good">{verificationPercent(liveness)}</dd>
+                <dd className={scoreClass(liveness)}>
+                  {verificationPercent(liveness)}
+                </dd>
               </div>
               <div>
                 <dt>Method</dt>
@@ -7359,14 +7631,16 @@ function VerificationDetail() {
                 </dd>
               </div>
             </dl>
-          </section>
+          </section>}
 
-          <section className="verification-detail-card">
+          {hasFaceMatch && <section className="verification-detail-card">
             <h2>Face Match</h2>
             <dl className="verification-detail-list">
               <div>
                 <dt>Score</dt>
-                <dd className="good">{verificationPercent(faceMatch)}</dd>
+                <dd className={scoreClass(faceMatch)}>
+                  {verificationPercent(faceMatch)}
+                </dd>
               </div>
               <div>
                 <dt>Status</dt>
@@ -7376,22 +7650,90 @@ function VerificationDetail() {
                   )}
                 </dd>
               </div>
+              {declineReasons.length > 0 && (
+                <div className="verification-decline-reasons">
+                  <dt>Decline Reasons</dt>
+                  <dd>
+                    {declineReasons.map((reason) => (
+                      <span key={reason}>{reason}</span>
+                    ))}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </section>}
+
+          <section className="verification-detail-card">
+            <h2>Device</h2>
+            <dl className="verification-detail-list">
+              <div>
+                <dt>Brand</dt>
+                <dd>{valueOf(detail.deviceBrand ?? data.deviceBrand ?? ipAnalysis.deviceBrand ?? ipAnalysis.device_brand)}</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>{valueOf(detail.deviceModel ?? data.deviceModel ?? ipAnalysis.deviceModel ?? ipAnalysis.device_model ?? rawDevice.deviceModel ?? rawDevice.device_model)}</dd>
+              </div>
+              <div>
+                <dt>OS</dt>
+                <dd>{valueOf(detail.osFamily ?? data.osFamily ?? ipAnalysis.osFamily ?? ipAnalysis.os_family)}</dd>
+              </div>
+              <div>
+                <dt>Platform</dt>
+                <dd>{valueOf(detail.platform ?? data.platform ?? ipAnalysis.platform ?? rawDevice.platform)}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="verification-detail-card">
+            <header className="verification-card-heading">
+              <h2>IP &amp; Location</h2>
+              {settingBoolean(detail.isDataCenter ?? data.isDataCenter ?? ipAnalysis.isDataCenter ?? ipAnalysis.is_data_center) && <span>Data center</span>}
+            </header>
+            <dl className="verification-detail-list">
+              <div>
+                <dt>IP Address</dt>
+                <dd className="verification-session-id">{valueOf(detail.ipAddress ?? data.ipAddress ?? ipAnalysis.ipAddress ?? ipAnalysis.ip_address)}</dd>
+              </div>
+              <div><dt>Country</dt><dd>{valueOf(detail.ipCountry ?? data.ipCountry ?? ipAnalysis.ipCountry ?? ipAnalysis.ip_country)}</dd></div>
+              <div><dt>State</dt><dd>{valueOf(detail.ipState ?? data.ipState ?? ipAnalysis.ipState ?? ipAnalysis.ip_state)}</dd></div>
+              <div><dt>City</dt><dd>{valueOf(detail.ipCity ?? data.ipCity ?? ipAnalysis.ipCity ?? ipAnalysis.ip_city)}</dd></div>
+              <div><dt>ISP</dt><dd>{valueOf(detail.isp ?? data.isp ?? ipAnalysis.isp ?? ipAnalysis.organization)}</dd></div>
+              <div><dt>Time Zone</dt><dd>{valueOf(detail.timeZone ?? data.timeZone ?? ipAnalysis.timeZone ?? ipAnalysis.time_zone)}</dd></div>
             </dl>
           </section>
         </div>
+        {showRawDecision && (
+          <details className="verification-raw-card">
+            <summary>Decision Raw Data</summary>
+            <pre>{JSON.stringify(rawDecision, null, 2)}</pre>
+          </details>
+        )}
       </section>
       <ConfirmModal
         open={confirmAction === "approve"}
-        title="Manual Approve"
-        message={`Approve the verification session for ${profileName}? The user will be marked as verified.`}
-        confirmLabel="Manual Approve"
+        modalClassName="verification-confirm-modal"
+        title="Manual Approve Verification"
+        message="This will override the current session status to APPROVED and mark the user's profile as verified. This action will be logged."
+        confirmLabel="Approve"
         confirmClassName="primary"
         busy={busy}
         onClose={() => setConfirmAction(null)}
         onConfirm={runConfirmedAction}
       />
       <ConfirmModal
+        open={confirmAction === "revoke"}
+        modalClassName="verification-confirm-modal"
+        title="Revoke Verification"
+        message="This will remove the verified status from this user's profile. Use this if the user changed their primary photo after verification or in case of fraud. This action will be logged."
+        confirmLabel="Revoke Verification"
+        busy={busy}
+        onClose={() => setConfirmAction(null)}
+        onConfirm={runConfirmedAction}
+      />
+      <ConfirmModal
         open={confirmAction === "delete"}
+        modalClassName="verification-confirm-modal"
         title="Delete Session"
         message={`Delete the verification session for ${profileName}? This action cannot be undone.`}
         confirmLabel="Delete Session"
@@ -7757,7 +8099,7 @@ function ArticleEditor({
   onClose: () => void;
   onSave: (values: RecordValue) => Promise<void>;
 }) {
-  const initialMeta = recordValue(row.data) ?? {};
+  const initialMeta = articleEditorMeta(row.data);
   const [locale, setLocale] = useState(String(row.locale ?? "en"));
   const [title, setTitle] = useState(String(row.title ?? ""));
   const [excerpt, setExcerpt] = useState(String(row.excerpt ?? ""));
@@ -7767,6 +8109,9 @@ function ArticleEditor({
     String(row.status ?? "DRAFT").toUpperCase(),
   );
   const [coverUrl, setCoverUrl] = useState(String(row.cover_url ?? ""));
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverError, setCoverError] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [tags, setTags] = useState(
     Array.isArray(initialMeta.tags)
       ? (initialMeta.tags as unknown[]).join(", ")
@@ -7811,11 +8156,7 @@ function ArticleEditor({
     const translated = translations.find(
       (item) => String(item.locale ?? "en") === next,
     );
-    const translatedMeta = (
-      translated?.data && typeof translated.data === "object"
-        ? translated.data
-        : {}
-    ) as RecordValue;
+    const translatedMeta = articleEditorMeta(translated?.data);
     setLocale(next);
     setTitle(String(translated?.title ?? ""));
     setExcerpt(String(translated?.excerpt ?? ""));
@@ -7858,6 +8199,26 @@ function ArticleEditor({
     }
   };
   const categoryId = articleCategoryKey(category);
+  const uploadCover = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    setCoverUploading(true);
+    setCoverError("");
+    try {
+      const result = await api.upload<{ publicUrl: string }>(
+        "/admin/article-images",
+        form,
+      );
+      setCoverUrl(result.publicUrl);
+    } catch {
+      setCoverError("Could not upload the cover image.");
+    } finally {
+      setCoverUploading(false);
+      event.currentTarget.value = "";
+    }
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const normalizedCategory = category
@@ -7881,16 +8242,21 @@ function ArticleEditor({
       metaDescription,
       ogImage,
     };
-    await onSave({
-      locale,
-      title,
-      excerpt,
-      body_html: body,
-      slug,
-      cover_url: coverUrl,
-      status,
-      meta,
-    });
+    setSaveError("");
+    try {
+      await onSave({
+        locale,
+        title,
+        excerpt,
+        body_html: body,
+        slug,
+        cover_url: coverUrl,
+        status,
+        meta,
+      });
+    } catch {
+      setSaveError("Could not save the article. Try again.");
+    }
   };
   return (
     <form className="article-editor-page" onSubmit={submit}>
@@ -7953,24 +8319,27 @@ function ArticleEditor({
           <label>
             Cover Image
             <div className="cover-picker">
-              <input
-                value={coverUrl}
-                onChange={(event) => setCoverUrl(event.target.value)}
-                placeholder="Image URL"
-              />
+              {coverUrl && (
+                <div className="article-cover-preview">
+                  <img src={coverUrl} alt="Cover" />
+                  <button
+                    type="button"
+                    aria-label="Remove cover image"
+                    onClick={() => setCoverUrl("")}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
               <input
                 type="file"
                 accept="image/*"
                 aria-label="Choose File"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = () =>
-                    setCoverUrl(String(reader.result ?? ""));
-                  reader.readAsDataURL(file);
-                }}
+                disabled={coverUploading}
+                onChange={uploadCover}
               />
+              {coverUploading && <small>Uploading…</small>}
+              {coverError && <small className="article-field-error">{coverError}</small>}
             </div>
           </label>
         </section>
@@ -8022,6 +8391,7 @@ function ArticleEditor({
             <label>
               Status
               <AdminSelect
+                className={`article-status-select is-${status.toLowerCase()}`}
                 value={status}
                 onChange={(event) => setStatus(event.target.value)}
               >
@@ -8064,6 +8434,7 @@ function ArticleEditor({
             </label>
           </section>
           <div className="article-editor-actions">
+            {saveError && <p className="article-save-error">{saveError}</p>}
             <button
               type="button"
               className="secondary-button"
@@ -8079,7 +8450,7 @@ function ArticleEditor({
             </button>
             <button
               className="primary"
-              disabled={busy || !title.trim() || !slug.trim()}
+              disabled={busy || coverUploading || !title.trim() || !slug.trim()}
             >
               <EditorIcon name="save" /> {busy ? "Saving…" : "Save Article"}
             </button>
@@ -9622,6 +9993,7 @@ function ConfirmModal({
   message,
   confirmLabel,
   confirmClassName = "danger",
+  modalClassName = "",
   busy,
   onClose,
   onConfirm,
@@ -9631,6 +10003,7 @@ function ConfirmModal({
   message: ReactNode;
   confirmLabel: string;
   confirmClassName?: "primary" | "danger";
+  modalClassName?: string;
   busy?: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void>;
@@ -9638,7 +10011,11 @@ function ConfirmModal({
   if (!open) return null;
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal confirm-modal" aria-modal="true" role="dialog">
+      <section
+        className={`modal confirm-modal ${modalClassName}`.trim()}
+        aria-modal="true"
+        role="dialog"
+      >
         <button
           className="modal-close"
           type="button"
@@ -9679,14 +10056,44 @@ function ActionModal({
   const [reason, setReason] = useState("HARASSMENT_THREATS");
   const [details, setDetails] = useState("");
   const [days, setDays] = useState("30");
-  const [plan, setPlan] = useState("MONTHLY");
+  const [plan, setPlan] = useState("PREMIUM_MONTHLY");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!state) return;
+    setError("");
+    if (state.kind === "grant") {
+      setDays("30");
+      setPlan("PREMIUM_MONTHLY");
+    }
+  }, [state?.kind]);
   if (!state) return null;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    setError("");
     setBusy(true);
     try {
       await onConfirm({ reason, details, days: Number(days), plan });
       onClose();
+    } catch (reason) {
+      let message =
+        reason instanceof Error ? reason.message : "The action could not be completed.";
+      try {
+        const detail = (JSON.parse(message) as RecordValue).detail;
+        if (Array.isArray(detail)) {
+          message = detail
+            .map((item) =>
+              item && typeof item === "object" && "msg" in item
+                ? String((item as RecordValue).msg)
+                : String(item),
+            )
+            .join(" ");
+        } else if (detail && typeof detail === "object") {
+          message = JSON.stringify(detail);
+        } else if (detail) {
+          message = String(detail);
+        }
+      } catch {}
+      setError(message);
     } finally {
       setBusy(false);
     }
@@ -9694,8 +10101,17 @@ function ActionModal({
   const destructive =
     state.kind === "ban" || state.kind === "delete" || state.kind === "shadow";
   return (
-    <div className="modal-backdrop" role="presentation">
-      <form className="modal" onSubmit={submit} aria-modal="true" role="dialog">
+    <div
+      className={`modal-backdrop ${state.kind === "grant" ? "grant-premium-backdrop" : ""}`.trim()}
+      role="presentation"
+    >
+      <form
+        className={`modal ${state.kind === "grant" ? "grant-premium-profile-modal" : ""}`.trim()}
+        onSubmit={submit}
+        aria-modal="true"
+        aria-labelledby={`admin-${state.kind}-modal-title`}
+        role="dialog"
+      >
         <button
           className="modal-close"
           type="button"
@@ -9704,7 +10120,10 @@ function ActionModal({
         >
           <AdminIcon name="x" />
         </button>
-        <h2>{state.title}</h2>
+        <h2 id={`admin-${state.kind}-modal-title`}>
+          {state.kind === "grant" && <AdminIcon name="crown" />}
+          {state.title}
+        </h2>
         {state.kind === "ban" && (
           <>
             <p>
@@ -9745,30 +10164,32 @@ function ActionModal({
           </>
         )}
         {state.kind === "grant" && (
-          <>
-            <p>Grant a verified profile a manual Premium subscription.</p>
-            <label>
-              Plan
+          <div className="grant-premium-profile-fields">
+            <div>
+              <label htmlFor="grant-premium-plan">Plan</label>
               <AdminSelect
+                id="grant-premium-plan"
                 value={plan}
                 onChange={(event) => setPlan(event.target.value)}
               >
-                <option value="MONTHLY">Monthly</option>
-                <option value="QUARTERLY">Quarterly</option>
-                <option value="ANNUAL">Annual</option>
+                <option value="PREMIUM_MONTHLY">Premium Monthly</option>
+                <option value="PREMIUM_QUARTERLY">Premium Quarterly</option>
               </AdminSelect>
-            </label>
-            <label>
-              Duration (days)
+            </div>
+            <div>
+              <label htmlFor="grant-premium-days">Duration (days)</label>
               <input
+                id="grant-premium-days"
                 min="1"
-                max="730"
+                max="3650"
+                step="1"
                 type="number"
                 value={days}
                 onChange={(event) => setDays(event.target.value)}
+                required
               />
-            </label>
-          </>
+            </div>
+          </div>
         )}
         {state.kind === "shadow" && (
           <p>
@@ -9782,6 +10203,7 @@ function ActionModal({
             account, all data, photos, messages, matches and likes.
           </p>
         )}
+        {error && <p className="error grant-premium-profile-error">{error}</p>}
         <div className="modal-actions">
           <button type="button" onClick={onClose}>
             Cancel
@@ -10715,6 +11137,7 @@ function UserDetail() {
   };
   const avatarUrl = String(dataValue("avatarUrl", "avatar_url") ?? "");
   const verified = settingBoolean(dataValue("isVerified", "verified"));
+  const premium = settingBoolean(dataValue("isPremium", "premium"));
   const online = settingBoolean(dataValue("isOnlineNow", "online"));
   const saveBio = async () => {
     setBioSaving(true);
@@ -10768,11 +11191,15 @@ function UserDetail() {
           <button onClick={openAmplitude}>
             <AdminIcon name="externalLink" /> Open in Amplitude
           </button>
-          <button
-            onClick={() => setModal({ kind: "grant", title: "Grant Premium" })}
-          >
-            <AdminIcon name="crown" /> Grant Premium
-          </button>
+          {verified && !premium && (
+            <button
+              onClick={() =>
+                setModal({ kind: "grant", title: "Grant Premium" })
+              }
+            >
+              <AdminIcon name="crown" /> Grant Premium
+            </button>
+          )}
           <button onClick={() => void toggleVerification()}>
             {verified ? "Unverify" : "Verify"}
           </button>

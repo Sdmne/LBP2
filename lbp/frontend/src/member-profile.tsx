@@ -944,13 +944,6 @@ function ProfileScreen({
       return;
     }
     if (
-      (kind === "like" || kind === "message") &&
-      !bool(session.user.profileVerified)
-    ) {
-      open("verification");
-      return;
-    }
-    if (
       inFlight.current ||
       !profile ||
       (kind === "like" && bool(profile.likedByViewer)) ||

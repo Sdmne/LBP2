@@ -1339,7 +1339,7 @@ class AdminAccountUpdatePayload(BaseModel):
 class AdminSubscriptionGrantPayload(BaseModel):
     profileRef: str = Field(min_length=1, max_length=320)
     plan: str = Field(pattern="^(PREMIUM_MONTHLY|PREMIUM_QUARTERLY|PREMIUM_ANNUAL)$")
-    days: int = Field(ge=1, le=366)
+    days: int = Field(ge=1, le=3650)
 
 
 class AdminSubscriptionReviewPayload(BaseModel):
@@ -4708,7 +4708,7 @@ async def read_profile_image(file: UploadFile) -> tuple[str, str, bytes, dict[st
     return normalized_content_type, normalized_ext, normalized_body, metadata
 
 
-def profile_photo_content_response(photo: dict[str, Any]) -> Response:
+def profile_photo_content_response(photo: dict[str, Any], *, image_only: bool = True) -> Response:
     storage_key = str(photo.get("storageKey") or "").strip().lstrip("/")
     if storage_key.startswith("quarantine/"):
         storage_path = safe_storage_path(PRIVATE_UPLOAD_DIR, storage_key[len("quarantine/"):])
@@ -4726,13 +4726,19 @@ def profile_photo_content_response(photo: dict[str, Any]) -> Response:
     if not re.match(r"^https?://", public_url, re.IGNORECASE):
         raise HTTPException(status_code=404, detail="Photo source is unavailable")
     try:
-        request = urllib.request.Request(public_url, headers={"User-Agent": "LetsBeParents/1.0", "Accept": "image/*"})
+        request = urllib.request.Request(
+            public_url,
+            headers={"User-Agent": "LetsBeParents/1.0", "Accept": "image/*" if image_only else "*/*"},
+        )
         with urllib.request.urlopen(request, timeout=15) as remote:
             content_type = (remote.headers.get_content_type() or "").lower()
             body = remote.read(MAX_UPLOAD_BYTES + 1)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError) as exc:
-        raise HTTPException(status_code=502, detail="Could not load the profile photo") from exc
-    if content_type not in ALLOWED_IMAGE_TYPES or len(body) > MAX_UPLOAD_BYTES:
+        message = "Could not load the profile photo" if image_only else "Could not load the media file"
+        raise HTTPException(status_code=502, detail=message) from exc
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Media file is too large")
+    if image_only and content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(status_code=415, detail="Profile photo format is not supported")
     return Response(
         content=body,
@@ -5074,14 +5080,14 @@ def automatically_recheck_legacy_profile_photos() -> None:
                 "providerConfigured": vision_is_configured(),
             }
         else:
-            result = moderate_profile_image(body, require_face=False)
+            result = moderate_profile_image(body, require_face=True)
         try:
             photo = apply_profile_photo_moderation(photo_id, result, actor="automatic_recheck")
             avatar_media_file_id = int_or_none(item.get("avatar_media_file_id"))
             if photo.get("moderationStatus") == "APPROVED" and avatar_media_file_id:
                 avatar_body = quarantine_photo_bytes(item.get("avatar_storage_key"))
                 avatar_result = (
-                    moderate_profile_image(avatar_body, require_face=False)
+                    moderate_profile_image(avatar_body, require_face=True)
                     if avatar_body
                     else {
                         "decision": "REJECTED",
@@ -5164,7 +5170,8 @@ async def member_upload_photo(
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
-            SELECT COUNT(DISTINCT position) AS total, SUM(position = %s) AS atPosition
+            SELECT COUNT(DISTINCT position) AS total,
+                   COUNT(*) FILTER (WHERE position = %s) AS atPosition
             FROM profile_photos
             WHERE profile_id = %s AND status IN ('ACTIVE', 'PENDING')
             """,
@@ -5274,12 +5281,12 @@ async def member_upload_photo(
             ),
         )
         conn.commit()
-    profile_moderation = moderate_profile_image(body, require_face=False)
+    profile_moderation = moderate_profile_image(body, require_face=True)
     photo = apply_profile_photo_moderation(photo_id, profile_moderation)
     avatar_outcome = None
     avatar_moderation = None
     if photo.get("moderationStatus") == "APPROVED" and avatar_body is not None and avatar_media_id:
-        avatar_moderation = moderate_profile_image(avatar_body, require_face=False)
+        avatar_moderation = moderate_profile_image(avatar_body, require_face=True)
         avatar_outcome = apply_avatar_crop_moderation(
             int(avatar_media_id),
             profile_id,
@@ -5370,7 +5377,7 @@ async def member_upload_avatar(
             ),
         )
         conn.commit()
-    moderation = moderate_profile_image(body, require_face=False)
+    moderation = moderate_profile_image(body, require_face=True)
     outcome = apply_avatar_crop_moderation(
         media_file_id,
         profile_id,
@@ -9207,7 +9214,7 @@ def recompute_profile_premium(cursor, profile_id: int) -> bool:
     is_premium = int(cursor.fetchone()["cnt"] or 0) > 0
     cursor.execute(
             "UPDATE profiles SET data = jsonb_set(COALESCE(data, '{}'::jsonb), '{isPremium}', to_jsonb(%s::boolean), true), updated_at = UTC_TIMESTAMP() WHERE id = %s",
-        (1 if is_premium else 0, profile_id),
+        (is_premium, profile_id),
     )
     return is_premium
 
@@ -10842,6 +10849,57 @@ def synchronize_article_category_metadata(
         )
 
 
+def normalize_admin_article_meta(value: Any) -> dict[str, Any]:
+    meta = as_dict(value)
+    translation = as_dict(meta.get("translation"))
+    raw_tags = meta.get("tags")
+    tags: list[str] = []
+    if isinstance(raw_tags, list):
+        tags = [str(tag).strip() for tag in raw_tags if str(tag).strip()]
+    elif isinstance(raw_tags, dict):
+        tags = [str(tag).strip() for tag, enabled in raw_tags.items() if enabled and str(tag).strip()]
+    elif isinstance(raw_tags, str) and raw_tags.strip():
+        try:
+            decoded_tags = json.loads(raw_tags)
+        except json.JSONDecodeError:
+            decoded_tags = None
+        if isinstance(decoded_tags, list):
+            tags = [str(tag).strip() for tag in decoded_tags if str(tag).strip()]
+        elif isinstance(decoded_tags, dict):
+            tags = [
+                str(tag).strip()
+                for tag, enabled in decoded_tags.items()
+                if enabled and str(tag).strip()
+            ]
+        elif decoded_tags is None:
+            tags = [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
+    return {
+        **meta,
+        "tags": tags,
+        "metaTitle": str(
+            meta.get("metaTitle")
+            or meta.get("seoTitle")
+            or translation.get("metaTitle")
+            or translation.get("seoTitle")
+            or ""
+        ),
+        "metaDescription": str(
+            meta.get("metaDescription")
+            or meta.get("seoDescription")
+            or translation.get("metaDescription")
+            or translation.get("seoDescription")
+            or ""
+        ),
+        "ogImage": str(
+            meta.get("ogImage")
+            or meta.get("ogImageUrl")
+            or translation.get("ogImage")
+            or translation.get("ogImageUrl")
+            or ""
+        ),
+    }
+
+
 def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not items:
         return items
@@ -10885,7 +10943,8 @@ def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict
         "parenthood": "parenthood",
     }
     for item in items:
-        meta = as_dict(item.get("data"))
+        meta = normalize_admin_article_meta(item.get("data"))
+        item["data"] = meta
         raw_category = meta.get("category")
         candidates = {
             str(meta.get("categoryId") or "").strip().casefold(),
@@ -10941,6 +11000,45 @@ def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict
         item["categoryName"] = category.get("name") or ""
         item["categorySlug"] = category.get("slug") or ""
     return items
+
+
+@app.post("/api/admin/article-images")
+async def admin_upload_article_image(
+    file: UploadFile = File(...),
+    actor: str = Depends(require_admin),
+):
+    content_type = (file.content_type or "").split(";")[0].lower()
+    ext = ALLOWED_IMAGE_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(status_code=415, detail="Only JPEG, PNG and WebP images are supported")
+    body = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Article image is too large")
+    if not body:
+        raise HTTPException(status_code=422, detail="Article image is empty")
+    storage_dir = UPLOAD_DIR / "articles"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    storage_name = f"{int(now_utc().timestamp())}-{secrets.token_hex(6)}{ext}"
+    storage_path = storage_dir / storage_name
+    storage_path.write_bytes(body)
+    storage_key = f"articles/{storage_name}"
+    public_url = f"{UPLOAD_URL_PREFIX.rstrip('/')}/{storage_key}"
+    metadata = {
+        "originalName": file.filename,
+        "purpose": "admin_article_image",
+    }
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            INSERT INTO media_files (storage_key, public_url, mime_type, bytes, metadata)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (storage_key, public_url, content_type, len(body), json.dumps(metadata, ensure_ascii=False)),
+        )
+        media_id = cursor.lastrowid
+        audit(conn, actor, "admin_upload_article_image", "article_image", media_id, {"publicUrl": public_url})
+        conn.commit()
+    return {"ok": True, "mediaId": media_id, "publicUrl": public_url}
 
 
 def admin_verification_score(value: Any) -> float | None:
@@ -11142,9 +11240,10 @@ def admin_enrich_verification_items(cursor, items: list[dict[str, Any]]) -> list
             "avatarUrl": (profile.get("avatarUrl") if profile else None) or payload_profile.get("photoUrl") or payload_user.get("avatarUrl") or "",
             "avatarFallbackUrl": (profile.get("avatarFallbackUrl") if profile else None) or "",
             "isPremium": bool(profile_meta.get("isPremium") or payload_user.get("isPremium") or data.get("isPremium")),
+            "isVerified": profile_is_verified(profile) if profile else bool(data.get("isVerified")),
             "verificationStatus": item.get("status"),
             "sessionId": admin_verification_session_id(item, data),
-            "verificationUrl": data.get("verificationUrl") or data.get("url") or "",
+            "verificationUrl": data.get("verificationUrl") or data.get("url") or decision.get("session_url") or decision.get("sessionUrl") or "",
             "liveness": admin_verification_score(liveness),
             "livenessMethod": data.get("livenessMethod") or liveness_check.get("method") or "",
             "ageEstimation": age_estimation,
@@ -11173,8 +11272,9 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
         placeholders = ", ".join(["%s"] * len(photo_ids))
         cursor.execute(
             f"""
-            SELECT id, profile_id, position, status, upload_status, moderation_status,
-                   moderation_reason, public_url, avatar_media_file_id, created_at, updated_at
+            SELECT id, profile_id, media_file_id, position, status, upload_status,
+                   moderation_status, moderation_reason, public_url,
+                   avatar_media_file_id, created_at, updated_at
             FROM profile_photos
             WHERE id IN ({placeholders})
             """,
@@ -11202,17 +11302,21 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
         photo_id = int_or_none(data.get("photoId") or data.get("profilePhotoId"))
         media_file_id = int_or_none(data.get("mediaFileId") or data.get("avatarMediaFileId"))
         photo = photos_by_id.get(photo_id or -1)
+        if not media_file_id and photo:
+            media_file_id = int_or_none(photo.get("media_file_id"))
         if not profile_id and photo:
             profile_id = int_or_none(photo.get("profile_id"))
         profile = profiles_by_id.get(profile_id or -1)
-        image_url = str(data.get("publicUrl") or "").strip()
-        if not image_url:
-            if str(data.get("kind") or "") == "avatar_crop" and media_file_id:
-                image_url = f"/api/admin/media/{media_file_id}/content"
-            elif photo_id:
-                image_url = f"/api/admin/profile-photos/{photo_id}/content"
-            else:
-                image_url = str(data.get("contentUrl") or data.get("avatarContentUrl") or "").strip()
+        image_url = str((photo.get("public_url") if photo else None) or data.get("publicUrl") or "").strip()
+        content_url = ""
+        if str(data.get("kind") or "") == "avatar_crop" and media_file_id:
+            content_url = f"/api/admin/media/{media_file_id}/content"
+        elif photo_id and photo:
+            content_url = f"/api/admin/profile-photos/{photo_id}/content"
+        elif media_file_id:
+            content_url = f"/api/admin/media/{media_file_id}/content"
+        else:
+            content_url = str(data.get("contentUrl") or data.get("avatarContentUrl") or "").strip()
         photo_status = str(photo.get("status") if photo else data.get("photoStatus") or "").upper()
         reason = (
             (photo.get("moderation_reason") if photo else None)
@@ -11222,15 +11326,16 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
             or ""
         )
         item.update({
-            "profileId": profile_id,
+            "profileId": profile_id if profile else None,
             "profileName": (profile.get("display_name") if profile else None) or data.get("profileName") or item.get("title") or "No profile",
             "profileEmail": (profile.get("email") if profile else None) or data.get("email") or "",
             "profileStatus": (profile.get("status") if profile else None) or "",
             "photoId": photo_id,
             "mediaFileId": media_file_id,
             "publicUrl": image_url,
+            "contentUrl": content_url,
             "isPrimary": bool((photo and int_or_none(photo.get("position")) == 0) or int_or_none(data.get("position")) == 0),
-            "isDeleted": photo_status in {"DELETED", "REPLACED"},
+            "isDeleted": photo_status in {"DELETED", "REPLACED"} or bool(photo_id and not photo),
             "photoStatus": photo_status,
             "moderationReason": reason,
             "createdAt": (photo.get("created_at") if photo else None) or item.get("created_at"),
@@ -11611,6 +11716,25 @@ def admin_verification_detail(
 ):
     with db_cursor() as (_, cursor):
         item = fetch_admin_verification(cursor, verification_id)
+        session_id = str(item.get("sessionId") or "").strip()
+        try:
+            provider_session_id = str(uuid.UUID(session_id))
+        except ValueError:
+            provider_session_id = ""
+        if didit_is_configured() and provider_session_id:
+            try:
+                provider_decision = didit_request(
+                    f"session/{provider_session_id}/decision/",
+                    allow_not_found=True,
+                )
+            except HTTPException:
+                provider_decision = {}
+            if provider_decision:
+                data = as_dict(item.get("data"))
+                data["decision"] = provider_decision
+                item["data"] = data
+                item["decisionRawData"] = provider_decision
+                admin_enrich_verification_items(cursor, [item])
     return {"item": item}
 
 
@@ -11664,6 +11788,51 @@ def admin_approve_verification(
     return {"ok": True, "id": item["id"], "status": "APPROVED"}
 
 
+@app.post("/api/admin/verifications/{verification_id}/revoke")
+def admin_revoke_verification(
+    verification_id: str,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        item = fetch_admin_verification(cursor, verification_id, for_update=True)
+        data = as_dict(item.get("data"))
+        profile_id = int_or_none(item.get("profileId") or data.get("profileId"))
+        if not profile_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Verification session is not linked to a profile",
+            )
+        profile = fetch_profile(cursor, profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        revoked_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        update_profile_data(
+            cursor,
+            profile_id,
+            {
+                "isVerified": False,
+                "verifiedAt": None,
+                "verificationRevokedAt": revoked_at,
+                "verificationRevokedBy": actor,
+            },
+        )
+        audit(
+            conn,
+            actor,
+            "VERIFICATION_REVOKED",
+            "verification",
+            item["id"],
+            {"profileId": profile_id, "sessionId": item.get("sessionId")},
+        )
+        conn.commit()
+    return {
+        "ok": True,
+        "id": item["id"],
+        "status": item.get("status"),
+        "profileVerified": False,
+    }
+
+
 @app.delete("/api/admin/verifications/{verification_id}")
 def admin_delete_verification(
     verification_id: str,
@@ -11685,6 +11854,295 @@ def admin_delete_verification(
         )
         conn.commit()
     return {"ok": True, "id": item["id"], "deleted": True}
+
+
+ADMIN_STORAGE_CATEGORY_SQL = """
+    CASE
+      WHEN mf.storage_key LIKE 'profiles/%%'
+        OR mf.storage_key LIKE 'quarantine/profiles/%%' THEN 'profile_photos'
+      WHEN mf.storage_key LIKE 'chat/%%'
+        AND COALESCE(mf.mime_type, '') LIKE 'image/%%' THEN 'chat_images'
+      WHEN mf.storage_key LIKE 'chat/%%'
+        OR mf.storage_key LIKE 'family-room/%%' THEN 'chat_files'
+      WHEN mf.storage_key LIKE 'clinics/%%' THEN 'clinic_logos'
+      WHEN mf.storage_key LIKE 'lawyers/%%' THEN 'lawyer_photos'
+      WHEN mf.storage_key LIKE 'articles/%%' THEN 'article_images'
+      ELSE NULL
+    END
+"""
+
+
+@app.get("/api/admin/storage")
+def admin_storage(
+    category: Literal[
+        "all",
+        "profile_photos",
+        "chat_images",
+        "chat_files",
+        "clinic_logos",
+        "lawyer_photos",
+        "article_images",
+    ] = "all",
+    user_id: str | None = Query(None, alias="userId", max_length=128),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _admin: str = Depends(require_admin),
+):
+    normalized_user_id = str(user_id or "").strip()
+    category_sql = ADMIN_STORAGE_CATEGORY_SQL.strip()
+    summary = {
+        key: {"files": 0, "bytes": 0}
+        for key in (
+            "profile_photos",
+            "chat_images",
+            "chat_files",
+            "clinic_logos",
+            "lawyer_photos",
+            "article_images",
+        )
+    }
+
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            f"""
+            SELECT category, COUNT(*) AS files, COALESCE(SUM(bytes), 0) AS bytes
+            FROM (
+              SELECT {category_sql} AS category, COALESCE(mf.bytes, 0) AS bytes
+              FROM media_files mf
+            ) categorized
+            WHERE category IS NOT NULL
+            GROUP BY category
+            """
+        )
+        for item in cursor.fetchall():
+            key = str(item.get("category") or "")
+            if key in summary:
+                summary[key] = {
+                    "files": int(item.get("files") or 0),
+                    "bytes": int(item.get("bytes") or 0),
+                }
+
+        predicates = [f"({category_sql}) IS NOT NULL"]
+        params: list[Any] = []
+        if category != "all":
+            predicates.append(f"({category_sql}) = %s")
+            params.append(category)
+        if normalized_user_id:
+            cursor.execute(
+                """
+                SELECT id, data->>'id' AS sourceId
+                FROM profiles
+                WHERE data->>'id' = %s OR CAST(id AS TEXT) = %s
+                LIMIT 1
+                """,
+                (normalized_user_id, normalized_user_id),
+            )
+            filter_profile = cursor.fetchone() or {}
+            owner_values = {normalized_user_id}
+            if filter_profile.get("id") is not None:
+                owner_values.add(str(filter_profile["id"]))
+            if filter_profile.get("sourceId"):
+                owner_values.add(str(filter_profile["sourceId"]))
+            owner_placeholders = ", ".join(["%s"] * len(owner_values))
+            owner_params = list(owner_values)
+            predicates.append(
+                f"""
+                (
+                  COALESCE(mf.metadata->>'profileSourceId', '') IN ({owner_placeholders})
+                  OR COALESCE(mf.metadata->>'profileId', '') IN ({owner_placeholders})
+                  OR COALESCE(mf.metadata->>'senderProfileId', '') IN ({owner_placeholders})
+                )
+                """
+            )
+            params.extend(owner_params * 3)
+        where_sql = " AND ".join(f"({predicate.strip()})" for predicate in predicates)
+
+        cursor.execute(f"SELECT COUNT(*) AS total FROM media_files mf WHERE {where_sql}", params)
+        total_row = cursor.fetchone() or {}
+        total = int(total_row.get("total") or 0)
+        cursor.execute(
+            f"""
+            SELECT mf.id,
+                   mf.storage_key AS storageKey,
+                   mf.public_url AS publicUrl,
+                   mf.mime_type AS mimeType,
+                   mf.bytes,
+                   mf.created_at AS createdAt,
+                   mf.metadata,
+                   {category_sql} AS category
+            FROM media_files mf
+            WHERE {where_sql}
+            ORDER BY
+              CASE ({category_sql})
+                WHEN 'article_images' THEN 1
+                WHEN 'chat_images' THEN 2
+                WHEN 'chat_files' THEN 3
+                WHEN 'clinic_logos' THEN 4
+                WHEN 'lawyer_photos' THEN 5
+                WHEN 'profile_photos' THEN 6
+                ELSE 7
+              END,
+              mf.storage_key ASC,
+              mf.id ASC
+            LIMIT %s OFFSET %s
+            """,
+            [*params, limit, offset],
+        )
+        files = cursor.fetchall()
+
+        conversation_ids: set[int] = set()
+        local_profile_ids: set[int] = set()
+        source_profile_ids: set[str] = set()
+        clinic_ids: set[int] = set()
+        for item in files:
+            metadata = as_dict(item.get("metadata"))
+            profile_id = int_or_none(metadata.get("profileId") or metadata.get("senderProfileId"))
+            if profile_id:
+                local_profile_ids.add(profile_id)
+            source_id = str(metadata.get("profileSourceId") or "").strip()
+            storage_key = str(item.get("storageKey") or "")
+            parts = storage_key.removeprefix("quarantine/").split("/")
+            if not source_id and item.get("category") == "profile_photos" and len(parts) > 1:
+                source_id = parts[1]
+            if source_id:
+                source_profile_ids.add(source_id)
+            conversation_id = int_or_none(metadata.get("conversationId"))
+            if conversation_id:
+                conversation_ids.add(conversation_id)
+            clinic_id = int_or_none(metadata.get("clinicLocalId"))
+            if clinic_id:
+                clinic_ids.add(clinic_id)
+
+        conversations: dict[int, dict[str, Any]] = {}
+        if conversation_ids:
+            placeholders = ", ".join(["%s"] * len(conversation_ids))
+            cursor.execute(
+                f"SELECT id, profile_a_id, profile_b_id FROM conversations WHERE id IN ({placeholders})",
+                list(conversation_ids),
+            )
+            conversations = {int(item["id"]): item for item in cursor.fetchall()}
+            for conversation in conversations.values():
+                local_profile_ids.add(int(conversation["profile_a_id"]))
+                local_profile_ids.add(int(conversation["profile_b_id"]))
+
+        profile_predicates: list[str] = []
+        profile_params: list[Any] = []
+        if local_profile_ids:
+            placeholders = ", ".join(["%s"] * len(local_profile_ids))
+            profile_predicates.append(f"id IN ({placeholders})")
+            profile_params.extend(local_profile_ids)
+        if source_profile_ids:
+            placeholders = ", ".join(["%s"] * len(source_profile_ids))
+            profile_predicates.append(f"data->>'id' IN ({placeholders})")
+            profile_params.extend(source_profile_ids)
+        profiles_by_id: dict[int, dict[str, Any]] = {}
+        profiles_by_source: dict[str, dict[str, Any]] = {}
+        if profile_predicates:
+            cursor.execute(
+                f"""
+                SELECT id, display_name AS displayName, data->>'id' AS sourceId
+                FROM profiles
+                WHERE {' OR '.join(profile_predicates)}
+                """,
+                profile_params,
+            )
+            for profile in cursor.fetchall():
+                profiles_by_id[int(profile["id"])] = profile
+                profile_source_id = str(profile.get("sourceId") or "").strip()
+                if profile_source_id:
+                    profiles_by_source[profile_source_id] = profile
+
+        clinics_by_id: dict[int, dict[str, Any]] = {}
+        if clinic_ids:
+            placeholders = ", ".join(["%s"] * len(clinic_ids))
+            cursor.execute(
+                f"SELECT id, name FROM clinics WHERE id IN ({placeholders})",
+                list(clinic_ids),
+            )
+            clinics_by_id = {int(item["id"]): item for item in cursor.fetchall()}
+
+    items: list[dict[str, Any]] = []
+    category_labels = {
+        "profile_photos": "Profile",
+        "chat_images": "Chat",
+        "chat_files": "Chat",
+        "clinic_logos": "Clinic",
+        "lawyer_photos": "lawyers",
+        "article_images": "Article",
+    }
+    for file in files:
+        media_id = int(file["id"])
+        metadata = as_dict(file.get("metadata"))
+        storage_key = str(file.get("storageKey") or "")
+        normalized_key = storage_key.removeprefix("quarantine/")
+        parts = normalized_key.split("/")
+        file_category = str(file.get("category") or "")
+        local_profile_id = int_or_none(metadata.get("profileId") or metadata.get("senderProfileId"))
+        source_profile_id = str(metadata.get("profileSourceId") or "").strip()
+        if not source_profile_id and file_category == "profile_photos" and len(parts) > 1:
+            source_profile_id = parts[1]
+        profile = profiles_by_id.get(local_profile_id or -1) or profiles_by_source.get(source_profile_id)
+        route_profile_id = str((profile or {}).get("sourceId") or (profile or {}).get("id") or source_profile_id or local_profile_id or "")
+        related_label = ""
+        related_url = ""
+        if file_category == "profile_photos":
+            related_label = str((profile or {}).get("displayName") or "Anonymous")
+            if route_profile_id:
+                related_url = f"/users/{urllib.parse.quote(route_profile_id, safe='')}"
+        elif file_category in {"chat_images", "chat_files"}:
+            conversation_id = int_or_none(metadata.get("conversationId"))
+            conversation = conversations.get(conversation_id or -1)
+            sender = profiles_by_id.get(local_profile_id or -1)
+            recipient = None
+            if conversation and local_profile_id:
+                other_id = int(conversation["profile_b_id"] if int(conversation["profile_a_id"]) == local_profile_id else conversation["profile_a_id"])
+                recipient = profiles_by_id.get(other_id)
+            sender_name = str((sender or {}).get("displayName") or "Anonymous")
+            recipient_name = str((recipient or {}).get("displayName") or "Anonymous")
+            related_label = f"{sender_name} → {recipient_name}"
+            sender_route_id = str((sender or {}).get("sourceId") or (sender or {}).get("id") or local_profile_id or "")
+            if sender_route_id:
+                related_url = f"/users/{urllib.parse.quote(sender_route_id, safe='')}?tab=messages"
+                if conversation_id:
+                    related_url += f"&chat={conversation_id}"
+                route_profile_id = sender_route_id
+        elif file_category == "clinic_logos":
+            clinic = clinics_by_id.get(int_or_none(metadata.get("clinicLocalId")) or -1)
+            related_label = str((clinic or {}).get("name") or "Clinic")
+            related_url = "/clinics"
+        elif file_category == "lawyer_photos":
+            related_label = "Lawyer photo"
+            related_url = "/lawyers"
+        elif file_category == "article_images":
+            related_label = "Article image"
+            related_url = "/articles"
+
+        items.append(
+            {
+                "id": media_id,
+                "category": file_category,
+                "categoryLabel": category_labels.get(file_category, "File"),
+                "name": str(metadata.get("originalName") or Path(normalized_key).name or f"File {media_id}"),
+                "bytes": int(file.get("bytes") or 0),
+                "mimeType": str(file.get("mimeType") or "application/octet-stream"),
+                "createdAt": file.get("createdAt"),
+                "contentUrl": f"/admin/api/admin/media/{media_id}/content",
+                "profileId": route_profile_id or None,
+                "relatedLabel": related_label,
+                "relatedUrl": related_url,
+            }
+        )
+
+    return {
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "totalFiles": sum(int(item["files"]) for item in summary.values()),
+        "totalBytes": sum(int(item["bytes"]) for item in summary.values()),
+        "summary": summary,
+        "filterActive": bool(normalized_user_id),
+    }
 
 
 @app.get("/api/admin/profile-photos/{photo_id}/content")
@@ -11721,7 +12179,7 @@ def admin_media_content(media_file_id: int, _admin: str = Depends(require_admin)
         media = cursor.fetchone()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
-    return profile_photo_content_response(media)
+    return profile_photo_content_response(media, image_only=False)
 
 
 @app.get("/api/admin/filter-options")
