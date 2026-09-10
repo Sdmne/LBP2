@@ -1437,7 +1437,7 @@ class AdminAccountUpdatePayload(BaseModel):
 
 class AdminSubscriptionGrantPayload(BaseModel):
     profileRef: str = Field(min_length=1, max_length=320)
-    plan: str = Field(pattern="^(PREMIUM_MONTHLY|PREMIUM_QUARTERLY|PREMIUM_ANNUAL)$")
+    plan: str = Field(pattern="^(PREMIUM_MONTHLY|PREMIUM_QUARTERLY)$")
     days: int = Field(ge=1, le=3650)
 
 
@@ -10525,12 +10525,29 @@ def fetch_admin_clinic(cursor, identifier: str | int) -> dict[str, Any]:
     return row
 
 
+def admin_clinic_partner(data: dict[str, Any], clinic_name: Any) -> tuple[str, str]:
+    partner = data.get("partner") if isinstance(data.get("partner"), dict) else {}
+    partner_name = str(
+        data.get("partnerName")
+        or partner.get("name")
+        or partner.get("displayName")
+        or ""
+    ).strip()
+    normalized_clinic_name = str(clinic_name or "").strip().casefold()
+    if partner_name.casefold() == normalized_clinic_name:
+        partner_name = ""
+    partner_email = str(
+        data.get("partnerEmail") or partner.get("email") or data.get("ownerEmail") or ""
+    ).strip()
+    return partner_name, partner_email
+
+
 def normalize_admin_clinic(row: dict[str, Any]) -> dict[str, Any]:
     clinic = normalize_partner_clinic(row)
     data = as_dict(row.get("data"))
-    partner = data.get("partner") if isinstance(data.get("partner"), dict) else {}
-    clinic["partnerName"] = data.get("partnerName") or partner.get("name") or partner.get("displayName") or "-"
-    clinic["partnerEmail"] = data.get("partnerEmail") or partner.get("email") or data.get("ownerEmail") or ""
+    partner_name, partner_email = admin_clinic_partner(data, clinic.get("name"))
+    clinic["partnerName"] = partner_name or "-"
+    clinic["partnerEmail"] = partner_email
     return clinic
 
 
@@ -10864,10 +10881,12 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
                 """
                 SELECT id, display_name, email, status, data
                 FROM profiles
-                WHERE email = %s OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) = %s
+                WHERE LOWER(email) = LOWER(%s)
+                   OR LOWER(display_name) = LOWER(%s)
+                   OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) = %s
                 LIMIT 1 FOR UPDATE
                 """,
-                (reference.lower(), reference),
+                (reference, reference, reference),
             )
         profile = cursor.fetchone()
         if not profile:
@@ -12521,7 +12540,7 @@ def build_list_where(
         if is_donor and str(is_donor).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) <> ''")
         if seeks_co_parent and str(seeks_co_parent).lower() in {"1", "true", "yes"}:
-            where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER'))")
+            where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER')) = 1")
         if is_online and str(is_online).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.isOnline')) IN ('true', '1')")
     return ("WHERE " + " AND ".join(where_parts)) if where_parts else "", params
@@ -12595,6 +12614,13 @@ def admin_list(
             items = [normalize_row(row) for row in cursor.fetchall()]
             if view == "articles":
                 admin_enrich_article_items(cursor, items)
+            elif view == "clinics":
+                for item in items:
+                    partner_name, partner_email = admin_clinic_partner(
+                        as_dict(item.get("data")), item.get("name")
+                    )
+                    item["partnerName"] = partner_name or None
+                    item["partnerEmail"] = partner_email
         return {"items": items, "total": total, "limit": limit, "offset": offset, "view": view}
 
     entity_type = ADMIN_ENTITY_VIEWS.get(view)
@@ -12616,11 +12642,28 @@ def admin_list(
         where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.group')) = %s")
         params.append(group)
     if entity_type == "subscription" and plan:
-        where_parts.append("UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) = %s")
-        params.append(plan.upper())
+        plan_key = plan.strip().upper()
+        plan_aliases = {
+            "MONTHLY": ("MONTHLY", "PREMIUM_MONTHLY"),
+            "PREMIUM_MONTHLY": ("MONTHLY", "PREMIUM_MONTHLY"),
+            "QUARTERLY": ("QUARTERLY", "PREMIUM_QUARTERLY"),
+            "PREMIUM_QUARTERLY": ("QUARTERLY", "PREMIUM_QUARTERLY"),
+        }.get(plan_key, (plan_key,))
+        placeholders = ", ".join(["%s"] * len(plan_aliases))
+        where_parts.append(f"UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) IN ({placeholders})")
+        params.extend(plan_aliases)
     if entity_type == "subscription" and source:
-        where_parts.append("UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), '')) = %s")
-        params.append(source.upper())
+        source_key = source.strip().upper().replace("-", "_").replace(" ", "_")
+        source_aliases = {
+            "MANUAL": ("MANUAL", "MANUAL_REVIEW", "MEMBER_REQUEST"),
+            "MANUAL_REVIEW": ("MANUAL", "MANUAL_REVIEW", "MEMBER_REQUEST"),
+            "STRIPE": ("STRIPE",),
+            "APP_STORE": ("APP_STORE", "IOS", "APPLE"),
+            "PLAY_STORE": ("PLAY_STORE", "GOOGLE_PLAY", "ANDROID"),
+        }.get(source_key, (source_key,))
+        placeholders = ", ".join(["%s"] * len(source_aliases))
+        where_parts.append(f"UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), '')) IN ({placeholders})")
+        params.extend(source_aliases)
     where = "WHERE " + " AND ".join(where_parts)
     entity_order = "id ASC" if entity_type == "category" else "id DESC"
     with db_cursor() as (conn, cursor):

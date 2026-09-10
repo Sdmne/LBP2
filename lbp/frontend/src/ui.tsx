@@ -4780,6 +4780,63 @@ function Article() {
     void load();
     return () => { alive = false; };
   }, [copy.unavailable, locale, previewMode, slug]);
+  useEffect(() => {
+    if (!article) return;
+    const meta = article.meta && typeof article.meta === "object" && !Array.isArray(article.meta)
+      ? article.meta as Row
+      : {};
+    const translation = meta.translation && typeof meta.translation === "object" && !Array.isArray(meta.translation)
+      ? meta.translation as Row
+      : {};
+    const firstText = (...values: unknown[]) =>
+      values.map((value) => String(value ?? "").trim()).find(Boolean) ?? "";
+    const title = firstText(meta.metaTitle, meta.seoTitle, translation.metaTitle, translation.seoTitle, article.title, "LetsBeParents");
+    const description = firstText(meta.metaDescription, meta.seoDescription, translation.metaDescription, translation.seoDescription, article.excerpt);
+    const imageValue = firstText(meta.ogImage, meta.ogImageUrl, translation.ogImage, translation.ogImageUrl, article.coverUrl, article.cover_url);
+    let image = "";
+    try {
+      image = imageValue ? new URL(imageValue, window.location.origin).href : "";
+    } catch {
+      image = "";
+    }
+    const canonical = `${window.location.origin}/${locale}/knowledge-hub/${encodeURIComponent(slug)}`;
+    const localeTag = locale === "ru" ? "ru_RU" : locale === "es" ? "es_ES" : "en_US";
+    const managed: HTMLElement[] = [];
+    const setMeta = (attribute: "name" | "property", key: string, content: string) => {
+      if (!content) return;
+      const element = document.createElement("meta");
+      element.setAttribute(attribute, key);
+      element.setAttribute("content", content);
+      element.dataset.articleSeo = "true";
+      document.head.appendChild(element);
+      managed.push(element);
+    };
+    const canonicalLink = document.createElement("link");
+    canonicalLink.rel = "canonical";
+    canonicalLink.href = canonical;
+    canonicalLink.dataset.articleSeo = "true";
+    document.head.appendChild(canonicalLink);
+    managed.push(canonicalLink);
+    document.title = title || "LetsBeParents";
+    setMeta("name", "description", description);
+    setMeta("property", "og:title", title);
+    setMeta("property", "og:description", description);
+    setMeta("property", "og:url", canonical);
+    setMeta("property", "og:site_name", "LetsBeParents");
+    setMeta("property", "og:locale", localeTag);
+    setMeta("property", "og:type", "article");
+    setMeta("property", "article:published_time", String(article.publishedAt ?? article.published_at ?? ""));
+    setMeta("property", "article:modified_time", String(article.updated_at ?? article.updatedAt ?? ""));
+    setMeta("property", "og:image", image);
+    setMeta("name", "twitter:card", "summary_large_image");
+    setMeta("name", "twitter:title", title);
+    setMeta("name", "twitter:description", description);
+    setMeta("name", "twitter:image", image);
+    return () => {
+      managed.forEach((element) => element.remove());
+      document.title = "LetsBeParents";
+    };
+  }, [article, locale, slug]);
   const previewBanner = previewMode ? (
     <div className="article-preview-banner" role="status">
       {articlePreviewCopy[activeLocale]}

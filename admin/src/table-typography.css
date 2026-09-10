@@ -9,10 +9,90 @@
   line-height: 20px !important;
 }
 
+/* Keep every table control and label inside the bordered table area. */
+.app :is(table, [role="table"]) {
+  max-width: 100%;
+}
+
+.app table :is(th, td) {
+  box-sizing: border-box;
+}
+
+.app table :is(th, td):first-child {
+  padding-left: 16px !important;
+}
+
+.app table :is(th, td):last-child {
+  padding-right: 16px !important;
+}
+
+.app table :is(button, [role="button"], .table-badge, .moderation-report-status) {
+  box-sizing: border-box;
+  max-width: 100%;
+  white-space: nowrap !important;
+}
+
+.app :is(table, [role="table"]) :is(
+    .table-badge,
+    .moderation-report-status,
+    .admin-role-badge,
+    .admin-status-badge,
+    .subscription-plan-badge,
+    .subscription-status-badge,
+    .category-badge,
+    .source-badge
+  ) {
+  width: max-content;
+  min-width: max-content;
+  max-width: none;
+  flex-shrink: 0;
+}
+
+@media (min-width: 1101px) {
+  .app .generic-list-table tbody td:not(
+      .table-column-displayName,
+      .table-column-profileName,
+      .table-column-name,
+      .table-column-title,
+      .table-column-actions
+    ),
+  .app .admin-users-table :is(.admin-email-cell, .admin-date-cell) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.app table :is(.row-actions, .admin-row-actions, .row-menu-wrap) {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
 /* Responsive tables render column headings from the cell label. */
 .app table td[data-label]::before {
   font-size: var(--admin-table-font-size) !important;
+  font-weight: 500 !important;
   line-height: 20px !important;
+  overflow-wrap: normal !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+}
+
+/* Column headings never split words and use the medium reference weight. */
+.app table thead th,
+.app [role="table"] [role="columnheader"] {
+  font-weight: 500 !important;
+  overflow-wrap: normal !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+}
+
+/* Status chips stay compact in every admin table. */
+.app :is(table, [role="table"]) :is(.table-badge, .moderation-report-status) {
+  font-size: 12px !important;
+  line-height: 16px !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
 }
 
 /* Settings > Admins uses compact chips from the desktop reference. */
@@ -27,6 +107,37 @@
 .app .settings-audit-table tbody td,
 .app .settings-audit-table tbody td :not(svg, svg *) {
   font-size: 12px !important;
+}
+
+/* Compact subscription chips and identity markers match the desktop reference. */
+.app .subscriptions-table :is(
+    .subscription-plan-badge,
+    .subscription-status-badge
+  ) {
+  font-size: 12px !important;
+  line-height: 16px !important;
+}
+
+.app .subscriptions-table .subscription-donor-badge {
+  font-size: 9px !important;
+  line-height: 1 !important;
+}
+
+/* Article metadata is intentionally denser than the title column. */
+.app .articles-table tbody :is(
+    .table-column-category,
+    .table-column-status,
+    .table-column-views,
+    .table-column-updated_at
+  ),
+.app .articles-table tbody :is(
+    .table-column-category,
+    .table-column-status,
+    .table-column-views,
+    .table-column-updated_at
+  ) :not(svg, svg *) {
+  font-size: 12px !important;
+  line-height: 16px !important;
 }
 
 /* PUBLISHED has one semantic treatment across all admin data rows. */

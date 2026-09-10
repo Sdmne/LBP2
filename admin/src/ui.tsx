@@ -87,6 +87,7 @@ type AdminIconName =
   | "eye"
   | "heart"
   | "clock"
+  | "badgeCheck"
   | "circleCheck"
   | "circleX"
   | "check"
@@ -290,6 +291,17 @@ function userCountryName(value: unknown) {
   };
   return compactNames[country] ?? country;
 }
+
+function countryFilterLabel(option: FilterOption, showCount = false) {
+  const name = userCountryName(option.label ?? option.value);
+  const count = Number(option.count);
+  return showCount &&
+    option.count !== null &&
+    option.count !== undefined &&
+    Number.isFinite(count)
+    ? `${name} (${Math.max(0, Math.trunc(count))})`
+    : name;
+}
 function columnLabel(view: string, column: string) {
   if (view === "users") {
     return (
@@ -326,6 +338,27 @@ function valueOf(value: unknown) {
     : typeof value === "object"
       ? JSON.stringify(value)
       : String(value);
+}
+
+function clinicPartnerName(row: RecordValue) {
+  const partner =
+    row.partner && typeof row.partner === "object"
+      ? (row.partner as RecordValue)
+      : null;
+  const rawName =
+    row.partnerName ??
+    partner?.name ??
+    partner?.displayName ??
+    (typeof row.partner === "string" ? row.partner : undefined);
+  const partnerName = String(rawName ?? "").trim();
+  const clinicName = String(row.name ?? "").trim();
+  if (
+    !partnerName ||
+    partnerName.toLocaleLowerCase() === clinicName.toLocaleLowerCase()
+  ) {
+    return "—";
+  }
+  return partnerName;
 }
 function compactDate(value: unknown) {
   const date = value ? new Date(String(value)) : null;
@@ -367,16 +400,12 @@ function directoryOptionLabel(value: unknown) {
 }
 function verificationDate(value: unknown) {
   const date = value ? new Date(String(value)) : null;
-  return date && !Number.isNaN(date.valueOf())
-    ? date.toLocaleString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })
-    : valueOf(value);
+  if (!date || Number.isNaN(date.valueOf())) return valueOf(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return [
+    `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`,
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+  ].join(", ");
 }
 
 function auditDate(value: unknown) {
@@ -669,6 +698,10 @@ type AdminSelectMenuPosition = {
   opensUp: boolean;
 };
 
+type AdminSelectProps = SelectHTMLAttributes<HTMLSelectElement> & {
+  menuMaxHeight?: number;
+};
+
 function collectSelectOptions(children: ReactNode) {
   const options: AdminSelectOption[] = [];
   Children.forEach(children, (child) => {
@@ -693,6 +726,20 @@ function collectSelectOptions(children: ReactNode) {
   return options;
 }
 
+function adminSelectLabelText(value: ReactNode): string {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  if (isValidElement<{ children?: ReactNode }>(value)) {
+    return adminSelectLabelText(value.props.children);
+  }
+  let text = "";
+  Children.forEach(value, (child) => {
+    text += adminSelectLabelText(child);
+  });
+  return text;
+}
+
 function AdminSelect({
   children,
   value,
@@ -703,9 +750,10 @@ function AdminSelect({
   id,
   name,
   required,
+  menuMaxHeight = 280,
   "aria-label": ariaLabel,
   ...nativeProps
-}: SelectHTMLAttributes<HTMLSelectElement>) {
+}: AdminSelectProps) {
   const options = collectSelectOptions(children);
   const initialValue = Array.isArray(defaultValue)
     ? defaultValue[0]
@@ -731,17 +779,37 @@ function AdminSelect({
 
   const openMenu = (preferredIndex = selectedIndex) => {
     if (disabled) return;
-    const bounds = buttonRef.current?.getBoundingClientRect();
-    if (bounds) {
-      const expectedHeight = Math.min(280, options.length * 36 + 8);
+    const trigger = buttonRef.current;
+    const bounds = trigger?.getBoundingClientRect();
+    if (bounds && trigger) {
+      const expectedHeight = Math.min(
+        menuMaxHeight,
+        options.length * 36 + 8,
+      );
       const below = window.innerHeight - bounds.bottom - 8;
       const above = bounds.top - 8;
       const opensUp = below < expectedHeight && above > below;
       const availableHeight = Math.max(64, opensUp ? above : below);
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      const triggerStyle = window.getComputedStyle(trigger);
+      if (context) context.font = triggerStyle.font;
+      const longestLabel = options.reduce((longest, option) => {
+        const label = adminSelectLabelText(option.label);
+        const width = context?.measureText(label).width ?? label.length * 8;
+        return Math.max(longest, width);
+      }, 0);
+      const menuWidth = Math.min(
+        Math.max(bounds.width, Math.ceil(longestLabel + 48)),
+        window.innerWidth - 16,
+      );
       setMenuPosition({
-        left: Math.max(8, bounds.left),
+        left: Math.min(
+          Math.max(8, bounds.left),
+          window.innerWidth - menuWidth - 8,
+        ),
         top: opensUp ? bounds.top - 4 : bounds.bottom + 4,
-        width: Math.min(bounds.width, window.innerWidth - 16),
+        width: menuWidth,
         maxHeight: Math.min(expectedHeight, availableHeight),
         opensUp,
       });
@@ -765,7 +833,11 @@ function AdminSelect({
       )
         closeMenu();
     };
-    const closeOnViewportChange = () => closeMenu();
+    const closeOnViewportChange = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      closeMenu();
+    };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     window.addEventListener("resize", closeOnViewportChange);
     window.addEventListener("scroll", closeOnViewportChange, true);
@@ -1105,7 +1177,11 @@ function subscriptionData(row: RecordValue) {
 function subscriptionPlan(row: RecordValue) {
   const data = subscriptionData(row);
   const value = String(row.plan ?? data.plan ?? "").trim();
-  return value ? statusLabel(value) : "—";
+  const key = value.replace(/[\s-]+/g, "_").toUpperCase();
+  if (["MONTHLY", "PREMIUM_MONTHLY"].includes(key)) return "Monthly";
+  if (["QUARTERLY", "PREMIUM_QUARTERLY"].includes(key)) return "Quarterly";
+  if (["ANNUAL", "PREMIUM_ANNUAL"].includes(key)) return "Quarterly";
+  return value ? statusLabel(value.replaceAll("_", " ")) : "—";
 }
 
 function subscriptionSource(row: RecordValue) {
@@ -1800,6 +1876,12 @@ function AdminIcon({ name }: { name: AdminIconName }) {
       <>
         <circle cx="12" cy="12" r="10" />
         <path d="M12 6v6l4 2" />
+      </>
+    ),
+    badgeCheck: (
+      <>
+        <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" />
+        <path d="m9 12 2 2 4-4" />
       </>
     ),
     circleCheck: (
@@ -5014,7 +5096,7 @@ function ReportPerson({
             title="Verified"
             aria-label="Verified"
           >
-            <AdminIcon name="circleCheck" />
+            <AdminIcon name="badgeCheck" />
           </span>
         )}
         {settingBoolean(row[`${kind}IsPremium`]) && (
@@ -5379,7 +5461,7 @@ function LiveKitCalls() {
         <span>{name}</span>
         {verified && (
           <span className="livekit-call-verified" title="Verified">
-            <AdminIcon name="circleCheck" />
+            <AdminIcon name="badgeCheck" />
           </span>
         )}
         {premium && (
@@ -6412,6 +6494,10 @@ function GenericList({ view }: { view: string }) {
   const [grantOpen, setGrantOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [grantUser, setGrantUser] = useState("");
+  const [grantSelectedUser, setGrantSelectedUser] =
+    useState<RecordValue | null>(null);
+  const [grantCandidates, setGrantCandidates] = useState<RecordValue[]>([]);
+  const [grantSearching, setGrantSearching] = useState(false);
   const [grantPlan, setGrantPlan] = useState("PREMIUM_MONTHLY");
   const [grantDays, setGrantDays] = useState(30);
   const [editing, setEditing] = useState<RecordValue | null>(null);
@@ -6487,6 +6573,42 @@ function GenericList({ view }: { view: string }) {
       .then((data) => setSummaryCounts((data.counts ?? {}) as RecordValue))
       .catch(() => setSummaryCounts({}));
   }, [view, refresh]);
+  useEffect(() => {
+    if (
+      view !== "subscriptions" ||
+      !grantOpen ||
+      grantSelectedUser ||
+      grantUser.trim().length < 2
+    ) {
+      setGrantCandidates([]);
+      setGrantSearching(false);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      setGrantSearching(true);
+      const params = new URLSearchParams({
+        q: grantUser.trim(),
+        limit: "10",
+        offset: "0",
+      });
+      api
+        .get<ListResponse>(`/admin/list/users?${params}`)
+        .then((data) => {
+          if (live) setGrantCandidates(data.items ?? []);
+        })
+        .catch(() => {
+          if (live) setGrantCandidates([]);
+        })
+        .finally(() => {
+          if (live) setGrantSearching(false);
+        });
+    }, 250);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [view, grantOpen, grantUser, grantSelectedUser]);
   useEffect(() => {
     let live = true;
     setResult(null);
@@ -6656,17 +6778,25 @@ function GenericList({ view }: { view: string }) {
   };
   const grantSubscription = async (event: FormEvent) => {
     event.preventDefault();
-    if (!grantUser.trim()) return;
+    if (!grantSelectedUser) return;
     setSaving(true);
     setError("");
     try {
       await api.post("/admin/subscriptions/grant", {
-        profileRef: grantUser.trim(),
+        profileRef: String(
+          grantSelectedUser.profileId ??
+            grantSelectedUser.profile_id ??
+            grantSelectedUser.id ??
+            grantSelectedUser.email ??
+            grantUser.trim(),
+        ),
         plan: grantPlan,
         days: grantDays,
       });
       setGrantOpen(false);
       setGrantUser("");
+      setGrantSelectedUser(null);
+      setGrantCandidates([]);
       refreshList();
     } catch {
       setError("Could not grant Premium. Verify the user and try again.");
@@ -6915,6 +7045,8 @@ function GenericList({ view }: { view: string }) {
                       "ABANDONED",
                       "EXPIRED",
                     ].map((value) => ({ value }))
+                  : ["clinics", "lawyers"].includes(view)
+                    ? ["ACTIVE", "INACTIVE"].map((value) => ({ value }))
                   : statusOptions
                 ).map((option) => {
                   const value = String(option.value ?? "");
@@ -6932,6 +7064,7 @@ function GenericList({ view }: { view: string }) {
               <>
                 <AdminSelect
                   value={filters.country ?? ""}
+                  menuMaxHeight={520}
                   onChange={(event) => {
                     setOffset(0);
                     setFilters((current) => ({
@@ -6945,7 +7078,7 @@ function GenericList({ view }: { view: string }) {
                     const value = String(option.value ?? "");
                     return value ? (
                       <option key={value} value={value}>
-                        {userCountryName(value)}
+                        {countryFilterLabel(option, true)}
                       </option>
                     ) : null;
                   })}
@@ -7036,6 +7169,7 @@ function GenericList({ view }: { view: string }) {
                 </label>
                 <AdminSelect
                   value={filters.country ?? ""}
+                  menuMaxHeight={520}
                   onChange={(event) => {
                     setOffset(0);
                     setFilters((current) => ({
@@ -7049,7 +7183,7 @@ function GenericList({ view }: { view: string }) {
                     const value = String(option.value ?? "");
                     return value ? (
                       <option key={value} value={value}>
-                        {valueOf(option.label ?? value)}
+                        {countryFilterLabel(option)}
                       </option>
                     ) : null;
                   })}
@@ -7123,7 +7257,6 @@ function GenericList({ view }: { view: string }) {
                   <option value="">All Premium</option>
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
-                  <option value="ANNUAL">Annual</option>
                 </AdminSelect>
                 <AdminSelect
                   value={filters.status ?? ""}
@@ -7137,8 +7270,9 @@ function GenericList({ view }: { view: string }) {
                 >
                   <option value="">All Status</option>
                   <option value="ACTIVE">Active</option>
-                  <option value="PENDING">Pending</option>
+                  <option value="CANCELLED">Cancelled</option>
                   <option value="EXPIRED">Expired</option>
+                  <option value="PAST_DUE">Past Due</option>
                 </AdminSelect>
                 <AdminSelect
                   value={filters.source ?? ""}
@@ -7151,9 +7285,10 @@ function GenericList({ view }: { view: string }) {
                   }}
                 >
                   <option value="">All Sources</option>
+                  <option value="MANUAL">Manual</option>
+                  <option value="STRIPE">Stripe</option>
                   <option value="APP_STORE">App Store</option>
                   <option value="PLAY_STORE">Play Store</option>
-                  <option value="MANUAL_REVIEW">Manual</option>
                 </AdminSelect>
               </>
             )}
@@ -7293,7 +7428,7 @@ function GenericList({ view }: { view: string }) {
                                 .map(valueOf)
                                 .join(", ") || "—"
                             ) : column === "partner" ? (
-                              valueOf(row.partnerName ?? row.partner)
+                              clinicPartnerName(row)
                             ) : column === "services" ? (
                               valueOf(row.servicesCount ?? row.services)
                             ) : column === "practiceAreas" ? (
@@ -7320,7 +7455,7 @@ function GenericList({ view }: { view: string }) {
                             ) : view === "subscriptions" &&
                               column === "plan" ? (
                               <span
-                                className={`subscription-plan-badge plan-${String(row.plan ?? subscriptionData(row).plan ?? "unknown").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                                className={`subscription-plan-badge plan-${subscriptionPlan(row).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                               >
                                 {subscriptionPlan(row)}
                               </span>
@@ -7384,7 +7519,7 @@ function GenericList({ view }: { view: string }) {
                                           title="Verified"
                                           aria-label="Verified"
                                         >
-                                          <AdminIcon name="circleCheck" />
+                                          <AdminIcon name="badgeCheck" />
                                         </span>
                                       )}
                                     {view === "verifications" &&
@@ -7394,7 +7529,7 @@ function GenericList({ view }: { view: string }) {
                                           title="Verified"
                                           aria-label="Verified"
                                         >
-                                          <AdminIcon name="circleCheck" />
+                                          <AdminIcon name="badgeCheck" />
                                         </span>
                                       )}
                                     {view === "subscriptions" &&
@@ -7629,24 +7764,82 @@ function GenericList({ view }: { view: string }) {
             <h2>
               <AdminIcon name="crown" /> Grant Premium
             </h2>
-            <label>
-              User
-              <input
-                value={grantUser}
-                onChange={(event) => setGrantUser(event.target.value)}
-                placeholder="Search by email or name..."
-                required
-              />
-            </label>
+            <div className="grant-user-field">
+              <label>User</label>
+              {grantSelectedUser ? (
+                <div className="grant-user-selected">
+                  <span>
+                    <b>{rowName(grantSelectedUser)}</b>
+                    <small>{valueOf(grantSelectedUser.email)}</small>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGrantSelectedUser(null);
+                      setGrantUser("");
+                    }}
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <div className="grant-user-search">
+                  <input
+                    value={grantUser}
+                    onChange={(event) => setGrantUser(event.target.value)}
+                    placeholder="Search by email or name..."
+                    autoComplete="off"
+                    required
+                  />
+                  {(grantSearching || grantUser.trim().length >= 2) && (
+                    <div className="grant-user-results">
+                      {grantSearching ? (
+                        <span className="grant-user-result-state">Searching…</span>
+                      ) : grantCandidates.length ? (
+                        grantCandidates.map((candidate, index) => (
+                          <button
+                            key={String(
+                              candidate.profileId ?? candidate.id ?? index,
+                            )}
+                            type="button"
+                            onClick={() => {
+                              setGrantSelectedUser(candidate);
+                              setGrantCandidates([]);
+                            }}
+                          >
+                            <PersonAvatar
+                              row={candidate}
+                              name={rowName(candidate)}
+                              className="person-avatar grant-user-avatar"
+                            />
+                            <span>
+                              <b>{rowName(candidate)}</b>
+                              <small>{valueOf(candidate.email)}</small>
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <span className="grant-user-result-state">
+                          No users found.
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <label>
               Plan
               <AdminSelect
                 value={grantPlan}
-                onChange={(event) => setGrantPlan(event.target.value)}
+                onChange={(event) => {
+                  const nextPlan = event.target.value;
+                  setGrantPlan(nextPlan);
+                  setGrantDays(nextPlan === "PREMIUM_QUARTERLY" ? 90 : 30);
+                }}
               >
                 <option value="PREMIUM_MONTHLY">Premium Monthly</option>
                 <option value="PREMIUM_QUARTERLY">Premium Quarterly</option>
-                <option value="PREMIUM_ANNUAL">Premium Annual</option>
               </AdminSelect>
             </label>
             <label>
@@ -7665,7 +7858,10 @@ function GenericList({ view }: { view: string }) {
               <button type="button" onClick={() => setGrantOpen(false)}>
                 Cancel
               </button>
-              <button className="primary" disabled={saving}>
+              <button
+                className="primary"
+                disabled={saving || !grantSelectedUser}
+              >
                 {saving ? "Working…" : "Grant Premium"}
               </button>
             </div>
@@ -7896,8 +8092,16 @@ function VerificationDetail() {
   );
   const reasonLabel = (value: unknown) => {
     const record = recordValue(value);
+    const risk = record?.risk ?? record?.code;
     return valueOf(
-      record?.message ?? record?.reason ?? record?.description ?? record?.code ?? value,
+      record?.short_description ??
+        record?.shortDescription ??
+        record?.message ??
+        record?.reason ??
+        record?.description ??
+        record?.long_description ??
+        record?.longDescription ??
+        (risk ? label(String(risk).toLowerCase()) : value),
     );
   };
   const declineReasons = [
@@ -7914,7 +8118,8 @@ function VerificationDetail() {
       : []),
   ]
     .map(reasonLabel)
-    .filter((value) => value !== "—");
+    .filter((value) => value !== "—")
+    .filter((value, index, values) => values.indexOf(value) === index);
   const isProfileVerified = settingBoolean(
     detail.isVerified ?? data.isVerified ?? status === "APPROVED",
   );
@@ -8737,7 +8942,7 @@ function ArticleEditor({
         >
           <EditorIcon name="arrowLeft" />
         </button>
-        <h1>{row.__new ? "New Article" : "Edit Article"}</h1>
+        <h1>Edit Article</h1>
       </header>
       <div className="article-editor-grid">
         <section className="article-editor-main">
@@ -11642,7 +11847,7 @@ function UserDetail() {
               )}{" "}
               {verified && (
                 <span className="verified-mark" title="Verified">
-                  <AdminIcon name="circleCheck" />
+                  <AdminIcon name="badgeCheck" />
                 </span>
               )}{" "}
               <em>{online ? "Online" : "Offline"}</em>
@@ -12040,7 +12245,7 @@ function ClinicDetail() {
           </p>
         </div>
         <p className="clinic-partner">
-          Partner: {valueOf(clinic.partnerName)}
+          Partner: {clinicPartnerName(clinic)}
           {clinic.partnerEmail ? ` (${valueOf(clinic.partnerEmail)})` : ""}
         </p>
         <span
@@ -12129,10 +12334,10 @@ function ClinicDetail() {
                 <input
                   value={valueOf(
                     draft.partnerEmail
-                      ? `${draft.partnerName ?? ""} (${draft.partnerEmail})`
-                      : draft.partnerName === "—"
+                      ? `${clinicPartnerName(draft) === "—" ? "" : clinicPartnerName(draft)} (${draft.partnerEmail})`
+                      : clinicPartnerName(draft) === "—"
                         ? ""
-                        : draft.partnerName,
+                        : clinicPartnerName(draft),
                   )}
                   disabled
                   readOnly
@@ -12405,7 +12610,7 @@ function ClinicDetail() {
                     <b>{rowName(visitor)}</b>
                     {settingBoolean(visitor.verified) && (
                       <span className="verified-mark" title="Verified">
-                        <AdminIcon name="circleCheck" />
+                        <AdminIcon name="badgeCheck" />
                       </span>
                     )}
                     {settingBoolean(visitor.premium) && (
