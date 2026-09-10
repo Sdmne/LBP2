@@ -1,7 +1,7 @@
 // UPDATE (Sep 2026): the earlier "#7c6cf0/#4e9bff purple-blue gradient" this
 // file described was sourced from an outdated style.css.txt reference. The
 // real, current, agreed design lives in the user's actual HTML prototype
-// (the supplied app-prototype-inline.html, built and approved
+// (Claude outputs/app-prototype-inline.html, the one she built and approved
 // screen-by-screen) and it uses a flat pink brand color, NOT a purple
 // gradient - grep that file's <style> block for `--pink`/`--blue` to
 // double check if this ever needs re-deriving. Every existing call site
@@ -35,6 +35,20 @@ export const colors = {
   danger: "#e0433c",
   success: "#0f9d68",
   premium: "#f2b134",
+  // Same gold hue, darkened for use as TEXT on the app's light
+  // pink/lavender gradient backgrounds - #f2b134 itself reads fine on a
+  // solid dark/white chip (that's how ProfileDetailScreen/SubscriptionScreen
+  // use it) but is close to invisible as plain text on GradientBackground
+  // "soft"/"vivid" (~1.5:1 contrast) - this is what Alena flagged as
+  // unreadable on the Verification screen; same fix applied everywhere else
+  // premium is used as a bare text color, not a fill.
+  premiumDark: "#92400e",
+  // colors.muted (#64748b) is fine on white cards but only ~3.7:1 against
+  // the light gradient backgrounds - under the 4.5:1 AA minimum for body
+  // text. Same Verification-screen readability report as premiumDark
+  // above; use this instead of muted for body copy sitting directly on
+  // GradientBackground rather than a white card.
+  mutedOnGradient: "#475569",
   white: "#ffffff",
 };
 
@@ -53,3 +67,11 @@ export const radius = {
   xl: 28,
   pill: 999,
 };
+
+// UPDATE (Sept 2026): MainTabs now renders a floating "pill" tab bar
+// (position:absolute, floating above the bottom edge) instead of docking a
+// flat bar in the layout flow - matches the prototype's .tabbar. Anything
+// that scrolls or absolutely-positions content in a tab screen needs this
+// much clearance at the bottom so the pill doesn't sit on top of it -
+// mirrors the prototype's own .tabbar-spacer{flex:0 0 92px}.
+export const tabBarClearance = 96;

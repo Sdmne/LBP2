@@ -6,7 +6,10 @@ import { ApiError } from "../api/client";
 import type { MemberSettings, NotificationSetting } from "../api/types";
 import { useI18n, SUPPORTED_LOCALES, type Locale } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import GradientBackground from "../components/GradientBackground";
 import type { RootStackParamList } from "../navigation/RootNavigator";
+import { Feather } from "@expo/vector-icons";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Settings">;
 
@@ -31,6 +34,7 @@ const NOTIFICATION_KEYS: Record<string, string> = {
 // new feature, not a design pass).
 export default function SettingsScreen({ navigation }: Props) {
   const { t, locale, setLocale } = useI18n();
+  const insets = useSafeAreaInsets();
   const [settings, setSettings] = useState<MemberSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,18 +112,20 @@ export default function SettingsScreen({ navigation }: Props) {
     );
   }
 
-  const accountLinks: { icon: string; iconBg: string; label: string; onPress: () => void }[] = [
-    { icon: "🖼️", iconBg: colors.tintPink, label: t("settings.photos"), onPress: () => navigation.navigate("Photos") },
-    { icon: "✅", iconBg: colors.tint, label: t("settings.verification"), onPress: () => navigation.navigate("Verification") },
-    { icon: "⭐", iconBg: "#fef3e2", label: t("settings.premium"), onPress: () => navigation.navigate("Subscription") },
-    { icon: "🚫", iconBg: "#f1f5f9", label: t("settings.blockedUsers"), onPress: () => navigation.navigate("BlockedUsers") },
-    { icon: "🔖", iconBg: colors.tint, label: t("settings.savedListings"), onPress: () => navigation.navigate("Favourites") },
-    { icon: "💞", iconBg: colors.tintPink, label: t("settings.compatibilityProfile"), onPress: () => navigation.navigate("CompatibilityAnswers") },
-    { icon: "🗑️", iconBg: "#feeceb", label: t("settings.deleteAccount"), onPress: () => navigation.navigate("DeleteAccount") },
+  const accountLinks: { icon: keyof typeof Feather.glyphMap; label: string; onPress: () => void }[] = [
+    { icon: "image", label: t("settings.photos"), onPress: () => navigation.navigate("Photos") },
+    { icon: "check-circle", label: t("settings.verification"), onPress: () => navigation.navigate("Verification") },
+    { icon: "star", label: t("settings.premium"), onPress: () => navigation.navigate("Subscription") },
+    { icon: "slash", label: t("settings.blockedUsers"), onPress: () => navigation.navigate("BlockedUsers") },
+    { icon: "bookmark", label: t("settings.savedListings"), onPress: () => navigation.navigate("Favourites") },
+    { icon: "heart", label: t("settings.compatibilityProfile"), onPress: () => navigation.navigate("CompatibilityAnswers") },
+    { icon: "lock", label: t("settings.privacy"), onPress: () => navigation.navigate("Privacy") },
+    { icon: "trash-2", label: t("settings.deleteAccount"), onPress: () => navigation.navigate("DeleteAccount") },
   ];
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <GradientBackground variant="soft">
+    <ScrollView contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + insets.bottom }]}>
       <Text style={styles.sectionTitle}>{t("settings.discovery")}</Text>
       <View style={styles.card}>
         <View style={styles.row}>
@@ -163,22 +169,34 @@ export default function SettingsScreen({ navigation }: Props) {
             style={[styles.menuRow, index < accountLinks.length - 1 && styles.rowDivider]}
             onPress={link.onPress}
           >
-            <View style={[styles.iconWrap, { backgroundColor: link.iconBg }]}>
-              <Text style={styles.iconWrapText}>{link.icon}</Text>
+            <View style={styles.iconWrap}>
+              <Feather name={link.icon} size={16} color={colors.pink} />
             </View>
             <Text style={styles.linkText}>{link.label}</Text>
             <Text style={styles.chevron}>›</Text>
           </Pressable>
         ))}
       </View>
+
+      <Text style={styles.sectionTitle}>{t("settings.legal")}</Text>
+      <View style={styles.card}>
+        <Pressable style={styles.menuRow} onPress={() => navigation.navigate("Terms")}>
+          <View style={styles.iconWrap}>
+            <Feather name="file-text" size={16} color={colors.pink} />
+          </View>
+          <Text style={styles.linkText}>{t("settings.termsPrivacy")}</Text>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
+      </View>
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   errorText: { color: colors.danger },
-  container: { padding: spacing.md, paddingBottom: spacing.xl, backgroundColor: colors.card },
+  container: { padding: spacing.md, paddingBottom: spacing.xl, backgroundColor: "transparent" },
   sectionTitle: {
     fontSize: 11.5,
     fontWeight: "700",
@@ -223,8 +241,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 12,
   },
-  iconWrap: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
-  iconWrapText: { fontSize: 15 },
+  iconWrap: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.tintPink },
   linkText: { flex: 1, fontSize: 14.5, color: colors.ink },
   chevron: { fontSize: 18, color: colors.muted },
 });

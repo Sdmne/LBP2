@@ -5,9 +5,11 @@ import { ApiError } from "../api/client";
 import type { BlockedProfile } from "../api/types";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function BlockedUsersScreen() {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const [blocked, setBlocked] = useState<BlockedProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export default function BlockedUsersScreen() {
     <FlatList
       data={blocked}
       keyExtractor={(item) => String(item.blockId)}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingBottom: spacing.md + insets.bottom }]}
       ListEmptyComponent={
         <View style={styles.center}>
           <Text style={styles.emptyText}>{t("blockedUsers.empty")}</Text>

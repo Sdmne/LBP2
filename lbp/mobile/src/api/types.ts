@@ -134,6 +134,10 @@ export type ConversationSummary = {
   otherLastSeenAt: string | null;
   lastMessage: string | null;
   lastMessageMediaUrl: string | null;
+  // Real, already computed server-side (conversation_scope_sql() in
+  // main.py counts messages from the other person with read_at IS NULL) -
+  // just wasn't exposed on this type before.
+  unreadCount: number;
   [key: string]: unknown;
 };
 
@@ -196,11 +200,18 @@ export type VerificationStatus = {
 };
 
 // GET /api/member/subscription - member_subscription_status() in main.py.
+// UPDATE (Sept 2026): real Family-Builder-vs-Pro tiers - `tier` is the
+// profile's actual feature tier (EXPLORE/BUILDER/PRO, from profile_tier()),
+// independent of `isPremium` (kept as-is: true for BUILDER or PRO).
+export type SubscriptionTier = "EXPLORE" | "BUILDER" | "PRO";
+
 export type SubscriptionStatus = {
   isVerified: boolean;
   isPremium: boolean;
+  tier: SubscriptionTier;
   status: "VERIFICATION_REQUIRED" | "NOT_STARTED" | "PENDING" | "ACTIVE" | string;
-  request: { id: number; plan: string; createdAt: string; updatedAt: string } | null;
+  limits: { freeLikesPerDay: number; premiumLikesPerDay: number };
+  request: { id: number; plan: string; tier: string | null; createdAt: string; updatedAt: string } | null;
 };
 
 // GET /api/member/blocks - member_blocks() in main.py, via

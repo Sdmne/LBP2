@@ -8,15 +8,11 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import {
-  QUIZ_QUESTIONS,
-  QUIZ_SECTIONS,
-  QUIZ_STRENGTH_COPY,
-  QUIZ_DISCUSS_COPY,
-  computeQuizResults,
-  quizResultsAsText,
-} from "../data/resources";
+import { getQuizContent, computeQuizResults, quizResultsAsText } from "../data/resources";
+import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import GradientBackground from "../components/GradientBackground";
 
 type Step = "intro" | number | "results";
 
@@ -28,21 +24,28 @@ type Step = "intro" | number | "results";
 // The web version also offers a "Print" button; there's no direct RN
 // equivalent, so "Share results" (native OS share sheet) covers both saving
 // and printing - iOS's share sheet has its own Print option built in.
+//
+// Content (questions/sections/copy) is locale-aware via getQuizContent() -
+// see the note at the top of data/resources.ts on why ru/es have original
+// translations rather than ported website copy.
 type Props = NativeStackScreenProps<RootStackParamList, "CompatibilityQuiz">;
 
 export default function CompatibilityQuizScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
+  const { t, locale } = useI18n();
+  const content = getQuizContent(locale);
   const [step, setStep] = useState<Step>("intro");
-  const [answers, setAnswers] = useState<(string | null)[]>(() => QUIZ_QUESTIONS.map(() => null));
+  const [answers, setAnswers] = useState<(string | null)[]>(() => content.questions.map(() => null));
   const [sharing, setSharing] = useState(false);
-  const totalQuestions = QUIZ_QUESTIONS.length;
+  const totalQuestions = content.questions.length;
 
   function setAnswer(index: number, value: string) {
     setAnswers((prev) => prev.map((a, i) => (i === index ? value : a)));
   }
 
   async function handleShareResults() {
-    const results = computeQuizResults(answers);
-    const text = quizResultsAsText(answers, results);
+    const results = computeQuizResults(answers, content);
+    const text = quizResultsAsText(answers, results, content);
     setSharing(true);
     try {
       const uri = `${FileSystem.cacheDirectory}LetsBeParents-Compatibility-Quiz-Results.txt`;
@@ -50,10 +53,10 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri);
       } else {
-        Alert.alert("Results saved", `Saved to ${uri}`);
+        Alert.alert(t("quiz.results.savedTitle"), t("quiz.results.savedBody", { uri }));
       }
     } catch {
-      Alert.alert("Couldn't share your results", "Please try again.");
+      Alert.alert(t("quiz.results.shareErrorTitle"), t("quiz.results.shareErrorBody"));
     } finally {
       setSharing(false);
     }
@@ -61,73 +64,68 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
 
   if (step === "intro") {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <Text style={styles.introTitle}>Could you see yourself parenting well with this person?</Text>
-        <Text style={styles.introBody}>
-          This quiz won't tell you whether you should co-parent. It helps you see where expectations align - and
-          what's worth discussing further.
-        </Text>
+      <GradientBackground variant="soft">
+      <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}>
+        <Text style={styles.introTitle}>{t("quiz.intro.title")}</Text>
+        <Text style={styles.introBody}>{t("quiz.intro.body")}</Text>
         <View style={styles.introBox}>
-          <Text style={styles.introBoxHeading}>Before you start</Text>
-          <Text style={styles.introBoxItem}>• {totalQuestions} questions</Text>
-          <Text style={styles.introBoxItem}>• About 5 minutes</Text>
-          <Text style={styles.introBoxItem}>• You can go back and edit answers</Text>
-          <Text style={styles.introBoxItem}>• Free-text answers are optional</Text>
+          <Text style={styles.introBoxHeading}>{t("quiz.intro.beforeYouStart")}</Text>
+          <Text style={styles.introBoxItem}>• {t("quiz.intro.questionsCount", { count: totalQuestions })}</Text>
+          <Text style={styles.introBoxItem}>• {t("quiz.intro.duration")}</Text>
+          <Text style={styles.introBoxItem}>• {t("quiz.intro.canGoBack")}</Text>
+          <Text style={styles.introBoxItem}>• {t("quiz.intro.freeTextOptional")}</Text>
         </View>
         <View style={styles.introBox}>
-          <Text style={styles.introBoxHeading}>Privacy</Text>
-          <Text style={styles.introBoxItem}>
-            Your answers stay on this device and are never shared automatically.
-          </Text>
+          <Text style={styles.introBoxHeading}>{t("quiz.intro.privacyHeading")}</Text>
+          <Text style={styles.introBoxItem}>{t("quiz.intro.privacyBody")}</Text>
         </View>
         <Pressable style={styles.primaryButton} onPress={() => setStep(0)}>
-          <Text style={styles.primaryButtonText}>Start the quiz →</Text>
+          <Text style={styles.primaryButtonText}>{t("quiz.intro.startButton")}</Text>
         </Pressable>
       </ScrollView>
+      </GradientBackground>
     );
   }
 
   if (step === "results") {
-    const results = computeQuizResults(answers);
+    const results = computeQuizResults(answers, content);
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        <Text style={styles.resultsTitle}>What your answers suggest</Text>
-        <Text style={styles.resultsSub}>A reflection of your priorities - not a verdict.</Text>
+      <GradientBackground variant="soft">
+      <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}>
+        <Text style={styles.resultsTitle}>{t("quiz.results.title")}</Text>
+        <Text style={styles.resultsSub}>{t("quiz.results.subtitle")}</Text>
 
         {results.strongest.length > 0 ? (
           <View style={styles.resultGroup}>
-            <Text style={styles.resultGroupHeading}>Your strongest areas</Text>
+            <Text style={styles.resultGroupHeading}>{t("quiz.results.strongestHeading")}</Text>
             {results.strongest.map((s) => (
               <View key={s} style={styles.resultCard}>
-                <Text style={styles.resultCardTitle}>{QUIZ_STRENGTH_COPY[s].title}</Text>
-                <Text style={styles.resultCardBody}>{QUIZ_STRENGTH_COPY[s].copy}</Text>
+                <Text style={styles.resultCardTitle}>{content.strengthCopy[s].title}</Text>
+                <Text style={styles.resultCardBody}>{content.strengthCopy[s].copy}</Text>
               </View>
             ))}
           </View>
         ) : null}
 
         <View style={styles.resultGroup}>
-          <Text style={styles.resultGroupHeading}>Worth discussing</Text>
+          <Text style={styles.resultGroupHeading}>{t("quiz.results.discussHeading")}</Text>
           {results.discuss.length > 0 ? (
             results.discuss.map((s) => (
               <View key={s} style={styles.resultCard}>
-                <Text style={styles.resultCardTitle}>{QUIZ_DISCUSS_COPY[s].title}</Text>
-                <Text style={styles.resultCardBody}>{QUIZ_DISCUSS_COPY[s].copy}</Text>
+                <Text style={styles.resultCardTitle}>{content.discussCopy[s].title}</Text>
+                <Text style={styles.resultCardBody}>{content.discussCopy[s].copy}</Text>
               </View>
             ))
           ) : (
             <View style={styles.resultCard}>
-              <Text style={styles.resultCardBody}>
-                You answered fairly decisively across the board - that's a good sign, but it's still worth having
-                these conversations out loud with a potential co-parent, not just with yourself.
-              </Text>
+              <Text style={styles.resultCardBody}>{t("quiz.results.discussEmptyBody")}</Text>
             </View>
           )}
         </View>
 
         {results.prompts.length > 0 ? (
           <View style={styles.resultGroup}>
-            <Text style={styles.resultGroupHeading}>Questions to explore together</Text>
+            <Text style={styles.resultGroupHeading}>{t("quiz.results.promptsHeading")}</Text>
             {results.prompts.map((prompt) => (
               <Text key={prompt} style={styles.promptItem}>
                 → {prompt}
@@ -137,28 +135,29 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
         ) : null}
 
         <Pressable style={styles.primaryButton} onPress={handleShareResults} disabled={sharing}>
-          {sharing ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>Share results</Text>}
+          {sharing ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{t("quiz.results.shareButton")}</Text>}
         </Pressable>
-        <Text style={styles.noScore}>No compatibility %</Text>
+        <Text style={styles.noScore}>{t("quiz.results.noScore")}</Text>
 
         <View style={styles.nextSteps}>
           <Pressable
             onPress={() => navigation.replace("ResourceTool", { categorySlug: "co-parenting", toolSlug: "questions-to-ask" })}
           >
-            <Text style={styles.nextStepLink}>Questions to Ask a Potential Co-Parent →</Text>
+            <Text style={styles.nextStepLink}>{t("quiz.results.nextStepQuestions")}</Text>
           </Pressable>
           <Pressable
             onPress={() => navigation.replace("ResourceTool", { categorySlug: "co-parenting", toolSlug: "planning-template" })}
           >
-            <Text style={styles.nextStepLink}>Create a Co-Parenting Plan →</Text>
+            <Text style={styles.nextStepLink}>{t("quiz.results.nextStepPlan")}</Text>
           </Pressable>
         </View>
       </ScrollView>
+      </GradientBackground>
     );
   }
 
   const index = step;
-  const question = QUIZ_QUESTIONS[index];
+  const question = content.questions[index];
   const answer = answers[index];
   const canAdvance = question.type === "text" || Boolean(answer);
   const isLast = index === totalQuestions - 1;
@@ -173,18 +172,19 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <GradientBackground variant="soft">
+      <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}>
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${((index + 1) / totalQuestions) * 100}%` }]} />
       </View>
       <Text style={styles.progressLabel}>
-        Section {question.section} of 8 - {QUIZ_SECTIONS[question.section - 1]}
+        {t("quiz.question.progressLabel", { n: question.section, section: content.sections[question.section - 1] })}
       </Text>
       <Text style={styles.questionPrompt}>{question.prompt}</Text>
 
       {question.type === "select" ? (
         <>
-          <Text style={styles.questionHint}>Choose the answer that feels closest to you.</Text>
+          <Text style={styles.questionHint}>{t("quiz.question.hintSelect")}</Text>
           <View style={styles.optionsList}>
             {question.options?.map((option) => (
               <Pressable
@@ -199,7 +199,7 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
         </>
       ) : (
         <>
-          <Text style={styles.questionHint}>Optional - write as much or as little as you like.</Text>
+          <Text style={styles.questionHint}>{t("quiz.question.hintText")}</Text>
           <TextInput
             style={styles.textArea}
             value={answer ?? ""}
@@ -213,19 +213,20 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
 
       <View style={styles.navRow}>
         <Pressable style={styles.backLink} onPress={goBack}>
-          <Text style={styles.backLinkText}>Back</Text>
+          <Text style={styles.backLinkText}>{t("quiz.question.back")}</Text>
         </Pressable>
         <Pressable style={[styles.primaryButton, styles.navPrimaryButton, !canAdvance && styles.disabledButton]} onPress={goNext} disabled={!canAdvance}>
-          <Text style={styles.primaryButtonText}>{isLast ? "See results →" : "Next →"}</Text>
+          <Text style={styles.primaryButtonText}>{isLast ? t("quiz.question.seeResults") : t("quiz.question.next")}</Text>
         </Pressable>
       </View>
-      <Text style={styles.navNote}>Answers can be changed before you reach your results.</Text>
+      <Text style={styles.navNote}>{t("quiz.question.note")}</Text>
     </ScrollView>
+      </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: "transparent" },
   content: { padding: spacing.lg, paddingBottom: spacing.xl },
   introTitle: { fontSize: 22, fontWeight: "800", color: colors.text },
   introBody: { fontSize: 14, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 20 },

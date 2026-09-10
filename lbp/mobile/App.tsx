@@ -4,11 +4,12 @@
 // place before other modules touch it. Needed for the swipeable Browse
 // card stack in CatalogScreen.tsx.
 import "react-native-gesture-handler";
-import React from "react";
+import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import Constants, { ExecutionEnvironment } from "expo-constants";
+import * as Updates from "expo-updates";
 import { AuthProvider } from "./src/context/AuthContext";
 import { CallProvider } from "./src/context/CallContext";
 import { I18nProvider } from "./src/i18n/I18nContext";
@@ -56,6 +57,33 @@ const CallOverlay: React.ComponentType = isExpoGo
     require("./src/screens/CallOverlay").default;
 
 export default function App() {
+  // Alena repeatedly reported "I ran eas update but the screens don't
+  // change" - expo-updates' default behavior only *checks* for a new
+  // update in the background on cold start; it still launches with
+  // whichever bundle was already installed, and only actually switches to
+  // the new one on the *next* full close+reopen. Nothing here was broken,
+  // but requiring two relaunches after every publish is an easy thing to
+  // miss and looks exactly like "nothing changed". Check for and apply any
+  // pending update right on launch instead, so one relaunch after
+  // `eas update` is enough. Updates.isEnabled is false in Expo Go/dev
+  // builds, matching the isExpoGo guard already used below - a no-op
+  // there, and any failure (offline, update server unreachable) just
+  // leaves the app running its currently installed bundle.
+  useEffect(() => {
+    if (!Updates.isEnabled) return;
+    (async () => {
+      try {
+        const check = await Updates.checkForUpdateAsync();
+        if (check.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch {
+        // Offline or update server unreachable - keep running as-is.
+      }
+    })();
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

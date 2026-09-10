@@ -1,3 +1,5 @@
+import { colors } from "../theme";
+
 // Ported directly from lbp/frontend/src/ui.tsx (RESOURCES_CATEGORIES,
 // QUIZ_SECTIONS, QUIZ_QUESTIONS, QUIZ_STRENGTH_COPY, QUIZ_DISCUSS_COPY,
 // QUIZ_PROMPTS, computeQuizResults - traced directly from the real file,
@@ -35,6 +37,17 @@ export type ResourceCategoryData = {
   icon: "coparenting" | "fertility" | "planning";
   disclaimer?: string;
   tools: ResourceTool[];
+};
+
+// Per-category tint, shared by ResourcesScreen (category list row icons)
+// and ResourceCategoryScreen (per-category header/tool-card accent) - the
+// prototype's blue/pink/green icon-wrap colors for these three categories,
+// moved here from ResourcesScreen.tsx so both screens read the exact same
+// mapping instead of two copies that could drift.
+export const CATEGORY_ICON: Record<string, { emoji: string; bg: string; accent: string }> = {
+  coparenting: { emoji: "🤝", bg: colors.tint, accent: colors.blue },
+  fertility: { emoji: "🧬", bg: colors.tintPink, accent: colors.pink },
+  planning: { emoji: "📄", bg: "#e6f7ef", accent: colors.success },
 };
 
 export const RESOURCES_CATEGORIES: ResourceCategoryData[] = [
@@ -241,10 +254,29 @@ export const RESOURCES_CATEGORIES: ResourceCategoryData[] = [
 
 // --- Co-Parenting Compatibility Quiz -----------------------------------
 // Ported from ui.tsx's QUIZ_SECTIONS / QUIZ_QUESTIONS / QUIZ_STRENGTH_COPY /
-// QUIZ_DISCUSS_COPY / QUIZ_PROMPTS / computeQuizResults, verbatim. Same MVP
-// scope as the website: 26 questions / 8 sections, a reflection tool (no
-// score, no pass/fail), single-person only - no backend call anywhere in
-// this feature, matching the site exactly.
+// QUIZ_DISCUSS_COPY / QUIZ_PROMPTS / computeQuizResults, verbatim for the
+// English content. Same MVP scope as the website: 26 questions / 8
+// sections, a reflection tool (no score, no pass/fail), single-person only
+// - no backend call anywhere in this feature, matching the site exactly.
+//
+// UPDATE (Sept 2026): the website itself has no ru/es copy for this quiz
+// yet (checked frontend/src/ui.tsx directly - QUIZ_QUESTIONS etc. there are
+// English-only, same as here), so there was nothing to port for those two
+// locales. Alena asked for the quiz itself to be translated regardless of
+// what the site currently has, so QUIZ_CONTENT_RU/ES below are original
+// translations of the same 26 questions/copy, not ported from anywhere -
+// if the website later adds its own ru/es quiz copy, reconcile against
+// that rather than assuming this translation is the canonical one.
+
+export type QuizLocale = "en" | "ru" | "es";
+
+export type QuizContent = {
+  sections: string[];
+  questions: QuizQuestion[];
+  strengthCopy: Record<number, { title: string; copy: string }>;
+  discussCopy: Record<number, { title: string; copy: string }>;
+  prompts: Record<number, string[]>;
+};
 
 export const QUIZ_SECTIONS = ["Why parent?", "Parenting", "Everyday life", "Money", "Communication", "Boundaries", "Future", "Important questions"];
 
@@ -315,11 +347,153 @@ export const QUIZ_PROMPTS: Record<number, string[]> = {
   8: ["What would be a dealbreaker for each of you?", "Is there anything you're hesitant to bring up right now?"],
 };
 
+const QUIZ_CONTENT_EN: QuizContent = {
+  sections: QUIZ_SECTIONS,
+  questions: QUIZ_QUESTIONS,
+  strengthCopy: QUIZ_STRENGTH_COPY,
+  discussCopy: QUIZ_DISCUSS_COPY,
+  prompts: QUIZ_PROMPTS,
+};
+
+const QUIZ_CONTENT_RU: QuizContent = {
+  sections: ["Зачем становиться родителем?", "Воспитание", "Повседневная жизнь", "Деньги", "Общение", "Границы", "Будущее", "Важные вопросы"],
+  questions: [
+    { section: 1, type: "select", prompt: "Почему вы хотите стать родителем?", options: ["Я всегда хотел(а) воспитывать ребёнка", "Я хочу создать семью, пока не стало слишком поздно", "Я хочу дать ребёнку любящий дом, каким бы он ни был", "Честно говоря, я всё ещё разбираюсь, почему"] },
+    { section: 1, type: "select", prompt: "Как бы вы описали родителя, которым надеетесь стать?", options: ["Активно вовлечённый(ая) во все повседневные детали", "Присутствующий(ая), но дающий(ая) ребёнку самостоятельность", "Ориентированный(ая) на структуру и режим", "Пока ещё не определился(лась)"] },
+    { section: 1, type: "select", prompt: "Что для вас сейчас важнее всего в том, чтобы стать родителем?", options: ["Время — я не хочу ждать намного дольше", "Найти подходящую ситуацию, когда бы это ни случилось", "Сделать это так, чтобы чувствовать стабильность и готовность", "Пока не уверен(а), я изучаю свои варианты"] },
+    { section: 2, type: "select", prompt: "Как бы вы в идеале хотели делить обязанности по воспитанию?", options: ["Максимально поровну", "В зависимости от графика", "В зависимости от дохода", "Решать вместе, по ситуации", "Пока не уверен(а)"] },
+    { section: 2, type: "select", prompt: "Как вы относитесь к дисциплине?", options: ["Чёткие правила и последовательные последствия", "Мягкое руководство, обсуждение ситуаций", "Зависит от ситуации", "Это то, о чём нам нужно договориться вместе"] },
+    { section: 2, type: "select", prompt: "Насколько вовлечённым вы хотите видеть второго родителя в повседневных решениях?", options: ["Вовлечён(а) во всё, всегда", "Вовлечён(а) в важные решения, независимость в мелочах", "В основном независимо, с редкими сверками", "Я пока ещё не разобрался(лась) с этим"] },
+    { section: 2, type: "select", prompt: "Как вы относитесь к участию расширенной семьи в воспитании?", options: ["Активное участие — бабушки, дедушки и родные рядом", "Иногда участвуют, но границы определяем мы", "Минимальное участие, мы бы растили ребёнка в основном сами", "Полностью зависит от семьи, мне нужно это обдумать"] },
+    { section: 3, type: "select", prompt: "Где бы вы хотели, чтобы рос ваш ребёнок?", options: ["Там, где я живу сейчас", "Открыт(а) к переезду куда-то ещё", "Рядом с семьёй, где бы она ни была", "Ещё не думал(а) об этом"] },
+    { section: 3, type: "select", prompt: "Как бы вы делили повседневные дела — отвозить в школу, готовить еду, укладывать спать?", options: ["По умолчанию поровну", "В зависимости от того, у кого какой график в этот день", "Один(а) берёт на себя основное, другой(ая) поддерживает", "Разберёмся по ходу дела"] },
+    { section: 3, type: "select", prompt: "Насколько гибким вы хотите видеть ваш повседневный родительский график?", options: ["Чёткий, последовательный режим — то, что мне подходит лучше всего", "Мне нравится гибкость и адаптация по необходимости", "Немного того и другого", "Пока не уверен(а)"] },
+    { section: 4, type: "select", prompt: "Как вы относитесь к разделению расходов на ребёнка?", options: ["Поровну, независимо от того, кто сколько зарабатывает", "Пропорционально доходу каждого", "Один(а) из нас берёт на себя больше финансово", "Нам нужно было бы это обсудить"] },
+    { section: 4, type: "select", prompt: "Как бы вы справились с крупным непредвиденным расходом на ребёнка?", options: ["Разделили бы сразу, без лишних обсуждений", "Сначала обсудили бы и решили вместе", "Пока покрывает тот, у кого есть возможность", "Честно говоря, пока не уверен(а)"] },
+    { section: 4, type: "select", prompt: "Насколько вам комфортно обсуждать деньги с со-родителем до того, как вы возьмёте на себя обязательства?", options: ["Очень комфортно — я бы хотел(а) прояснить это заранее", "Комфортно, но я бы подходил(а) к этому постепенно", "Немного неловко, но понимаю, что это необходимо", "Обычно я избегаю разговоров о деньгах"] },
+    { section: 5, type: "select", prompt: "Как часто вы ожидаете общаться с со-родителем по поводу ребёнка?", options: ["Ежедневные новости, даже по мелочам", "Регулярно, по всему, что имеет значение", "Только когда нужно принять решение", "Пока не уверен(а), что реалистично"] },
+    { section: 5, type: "select", prompt: "Как вы предпочитаете разрешать разногласия?", options: ["Обсудить сразу же, лично, если возможно", "Взять время подумать, а потом поговорить", "Сначала записать мысли, чтобы выразиться яснее", "Обычно я избегаю конфликтов, когда это возможно"] },
+    { section: 5, type: "select", prompt: "Как вы относитесь к тому, что вам могут задавать сложные вопросы на раннем этапе?", options: ["Я предпочитаю знать всё сразу", "Мне это нормально, как только появится немного доверия", "Я бы предпочёл(ла) постепенно переходить к более глубоким темам", "Это вызывает у меня лёгкий дискомфорт"] },
+    { section: 6, type: "select", prompt: "Как вы относитесь к тому, что со-родитель встречается с другими людьми?", options: ["Совершенно нормально, если это делается с уважением", "Нормально, но я бы хотел(а) установить некоторые границы", "Я бы хотел(а) обсудить это заранее", "Я пока не продумал(а) это"] },
+    { section: 6, type: "select", prompt: "Какой личной информацией вам комфортно делиться на раннем этапе разговора о со-родительстве?", options: ["Практически всем, что имеет значение", "Основным, а дальше — по мере роста доверия", "Только тем, что напрямую связано с воспитанием", "По природе я довольно закрытый(ая) человек"] },
+    { section: 6, type: "select", prompt: "Как вы относитесь к тому, что со-родитель устанавливает ограничения на степень вашего участия?", options: ["Совершенно справедливо, каждый должен иметь право устанавливать границы", "Зависит от того, что это за ограничение", "Я бы всегда хотел(а) быть максимально вовлечён(а)", "Пока не задумывался(лась) об этом"] },
+    { section: 7, type: "select", prompt: "Как вы представляете свою семью через пять лет?", options: ["Чёткий, стабильный уклад, к которому мы пришли", "Всё ещё адаптируемся по мере изменений", "Во многом зависит от того, куда нас приведёт жизнь", "Честно говоря, я пока это не представлял(а)"] },
+    { section: 7, type: "select", prompt: "Что произойдёт, если однажды один из вас захочет переехать?", options: ["Нам нужно было бы договориться об этом заранее", "Мы бы разобрались с этим вместе, когда возникнет такая необходимость", "Я бы хотел(а) сохранить гибкость на случай переезда", "Не уверен(а), как бы я с этим справился(лась)"] },
+    { section: 7, type: "select", prompt: "Как вы относитесь к тому, что договорённости будут меняться по мере взросления ребёнка?", options: ["Я ожидаю, что всё будет меняться, и мне это комфортно", "Я бы хотел(а) сохранять максимальную стабильность", "Немного и того, и другого, в зависимости от ситуации", "Пока не заглядывал(а) так далеко вперёд"] },
+    { section: 8, type: "select", prompt: "Что заставило бы вас отказаться от продолжения отношений с потенциальным со-родителем?", options: ["Несовпадение базовых ценностей в вопросах воспитания", "Ощущение давления или спешки в принятии решений", "Сомнения в надёжности или готовности довести дело до конца", "Я бы просто это почувствовал(а)"] },
+    { section: 8, type: "text", prompt: "Что вы больше всего хотели бы, чтобы потенциальный со-родитель понял о вас, прежде чем вы продолжите вместе?" },
+    { section: 8, type: "text", prompt: "Какой вопрос вы боитесь задать, но знаете, что должны?" },
+    { section: 8, type: "text", prompt: "Есть ли что-то ещё о вашей ситуации или ожиданиях, чем вы хотели бы поделиться?" },
+  ],
+  strengthCopy: {
+    1: { title: "Зачем становиться родителем?", copy: "Похоже, вы чётко понимаете, почему хотите стать родителем — эту ясность стоит озвучить вслух в самом начале разговора." },
+    2: { title: "Воспитание", copy: "Похоже, у вас уже сложилось чёткое представление о том, как вы хотели бы совместно воспитывать ребёнка изо дня в день." },
+    3: { title: "Повседневная жизнь", copy: "У вас довольно чёткое представление о том, как могла бы выглядеть повседневная жизнь и режим." },
+    4: { title: "Деньги", copy: "Похоже, вам комфортно и вы уверенно представляете, как будут решаться финансовые вопросы." },
+    5: { title: "Общение", copy: "Похоже, вам комфортно обсуждать сложные темы и искать решения вместе." },
+    6: { title: "Границы", copy: "У вас есть чёткое понимание того, какие границы для вас важны." },
+    7: { title: "Будущее", copy: "Похоже, вы уже продумали, как всё может измениться по мере роста вашей семьи." },
+    8: { title: "Важные вопросы", copy: "У вас есть чёткое понимание того, что вам подходит, а что нет." },
+  },
+  discussCopy: {
+    1: { title: "Зачем становиться родителем?", copy: "Ваши ответы говорят о том, что причины стать родителем у вас пока формируются — стоит облечь их в слова, прежде чем двигаться дальше." },
+    2: { title: "Воспитание", copy: "То, как на самом деле будут распределяться повседневные обязанности по воспитанию, — тема, которую стоит обсудить глубже." },
+    3: { title: "Повседневная жизнь", copy: "Условия проживания и повседневный распорядок — судя по вашим ответам, это область, которую стоит обсудить подробнее." },
+    4: { title: "Деньги", copy: "Вопрос о том, как будут делиться расходы, выглядит менее определённым для вас — его стоит поднять заранее, а не постфактум." },
+    5: { title: "Общение", copy: "То, как вы будете общаться изо дня в день, особенно во время разногласий, стоит обсудить явно и открыто." },
+    6: { title: "Границы", copy: "Ваши границы пока не до конца определены — стоит прояснить их сначала для себя, а затем с потенциальным со-родителем." },
+    7: { title: "Будущее", copy: "То, как всё может измениться с годами, пока остаётся для вас неопределённым — стоит возвращаться к этому по мере развития отношений." },
+    8: { title: "Важные вопросы", copy: "Некоторые из более сложных вопросов пока остаются для вас открытыми — стоит подумать над ними, прежде чем брать на себя обязательства." },
+  },
+  prompts: {
+    1: ["Почему вы оба рассматриваете это именно сейчас?", "Что заставило бы вас оглянуться назад и почувствовать, что решение было неверным?"],
+    2: ["Как вы будете делить решения по образованию, здравоохранению и дисциплине?", "Что произойдёт, если вы не согласитесь друг с другом по поводу решения о воспитании?"],
+    3: ["Где бы каждый из вас в идеале хотел жить и насколько близко друг к другу?", "Как на самом деле будет делиться обычная неделя?"],
+    4: ["Как вы будете делить расходы, если один из вас зарабатывает значительно больше?", "Кто покроет крупный незапланированный расход?"],
+    5: ["Как часто вы ожидаете быть на связи друг с другом?", "Как, по мнению каждого из вас, выглядит справедливый способ не соглашаться?"],
+    6: ["Что бы вы хотели знать об отношениях друг друга с другими людьми?", "Какую информацию каждый из вас считает личной?"],
+    7: ["Что бы вы сделали, если бы один из вас захотел переехать?", "Как вы представляете развитие этой договорённости через 10+ лет?"],
+    8: ["Что стало бы для каждого из вас решающим фактором отказа?", "Есть ли что-то, что вам сейчас неловко поднять?"],
+  },
+};
+
+const QUIZ_CONTENT_ES: QuizContent = {
+  sections: ["¿Por qué ser padre/madre?", "Crianza", "Vida cotidiana", "Dinero", "Comunicación", "Límites", "Futuro", "Preguntas importantes"],
+  questions: [
+    { section: 1, type: "select", prompt: "¿Por qué quieres ser padre/madre?", options: ["Siempre he querido criar a un hijo/a", "Quiero formar una familia antes de que sea demasiado tarde para mí", "Quiero darle a un niño/a un hogar lleno de amor, sea como sea", "Sinceramente, todavía estoy explorando por qué"] },
+    { section: 1, type: "select", prompt: "¿Cómo describirías al padre o madre que esperas ser?", options: ["Muy involucrado/a en los detalles del día a día", "Presente, pero dando independencia a mi hijo/a", "Guiado/a por la estructura y la rutina", "Todavía lo estoy descubriendo"] },
+    { section: 1, type: "select", prompt: "¿Qué es lo más importante para ti ahora mismo respecto a ser padre/madre?", options: ["El momento: no quiero esperar mucho más", "Encontrar la situación adecuada, cuando sea que llegue", "Hacerlo de una manera que se sienta estable y preparada", "Aún no estoy seguro/a, estoy explorando mis opciones"] },
+    { section: 2, type: "select", prompt: "¿Cómo te gustaría idealmente repartir las responsabilidades de crianza?", options: ["Lo más equitativamente posible", "Según los horarios", "Según los ingresos", "Decidirlo juntos", "Aún no estoy seguro/a"] },
+    { section: 2, type: "select", prompt: "¿Cuál es tu opinión sobre la disciplina?", options: ["Reglas claras y consecuencias consistentes", "Orientación suave, hablando las cosas", "Depende de la situación", "Es algo que tendríamos que acordar juntos"] },
+    { section: 2, type: "select", prompt: "¿Qué tan involucrado/a quieres que esté el otro padre o madre en las decisiones del día a día?", options: ["Involucrado/a en todo, siempre", "Involucrado/a en las decisiones grandes, independiente en las pequeñas", "Mayormente independiente, consultando de vez en cuando", "Todavía lo estoy pensando"] },
+    { section: 2, type: "select", prompt: "¿Qué opinas sobre la participación de la familia extendida en la crianza?", options: ["Muy involucrada: abuelos y familia cerca", "Involucrada a veces, pero nosotros ponemos los límites", "Participación mínima, criaríamos al niño/a mayormente nosotros", "Depende totalmente de la familia, tendría que pensarlo"] },
+    { section: 3, type: "select", prompt: "¿Dónde te gustaría idealmente que creciera tu hijo/a?", options: ["Cerca de donde vivo ahora", "Abierto/a a mudarme a un lugar nuevo", "Cerca de la familia, esté donde esté", "Todavía no lo he pensado"] },
+    { section: 3, type: "select", prompt: "¿Cómo dividirían las rutinas diarias, como llevar al colegio, las comidas y la hora de dormir?", options: ["Repartido de forma equitativa por defecto", "Quien tenga el horario disponible ese día", "Uno/a de nosotros lidera, el otro/a apoya", "Lo iríamos resolviendo sobre la marcha"] },
+    { section: 3, type: "select", prompt: "¿Cuánta flexibilidad quieres en tu rutina diaria de crianza?", options: ["Una rutina clara y constante es lo que mejor me funciona", "Me gusta la flexibilidad y adaptarme según haga falta", "Una mezcla de ambas", "Aún no estoy seguro/a"] },
+    { section: 4, type: "select", prompt: "¿Cómo te sientes respecto a dividir los gastos relacionados con el niño/a?", options: ["Por igual, sin importar cuánto gane cada uno", "Proporcional a lo que gane cada uno", "Uno/a de nosotros asume más responsabilidad económica", "Tendríamos que hablarlo"] },
+    { section: 4, type: "select", prompt: "¿Cómo manejarías un gasto grande e inesperado para tu hijo/a?", options: ["Lo dividiríamos de inmediato, sin necesidad de discutirlo", "Lo hablaríamos y decidiríamos juntos primero", "Quien tenga los medios lo cubre, por ahora", "Sinceramente, aún no lo sé"] },
+    { section: 4, type: "select", prompt: "¿Qué tan cómodo/a te sientes hablando de dinero con un co-padre o co-madre antes de comprometerte a algo?", options: ["Muy cómodo/a: querría dejarlo claro desde el principio", "Cómodo/a, pero iría poco a poco", "Un poco incómodo/a, pero sé que es necesario", "Tiendo a evitar las conversaciones sobre dinero"] },
+    { section: 5, type: "select", prompt: "¿Con qué frecuencia esperas comunicarte con un co-padre o co-madre sobre tu hijo/a?", options: ["Actualizaciones diarias, incluso por cosas pequeñas", "Con regularidad, para todo lo que importa", "Solo cuando haya que tomar una decisión", "Aún no sé qué es realista"] },
+    { section: 5, type: "select", prompt: "¿Cuál es tu forma preferida de manejar un desacuerdo?", options: ["Hablarlo de inmediato, en persona si es posible", "Tomarme un tiempo para pensar y después hablarlo", "Escribirlo primero para poder expresarme con claridad", "Tiendo a evitar el conflicto cuando puedo"] },
+    { section: 5, type: "select", prompt: "¿Cómo te sientes si te hacen preguntas difíciles desde el principio?", options: ["Prefiero saberlo todo desde el inicio", "Me parece bien una vez que hay algo de confianza", "Prefiero ir entrando poco a poco en temas más profundos", "Me incomoda un poco"] },
+    { section: 6, type: "select", prompt: "¿Qué opinas de que un co-padre o co-madre salga con otras personas?", options: ["Totalmente bien, siempre que sea con respeto", "Bien, pero querría establecer algunos límites", "Querría hablarlo antes de que suceda", "Todavía no lo he pensado bien"] },
+    { section: 6, type: "select", prompt: "¿Qué información personal te sientes cómodo/a compartiendo al principio de una conversación sobre co-crianza?", options: ["Prácticamente todo lo relevante", "Lo básico, y más a medida que se genera confianza", "Solo lo directamente relacionado con la crianza", "Por naturaleza soy bastante reservado/a"] },
+    { section: 6, type: "select", prompt: "¿Cómo te sientes si un co-padre o co-madre pone límites a tu nivel de participación?", options: ["Totalmente justo, cada uno debería poder poner límites", "Depende de cuál sea el límite", "Siempre querría estar lo más involucrado/a posible", "Aún no lo he considerado"] },
+    { section: 7, type: "select", prompt: "¿Cómo imaginas a tu familia dentro de cinco años?", options: ["Una rutina clara y estable en la que ya nos hemos asentado", "Todavía adaptándonos a medida que cambian las cosas", "Depende mucho de hacia dónde nos lleve la vida", "Sinceramente, todavía no lo he imaginado"] },
+    { section: 7, type: "select", prompt: "¿Qué pasaría si uno/a de ustedes quisiera mudarse algún día?", options: ["Tendríamos que acordar esto antes de empezar", "Lo resolveríamos juntos cuando surja", "Querría tener la flexibilidad de mudarme si fuera necesario", "No estoy seguro/a de cómo lo manejaría"] },
+    { section: 7, type: "select", prompt: "¿Cómo te sientes respecto a que el acuerdo cambie a medida que tu hijo/a crece?", options: ["Espero que evolucione, y me siento cómodo/a con eso", "Querría mantener las cosas lo más estables posible", "Un poco de ambas, según lo que se necesite", "Todavía no lo he pensado tan a futuro"] },
+    { section: 8, type: "select", prompt: "¿Qué te haría decidir no seguir adelante con un posible co-padre o co-madre?", options: ["Una discrepancia en los valores fundamentales sobre la crianza", "Sentirme presionado/a o apresurado/a a tomar decisiones", "Dudas sobre su fiabilidad o compromiso", "Simplemente lo sabría al sentirlo"] },
+    { section: 8, type: "text", prompt: "¿Qué es lo que más te gustaría que un posible co-padre o co-madre entendiera de ti antes de seguir adelante juntos?" },
+    { section: 8, type: "text", prompt: "¿Cuál es una pregunta que temes hacer, pero sabes que deberías?" },
+    { section: 8, type: "text", prompt: "¿Hay algo más sobre tu situación o tus expectativas que te gustaría compartir?" },
+  ],
+  strengthCopy: {
+    1: { title: "¿Por qué ser padre/madre?", copy: "Pareces tener claro por qué quieres ser padre o madre; vale la pena expresar esa claridad en voz alta al principio de la conversación." },
+    2: { title: "Crianza", copy: "Pareces tener una idea clara de cómo te gustaría co-criar día a día." },
+    3: { title: "Vida cotidiana", copy: "Tienes una idea bastante clara de cómo podría ser la vida diaria y las rutinas." },
+    4: { title: "Dinero", copy: "Pareces sentirte cómodo/a y decidido/a sobre cómo se manejarían el dinero y los gastos." },
+    5: { title: "Comunicación", copy: "Pareces sentirte cómodo/a hablando de temas difíciles y buscando soluciones juntos." },
+    6: { title: "Límites", copy: "Tienes una idea clara de los límites que son importantes para ti." },
+    7: { title: "Futuro", copy: "Pareces haber pensado en cómo podrían cambiar las cosas a medida que tu familia crece." },
+    8: { title: "Preguntas importantes", copy: "Tienes una idea clara de lo que te funcionaría y lo que no." },
+  },
+  discussCopy: {
+    1: { title: "¿Por qué ser padre/madre?", copy: "Tus respuestas sugieren que tus razones para ser padre o madre todavía están tomando forma; vale la pena ponerlas en palabras antes de avanzar mucho más." },
+    2: { title: "Crianza", copy: "Cómo se repartirían realmente las responsabilidades diarias de crianza parece un tema que merece una conversación más profunda." },
+    3: { title: "Vida cotidiana", copy: "Las condiciones de vida y las rutinas diarias: tus respuestas muestran un área donde podría valer la pena una conversación más profunda." },
+    4: { title: "Dinero", copy: "Cómo se compartirían los gastos parece un tema menos resuelto para ti; es bueno plantearlo pronto, no después de los hechos." },
+    5: { title: "Comunicación", copy: "Cómo te comunicarías día a día, especialmente durante los desacuerdos, vale la pena hablarlo de forma explícita." },
+    6: { title: "Límites", copy: "Dónde están tus límites no está del todo definido; vale la pena aclararlo primero contigo mismo/a, y luego con un posible co-padre o co-madre." },
+    7: { title: "Futuro", copy: "Cómo podrían cambiar las cosas con los años sigue siendo incierto para ti; vale la pena revisarlo a medida que la relación avanza." },
+    8: { title: "Preguntas importantes", copy: "Algunas de las preguntas más difíciles siguen abiertas para ti; vale la pena reflexionar sobre ellas antes de comprometerte a algo." },
+  },
+  prompts: {
+    1: ["¿Por qué están considerando esto específicamente ahora?", "¿Qué haría que esto se sintiera como una decisión equivocada en retrospectiva?"],
+    2: ["¿Cómo dividirían las decisiones sobre educación, salud y disciplina?", "¿Qué pasa si no están de acuerdo en una decisión de crianza?"],
+    3: ["¿Dónde le gustaría idealmente vivir a cada uno, y qué tan cerca uno del otro?", "¿Cómo se dividiría realmente una semana típica?"],
+    4: ["¿Cómo dividirían los gastos si uno/a de ustedes gana significativamente más?", "¿Quién cubriría un gasto grande e imprevisto?"],
+    5: ["¿Con qué frecuencia esperan comunicarse entre ustedes?", "¿Cómo se ve, para cada uno de ustedes, una forma justa de estar en desacuerdo?"],
+    6: ["¿Qué querrían saber sobre las otras relaciones de cada uno?", "¿Qué información considera privada cada uno?"],
+    7: ["¿Qué harían si uno/a de ustedes quisiera mudarse lejos?", "¿Cómo imaginan que evolucionará este acuerdo en más de 10 años?"],
+    8: ["¿Qué sería decisivo para romper el trato para cada uno de ustedes?", "¿Hay algo que dudan en mencionar ahora mismo?"],
+  },
+};
+
+export const QUIZ_CONTENT: Record<QuizLocale, QuizContent> = {
+  en: QUIZ_CONTENT_EN,
+  ru: QUIZ_CONTENT_RU,
+  es: QUIZ_CONTENT_ES,
+};
+
+export function getQuizContent(locale: string): QuizContent {
+  return QUIZ_CONTENT[locale as QuizLocale] || QUIZ_CONTENT_EN;
+}
+
 export type QuizResults = { strongest: number[]; discuss: number[]; prompts: string[] };
 
-export function computeQuizResults(answers: (string | null)[]): QuizResults {
+export function computeQuizResults(answers: (string | null)[], content: QuizContent = QUIZ_CONTENT_EN): QuizResults {
   const bySection = new Map<number, { decisive: number; total: number }>();
-  QUIZ_QUESTIONS.forEach((q, i) => {
+  content.questions.forEach((q, i) => {
     if (q.type !== "select" || !q.options) return;
     const entry = bySection.get(q.section) ?? { decisive: 0, total: 0 };
     entry.total += 1;
@@ -331,21 +505,21 @@ export function computeQuizResults(answers: (string | null)[]): QuizResults {
   const byStrength = [...ranked].sort((a, b) => b.ratio - a.ratio);
   const strongest = byStrength.filter((r) => r.ratio >= 0.66).slice(0, 2).map((r) => r.section);
   const discuss = [...ranked].sort((a, b) => a.ratio - b.ratio).filter((r) => r.ratio < 0.66 && !strongest.includes(r.section)).slice(0, 2).map((r) => r.section);
-  const prompts = discuss.flatMap((section) => QUIZ_PROMPTS[section] ?? []).slice(0, 3);
+  const prompts = discuss.flatMap((section) => content.prompts[section] ?? []).slice(0, 3);
   return { strongest, discuss, prompts };
 }
 
-export function quizResultsAsText(answers: (string | null)[], results: QuizResults): string {
+export function quizResultsAsText(answers: (string | null)[], results: QuizResults, content: QuizContent = QUIZ_CONTENT_EN): string {
   const lines: string[] = ["LetsBeParents - Co-Parenting Compatibility Quiz", "A reflection of your priorities, not a verdict.", ""];
-  QUIZ_QUESTIONS.forEach((q, i) => {
-    lines.push(`${QUIZ_SECTIONS[q.section - 1]} - ${q.prompt}`);
+  content.questions.forEach((q, i) => {
+    lines.push(`${content.sections[q.section - 1]} - ${q.prompt}`);
     lines.push(`> ${answers[i] || "(not answered)"}`);
     lines.push("");
   });
   lines.push("Your strongest areas:");
-  results.strongest.forEach((s) => lines.push(`- ${QUIZ_STRENGTH_COPY[s].title}: ${QUIZ_STRENGTH_COPY[s].copy}`));
+  results.strongest.forEach((s) => lines.push(`- ${content.strengthCopy[s].title}: ${content.strengthCopy[s].copy}`));
   lines.push("");
   lines.push("Worth discussing:");
-  results.discuss.forEach((s) => lines.push(`- ${QUIZ_DISCUSS_COPY[s].title}: ${QUIZ_DISCUSS_COPY[s].copy}`));
+  results.discuss.forEach((s) => lines.push(`- ${content.discussCopy[s].title}: ${content.discussCopy[s].copy}`));
   return lines.join("\n");
 }

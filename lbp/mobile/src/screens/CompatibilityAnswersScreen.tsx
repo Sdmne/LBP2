@@ -10,6 +10,7 @@ import {
 } from "../api/compatibility";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CompatibilityAnswers">;
@@ -25,6 +26,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "CompatibilityAnswers">;
 // are always reading the same wording.
 export default function CompatibilityAnswersScreen({ navigation }: Props) {
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const [questions, setQuestions] = useState<CompatibilityQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -77,7 +79,7 @@ export default function CompatibilityAnswersScreen({ navigation }: Props) {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + insets.bottom }]}>
       <Text style={styles.intro}>{t("compatibility.intro")}</Text>
       <Text style={styles.progress}>{t("compatibility.progress", { done: answeredCount, total: questions.length })}</Text>
 

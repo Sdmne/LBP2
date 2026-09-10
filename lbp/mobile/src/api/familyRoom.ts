@@ -1,4 +1,4 @@
-import { api } from "./client";
+import { api, localFileToBlob } from "./client";
 
 // Family Plan / Shared Family Room / Document & checklist tools - the
 // "Family Builder Pro" pricing-page features (see the site's pricing page,
@@ -42,10 +42,26 @@ export type FamilyDocument = {
   contentUrl: string;
 };
 
+// Structured 10-section Family Plan (Alena's reference mockup, "Your
+// Family Plan"). Separate from FamilyPlan above (the older free-text
+// parenting/finances/legal notes, still used by the Checklist/Documents
+// cards) - see backend/sql/2026_09_family_plan_sections.sql and the
+// FAMILY_PLAN_SECTION_KEYS list in main.py, mirrored client-side in
+// utils/familyPlan.ts for ordering + i18n labels.
+export type FamilyPlanSection = {
+  key: string;
+  content: string;
+  updatedByProfileId: number | null;
+  updatedAt: string | null;
+  myComplete: boolean;
+  partnerComplete: boolean;
+};
+
 export type FamilyRoom = {
   ok: true;
   matchId: number;
   plan: FamilyPlan;
+  sections: FamilyPlanSection[];
   checklist: FamilyChecklistItem[];
   documents: FamilyDocument[];
 };
@@ -59,6 +75,17 @@ export function updateFamilyPlan(
   updates: Partial<Pick<FamilyPlan, "parentingNotes" | "financesNotes" | "legalNotes">>,
 ) {
   return api.patch<{ ok: true; plan: FamilyPlan }>(`/api/member/family-room/${profileId}/plan`, updates);
+}
+
+export function updateFamilyPlanSection(
+  profileId: number | string,
+  sectionKey: string,
+  updates: Partial<{ content: string; isComplete: boolean }>,
+) {
+  return api.patch<{ ok: true; sections: FamilyPlanSection[] }>(
+    `/api/member/family-room/${profileId}/sections/${encodeURIComponent(sectionKey)}`,
+    updates,
+  );
 }
 
 export function createFamilyChecklistItem(
@@ -85,9 +112,25 @@ export function deleteFamilyChecklistItem(itemId: number) {
 
 // Multipart upload - mirrors src/api/photos.ts's pattern for building a
 // FormData body from a picked file.
-export function uploadFamilyDocument(profileId: number | string, file: { uri: string; name: string; type: string }) {
+export async function uploadFamilyDocument(
+  profileId: number | string,
+  file: { uri: string; name: string; type: string },
+) {
+  // See client.ts's localFileToBlob for why this can't be the old
+  // {uri, name, type} object form anymore. Same follow-on issue as
+  // photos.ts's uploadPhoto: `file.type` (expo-document-picker's own
+  // asset.mimeType, which IS reliable here) was being accepted as a
+  // parameter and then silently dropped - only the raw blob's own
+  // `.type`, sniffed by fetch(uri).blob() from a file://cache URI, made it
+  // into the multipart part's Content-Type, and that's frequently blank/
+  // "application/octet-stream" - which is exactly the server's "Unsupported
+  // file type" rejection Alena hit. .slice() rewrites the blob's reported
+  // type using the picker's own mimeType without recopying the bytes.
   const form = new FormData();
-  form.append("file", { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+  const rawBlob = await localFileToBlob(file.uri);
+  const blob =
+    rawBlob.type && rawBlob.type !== "application/octet-stream" ? rawBlob : rawBlob.slice(0, rawBlob.size, file.type);
+  form.append("file", blob, file.name);
   return api.upload<{ ok: true; document: FamilyDocument }>(`/api/member/family-room/${profileId}/documents`, form);
 }
 

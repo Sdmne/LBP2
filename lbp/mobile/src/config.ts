@@ -3,14 +3,8 @@
 // Change this by setting EXPO_PUBLIC_API_BASE_URL in a .env file (see
 // .env.example) rather than editing this file, so switching between local
 // dev and the real deployed backend never touches code.
-const configuredApiUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
-export const API_BASE_URL = (configuredApiUrl || "https://test.letsbeparents.com")
-  .replace(/\/+$/, "")
-  .replace(/\/api$/i, "");
-const apiOrigin = new URL(API_BASE_URL);
-if (apiOrigin.protocol !== "https:" || apiOrigin.username || apiOrigin.password || apiOrigin.pathname !== "/" || apiOrigin.search || apiOrigin.hash) {
-  throw new Error("API configuration must be an HTTPS origin without credentials or a path.");
-}
+export const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") || "http://localhost:8000";
 
 // Where static, non-API files served by the website's own build (not the
 // FastAPI backend) live - e.g. the Resources & Tools .docx downloads at
@@ -44,10 +38,6 @@ export const FIREBASE_CONFIG = {
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || "",
 };
-
-if (FIREBASE_CONFIG.projectId && FIREBASE_CONFIG.projectId !== "parents-698f8") {
-  throw new Error("Firebase configuration must use project parents-698f8.");
-}
 
 // Google OAuth client IDs for expo-auth-session's Google provider (used by
 // src/components/SocialAuthButtons.tsx). Firebase auto-creates a "Web

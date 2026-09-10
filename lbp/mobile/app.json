@@ -28,6 +28,7 @@
     },
     "android": {
       "package": "com.letsBeParents.letsBeParents",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -47,12 +48,19 @@
       ]
     },
     "plugins": [
-      "@config-plugins/react-native-webrtc"
+      "@config-plugins/react-native-webrtc",
+      "expo-video"
     ],
     "extra": {
       "eas": {
         "projectId": "28000ab6-727c-4c77-a84b-92b35bbf9095"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/28000ab6-727c-4c77-a84b-92b35bbf9095"
     }
   }
 }

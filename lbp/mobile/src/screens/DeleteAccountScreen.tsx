@@ -4,6 +4,7 @@ import { ApiError } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import GradientBackground from "../components/GradientBackground";
 
 export default function DeleteAccountScreen() {
   const { deleteAccount } = useAuth();
@@ -27,6 +28,7 @@ export default function DeleteAccountScreen() {
   }
 
   return (
+    <GradientBackground variant="soft">
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.warningIcon}><Text style={styles.warningIconText}>!</Text></View>
@@ -47,22 +49,56 @@ export default function DeleteAccountScreen() {
         </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: colors.bg },
-  container: { flexGrow: 1, padding: spacing.lg, paddingBottom: spacing.xl },
-  warningIcon: { width: 58, height: 58, borderRadius: 29, backgroundColor: "#feeceb", alignSelf: "center", alignItems: "center", justifyContent: "center", marginTop: spacing.lg },
-  warningIconText: { color: colors.danger, fontSize: 30, fontWeight: "800" },
-  title: { color: colors.ink, fontSize: 24, fontWeight: "800", textAlign: "center", marginTop: spacing.md },
-  body: { color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: "center", marginTop: spacing.sm },
-  summary: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, padding: spacing.md, gap: 10, marginVertical: spacing.lg },
-  summaryText: { color: colors.ink, fontSize: 14, lineHeight: 20 },
-  label: { color: colors.ink, fontSize: 14, fontWeight: "700", marginBottom: 7, marginTop: spacing.sm },
-  input: { height: 52, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, backgroundColor: colors.card, color: colors.ink, paddingHorizontal: spacing.md, fontSize: 14.5 },
-  error: { color: colors.danger, fontSize: 13, marginTop: spacing.sm },
-  deleteButton: { height: 54, backgroundColor: colors.danger, borderRadius: radius.pill, alignItems: "center", justifyContent: "center", marginTop: spacing.lg },
-  disabled: { opacity: 0.45 },
-  deleteButtonText: { color: colors.white, fontSize: 15.5, fontWeight: "700" },
+  page: { flex: 1, backgroundColor: "transparent" },
+  container: { flexGrow: 1, alignItems: "center", padding: spacing.xl },
+  warningIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#feeceb",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.md,
+  },
+  warningIconText: { fontSize: 26, fontWeight: "800", color: colors.danger },
+  title: { fontSize: 20, fontWeight: "800", color: colors.ink, textAlign: "center", marginBottom: 8 },
+  body: { fontSize: 14, color: colors.muted, textAlign: "center", lineHeight: 20, marginBottom: spacing.md },
+  summary: {
+    width: "100%",
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    gap: 6,
+  },
+  summaryText: { fontSize: 13, color: colors.ink },
+  label: { alignSelf: "flex-start", fontSize: 13, fontWeight: "700", color: colors.ink, marginBottom: 6, marginTop: spacing.sm },
+  input: {
+    width: "100%",
+    height: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.white,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  error: { fontSize: 13, color: colors.danger, marginTop: spacing.sm, textAlign: "center" },
+  deleteButton: {
+    width: "100%",
+    height: 52,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.danger,
+    marginTop: spacing.lg,
+  },
+  disabled: { opacity: 0.5 },
+  deleteButtonText: { color: "#fff", fontSize: 14.5, fontWeight: "700" },
 });

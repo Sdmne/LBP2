@@ -35,6 +35,20 @@ export function forgotPassword(email: string) {
   return api.post<{ ok: true }>("/api/auth/forgot-password", { email });
 }
 
+export function logout() {
+  return api.post<{ ok: true }>("/api/auth/logout");
+}
+
+// UPDATE (Sept 2026): the backend now issues a 6-digit code alongside the
+// verification link on every local signup/resend (see main.py's
+// issue_email_verification_code/send_auth_action_email), matching the
+// prototype's #scr-verify-code design - VerifyCodeScreen is a blocking gate
+// (an authenticated-but-unverified user sees only this screen; see
+// RootNavigator), not a skippable notice.
+//
+// POST /api/auth/email-verification/code/confirm - auth_confirm_email_code()
+// in main.py. Rate-limited to 10 failed attempts per 15 minutes
+// (429 "TOO_MANY_CODE_ATTEMPTS"); a wrong/expired code is a 400.
 export function confirmEmailCode(code: string) {
   return api.post<{ ok: true; status: string; user: PublicUser }>(
     "/api/auth/email-verification/code/confirm",
@@ -42,10 +56,20 @@ export function confirmEmailCode(code: string) {
   );
 }
 
+// POST /api/auth/email-verification/resend - auth_resend_verification() in
+// main.py. Reissues and resends both the link and the 6-digit code,
+// throttled to once per AUTH_EMAIL_RESEND_SECONDS (60s). Returns status
+// "EMAIL_SENT", "EMAIL_RECENTLY_SENT", "EMAIL_ALREADY_VERIFIED", or
+// "EMAIL_DELIVERY_FAILED" rather than an error - VerifyCodeScreen reads
+// `status` to decide what to show, not just `ok`.
 export function resendEmailVerification(locale = "en") {
   return api.post<{ ok: true; status: string }>("/api/auth/email-verification/resend", { locale });
 }
 
+// POST /api/member/account-deletion - member_account_deletion() in main.py.
+// Ends access immediately (revokes all sessions, flags the profile/user
+// DELETION_PENDING) and schedules permanent deletion ACCOUNT_DELETION_DAYS
+// (30) days out - see DeleteAccountScreen.
 export function requestAccountDeletion(reason: string, details = "") {
   return api.post<{ ok: true; status: string; deleteAfter: string }>("/api/member/account-deletion", {
     reason,
@@ -54,12 +78,8 @@ export function requestAccountDeletion(reason: string, details = "") {
   });
 }
 
-export function logout() {
-  return api.post<{ ok: true }>("/api/auth/logout");
-}
-
 export function me() {
-  return api.get<{ user: AuthResponse["user"] & { profileVerified: boolean; isPremium: boolean } }>(
+  return api.get<{ user: AuthResponse["user"] & { profileVerified: boolean; isPremium: boolean; profileCompleteness: number } }>(
     "/api/auth/me",
   );
 }

@@ -40,7 +40,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 type Intent = "login" | "register";
 
-export default function SocialAuthButtons({ intent }: { intent: Intent }) {
+export default function SocialAuthButtons({ intent, variant = "full" }: { intent: Intent; variant?: "full" | "sheet" }) {
   const { socialLogin } = useAuth();
   const { t } = useI18n();
   // Separate loading flags per provider (not one shared `busy` value) so an
@@ -174,22 +174,29 @@ export default function SocialAuthButtons({ intent }: { intent: Intent }) {
   }
 
   return (
-    <View style={styles.wrap}>
-      <View style={styles.dividerRow}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>{t("auth.orContinueWith")}</Text>
-        <View style={styles.dividerLine} />
-      </View>
+    <View style={variant === "sheet" ? styles.wrapSheet : styles.wrap}>
+      {variant === "full" ? (
+        <View style={styles.dividerRow}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>{t("auth.orContinueWith")}</Text>
+          <View style={styles.dividerLine} />
+        </View>
+      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <Pressable
-        style={styles.googleButton}
+        style={variant === "sheet" ? styles.googleButtonSheet : styles.googleButton}
         onPress={handleGoogle}
         disabled={!request || !googleConfigured || !firebaseAuth || googleBusy || appleBusy}
       >
         {googleBusy ? (
           <ActivityIndicator color={colors.text} />
+        ) : variant === "sheet" ? (
+          <>
+            <Text style={styles.googleButtonSheetIcon}>{"G"}</Text>
+            <Text style={styles.googleButtonSheetText}>{t("auth.continueGoogle")}</Text>
+          </>
         ) : (
           <Text style={styles.googleButtonText}>{t("auth.continueGoogle")}</Text>
         )}
@@ -216,6 +223,24 @@ export default function SocialAuthButtons({ intent }: { intent: Intent }) {
 
 const styles = StyleSheet.create({
   wrap: { marginTop: spacing.lg, gap: spacing.sm },
+  // "sheet" variant (AuthMethodSheet.tsx): no divider (the sheet's own
+  // "Continue with Email" row already establishes the pattern), no top
+  // margin (sits directly under that row instead of the bottom of a form),
+  // and the Google button matches that row's exact pill/border/height
+  // instead of the boxier style used at the bottom of Login/Signup.
+  wrapSheet: { marginTop: spacing.sm, gap: spacing.sm },
+  googleButtonSheet: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    height: 54,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  googleButtonSheetIcon: { fontSize: 16, fontWeight: "800", color: "#4285F4" },
+  googleButtonSheetText: { color: colors.text, fontSize: 15, fontWeight: "700" },
   dividerRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.xs },
   dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
   dividerText: { fontSize: 12, color: colors.textMuted, textTransform: "uppercase" },

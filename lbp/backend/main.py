@@ -1364,6 +1364,26 @@ class FamilyPlanUpdatePayload(BaseModel):
         return value
 
 
+class FamilyPlanSectionUpdatePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    content: str | None = Field(default=None, max_length=20000)
+    isComplete: bool | None = Field(default=None, strict=True)
+
+    @field_validator("content")
+    @classmethod
+    def reject_null_content(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("Use an empty string to clear content; null is not allowed")
+        return value
+
+    @field_validator("isComplete")
+    @classmethod
+    def reject_null_is_complete(cls, value: bool | None) -> bool:
+        if value is None:
+            raise ValueError("Explicit null is not allowed for isComplete")
+        return value
+
+
 class FamilyChecklistItemCreatePayload(BaseModel):
     model_config = {"extra": "forbid"}
     section: str = Field(default="general", pattern="^(parenting|finances|legal|general)$")
@@ -3123,6 +3143,66 @@ def fetch_family_documents(cursor, match_id: int) -> list[dict[str, Any]]:
     for document in documents:
         document["contentUrl"] = f"/api/member/family-room/documents/{document['id']}/content"
     return documents
+
+
+FAMILY_PLAN_SECTION_KEYS: list[str] = [
+    "values-motivation",
+    "parenting-roles",
+    "legal-custody",
+    "financial-planning",
+    "living-arrangements",
+    "health-insurance",
+    "education",
+    "communication",
+    "extended-family",
+    "emergency-planning",
+]
+
+
+def fetch_family_plan_sections(cursor, match_id: int, viewer_profile_id: int, other_profile_id: int) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT section_key AS sectionKey, content, updated_by_profile_id AS updatedByProfileId,
+               updated_at AS updatedAt
+        FROM family_plan_sections
+        WHERE match_id = %s
+        """,
+        (match_id,),
+    )
+    content_by_key = {row["sectionKey"]: normalize_row(row) for row in cursor.fetchall()}
+
+    cursor.execute(
+        """
+        SELECT section_key AS sectionKey, profile_id AS profileId
+        FROM family_plan_section_completions
+        WHERE match_id = %s
+        """,
+        (match_id,),
+    )
+    my_done: set[str] = set()
+    partner_done: set[str] = set()
+    for row in cursor.fetchall():
+        key = row["sectionKey"]
+        profile_id = int(row["profileId"])
+        if profile_id == viewer_profile_id:
+            my_done.add(key)
+        elif profile_id == other_profile_id:
+            partner_done.add(key)
+
+    sections: list[dict[str, Any]] = []
+    for key in FAMILY_PLAN_SECTION_KEYS:
+        entry = content_by_key.get(key)
+        sections.append(
+            {
+                "key": key,
+                "content": entry["content"] if entry else "",
+                "updatedByProfileId": entry["updatedByProfileId"] if entry else None,
+                "updatedAt": entry["updatedAt"] if entry else None,
+                "myComplete": key in my_done,
+                "partnerComplete": key in partner_done,
+            }
+        )
+    return sections
 
 
 def daily_like_count(cursor, profile_id: int) -> int:
@@ -6816,6 +6896,7 @@ def member_family_room(profile_identifier: str, response: Response, user: dict[s
             "ok": True,
             "matchId": match_id,
             "plan": fetch_family_plan(cursor, match_id),
+            "sections": fetch_family_plan_sections(cursor, match_id, profile_id, other_profile_id),
             "checklist": fetch_family_checklist(cursor, match_id),
             "documents": fetch_family_documents(cursor, match_id),
         }
@@ -6858,6 +6939,62 @@ def member_update_family_plan(
             )
         conn.commit()
         return {"ok": True, "plan": fetch_family_plan(cursor, match_id)}
+
+
+@app.patch("/api/member/family-room/{profile_identifier}/sections/{section_key}")
+def member_update_family_plan_section(
+    profile_identifier: str,
+    section_key: str,
+    payload: FamilyPlanSectionUpdatePayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    if section_key not in FAMILY_PLAN_SECTION_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown Family Plan section")
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        updates = payload.model_dump(exclude_unset=True)
+
+        if "content" in updates:
+            cursor.execute(
+                """
+                INSERT INTO family_plan_sections
+                    (match_id, section_key, content, updated_by_profile_id, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+                ON CONFLICT (match_id, section_key) DO UPDATE SET
+                    content = EXCLUDED.content, updated_by_profile_id = EXCLUDED.updated_by_profile_id,
+                    updated_at = UTC_TIMESTAMP()
+                """,
+                (match_id, section_key, updates["content"], profile_id),
+            )
+
+        if "isComplete" in updates:
+            if updates["isComplete"]:
+                cursor.execute(
+                    """
+                    INSERT INTO family_plan_section_completions
+                        (match_id, section_key, profile_id, completed_at)
+                    VALUES (%s, %s, %s, UTC_TIMESTAMP())
+                    ON CONFLICT (match_id, section_key, profile_id) DO UPDATE SET
+                        completed_at = UTC_TIMESTAMP()
+                    """,
+                    (match_id, section_key, profile_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    DELETE FROM family_plan_section_completions
+                    WHERE match_id = %s AND section_key = %s AND profile_id = %s
+                    """,
+                    (match_id, section_key, profile_id),
+                )
+        conn.commit()
+        return {
+            "ok": True,
+            "sections": fetch_family_plan_sections(cursor, match_id, profile_id, other_profile_id),
+        }
 
 
 @app.post("/api/member/family-room/{profile_identifier}/checklist")

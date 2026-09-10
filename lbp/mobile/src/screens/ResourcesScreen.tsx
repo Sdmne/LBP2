@@ -3,84 +3,102 @@ import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { RESOURCES_CATEGORIES } from "../data/resources";
+import { RESOURCES_CATEGORIES, CATEGORY_ICON } from "../data/resources";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import GradientBackground from "../components/GradientBackground";
 
-// Mirrors the website's /:locale/resources index (ResourcesIndex in
-// ui.tsx): a "Start here" row of 3 picks, then the full category grid.
-// Deliberately English-only, same as the site - see src/data/resources.ts
-// for why. The site's own closing "Create free account" CTA is dropped
-// here since everyone reaching this screen is already logged in.
+// UPDATE (Sept 2026): restyled from a heavy card-per-item layout (which
+// mirrored the website's /resources index instead of the mobile
+// prototype) to the prototype's actual #scr-resources look - a subtitle,
+// then plain icon-wrap/title/meta list rows (.doc-row) grouped under
+// "Start here" and "Browse by category", the same row pattern already
+// used on ExploreScreen/SettingsScreen/MeProfileScreen. Real data and
+// navigation are unchanged - RESOURCES_CATEGORIES already carries an
+// icon key ("coparenting"/"fertility"/"planning") that maps directly to
+// the prototype's blue/pink/green icon-wrap colors, so nothing here is
+// invented. Moved to data/resources.ts (CATEGORY_ICON) so
+// ResourceCategoryScreen.tsx can share the exact same mapping.
+
 export default function ResourcesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const insets = useSafeAreaInsets();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.heroEyebrow}>RESOURCES & TOOLS</Text>
-      <Text style={styles.heroTitle}>Parenthood resources and tools</Text>
-      <Text style={styles.heroBody}>
-        Practical checklists, worksheets and planning tools to help you explore co-parenting, fertility, donor
-        conception and the practical side of becoming a parent.
+    <GradientBackground variant="soft">
+    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}>
+      <Text style={styles.sub}>
+        Guides, templates and tools to help you plan your path to parenthood.
       </Text>
 
-      <Text style={styles.sectionTitle}>Start here</Text>
-      <Pressable
-        style={styles.startCard}
-        onPress={() => navigation.navigate("ResourceTool", { categorySlug: "co-parenting", toolSlug: "planning-template" })}
-      >
-        <Text style={styles.startIcon}>📄</Text>
-        <Text style={styles.startCardTitle}>Co-Parenting Planning Template</Text>
-        <Text style={styles.startCardBody}>
-          Thinking about becoming co-parents? Talk through parenting, finances, living arrangements and boundaries
-          before you move forward.
-        </Text>
-        <Text style={styles.startCardLink}>Download the template →</Text>
-      </Pressable>
-      <Pressable
-        style={styles.startCard}
-        onPress={() => navigation.navigate("ResourceTool", { categorySlug: "co-parenting", toolSlug: "questions-to-ask" })}
-      >
-        <Text style={styles.startIcon}>📄</Text>
-        <Text style={styles.startCardTitle}>Questions to Ask a Potential Co-Parent</Text>
-        <Text style={styles.startCardBody}>
-          Not sure what to ask before taking the next step? A practical list covering parenting, money,
-          communication and everyday life.
-        </Text>
-        <Text style={styles.startCardLink}>View the questions →</Text>
-      </Pressable>
-      <Pressable style={[styles.startCard, styles.startCardFeatured]} onPress={() => navigation.navigate("CompatibilityQuiz")}>
-        <Text style={styles.startIcon}>🧭</Text>
-        <Text style={styles.startCardTitle}>Co-Parenting Compatibility Quiz</Text>
-        <Text style={styles.startCardBody}>
-          See where your expectations line up, and what's worth discussing further. It won't tell you whether
-          you're a "match."
-        </Text>
-        <Text style={styles.startCardLink}>Take the quiz →</Text>
-      </Pressable>
+      <Text style={styles.groupTitle}>Start here</Text>
+      <View style={styles.card}>
+        <Pressable
+          style={styles.row}
+          onPress={() => navigation.navigate("CompatibilityQuiz")}
+        >
+          <View style={[styles.iconWrap, { backgroundColor: colors.tintPink }]}>
+            <Text style={styles.icon}>🧭</Text>
+          </View>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>Compatibility Quiz</Text>
+            <Text style={styles.rowMeta}>26 questions, ~5 min — reflect, not score</Text>
+          </View>
+          <Text style={styles.chevron}>{"\u203a"}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.row, styles.rowDivider]}
+          onPress={() => navigation.navigate("ResourceTool", { categorySlug: "co-parenting", toolSlug: "planning-template" })}
+        >
+          <View style={[styles.iconWrap, { backgroundColor: colors.tint }]}>
+            <Text style={styles.icon}>📄</Text>
+          </View>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>Co-Parenting Planning Template</Text>
+            <Text style={styles.rowMeta}>10 sections to align with a co-parent</Text>
+          </View>
+          <Text style={styles.chevron}>{"\u203a"}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.row, styles.rowDivider]}
+          onPress={() => navigation.navigate("ResourceTool", { categorySlug: "co-parenting", toolSlug: "questions-to-ask" })}
+        >
+          <View style={[styles.iconWrap, { backgroundColor: "#e6f7ef" }]}>
+            <Text style={styles.icon}>❓</Text>
+          </View>
+          <View style={styles.rowBody}>
+            <Text style={styles.rowTitle}>Questions to Ask a Potential Co-Parent</Text>
+            <Text style={styles.rowMeta}>A conversation starter list</Text>
+          </View>
+          <Text style={styles.chevron}>{"\u203a"}</Text>
+        </Pressable>
+      </View>
 
-      <Text style={styles.sectionTitle}>Explore all</Text>
-      {RESOURCES_CATEGORIES.map((cat) => (
-        <View key={cat.slug} style={styles.categoryCard}>
-          <Text style={styles.categoryEyebrow}>{cat.eyebrow.toUpperCase()}</Text>
-          <Text style={styles.categoryTitle}>{cat.title}</Text>
-          <Text style={styles.categoryBody}>{cat.description}</Text>
-          {cat.tools.map((tool) => (
+      <Text style={styles.groupTitle}>Browse by category</Text>
+      <View style={styles.card}>
+        {RESOURCES_CATEGORIES.map((cat, i) => {
+          const iconInfo = CATEGORY_ICON[cat.icon] || { emoji: "\ud83d\udcc4", bg: colors.bgSoft };
+          return (
             <Pressable
-              key={tool.slug}
-              onPress={() => navigation.navigate("ResourceTool", { categorySlug: cat.slug, toolSlug: tool.slug })}
+              key={cat.slug}
+              style={[styles.row, i > 0 && styles.rowDivider]}
+              onPress={() => navigation.navigate("ResourceCategory", { slug: cat.slug })}
             >
-              <Text style={styles.categoryToolLink}>• {tool.title}</Text>
+              <View style={[styles.iconWrap, { backgroundColor: iconInfo.bg }]}>
+                <Text style={styles.icon}>{iconInfo.emoji}</Text>
+              </View>
+              <View style={styles.rowBody}>
+                <Text style={styles.rowTitle}>{cat.eyebrow}</Text>
+                <Text style={styles.rowMeta}>{cat.description}</Text>
+              </View>
+              <Text style={styles.chevron}>{"\u203a"}</Text>
             </Pressable>
-          ))}
-          {cat.disclaimer ? <Text style={styles.categoryNote}>{cat.disclaimer}</Text> : null}
-          <Pressable style={styles.categoryCta} onPress={() => navigation.navigate("ResourceCategory", { slug: cat.slug })}>
-            <Text style={styles.categoryCtaText}>Explore {cat.eyebrow.toLowerCase()} →</Text>
-          </Pressable>
-        </View>
-      ))}
+          );
+        })}
+      </View>
 
       <View style={styles.proCard}>
-        <Text style={styles.proIcon}>💬</Text>
+        <Text style={styles.proIcon}>{"\ud83d\udcac"}</Text>
         <Text style={styles.proTitle}>Looking for professional guidance?</Text>
         <Text style={styles.proBody}>
           Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted
@@ -88,45 +106,34 @@ export default function ResourcesScreen() {
         </Text>
       </View>
     </ScrollView>
+    </GradientBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: "transparent" },
   content: { padding: spacing.lg, paddingBottom: spacing.xl },
-  heroEyebrow: { color: colors.pink, fontWeight: "700", fontSize: 12, letterSpacing: 0.5 },
-  heroTitle: { fontSize: 24, fontWeight: "800", color: colors.ink, marginTop: spacing.xs },
-  heroBody: { color: colors.muted, fontSize: 14, marginTop: spacing.sm, lineHeight: 20 },
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.ink, marginTop: spacing.xl, marginBottom: spacing.sm },
-  startCard: {
-    backgroundColor: colors.bgSoft,
+  sub: { color: colors.muted, fontSize: 14, lineHeight: 20, marginBottom: spacing.md },
+  groupTitle: { fontSize: 12.5, fontWeight: "700", color: colors.muted, marginTop: spacing.lg, marginBottom: spacing.sm },
+  card: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.line,
     borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.sm,
   },
-  startCardFeatured: { borderWidth: 1, borderColor: colors.pink },
-  startIcon: { fontSize: 22, marginBottom: spacing.xs },
-  startCardTitle: { fontSize: 16, fontWeight: "700", color: colors.text },
-  startCardBody: { fontSize: 13, color: colors.muted, marginTop: spacing.xs, lineHeight: 18 },
-  startCardLink: { fontSize: 13, fontWeight: "700", color: colors.pink, marginTop: spacing.sm },
-  categoryCard: {
-    backgroundColor: colors.bgSoft,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  categoryEyebrow: { fontSize: 11, fontWeight: "700", color: colors.pink, letterSpacing: 0.5 },
-  categoryTitle: { fontSize: 17, fontWeight: "800", color: colors.ink, marginTop: spacing.xs },
-  categoryBody: { fontSize: 13, color: colors.muted, marginTop: spacing.xs, lineHeight: 18 },
-  categoryToolLink: { fontSize: 14, color: colors.ink, marginTop: spacing.sm },
-  categoryNote: { fontSize: 12, color: colors.muted, marginTop: spacing.md, fontStyle: "italic" },
-  categoryCta: { marginTop: spacing.md },
-  categoryCtaText: { fontSize: 13, fontWeight: "700", color: colors.pink },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md },
+  rowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  iconWrap: { width: 40, height: 40, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  icon: { fontSize: 18 },
+  rowBody: { flex: 1, minWidth: 0 },
+  rowTitle: { fontSize: 14.5, fontWeight: "700", color: colors.ink },
+  rowMeta: { fontSize: 12.5, color: colors.muted, marginTop: 2 },
+  chevron: { fontSize: 18, color: "#a3a3a3" },
   proCard: {
     backgroundColor: colors.bgSoft,
     borderRadius: radius.lg,
     padding: spacing.lg,
-    marginTop: spacing.md,
+    marginTop: spacing.lg,
     alignItems: "flex-start",
   },
   proIcon: { fontSize: 22, marginBottom: spacing.xs },

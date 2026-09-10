@@ -5,6 +5,7 @@ import { ApiError } from "../api/client";
 import { fetchCompatibilityReport, type CompatibilityReport } from "../api/compatibility";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CompatibilityReport">;
@@ -20,6 +21,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "CompatibilityReport">;
 export default function CompatibilityReportScreen({ route, navigation }: Props) {
   const { profileId, displayName } = route.params;
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
 
   const [report, setReport] = useState<CompatibilityReport | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "needsPremium" | "noMatch" | "error">("loading");
@@ -103,7 +105,7 @@ export default function CompatibilityReportScreen({ route, navigation }: Props) 
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + insets.bottom }]}>
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t("compatibilityReport.strongestTitle")}</Text>
         {report.strongest.length === 0 ? (

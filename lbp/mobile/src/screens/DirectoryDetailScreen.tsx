@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { fetchClinicDetail, fetchLawyerDetail } from "../api/directory";
 import { favouriteClinic, favouriteLawyer, unfavouriteClinic, unfavouriteLawyer } from "../api/favourites";
@@ -7,6 +7,8 @@ import { ApiError } from "../api/client";
 import type { DirectoryDetail } from "../api/types";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import GradientBackground from "../components/GradientBackground";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "DirectoryDetail">;
@@ -24,6 +26,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "DirectoryDetail">;
 export default function DirectoryDetailScreen({ route }: Props) {
   const { kind, slugOrId, isFavourite: initialIsFavourite } = route.params;
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const [item, setItem] = useState<DirectoryDetail | null>(null);
   const [isFavourite, setIsFavourite] = useState(!!initialIsFavourite);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +78,8 @@ export default function DirectoryDetailScreen({ route }: Props) {
   const tags = firstStringList(kind === "clinics" ? item.services : item.practiceAreas);
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <GradientBackground variant="soft">
+    <ScrollView contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + insets.bottom }]}>
       <View style={styles.hero}>
         {image ? (
           <Image source={{ uri: image }} style={styles.heroIcon} />
@@ -112,17 +116,18 @@ export default function DirectoryDetailScreen({ route }: Props) {
         </Pressable>
 
         {contact.phone ? (
-          <ContactRow icon="📞" label={t("directoryDetail.phone")} value={contact.phone} onPress={() => Linking.openURL(`tel:${contact.phone}`)} />
+          <ContactRow icon="📞" label={t("directoryDetail.phone")} value={contact.phone} onPress={() => Linking.openURL(`tel:${contact.phone}`).catch(() => Alert.alert(t("directoryDetail.openLinkError")))} />
         ) : null}
         {contact.email ? (
-          <ContactRow icon="✉️" label={t("directoryDetail.email")} value={contact.email} onPress={() => Linking.openURL(`mailto:${contact.email}`)} />
+          <ContactRow icon="✉️" label={t("directoryDetail.email")} value={contact.email} onPress={() => Linking.openURL(`mailto:${contact.email}`).catch(() => Alert.alert(t("directoryDetail.openLinkError")))} />
         ) : null}
         {contact.website ? (
-          <ContactRow icon="🌐" label={t("directoryDetail.website")} value={contact.website} onPress={() => Linking.openURL(String(contact.website))} />
+          <ContactRow icon="🌐" label={t("directoryDetail.website")} value={contact.website} onPress={() => Linking.openURL(String(contact.website)).catch(() => Alert.alert(t("directoryDetail.openLinkError")))} />
         ) : null}
         {contact.location ? <ContactRow icon="📍" label={t("directoryDetail.address")} value={contact.location} /> : null}
       </View>
     </ScrollView>
+    </GradientBackground>
   );
 }
 
@@ -156,7 +161,7 @@ function ContactRow({ icon, label, value, onPress }: { icon: string; label: stri
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
   errorText: { color: colors.danger },
-  container: { paddingBottom: spacing.xl, backgroundColor: colors.card },
+  container: { paddingBottom: spacing.xl, backgroundColor: "transparent" },
   hero: { alignItems: "center", paddingTop: spacing.lg, paddingHorizontal: spacing.lg },
   heroIcon: { width: 74, height: 74, borderRadius: 37, backgroundColor: colors.tint, marginBottom: 12 },
   heroIconPlaceholder: { alignItems: "center", justifyContent: "center" },

@@ -11,6 +11,7 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { RESOURCES_CATEGORIES } from "../data/resources";
 import { SITE_BASE_URL } from "../config";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ResourceTool">;
 
@@ -20,6 +21,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "ResourceTool">;
 // sheet (expo-sharing) so the person can save it to Files/Drive/print/etc -
 // same end result (they get the real file), different mechanism.
 export default function ResourceToolScreen({ route, navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const [downloading, setDownloading] = useState(false);
 
   const cat = RESOURCES_CATEGORIES.find((item) => item.slug === route.params.categorySlug);
@@ -29,7 +31,7 @@ export default function ResourceToolScreen({ route, navigation }: Props) {
     return (
       <View style={styles.container}>
         <Text style={styles.notFoundTitle}>Resource not found</Text>
-        <Pressable style={styles.backButton} onPress={() => navigation.navigate("MainTabs", { screen: "Resources" })}>
+        <Pressable style={styles.backButton} onPress={() => navigation.navigate("Resources")}>
           <Text style={styles.backButtonText}>Back to Resources & Tools</Text>
         </Pressable>
       </View>
@@ -58,7 +60,7 @@ export default function ResourceToolScreen({ route, navigation }: Props) {
   const related = cat.tools.filter((item) => item.slug !== tool.slug).slice(0, 3);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}>
       <Text style={styles.title}>{tool.title}</Text>
       <Text style={styles.body}>{tool.description}</Text>
 
@@ -148,7 +150,7 @@ const styles = StyleSheet.create({
   },
   downloadButtonText: { color: colors.white, fontWeight: "700" },
   format: { fontSize: 12, color: colors.textMuted, textAlign: "center" },
-  comingSoon: { marginTop: spacing.lg, fontSize: 13, fontWeight: "700", color: colors.premium },
+  comingSoon: { marginTop: spacing.lg, fontSize: 13, fontWeight: "700", color: colors.premiumDark },
   sectionHeading: { fontSize: 17, fontWeight: "800", color: colors.text, marginTop: spacing.xl },
   sectionSub: { fontSize: 13, color: colors.textMuted, marginTop: spacing.xs, lineHeight: 18 },
   sectionRow: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm, gap: spacing.sm },

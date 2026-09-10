@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { forgotPassword } from "../api/auth";
 import { useI18n } from "../i18n/I18nContext";
@@ -26,6 +28,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "ForgotPassword">;
 // now the backend's own emailed reset link (POST /api/auth/forgot-password)
 // is the complete path, same as the website.
 export default function ForgotPasswordScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -54,10 +57,16 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + insets.bottom }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable onPress={() => navigation.goBack()} style={styles.back} hitSlop={12}>
           <Text style={styles.backText}>‹</Text>
         </Pressable>
+        <View style={styles.logoWrap}>
+          <Image source={require("../../assets/logo-full.png")} style={styles.logo} resizeMode="contain" />
+        </View>
 
         <Text style={styles.title}>{t("forgotPassword.title")}</Text>
         <Text style={styles.subtitle}>{t("forgotPassword.subtitle")}</Text>
@@ -96,9 +105,27 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
-  container: { flexGrow: 1, padding: spacing.lg, paddingTop: spacing.xl, justifyContent: "center" },
-  back: { position: "absolute", top: spacing.xl, left: spacing.lg, width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  backText: { fontSize: 26, color: colors.ink, marginTop: -2 },
+  container: { flexGrow: 1, padding: spacing.lg, paddingTop: spacing.xl },
+  // Prototype's .ob-back: a floating 38x38 circular white pill with a
+  // subtle shadow, not the plain unstyled chevron this used to be.
+  back: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
+    shadowColor: colors.ink,
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  backText: { fontSize: 22, color: colors.ink, marginTop: -2 },
+  logoWrap: { alignItems: "center", marginBottom: spacing.md },
+  // Prototype's .auth-logo img is 190px wide.
+  logo: { width: 230, height: 160 }, // logo-full.png is 900x625 - keep that aspect ratio
   title: { fontSize: 25, fontWeight: "800", color: colors.ink, textAlign: "center", marginBottom: 8 },
   subtitle: { fontSize: 14, color: colors.muted, textAlign: "center", lineHeight: 20, marginBottom: spacing.lg, paddingHorizontal: spacing.sm },
   form: { gap: spacing.sm },

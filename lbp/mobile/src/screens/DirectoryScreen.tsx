@@ -1,17 +1,28 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useNavigation } from "@react-navigation/native";
-import { fetchClinics, fetchLawyers } from "../api/directory";
+import { ActivityIndicator, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { Feather } from "@expo/vector-icons";
+import {
+  fetchClinicOptions,
+  fetchClinics,
+  fetchLawyerOptions,
+  fetchLawyers,
+  type DirectoryCategoryOption,
+  type DirectoryCountryOption,
+} from "../api/directory";
 import { favouriteClinic, favouriteLawyer, fetchFavourites, unfavouriteClinic, unfavouriteLawyer } from "../api/favourites";
 import { ApiError } from "../api/client";
 import type { DirectoryItem } from "../api/types";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import GradientBackground from "../components/GradientBackground";
+import { OptionListPicker } from "../components/OptionListPicker";
+import { countryName } from "../utils/countryNames";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Kind = "clinics" | "lawyers";
-type Nav = NativeStackNavigationProp<RootStackParamList>;
+type Props = NativeStackScreenProps<RootStackParamList, "Directory">;
 const PAGE_SIZE = 20;
 
 // Mirrors the site's public /clinics and /lawyers directories
@@ -23,15 +34,17 @@ const PAGE_SIZE = 20;
 //
 // Restyled (Sep 2026) to match the prototype's #scr-clinics/#scr-lawyers
 // list rows (.doc-row: bordered card, 48px thumbnail, title + meta line,
-// small "Partner" pill). The prototype also shows category filter chips
-// (IVF, Egg freezing, ...) above the list, but /api/public/clinics and
-// /lawyers have no category query param to back that with real filtering
-// (see api/directory.ts) - rather than ship chips that silently do
-// nothing, they're left out here.
-export default function DirectoryScreen() {
-  const navigation = useNavigation<Nav>();
-  const { t } = useI18n();
-  const [kind, setKind] = useState<Kind>("clinics");
+// small "Partner" pill). The prototype's own category filter chips (IVF,
+// Egg freezing, ...) have no backing query param on /api/public/clinics or
+// /lawyers, so those specifically are still left out rather than shipped
+// fake - but /api/public/clinics/options and /lawyers/options DO already
+// return a real per-country breakdown with counts (public_clinic_options()/
+// public_lawyer_options() in main.py), which nothing on this screen used -
+// that's now a real country filter chip row instead.
+export default function DirectoryScreen({ route, navigation }: Props) {
+  const { t, locale } = useI18n();
+  const insets = useSafeAreaInsets();
+  const [kind, setKind] = useState<Kind>(route.params?.initialKind || "clinics");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<DirectoryItem[]>([]);
   const [favouritedIds, setFavouritedIds] = useState<Set<number>>(new Set());
@@ -39,6 +52,27 @@ export default function DirectoryScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [countries, setCountries] = useState<DirectoryCountryOption[]>([]);
+  // Alena: "должны выбираться несколько сразу" - country needed to be a
+  // multi-select (several countries filtered together), not one at a
+  // time. Kept as an array everywhere below instead of a single value.
+  const [country, setCountry] = useState<string[]>([]);
+  // Real, backend-backed specialty filter (clinics: serviceCategory /
+  // CLINIC_SERVICE_GROUPS, lawyers: practiceArea) - Alena's reference had
+  // its own chip labels ("Egg freezing", "Donor programs", "Surrogacy")
+  // that don't match the real taxonomy the backend actually groups by, so
+  // the chips below use the API's own labels/options rather than those.
+  const [categories, setCategories] = useState<DirectoryCategoryOption[]>([]);
+  const [category, setCategory] = useState<string | null>(null);
+  // Both filter rows used to be horizontal chip scrollers - fine for a
+  // handful of countries, unusable once a category list has 227 entries
+  // (Alena: "не помещаются фильтры" - the row doesn't fit, and endlessly
+  // scrolling sideways through 227 chips to find one isn't a real way to
+  // pick from a list that size). Replaced with two dropdown-style fields
+  // that open the same full-screen OptionListPicker FiltersScreen already
+  // uses for its own country/profileType/etc pickers, so long option lists
+  // get a normal scrollable list instead of a horizontal chip row.
+  const [picker, setPicker] = useState<"category" | "country" | null>(null);
   // Guards against the tab switch and the search submit racing each other -
   // e.g. tapping "Lawyers" right after submitting a clinics search could
   // otherwise let the slower (now-stale) response overwrite the newer one.
@@ -46,25 +80,36 @@ export default function DirectoryScreen() {
   // tab/search) supersedes it.
   const requestIdRef = useRef(0);
 
-  const load = useCallback(async (activeKind: Kind, q: string) => {
-    const requestId = ++requestIdRef.current;
-    setError(null);
-    try {
-      const fetchList = activeKind === "clinics" ? fetchClinics : fetchLawyers;
-      const [listRes, favRes] = await Promise.all([
-        fetchList({ q: q || undefined, limit: PAGE_SIZE, offset: 0 }),
-        fetchFavourites(),
-      ]);
-      if (requestIdRef.current !== requestId) return; // superseded by a newer load()
-      setItems(listRes.items);
-      setTotal(listRes.total);
-      const favs = activeKind === "clinics" ? favRes.clinics : favRes.lawyers;
-      setFavouritedIds(new Set(favs.map((item) => item.id)));
-    } catch (err) {
-      if (requestIdRef.current !== requestId) return;
-      setError(err instanceof ApiError ? err.message : t("directory.loadError"));
-    }
-  }, [t]);
+  const load = useCallback(
+    async (activeKind: Kind, q: string, activeCountry: string[], activeCategory: string | null) => {
+      const requestId = ++requestIdRef.current;
+      setError(null);
+      try {
+        const listParams =
+          activeKind === "clinics"
+            ? { q: q || undefined, country: activeCountry.length ? activeCountry : undefined, serviceCategory: activeCategory || undefined, limit: PAGE_SIZE, offset: 0 }
+            : { q: q || undefined, country: activeCountry.length ? activeCountry : undefined, practiceArea: activeCategory || undefined, limit: PAGE_SIZE, offset: 0 };
+        const [listRes, favRes, optionsRes] = await Promise.all([
+          activeKind === "clinics" ? fetchClinics(listParams) : fetchLawyers(listParams),
+          fetchFavourites(),
+          activeKind === "clinics"
+            ? fetchClinicOptions(locale).catch(() => ({ countries: [] as DirectoryCountryOption[], serviceCategories: [] as DirectoryCategoryOption[] }))
+            : fetchLawyerOptions().catch(() => ({ countries: [] as DirectoryCountryOption[], practiceAreas: [] as DirectoryCategoryOption[] })),
+        ]);
+        if (requestIdRef.current !== requestId) return; // superseded by a newer load()
+        setItems(listRes.items);
+        setTotal(listRes.total);
+        const favs = activeKind === "clinics" ? favRes.clinics : favRes.lawyers;
+        setFavouritedIds(new Set(favs.map((item) => item.id)));
+        setCountries(optionsRes.countries);
+        setCategories("serviceCategories" in optionsRes ? optionsRes.serviceCategories : optionsRes.practiceAreas);
+      } catch (err) {
+        if (requestIdRef.current !== requestId) return;
+        setError(err instanceof ApiError ? err.message : t("directory.loadError"));
+      }
+    },
+    [t, locale],
+  );
 
   // GET /api/public/clinics and /api/public/lawyers are paginated (limit/
   // offset, "total"/"hasMore" in the response - see public_clinics() in
@@ -77,8 +122,11 @@ export default function DirectoryScreen() {
     const requestId = ++requestIdRef.current;
     setLoadingMore(true);
     try {
-      const fetchList = kind === "clinics" ? fetchClinics : fetchLawyers;
-      const res = await fetchList({ q: query || undefined, limit: PAGE_SIZE, offset: items.length });
+      const moreParams =
+        kind === "clinics"
+          ? { q: query || undefined, country: country.length ? country : undefined, serviceCategory: category || undefined, limit: PAGE_SIZE, offset: items.length }
+          : { q: query || undefined, country: country.length ? country : undefined, practiceArea: category || undefined, limit: PAGE_SIZE, offset: items.length };
+      const res = kind === "clinics" ? await fetchClinics(moreParams) : await fetchLawyers(moreParams);
       if (requestIdRef.current !== requestId) return;
       setItems((prev) => [...prev, ...res.items]);
       setTotal(res.total);
@@ -92,10 +140,36 @@ export default function DirectoryScreen() {
 
   useEffect(() => {
     setLoading(true);
-    load(kind, query).finally(() => setLoading(false));
+    setCountry([]); // clinics/lawyers have different country breakdowns
+    setCategory(null); // ...and different specialty taxonomies
+    load(kind, query, [], null).finally(() => setLoading(false));
     // Re-run when switching tabs; search re-runs on submit, not per keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind]);
+
+  function toggleCountry(value: string) {
+    // "" is the picker's own "All countries" row - always clears the whole
+    // selection instead of toggling one code in/out of it.
+    const next = value === "" ? [] : country.includes(value) ? country.filter((c) => c !== value) : [...country, value];
+    setCountry(next);
+    setLoading(true);
+    load(kind, query, next, category).finally(() => setLoading(false));
+  }
+
+  function selectCategory(next: string | null) {
+    setCategory(next);
+    setLoading(true);
+    load(kind, query, country, next).finally(() => setLoading(false));
+  }
+
+  // Search's only clear affordance used to be backspacing the whole query
+  // by hand - Alena flagged there was no way to reset back to the full
+  // list after searching.
+  function clearSearch() {
+    setQuery("");
+    setLoading(true);
+    load(kind, "", country, category).finally(() => setLoading(false));
+  }
 
   async function toggleFavourite(item: DirectoryItem) {
     const isFav = favouritedIds.has(item.id);
@@ -123,6 +197,7 @@ export default function DirectoryScreen() {
   }
 
   return (
+    <GradientBackground variant="soft">
     <View style={styles.container}>
       <View style={styles.tabs}>
         <Pressable style={[styles.tab, kind === "clinics" && styles.tabActive]} onPress={() => setKind("clinics")}>
@@ -134,7 +209,7 @@ export default function DirectoryScreen() {
       </View>
 
       <View style={styles.searchBar}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <Feather name="search" size={17} color={colors.muted} />
         <TextInput
           style={styles.searchInput}
           value={query}
@@ -144,10 +219,73 @@ export default function DirectoryScreen() {
           returnKeyType="search"
           onSubmitEditing={() => {
             setLoading(true);
-            load(kind, query).finally(() => setLoading(false));
+            load(kind, query, country, category).finally(() => setLoading(false));
           }}
         />
+        {query.length > 0 ? (
+          <Pressable onPress={clearSearch} hitSlop={8}>
+            <Feather name="x" size={17} color={colors.muted} />
+          </Pressable>
+        ) : null}
       </View>
+
+      {/* Real specialty + country filters - see the comment by the
+          `picker` state. Each field opens a full-screen list instead of
+          cramming every option into a horizontal chip row. */}
+      {categories.length > 0 || countries.length > 0 ? (
+        <View style={styles.filterRow}>
+          {categories.length > 0 ? (
+            <Pressable style={[styles.filterField, category && styles.filterFieldActive]} onPress={() => setPicker("category")}>
+              <Text style={[styles.filterFieldText, category && styles.filterFieldTextActive]} numberOfLines={1}>
+                {category ? categories.find((c) => c.value === category)?.label || category : t("directory.allCategories")}
+              </Text>
+              <Feather name="chevron-down" size={16} color={category ? colors.white : colors.ink} />
+            </Pressable>
+          ) : null}
+          {countries.length > 0 ? (
+            <Pressable style={[styles.filterField, country.length > 0 && styles.filterFieldActive]} onPress={() => setPicker("country")}>
+              <Text style={[styles.filterFieldText, country.length > 0 && styles.filterFieldTextActive]} numberOfLines={1}>
+                {country.length === 0
+                  ? t("directory.allCountries")
+                  : country.length === 1
+                    ? countryName(country[0], locale)
+                    : t("directory.countriesSelected", { count: country.length })}
+              </Text>
+              <Feather name="chevron-down" size={16} color={country.length > 0 ? colors.white : colors.ink} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      <Modal visible={picker === "category"} animationType="slide" onRequestClose={() => setPicker(null)}>
+        <OptionListPicker
+          title={t("directory.allCategories")}
+          options={[{ value: "", label: t("directory.allCategories") }, ...categories.map((c) => ({ value: c.value, label: c.label, count: c.count ?? undefined }))]}
+          selected={category ? [category] : []}
+          multi={false}
+          onToggle={(value) => {
+            selectCategory(value || null);
+            setPicker(null);
+          }}
+          onClose={() => setPicker(null)}
+        />
+      </Modal>
+
+      <Modal visible={picker === "country"} animationType="slide" onRequestClose={() => setPicker(null)}>
+        <OptionListPicker
+          title={t("directory.allCountries")}
+          options={[
+            { value: "", label: t("directory.allCountries") },
+            ...countries
+              .map((c) => ({ value: c.value, label: countryName(c.value, locale), count: c.count }))
+              .sort((a, b) => a.label.localeCompare(b.label)),
+          ]}
+          selected={country}
+          multi
+          onToggle={toggleCountry}
+          onClose={() => setPicker(null)}
+        />
+      </Modal>
 
       {loading ? (
         <View style={styles.center}>
@@ -161,7 +299,7 @@ export default function DirectoryScreen() {
         <FlatList
           data={items}
           keyExtractor={(item) => `${kind}-${item.id}`}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom }]}
           onEndReachedThreshold={0.5}
           onEndReached={() => void loadMore()}
           ListEmptyComponent={
@@ -180,7 +318,7 @@ export default function DirectoryScreen() {
             const image = item.logoUrl || item.photoUrl;
             const isFav = favouritedIds.has(item.id);
             const specialties = firstStringList(kind === "clinics" ? item.services : item.practiceAreas);
-            const metaParts = [[item.city, item.country].filter(Boolean).join(", "), specialties].filter(Boolean);
+            const metaParts = [[item.city, item.country ? countryName(item.country, locale) : null].filter(Boolean).join(", "), specialties].filter(Boolean);
             return (
               <Pressable
                 style={styles.row}
@@ -199,13 +337,15 @@ export default function DirectoryScreen() {
                   <Text style={styles.name} numberOfLines={1}>
                     {item.name}
                   </Text>
+                  {/* Meta text + the partner badge sit on the same line -
+                      Alena's reference had it inline, not stacked below. */}
                   <View style={styles.metaRow}>
                     <Text style={styles.meta} numberOfLines={1}>
                       {metaParts.join(" · ") || t("common.locationNotSet")}
                     </Text>
-                  </View>
-                  <View style={styles.partnerTag}>
-                    <Text style={styles.partnerTagText}>{t("directory.partnerTag")}</Text>
+                    <View style={styles.partnerTag}>
+                      <Text style={styles.partnerTagText}>{t("directory.partnerTag")}</Text>
+                    </View>
                   </View>
                 </View>
                 <Pressable hitSlop={8} onPress={() => void toggleFavourite(item)}>
@@ -217,6 +357,7 @@ export default function DirectoryScreen() {
         />
       )}
     </View>
+    </GradientBackground>
   );
 }
 
@@ -237,7 +378,7 @@ function firstStringList(value: unknown, max = 2): string {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.card },
+  container: { flex: 1, backgroundColor: "transparent" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
   errorText: { color: colors.danger },
   emptyText: { color: colors.muted },
@@ -265,6 +406,35 @@ const styles = StyleSheet.create({
   },
   searchIcon: { fontSize: 14 },
   searchInput: { flex: 1, fontSize: 13, color: colors.ink, padding: 0 },
+  // Explicit height (Sept 2026): a horizontal ScrollView with no
+  // height of its own can fail to reserve its content's height in the
+  // surrounding flex column - Alena's screenshot showed the category-chip
+  // row and the country-chip row rendering on top of each other instead
+  // of stacked, exactly this failure mode (both rows collapsing toward
+  // zero height, so their real chip content overlapped the next row down
+  // instead of pushing it lower). A fixed height matching the chip's own
+  // rendered size (paddingVertical 7 * 2 + ~16px text ≈ 30px, +6px slack)
+  // makes the row's box-model height unambiguous regardless of that.
+  countryScroll: { height: 36, marginBottom: spacing.sm },
+  countryRow: { paddingHorizontal: spacing.md, gap: spacing.xs, alignItems: "center" },
+  filterRow: { flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
+  filterField: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bgSoft,
+  },
+  filterFieldActive: { backgroundColor: colors.ink },
+  filterFieldText: { fontSize: 13, fontWeight: "700", color: colors.muted, flexShrink: 1, marginRight: 6 },
+  filterFieldTextActive: { color: colors.white },
+  chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.bgSoft },
+  chipActive: { backgroundColor: colors.ink },
+  chipText: { fontSize: 12.5, fontWeight: "700", color: colors.muted },
+  chipTextActive: { color: colors.white },
   list: { padding: spacing.md, gap: spacing.sm },
   row: {
     flexDirection: "row",
@@ -281,9 +451,9 @@ const styles = StyleSheet.create({
   thumbPlaceholder: { alignItems: "center", justifyContent: "center" },
   rowBody: { flex: 1, gap: 2 },
   name: { fontSize: 14, fontWeight: "600", color: colors.ink },
-  metaRow: { flexDirection: "row" },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
   meta: { fontSize: 12, color: colors.muted, flexShrink: 1 },
-  partnerTag: { alignSelf: "flex-start", backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, marginTop: 2 },
+  partnerTag: { alignSelf: "flex-start", backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
   partnerTagText: { fontSize: 9.5, fontWeight: "700", color: colors.blueDark },
   heart: { fontSize: 20 },
   footer: { paddingVertical: spacing.lg },

@@ -11,17 +11,20 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { ApiError } from "../api/client";
 import SocialAuthButtons from "../components/SocialAuthButtons";
 import { colors, radius, spacing } from "../theme";
+import { Feather } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 
 export default function LoginScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const { login } = useAuth();
   const { t } = useI18n();
   const [email, setEmail] = useState("");
@@ -57,9 +60,15 @@ export default function LoginScreen({ navigation }: Props) {
       style={styles.flex}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + insets.bottom }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Pressable onPress={() => navigation.goBack()} style={styles.back} hitSlop={12}>
+          <Text style={styles.backText}>‹</Text>
+        </Pressable>
         <View style={styles.logoWrap}>
-          <Image source={require("../../assets/icon.png")} style={styles.logo} resizeMode="contain" />
+          <Image source={require("../../assets/logo-full.png")} style={styles.logo} resizeMode="contain" />
         </View>
         <Text style={styles.title}>{t("login.title")}</Text>
         <Text style={styles.subtitle}>{t("login.subtitle")}</Text>
@@ -93,7 +102,7 @@ export default function LoginScreen({ navigation }: Props) {
               onPress={() => setPasswordVisible((v) => !v)}
               hitSlop={8}
             >
-              <Text style={styles.passwordToggleText}>{passwordVisible ? "🙈" : "👁️"}</Text>
+              <Feather name={passwordVisible ? "eye-off" : "eye"} size={18} color={colors.muted} />
             </Pressable>
           </View>
 
@@ -137,13 +146,33 @@ function describeAuthError(err: ApiError, t: (key: string) => string): string {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
-  container: { flexGrow: 1, padding: spacing.lg, paddingTop: spacing.xl, justifyContent: "center" },
+  container: { flexGrow: 1, padding: spacing.lg, paddingTop: spacing.xl },
   logoWrap: { alignItems: "center", marginBottom: spacing.md },
-  logo: { width: 84, height: 84, borderRadius: radius.md },
+  // Prototype's .auth-logo img is 190px wide - this was 84px.
+  logo: { width: 230, height: 160 }, // logo-full.png is 900x625 - keep that aspect ratio
+  // Prototype's .ob-back: a floating 38x38 circular white pill with a
+  // subtle shadow (scr-login/scr-forgot-password in
+  // "Claude outputs/app-prototype-inline.html") - this screen had no back
+  // button at all before, relying only on the OS back gesture.
+  back: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
+    shadowColor: colors.ink,
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  backText: { fontSize: 22, color: colors.ink, marginTop: -2 },
   title: { fontSize: 25, fontWeight: "800", color: colors.ink, textAlign: "center", marginBottom: 8 },
   subtitle: { fontSize: 14, color: colors.muted, textAlign: "center", lineHeight: 20, marginBottom: spacing.lg, paddingHorizontal: spacing.sm },
   form: { gap: spacing.sm },
-  label: { fontSize: 14.5, fontWeight: "700", color: colors.ink, marginTop: spacing.sm, marginBottom: 4 },
+  label: { fontSize: 14.5, fontWeight: "700", color: colors.ink, marginBottom: spacing.xs * 2 },
   input: {
     height: 52,
     borderWidth: 1,
@@ -157,7 +186,6 @@ const styles = StyleSheet.create({
   passwordRow: { flexDirection: "row", alignItems: "center" },
   passwordInput: { flex: 1, paddingRight: spacing.xl + spacing.md },
   passwordToggle: { position: "absolute", right: spacing.md, padding: spacing.xs },
-  passwordToggleText: { fontSize: 18 },
   error: { color: colors.danger, fontSize: 13, marginTop: spacing.xs },
   primaryButton: {
     height: 54,
@@ -165,7 +193,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: spacing.md,
+    marginTop: 10,
   },
   primaryButtonText: { color: colors.white, fontSize: 15.5, fontWeight: "700" },
   outlineButton: {

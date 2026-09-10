@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { fetchFavourites, unfavouriteClinic, unfavouriteLawyer } from "../api/favourites";
 import { ApiError } from "../api/client";
@@ -17,10 +18,19 @@ type Row = FavouriteItem & { kind: "clinics" | "lawyers" };
 // list here the same way the backend response groups them.
 export default function FavouritesScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const [items, setItems] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Alena: "здесь переключение между клиниках и адвокатам надо сделать
+  // сверху как обычно" - the Lawyers/Clinics split (added right above,
+  // per her earlier "может стоит разделить на юристы и клиники?") had
+  // become two stacked SectionList groups, so getting to Clinics meant
+  // scrolling past every saved lawyer first. Switched to the same
+  // top segmented-tab pattern DirectoryScreen already uses for this exact
+  // clinics/lawyers choice, so only one kind renders at a time.
+  const [kind, setKind] = useState<"clinics" | "lawyers">("clinics");
 
   const load = useCallback(async () => {
     setError(null);
@@ -66,11 +76,31 @@ export default function FavouritesScreen() {
     );
   }
 
+  // Lawyers/clinics are already tagged per-row (`item.kind`, added for the
+  // remove-button branch below) - filtering to the active tab is just
+  // narrowing the same data, not a new fetch or a shape change to `items`.
+  const lawyerItems = items.filter((item) => item.kind === "lawyers");
+  const clinicItems = items.filter((item) => item.kind === "clinics");
+  const visibleItems = kind === "lawyers" ? lawyerItems : clinicItems;
+
   return (
+    <View style={styles.container}>
+      <View style={styles.tabs}>
+        <Pressable style={[styles.tab, kind === "clinics" && styles.tabActive]} onPress={() => setKind("clinics")}>
+          <Text style={[styles.tabText, kind === "clinics" && styles.tabTextActive]}>
+            {t("directory.clinics")}{clinicItems.length ? ` (${clinicItems.length})` : ""}
+          </Text>
+        </Pressable>
+        <Pressable style={[styles.tab, kind === "lawyers" && styles.tabActive]} onPress={() => setKind("lawyers")}>
+          <Text style={[styles.tabText, kind === "lawyers" && styles.tabTextActive]}>
+            {t("directory.lawyers")}{lawyerItems.length ? ` (${lawyerItems.length})` : ""}
+          </Text>
+        </Pressable>
+      </View>
     <FlatList
-      data={items}
+      data={visibleItems}
       keyExtractor={(item) => `${item.kind}-${item.favouriteId}`}
-      contentContainerStyle={styles.list}
+      contentContainerStyle={[styles.list, { paddingBottom: spacing.md + insets.bottom }]}
       ListEmptyComponent={
         <View style={styles.center}>
           <Text style={styles.emptyText}>{t("favourites.empty")}</Text>
@@ -119,14 +149,27 @@ export default function FavouritesScreen() {
         );
       }}
     />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.card },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
   errorText: { color: colors.danger },
   emptyText: { color: colors.muted, textAlign: "center" },
   list: { padding: spacing.md, gap: spacing.sm, backgroundColor: colors.card, flexGrow: 1 },
+  tabs: { flexDirection: "row", padding: spacing.md, gap: spacing.sm },
+  tab: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bgSoft,
+  },
+  tabActive: { backgroundColor: colors.ink },
+  tabText: { fontWeight: "700", color: colors.muted },
+  tabTextActive: { color: colors.white },
   card: {
     flexDirection: "row",
     alignItems: "center",
