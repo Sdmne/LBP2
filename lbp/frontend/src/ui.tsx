@@ -3847,7 +3847,7 @@ function Subscription({ session }: { session: Session }) {
             <p>Your Premium subscription is active.</p>
           ) : (
             <div className="plan-actions">
-              {["MONTHLY", "QUARTERLY", "ANNUAL"].map((plan) => (
+              {["MONTHLY", "QUARTERLY"].map((plan) => (
                 <button
                   className="primary"
                   key={plan}

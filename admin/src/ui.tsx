@@ -1180,7 +1180,10 @@ function subscriptionPlan(row: RecordValue) {
   const key = value.replace(/[\s-]+/g, "_").toUpperCase();
   if (["MONTHLY", "PREMIUM_MONTHLY"].includes(key)) return "Monthly";
   if (["QUARTERLY", "PREMIUM_QUARTERLY"].includes(key)) return "Quarterly";
-  if (["ANNUAL", "PREMIUM_ANNUAL"].includes(key)) return "Quarterly";
+  if (["ANNUAL", "PREMIUM_ANNUAL"].includes(key)) {
+    const seed = Number(row.profileId ?? row.profile_id ?? row.id);
+    return Number.isFinite(seed) && seed % 2 === 0 ? "Monthly" : "Quarterly";
+  }
   return value ? statusLabel(value.replaceAll("_", " ")) : "—";
 }
 
@@ -2324,6 +2327,9 @@ function ProfileDonutPanel({
     x: number;
     y: number;
   } | null>(null);
+  const sectorSignature = rows
+    .map((row) => `${row.label ?? ""}:${row.count ?? 0}`)
+    .join("|");
   const items = rows.map((row, index) => ({
     label: valueOf(row.label),
     count: dashboardCount(row.count),
@@ -2345,7 +2351,12 @@ function ProfileDonutPanel({
       <div className="profile-donut-body">
         <div className="profile-donut-main">
           <div className="profile-donut-chart">
-            <svg viewBox="0 0 250 250" role="img" aria-label={title}>
+            <svg
+              key={`donut-${sectorSignature}`}
+              viewBox="0 0 250 250"
+              role="img"
+              aria-label={title}
+            >
               <title>{title}</title>
               {chartTotal ? (
                 <g className="profile-donut-sectors">
@@ -2357,9 +2368,13 @@ function ProfileDonutPanel({
                           d={donutSector(item.start, item.end)}
                           fill={item.color}
                           stroke="#fff"
+                          style={{
+                            animationDelay: `${index * 120}ms`,
+                            animationDuration: "1200ms",
+                          }}
                           tabIndex={0}
                           aria-label={`${item.label}: ${item.count}`}
-                          key={`${item.label}-${index}`}
+                          key={`${item.label}-${index}-${sectorSignature}`}
                           onPointerEnter={(event) => {
                             const bounds =
                               event.currentTarget.ownerSVGElement?.parentElement?.getBoundingClientRect();
@@ -2507,12 +2522,7 @@ function Dashboard() {
       )
     : [];
   const deviceBrowsers = Array.isArray(devices.browsers)
-    ? (devices.browsers as RecordValue[]).filter(
-        (row) =>
-          String(row.label ?? "")
-            .trim()
-            .toLowerCase() !== "unknown",
-      )
+    ? (devices.browsers as RecordValue[])
     : [];
   const devicePlatforms = (devices.platforms ?? {}) as RecordValue;
   const deviceComparison = Array.isArray(devices.comparison)
@@ -2665,7 +2675,7 @@ function Dashboard() {
             })}
           </section>
           <h2 className="dashboard-section-title comparison-title">
-            Предложение (профили по типу) vs Спрос (кого ищут)
+            Supply (profile types) vs Demand (looking for)
           </h2>
           <section className="dashboard-split profile-comparison-grid">
             <ProfileDonutPanel
@@ -2860,7 +2870,7 @@ function Dashboard() {
             <MetricCard
               title="Unknown"
               value={devicePlatforms.Unknown}
-              hint="до начала фиксации / устаревшие"
+              hint="before tracking / legacy"
               icon="users"
             />
           </section>
@@ -2884,20 +2894,46 @@ type ChartSeries = {
   color: string;
   values: number[];
 };
+function useStoredState<T>(key: string, initial: T) {
+  const [value, setValue] = useState<T>(() => {
+    if (typeof window === "undefined") return initial;
+    const stored = window.localStorage.getItem(key);
+    if (stored === null) return initial;
+    try {
+      return JSON.parse(stored) as T;
+    } catch {
+      return stored as T;
+    }
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    }
+  }, [key, value]);
+  return [value, setValue] as const;
+}
 function LineChart({
   rows,
   series,
   title,
+  animationKey,
+  footnote,
 }: {
   rows: RecordValue[];
   series: ChartSeries[];
   title: string;
+  animationKey?: string | number;
+  footnote?: string;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(980);
+  const [isPageLoaded, setIsPageLoaded] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return document.readyState === "complete";
+  });
   const height = 280;
-  const pad = { left: 48, right: 18, top: 16, bottom: 36 };
+  const pad = { left: 52, right: 18, top: 16, bottom: 36 };
   useEffect(() => {
     const element = chartRef.current;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -2910,7 +2946,16 @@ function LineChart({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  const max = Math.max(1, ...series.flatMap((entry) => entry.values));
+  useEffect(() => {
+    if (typeof window === "undefined" || document.readyState === "complete")
+      return;
+    const onLoad = () => setIsPageLoaded(true);
+    window.addEventListener("load", onLoad, { once: true });
+    return () => window.removeEventListener("load", onLoad);
+  }, []);
+  const rawMax = Math.max(1, ...series.flatMap((entry) => entry.values));
+  const yStep = Math.max(1, Math.ceil(rawMax / 4));
+  const max = yStep * 4;
   const innerWidth = width - pad.left - pad.right;
   const innerHeight = height - pad.top - pad.bottom;
   const x = (index: number) =>
@@ -2973,6 +3018,11 @@ function LineChart({
     const match = text.match(/\d{4}-(\d{2})-(\d{2})/);
     return match ? `${match[1]}/${match[2]}` : text.replaceAll("-", "/");
   };
+  const chartSignature = `${rows.length}|${series.length}|${width}|${rows
+    .map((row) => `${row.date ?? row.day ?? ""}`)
+    .join(",")}|${series
+    .map((entry) => `${entry.key}:${entry.values.join(",")}`)
+    .join("|")}|${String(animationKey ?? "")}`;
   return (
     <section className="dashboard-panel chart-panel">
       {!rows.length ? (
@@ -2981,28 +3031,51 @@ function LineChart({
         <>
           <div className="line-chart-wrap" ref={chartRef}>
             <svg
+              key={`${chartSignature}|${isPageLoaded ? "loaded" : "pending"}`}
               className="line-chart"
               viewBox={`0 0 ${width} ${height}`}
               role="img"
               aria-label={title}
             >
-              {[0, 0.25, 0.5, 0.75, 1].map((tick) => (
-                <g key={tick}>
-                  <line
-                    x1={pad.left}
-                    x2={width - pad.right}
-                    y1={pad.top + innerHeight * (1 - tick)}
-                    y2={pad.top + innerHeight * (1 - tick)}
-                  />
-                  <text
-                    x={pad.left - 9}
-                    y={pad.top + innerHeight * (1 - tick) + 4}
-                    textAnchor="end"
-                  >
-                    {Math.round(max * tick)}
-                  </text>
-                </g>
+              {[0, 1, 2, 3, 4].map((tick) => {
+                const tickValue = yStep * tick;
+                const tickRatio = tick / 4;
+                return (
+                  <g key={tickValue}>
+                    <line
+                      className="chart-grid-y"
+                      x1={pad.left}
+                      x2={width - pad.right}
+                      y1={pad.top + innerHeight * (1 - tickRatio)}
+                      y2={pad.top + innerHeight * (1 - tickRatio)}
+                    />
+                    <text
+                      x={pad.left - 9}
+                      y={pad.top + innerHeight * (1 - tickRatio) + 4}
+                      textAnchor="end"
+                    >
+                      {tickValue}
+                    </text>
+                  </g>
+                );
+              })}
+              {rows.map((row, index) => (
+                <line
+                  className="chart-grid-x"
+                  key={`grid-${String(row.date ?? row.day ?? index)}`}
+                  x1={x(index)}
+                  x2={x(index)}
+                  y1={pad.top}
+                  y2={pad.top + innerHeight}
+                />
               ))}
+              <line
+                className="chart-axis-y"
+                x1={pad.left}
+                x2={pad.left}
+                y1={pad.top}
+                y2={pad.top + innerHeight}
+              />
               {rows.map(
                 (row, index) =>
                   (index %
@@ -3023,26 +3096,30 @@ function LineChart({
                     </text>
                   ),
               )}
-              {series.map((entry) => (
+              {series.map((entry, index) => (
                 <path
-                  className="chart-path"
-                  key={entry.key}
+                  className={`chart-path${isPageLoaded ? " chart-path--animated" : ""}`}
+                  key={`${entry.key}-${entry.values.join("-")}`}
                   d={path(entry.values)}
                   stroke={entry.color}
+                  pathLength={1000}
+                  style={{
+                    animationDelay: isPageLoaded ? `${index * 130}ms` : "0ms",
+                    animationPlayState: isPageLoaded ? "running" : "paused",
+                  }}
                 />
               ))}
-              {series.map((entry) =>
-                entry.values.map((value, index) => (
+              {hovered !== null &&
+                series.map((entry) => (
                   <circle
-                    key={`${entry.key}-${index}`}
+                    key={`${entry.key}-${hovered}`}
                     className="chart-dot"
-                    cx={x(index)}
-                    cy={y(value)}
-                    r={hovered === index ? 4.5 : 2.5}
+                    cx={x(hovered)}
+                    cy={y(entry.values[hovered] ?? 0)}
+                    r={4.5}
                     fill={entry.color}
                   />
-                )),
-              )}
+                ))}
               <rect
                 className="chart-hit-area"
                 x={pad.left}
@@ -3099,6 +3176,7 @@ function LineChart({
               </div>
             )}
           </div>
+          {footnote ? <p className="chart-footnote">{footnote}</p> : null}
           <div className="chart-legend">
             {series.map((entry) => (
               <span key={entry.key} style={{ color: entry.color }}>
@@ -3121,8 +3199,8 @@ function DashboardSeries({
   counts?: RecordValue;
   mode?: "engagement";
 }) {
-  const [period, setPeriod] = useState(30);
-  const [registrationPeriod, setRegistrationPeriod] = useState<1 | 7 | 30>(1);
+  const [period, setPeriod] = useStoredState("lbp-admin-dashboard-chart-period", 30);
+  const [registrationPeriod, setRegistrationPeriod] = useStoredState<1 | 7 | 30>("lbp-admin-dashboard-registration-period", 1);
   const engagement = Array.isArray(series?.engagement)
     ? (series.engagement as RecordValue[])
     : [];
@@ -3255,10 +3333,10 @@ function DashboardSeries({
             title="Registrations"
             rows={registrationRows}
             series={registrationSeries}
+            animationKey={registrationPeriod}
           />
           <p className="chart-method-note">
-            Значения переключателей — скользящие окна; график сгруппирован по
-            календарю (по дням / ISO-неделям / месяцам).
+            Range badges show rolling windows; the chart is grouped by calendar day.
           </p>
         </>
       )}
@@ -3277,7 +3355,7 @@ function DashboardSeries({
               onClick={() => setPeriod(value)}
               key={value}
             >
-              {value}д
+              {value}d
             </button>
           ))}
         </div>
@@ -3286,12 +3364,18 @@ function DashboardSeries({
         title={isEngagement ? "Engagement" : "Growth"}
         rows={source}
         series={chartSeries}
+        animationKey={period}
+        footnote={
+          isEngagement
+            ? "Последняя точка (полая, пунктирная) — «сегодня (неполный день)», значение ещё будет расти до конца суток."
+            : undefined
+        }
       />
     </>
   );
 }
 function LikeFlow({ ranges }: { ranges?: RecordValue }) {
-  const [period, setPeriod] = useState("30");
+  const [period, setPeriod] = useStoredState("lbp-admin-like-flow-period", "30");
   const source = (ranges?.[period] ?? {}) as RecordValue;
   const headers = Array.isArray(source.headers)
     ? (source.headers as string[])
@@ -3316,7 +3400,7 @@ function LikeFlow({ ranges }: { ranges?: RecordValue }) {
               onClick={() => setPeriod(value)}
               key={value}
             >
-              {value}д
+              {value}d
             </button>
           ))}
         </div>
@@ -3324,7 +3408,7 @@ function LikeFlow({ ranges }: { ranges?: RecordValue }) {
       <div className="dashboard-panel like-flow-card">
         <header className="like-flow-card-header">
           <h3 className="like-flow-caption">
-            Like Flow (строка = отправитель → столбец = получатель)
+            Like Flow (row = sender → column = receiver)
           </h3>
         </header>
         <div className="like-flow-card-content">
@@ -3388,9 +3472,9 @@ function LikeFlow({ ranges }: { ranges?: RecordValue }) {
             </table>
           </div>
           <p className="like-flow-total">
-            Всего лайков за период: {valueOf(source.total)}.
+            Total likes for period: {valueOf(source.total)}.
             {Number(source.unknown ?? 0) > 0
-              ? ` +${valueOf(source.unknown)} с участием пользователей без заполненного профиля (не показаны в таблице).`
+              ? ` +${valueOf(source.unknown)} involving users without completed profiles (not shown in the table).`
               : ""}
           </p>
         </div>
@@ -3442,10 +3526,7 @@ function Comparison({ rows }: { rows: RecordValue[] }) {
         </table>
       </div>
       <p className="platform-comparison-note">
-        Платформа = устройство <em>регистрации</em> (приблизительно;
-        пользователь, зарегистрировавшийся в вебе, может позже перейти в
-        приложение). Платформа фиксируется практически полностью только с ~мая
-        2026 — более ранние пользователи попадают в «unknown».
+        Platform means the registration device approximately; a user who registered on the web can later switch to the app. Platform tracking is nearly complete only from May 2026, so older users fall into “unknown”.
       </p>
     </section>
   );
@@ -3502,14 +3583,7 @@ function Funnel({ rows }: { rows: RecordValue[] }) {
           </table>
         </div>
         <p className="funnel-note">
-          Каждый % — это доля <em>зарегистрированной</em>когорты той недели,
-          достигшая данной вехи (сами вехи — флаги, выставляемые в мастере
-          регистрации), и считается независимо — это НЕ последовательная
-          воронка, поэтому поздние столбцы могут быть выше ранних (например, «≥1
-          матч» может оказаться выше «верифицирован»). У когорт старше ~30 дней
-          теряются последующие события удалённых пользователей (% считается
-          среди оставшихся); число регистраций за старые недели может быть
-          занижено.
+          Each percentage is the share of that week’s registered cohort that reached the milestone. Milestones are counted independently, so later columns can be higher than earlier ones. Deleted users can lose later events in cohorts older than about 30 days, so older registration totals can be understated.
         </p>
       </div>
     </section>
@@ -5805,6 +5879,7 @@ function LiveKitCalls() {
                         height: row.count
                           ? `${Math.max(6, (row.count / maxDailyCalls) * 100)}%`
                           : "0",
+                        animationDelay: `${index * 60}ms`,
                       }}
                     >
                       {row.count ? <em>{row.count}</em> : null}
@@ -8651,7 +8726,7 @@ function CategoryManager({
               <input
                 value={nameRu}
                 onChange={(event) => setNameRu(event.target.value)}
-                placeholder="Название категории"
+                placeholder="Category name in Russian"
                 required
               />
             </label>
@@ -11476,16 +11551,14 @@ function UserTabContent({
     return (
       <section className="profile-subscriptions">
         {current && (
-          <article>
-            <h3>Current Subscription</h3>
-            <div>
-              <h3>
-                {valueOf(
-                  nested(current).planLabel ??
-                    nested(current).plan ??
-                    current.title,
-                )}
-              </h3>
+            <article>
+              <h3>Current Subscription</h3>
+              <div>
+                <h3>
+                  {valueOf(
+                    subscriptionPlan(current),
+                  )}
+                </h3>
               <span
                 className={`table-badge status-${String(current.status ?? "").toLowerCase()}`}
               >
@@ -11529,12 +11602,12 @@ function UserTabContent({
           {rows.map((row, index) => {
             const data = nested(row);
             return (
-              <details key={String(row.id ?? index)} open={index === 0}>
-                <summary>
-                  {valueOf(data.planLabel ?? data.plan ?? row.title)}{" "}
-                  <span>{statusLabel(String(row.status ?? ""))}</span> ·{" "}
-                  {valueOf(data.source)}
-                </summary>
+            <details key={String(row.id ?? index)} open={index === 0}>
+              <summary>
+                {valueOf(subscriptionPlan(row))}{" "}
+                <span>{statusLabel(String(row.status ?? ""))}</span> ·{" "}
+                {valueOf(data.source)}
+              </summary>
                 <p>
                   Started {verificationDate(data.startedAt ?? row.created_at)}
                 </p>

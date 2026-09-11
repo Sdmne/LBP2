@@ -258,15 +258,25 @@ export default function LikesScreen({ navigation }: Props) {
   // and My likes are unlocked at every tier - so the preview only applies
   // to those same two tabs.
   const isPreviewingFree = previewAsFree && accountIsPremium && (tab === "likesYou" || tab === "visitors");
-  const isLocked = !isPreviewingFree && ((tab === "likesYou" && Boolean(data?.likesYouLocked)) || (tab === "visitors" && visitorsLocked));
-  // The backend deliberately withholds the actual likesYou/visitors rows
-  // for a non-Premium viewer (member_likes()/member_profile_views() in
-  // main.py both return likesYou:[]/items:[] unless is_premium, sending
-  // only the count) - there's no real name/photo data on the client to
-  // blur, so unlike Alena's reference mockup (which blurs REAL rows) this
-  // renders generic locked placeholder rows up to that count instead of
-  // inventing fake people. Capped at 6 so a large count doesn't produce a
-  // huge empty-looking list of identical rows.
+  const realLocked = (tab === "likesYou" && Boolean(data?.likesYouLocked)) || (tab === "visitors" && visitorsLocked);
+  // FIX (Sept 2026): a genuinely free account used to get a completely
+  // different, separate treatment here - generic gray placeholder bars,
+  // because member_likes()/member_profile_views() withheld ALL row data
+  // for a non-Premium viewer, leaving nothing real to show or blur. Alena
+  // kept sending the same reference mockup ("покажи 5шт", "замылить")
+  // because that placeholder view never matched it. member_likes() now
+  // sends real data for a free account's first FREE_PREVIEW_COUNT likers
+  // (see LIKES_FREE_PREVIEW_COUNT in main.py) - so a real free account and
+  // the Premium "previewAsFree" self-test toggle can now share the exact
+  // same rendering below: real clear rows up to FREE_PREVIEW_COUNT, blurred
+  // beyond that (only reachable in the self-test case, which already has
+  // more real rows loaded), upgrade banner under the list either way.
+  const previewMode = isPreviewingFree || realLocked;
+  // Fallback only for a tab with a nonzero total but ZERO real preview rows
+  // (visitors - member_profile_views() wasn't touched by this fix, still
+  // withholds everything for a free account) - generic locked placeholder
+  // rows up to the count, capped at 6 so it doesn't produce a huge
+  // empty-looking list of identical rows.
   const lockedCount = Math.min(tab === "visitors" ? visitorsTotal : data?.likesYouCount || 0, 6);
   const profileItems: ProfileSummary[] = tab === "visitors" ? visitors || [] : tab === "likesYou" ? data?.likesYou || [] : tab === "matches" ? data?.matches || [] : data?.myLikes || [];
   // The existing *long* copy (e.g. "likes.empty") reads well as the
@@ -311,7 +321,7 @@ export default function LikesScreen({ navigation }: Props) {
         <View style={styles.center}>
           <Text style={styles.errorText}>{tab === "visitors" ? visitorsError : likesError}</Text>
         </View>
-      ) : isLocked ? (
+      ) : previewMode && profileItems.length === 0 ? (
         <ScrollView contentContainerStyle={[styles.list, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}>
           <View style={styles.premiumBanner}>
             <Text style={styles.premiumTitle}>{t("likes.premiumTitle")}</Text>
@@ -359,7 +369,7 @@ export default function LikesScreen({ navigation }: Props) {
             // the rest blurred), with a dedicated upgrade banner at the
             // bottom - matching the reference mockup's layout (banner
             // below the row list, not above it).
-            isPreviewingFree && profileItems.length > 0 ? (
+            previewMode && profileItems.length > 0 ? (
               <View style={styles.premiumBanner}>
                 <Text style={styles.premiumTitle}>{t("likes.previewLockedTitle")}</Text>
                 <Text style={styles.premiumBody}>{t("likes.previewLockedBody")}</Text>
@@ -371,11 +381,14 @@ export default function LikesScreen({ navigation }: Props) {
           }
           renderItem={({ item, index }) => {
             const visitor = tab === "visitors" ? (item as ProfileVisitor) : null;
-            // Reference mockup (#scr-likes preview toggle): only rows from
-            // FREE_PREVIEW_COUNT onward get the blurred/locked treatment -
-            // the first two stay exactly like a normal unlocked row, even
-            // while isPreviewingFree is on.
-            const previewLocked = isPreviewingFree && index >= FREE_PREVIEW_COUNT;
+            // Reference mockup: only rows from FREE_PREVIEW_COUNT onward get
+            // the blurred/locked treatment - the first FREE_PREVIEW_COUNT
+            // stay exactly like a normal unlocked row, whether this is a
+            // genuinely free account (real data, capped server-side at
+            // FREE_PREVIEW_COUNT so this condition rarely even triggers) or
+            // a Premium account self-testing via the previewAsFree toggle
+            // (real data, up to 100 rows, so this DOES trigger beyond row 5).
+            const previewLocked = previewMode && index >= FREE_PREVIEW_COUNT;
             // Reference mockup (#scr-likes): a "message" + "like back" round
             // button pair on rows for people you haven't acted on yet.
             // Doesn't apply to Matches (already mutual) or My likes (you

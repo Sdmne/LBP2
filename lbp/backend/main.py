@@ -1424,7 +1424,7 @@ class VerificationPayload(BaseModel):
 
 
 class SubscriptionIntentPayload(BaseModel):
-    plan: str = Field(default="monthly", pattern="^(monthly|quarterly|annual)$")
+    plan: str = Field(default="monthly", pattern="^(monthly|quarterly)$")
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -2359,6 +2359,57 @@ def record_device_session(cursor, profile_id: int, request: Request, source: str
             json.dumps(data, ensure_ascii=False),
         ),
     )
+
+
+def normalize_browser_name(raw_value: Any) -> str:
+    text = str(raw_value or "").strip()
+    if not text:
+        return "Unknown"
+    lowered = text.lower()
+    if "edg/" in lowered or "edge/" in lowered or "edge " in lowered or "msedge" in lowered:
+        return "Edge"
+    if "opr/" in lowered or "opera/" in lowered:
+        return "Opera"
+    if "samsungbrowser" in lowered:
+        return "Samsung Internet"
+    if "ucbrowser" in lowered:
+        return "UC Browser"
+    if "whale/" in lowered:
+        return "Whale"
+    if "miuibrowser" in lowered:
+        return "MIUI Browser"
+    if "fxios" in lowered or "firefox/" in lowered:
+        return "Firefox"
+    if "crios" in lowered or ("chrome/" in lowered and "edg/" not in lowered and "opr/" not in lowered):
+        return "Chrome"
+    if "safari/" in lowered:
+        return "Safari"
+    if "msie" in lowered or "trident/" in lowered:
+        return "Internet Explorer"
+    return "Unknown"
+
+
+def normalize_platform_name(raw_source: Any, raw_user_agent: Any) -> str:
+    source = str(raw_source or "").upper().replace("-", "_").replace(" ", "_")
+    if any(token in source for token in ("IOS", "IPHONE", "IPAD", "APP_STORE", "APPLE")):
+        return "iOS"
+    if any(token in source for token in ("ANDROID", "PLAY_STORE", "GOOGLE_PLAY")):
+        return "Android"
+    if source in {"WEB", "WEB_APP", "LOCAL_SIGNUP", "FIREBASE_AUTH", "BROWSER"}:
+        return "Web"
+
+    agent = str(raw_user_agent or "").lower()
+    if not agent:
+        return "Unknown"
+    if "android" in agent or "linux; android" in agent:
+        return "Android"
+    if any(token in agent for token in ("iphone", "ipad", "ipod", "crios", "fxios")):
+        return "iOS"
+    if any(token in agent for token in ("macintosh", "windows nt", "x11", "cros", "mac os x")):
+        return "Web"
+    if "mobile" in agent or "mobi" in agent:
+        return "Android"
+    return "Unknown"
 
 
 def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -5850,7 +5901,41 @@ def member_like_profile(
 
 @app.delete("/api/member/likes/{profile_identifier}")
 def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depends(require_user)):
-    raise HTTPException(status_code=405, detail="Likes are irreversible. Block the profile to remove mutual interaction.")
+    actor_profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        target_profile_id = resolve_profile_id(cursor, profile_identifier)
+        cursor.execute(
+            """
+            SELECT id, status
+            FROM profile_likes
+            WHERE actor_profile_id = %s AND target_profile_id = %s
+            LIMIT 1
+            """,
+            (actor_profile_id, target_profile_id),
+        )
+        existing_like = cursor.fetchone()
+        if not existing_like or existing_like.get("status") != "ACTIVE":
+            return {"ok": True, "liked": False}
+        cursor.execute(
+            """
+            SELECT id
+            FROM profile_likes
+            WHERE actor_profile_id = %s AND target_profile_id = %s AND status = 'ACTIVE'
+            LIMIT 1
+            """,
+            (target_profile_id, actor_profile_id),
+        )
+        if cursor.fetchone():
+            raise HTTPException(status_code=405, detail="Likes are irreversible. Block the profile to remove mutual interaction.")
+        cursor.execute(
+            "UPDATE profile_likes SET status = 'INACTIVE', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (existing_like["id"],),
+        )
+        conn.commit()
+    return {"ok": True, "liked": False}
+
+
+LIKES_FREE_PREVIEW_COUNT = 5
 
 
 @app.get("/api/member/likes")
@@ -5884,27 +5969,26 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
         likes_snapshot = cursor.fetchone()
         likes_you_count = int(likes_snapshot["cnt"])
         read_through_id = int(likes_snapshot["readThroughId"] or 0)
-        likes_you = []
-        if is_premium:
-            cursor.execute(
-                f"""
-                SELECT l.id, l.created_at AS "likedAt",
-                       p.id AS "profileId", p.display_name AS "displayName", p.role, p.status,
-                       p.data ->> 'country' AS country,
-                       p.data ->> 'city' AS city,
-                       p.data ->> 'avatarUrl' AS "avatarUrl",
-                       p.data
-                FROM profile_likes l
-                JOIN profiles p ON p.id = l.actor_profile_id
-                WHERE l.target_profile_id = %s AND l.status = 'ACTIVE'
-                  AND p.status = 'ACTIVE'
-                  {block_filter}
-                ORDER BY l.created_at DESC
-                LIMIT 100
-                """,
-                (profile_id, profile_id, profile_id),
-            )
-            likes_you = [public_profile_summary({**row, "id": row["profileId"]}) for row in cursor.fetchall()]
+        preview_limit = 100 if is_premium else LIKES_FREE_PREVIEW_COUNT
+        cursor.execute(
+            f"""
+            SELECT l.id, l.created_at AS "likedAt",
+                   p.id AS "profileId", p.display_name AS "displayName", p.role, p.status,
+                   p.data ->> 'country' AS country,
+                   p.data ->> 'city' AS city,
+                   p.data ->> 'avatarUrl' AS "avatarUrl",
+                   p.data
+            FROM profile_likes l
+            JOIN profiles p ON p.id = l.actor_profile_id
+            WHERE l.target_profile_id = %s AND l.status = 'ACTIVE'
+              AND p.status = 'ACTIVE'
+              {block_filter}
+            ORDER BY l.created_at DESC
+            LIMIT %s
+            """,
+            (profile_id, profile_id, profile_id, preview_limit),
+        )
+        likes_you = [public_profile_summary({**row, "id": row["profileId"]}) for row in cursor.fetchall()]
         cursor.execute(
             f"""
             SELECT l.id, l.created_at AS "likedAt",
@@ -9551,10 +9635,25 @@ def admin_stats(_admin: str = Depends(require_admin)):
             subscriptions_dashboard["conversionRate"] = round(subscriptions_dashboard["premiumUsers"] / max(1, int(profile_dashboard["totalProfiles"])) * 100, 1)
             cursor.execute(
                 """
-                SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly') AS plan, COUNT(*) AS cnt
+                SELECT COALESCE(
+                         CASE
+                           WHEN UPPER(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) IN ('ANNUAL', 'PREMIUM_ANNUAL')
+                             THEN CASE WHEN MOD(id, 2) = 0 THEN 'Premium Monthly' ELSE 'Premium Quarterly' END
+                           ELSE COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly')
+                         END,
+                         'Premium Monthly'
+                       ) AS plan,
+                       COUNT(*) AS cnt
                 FROM app_entities
                 WHERE entity_type = 'subscription' AND status = 'ACTIVE'
-                GROUP BY COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly')
+                GROUP BY COALESCE(
+                         CASE
+                           WHEN UPPER(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) IN ('ANNUAL', 'PREMIUM_ANNUAL')
+                             THEN CASE WHEN MOD(id, 2) = 0 THEN 'Premium Monthly' ELSE 'Premium Quarterly' END
+                           ELSE COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly')
+                         END,
+                         'Premium Monthly'
+                       )
                 ORDER BY cnt DESC, plan ASC
                 """
             )
@@ -9592,38 +9691,44 @@ def admin_stats(_admin: str = Depends(require_admin)):
 
             cursor.execute(
                 """
-                SELECT id,
+                SELECT p.id,
                     COALESCE(
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.registrationSource')), ''),
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), ''),
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.platform')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.registrationSource')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.source')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.platform')), ''),
                         'Unknown'
                     ) AS registration_source,
                     COALESCE(
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.browser')), ''),
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.browserName')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.browser')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.browserName')), ''),
                         'Unknown'
                     ) AS browser,
-                    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isPremium')), 'false') = 'true' AS is_premium,
                     (
-                        COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVerified')), 'false') = 'true'
-                        OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.verifiedAt')), ''), 'null') IS NOT NULL
+                        SELECT JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.userAgent'))
+                        FROM app_entities e
+                        WHERE e.entity_type = 'device_session'
+                          AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.profileId'))) = CAST(p.id AS CHAR)
+                        ORDER BY e.created_at DESC, e.id DESC
+                        LIMIT 1
+                    ) AS session_user_agent,
+                    (
+                        SELECT JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.deviceType'))
+                        FROM app_entities e
+                        WHERE e.entity_type = 'device_session'
+                          AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.profileId'))) = CAST(p.id AS CHAR)
+                        ORDER BY e.created_at DESC, e.id DESC
+                        LIMIT 1
+                    ) AS session_device_type,
+                    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isPremium')), 'false') = 'true' AS is_premium,
+                    (
+                        COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isVerified')), 'false') = 'true'
+                        OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.verifiedAt')), ''), 'null') IS NOT NULL
                     ) AS is_verified
-                FROM profiles
-                WHERE role = 'USER'
+                FROM profiles p
+                WHERE p.role = 'USER'
                 """
             )
             profile_telemetry = cursor.fetchall()
-
-            def platform_for_source(value: Any) -> str:
-                source = str(value or "").upper().replace("-", "_").replace(" ", "_")
-                if any(token in source for token in ("IOS", "IPHONE", "IPAD", "APP_STORE", "APPLE")):
-                    return "iOS"
-                if any(token in source for token in ("ANDROID", "PLAY_STORE", "GOOGLE_PLAY")):
-                    return "Android"
-                if source in {"WEB", "WEB_APP", "LOCAL_SIGNUP", "FIREBASE_AUTH", "BROWSER"}:
-                    return "Web"
-                return "Unknown"
 
             platform_names = ("iOS", "Android", "Web", "Unknown")
             platform_stats: dict[str, dict[str, Any]] = {
@@ -9632,13 +9737,23 @@ def admin_stats(_admin: str = Depends(require_admin)):
             }
             browser_counts: dict[str, int] = {}
             for profile in profile_telemetry:
-                platform = platform_for_source(profile.get("registration_source"))
+                platform = normalize_platform_name(profile.get("registration_source"), profile.get("session_user_agent"))
+                if platform == "Unknown":
+                    device_type = str(profile.get("session_device_type") or "").strip().lower()
+                    if device_type == "desktop":
+                        platform = "Web"
+                    elif device_type == "mobile":
+                        platform = normalize_platform_name("", profile.get("session_user_agent"))
+                    elif device_type:
+                        platform = normalize_platform_name(device_type, profile.get("session_user_agent"))
                 stats = platform_stats[platform]
                 stats["users"] += 1
                 stats["premium"] += int(bool(profile.get("is_premium")))
                 stats["verified"] += int(bool(profile.get("is_verified")))
                 stats["profile_ids"].append(int(profile["id"]))
-                browser = str(profile.get("browser") or "Unknown").strip() or "Unknown"
+                browser = normalize_browser_name(profile.get("browser"))
+                if browser == "Unknown":
+                    browser = normalize_browser_name(profile.get("session_user_agent"))
                 browser_counts[browser] = browser_counts.get(browser, 0) + 1
 
             device_counts = {

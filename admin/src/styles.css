@@ -2458,12 +2458,16 @@ body {
 }
 .funnel-table th,
 .funnel-table td {
+  font-size: 12px;
+  line-height: 16px;
   padding: 4px;
   border: 0;
   text-align: right;
   vertical-align: middle;
 }
 .funnel-table thead th {
+  font-size: 12px;
+  line-height: 16px;
   color: #64748b;
   font-weight: 700;
 }
@@ -2584,7 +2588,7 @@ body {
 .like-flow-caption {
   margin: 0;
   color: #020817;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 20px;
 }
@@ -2683,11 +2687,14 @@ body {
 .profile-donut-sectors {
   transform-box: fill-box;
   transform-origin: center;
-  animation: profile-donut-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .profile-donut-sector {
   stroke-width: 1px;
   outline: none;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  opacity: 0;
+  animation: profile-donut-reveal 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .profile-donut-sector:focus-visible {
   filter: brightness(0.94);
@@ -2790,7 +2797,7 @@ body {
 @keyframes profile-donut-reveal {
   from {
     opacity: 0;
-    transform: rotate(360deg) scale(0.94);
+    transform: rotate(-180deg) scale(0.3);
   }
   to {
     opacity: 1;
@@ -2854,10 +2861,14 @@ body {
 .platform-comparison .compact-table td {
   padding: 4px 6px;
   text-align: right;
+  font-size: 12px;
 }
 .platform-comparison .compact-table th:first-child,
 .platform-comparison .compact-table td:first-child {
   text-align: left;
+}
+.platform-comparison .compact-table small {
+  font-size: 12px;
 }
 .platform-comparison-note {
   margin: 8px 0 0;
@@ -8271,7 +8282,7 @@ body {
 }
 .chart-panel {
   margin-top: 8px;
-  padding: 24px;
+  padding: 20px 18px 18px;
 }
 .chart-panel > h2 {
   display: none;
@@ -8286,6 +8297,10 @@ body {
   position: relative;
   width: 100%;
   overflow: hidden;
+  border: 1px solid #dfe7ef;
+  border-radius: 8px;
+  background: #fff;
+  padding: 16px 14px 10px 8px;
 }
 .line-chart {
   display: block;
@@ -8293,31 +8308,43 @@ body {
   height: 280px;
   overflow: visible;
 }
-.line-chart line {
-  stroke: #dce7f2;
-  stroke-dasharray: 3 3;
+.line-chart .chart-grid-y,
+.line-chart .chart-grid-x {
+  stroke: #eaf1f8;
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+.line-chart .chart-axis-y {
+  stroke: #8c929a;
+  stroke-dasharray: none;
+  stroke-width: 1.2;
 }
 .line-chart text {
-  fill: #687b97;
+  fill: #777;
   font-size: 12px;
+  font-weight: 400;
 }
 .line-chart .x-label {
-  font-size: 11px;
+  font-size: 12px;
 }
 .line-chart .chart-path {
   fill: none;
-  stroke-width: 2.6;
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 2200;
-  stroke-dashoffset: 2200;
-  animation: chart-reveal 850ms ease forwards;
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  opacity: 0;
+}
+.line-chart .chart-path--animated {
+  animation: chart-reveal 1200ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-fill-mode: forwards;
 }
 .line-chart .chart-dot {
   stroke: #fff;
   stroke-width: 1.5;
   pointer-events: none;
-  transition: r 0.14s ease;
+  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.18));
 }
 .line-chart .chart-cursor {
   stroke: #aab4c1;
@@ -8358,12 +8385,13 @@ body {
   flex-wrap: wrap;
   gap: 18px;
   margin-top: 8px;
+  color: #0f172a;
 }
 .chart-legend span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 15px;
+  font-size: 12px;
 }
 .chart-legend i {
   width: 18px;
@@ -8382,8 +8410,19 @@ body {
   top: -2.5px;
   left: 6px;
 }
+.chart-footnote {
+  margin: 10px 0 8px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 16px;
+}
 @keyframes chart-reveal {
+  from {
+    opacity: 0;
+    stroke-dashoffset: 1000;
+  }
   to {
+    opacity: 1;
     stroke-dashoffset: 0;
   }
 }
