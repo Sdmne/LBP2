@@ -2863,9 +2863,21 @@ body {
   font-weight: 500;
   line-height: 20px;
 }
+.platform-comparison {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+.platform-comparison .compact-table {
+  overflow-x: auto;
+}
+.platform-comparison .compact-table table {
+  min-width: 0;
+}
 .platform-comparison .compact-table th,
 .platform-comparison .compact-table td {
-  padding: 4px 6px;
+  padding: 4px 8px;
   text-align: right;
   font-size: 12px;
 }
