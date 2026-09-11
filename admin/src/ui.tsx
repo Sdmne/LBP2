@@ -2317,6 +2317,14 @@ function donutSector(startAngle: number, endAngle: number) {
   ].join(" ");
 }
 
+function stableChartId(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 function ProfileDonutPanel({
   title,
   rows,
@@ -2338,6 +2346,7 @@ function ProfileDonutPanel({
   const sectorSignature = rows
     .map((row) => `${row.label ?? ""}:${row.count ?? 0}`)
     .join("|");
+  const revealMaskId = `donut-reveal-${stableChartId(`${title}|${sectorSignature}`)}`;
   const items = rows.map((row, index) => ({
     label: valueOf(row.label),
     count: dashboardCount(row.count),
@@ -2369,18 +2378,26 @@ function ProfileDonutPanel({
               {chartTotal ? (
                 <>
                   <defs>
-                    <clipPath id={`donut-reveal-${sectorSignature}`}>
+                    <mask
+                      id={revealMaskId}
+                      maskUnits="userSpaceOnUse"
+                      x="0"
+                      y="0"
+                      width="250"
+                      height="250"
+                    >
+                      <rect width="250" height="250" fill="#000" />
                       <circle
                         className="profile-donut-reveal-mask"
                         cx="125"
                         cy="125"
                         r="126"
                       />
-                    </clipPath>
+                    </mask>
                   </defs>
                   <g
                     className="profile-donut-sectors"
-                    clipPath={`url(#donut-reveal-${sectorSignature})`}
+                    mask={`url(#${revealMaskId})`}
                   >
                     {sectors.map(
                       (item, index) =>
