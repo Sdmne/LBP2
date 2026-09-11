@@ -9635,29 +9635,24 @@ def admin_stats(_admin: str = Depends(require_admin)):
             subscriptions_dashboard["conversionRate"] = round(subscriptions_dashboard["premiumUsers"] / max(1, int(profile_dashboard["totalProfiles"])) * 100, 1)
             cursor.execute(
                 """
-                SELECT COALESCE(
-                         CASE
-                           WHEN UPPER(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) IN ('ANNUAL', 'PREMIUM_ANNUAL')
-                             THEN CASE WHEN MOD(id, 2) = 0 THEN 'Premium Monthly' ELSE 'Premium Quarterly' END
-                           ELSE COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly')
-                         END,
-                         'Premium Monthly'
-                       ) AS plan,
-                       COUNT(*) AS cnt
-                FROM app_entities
-                WHERE entity_type = 'subscription' AND status = 'ACTIVE'
-                GROUP BY COALESCE(
-                         CASE
-                           WHEN UPPER(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) IN ('ANNUAL', 'PREMIUM_ANNUAL')
-                             THEN CASE WHEN MOD(id, 2) = 0 THEN 'Premium Monthly' ELSE 'Premium Quarterly' END
-                           ELSE COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly')
-                         END,
-                         'Premium Monthly'
-                       )
+                WITH normalized_subscriptions AS (
+                    SELECT CASE
+                             WHEN UPPER(COALESCE(data->>'plan', '')) IN ('QUARTERLY', 'PREMIUM_QUARTERLY', 'PREMIUM QUARTERLY')
+                               THEN 'Premium Quarterly'
+                             WHEN UPPER(COALESCE(data->>'plan', '')) IN ('ANNUAL', 'PREMIUM_ANNUAL', 'PREMIUM ANNUAL')
+                               THEN CASE WHEN MOD(id, 2) = 0 THEN 'Premium Monthly' ELSE 'Premium Quarterly' END
+                             ELSE 'Premium Monthly'
+                           END AS plan
+                    FROM app_entities
+                    WHERE entity_type = 'subscription' AND status = 'ACTIVE'
+                )
+                SELECT plan, COUNT(*) AS cnt
+                FROM normalized_subscriptions
+                GROUP BY plan
                 ORDER BY cnt DESC, plan ASC
                 """
             )
-            subscriptions_dashboard["plans"] = [{"label": str(row.get("plan") or "Premium Monthly").replace("_", " ").title(), "count": int(row.get("cnt") or 0)} for row in cursor.fetchall()]
+            subscriptions_dashboard["plans"] = [{"label": str(row.get("plan") or "Premium Monthly"), "count": int(row.get("cnt") or 0)} for row in cursor.fetchall()]
         except psycopg.Error as error:
             logger.warning("Admin subscriptions dashboard stats failed: %s", error)
             warnings.append("subscriptions_dashboard")
