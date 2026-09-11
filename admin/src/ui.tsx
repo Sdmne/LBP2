@@ -2359,49 +2359,60 @@ function ProfileDonutPanel({
             >
               <title>{title}</title>
               {chartTotal ? (
-                <g className="profile-donut-sectors">
-                  {sectors.map(
-                    (item, index) =>
-                      item.count > 0 && (
-                        <path
-                          className="profile-donut-sector"
-                          d={donutSector(item.start, item.end)}
-                          fill={item.color}
-                          stroke="#fff"
-                          style={{
-                            animationDelay: `${index * 120}ms`,
-                            animationDuration: "1200ms",
-                          }}
-                          tabIndex={0}
-                          aria-label={`${item.label}: ${item.count}`}
-                          key={`${item.label}-${index}-${sectorSignature}`}
-                          onPointerEnter={(event) => {
-                            const bounds =
-                              event.currentTarget.ownerSVGElement?.parentElement?.getBoundingClientRect();
-                            setHovered({
-                              index,
-                              x: event.clientX - (bounds?.left ?? 0) + 12,
-                              y: event.clientY - (bounds?.top ?? 0) + 12,
-                            });
-                          }}
-                          onPointerMove={(event) => {
-                            const bounds =
-                              event.currentTarget.ownerSVGElement?.parentElement?.getBoundingClientRect();
-                            setHovered({
-                              index,
-                              x: event.clientX - (bounds?.left ?? 0) + 12,
-                              y: event.clientY - (bounds?.top ?? 0) + 12,
-                            });
-                          }}
-                          onPointerLeave={() => setHovered(null)}
-                          onFocus={() =>
-                            setHovered({ index, x: 112, y: 92 })
-                          }
-                          onBlur={() => setHovered(null)}
-                        />
-                      ),
-                  )}
-                </g>
+                <>
+                  <defs>
+                    <clipPath id={`donut-reveal-${sectorSignature}`}>
+                      <circle
+                        className="profile-donut-reveal-mask"
+                        cx="125"
+                        cy="125"
+                        r="126"
+                      />
+                    </clipPath>
+                  </defs>
+                  <g
+                    className="profile-donut-sectors"
+                    clipPath={`url(#donut-reveal-${sectorSignature})`}
+                  >
+                    {sectors.map(
+                      (item, index) =>
+                        item.count > 0 && (
+                          <path
+                            className="profile-donut-sector"
+                            d={donutSector(item.start, item.end)}
+                            fill={item.color}
+                            stroke="#fff"
+                            tabIndex={0}
+                            aria-label={`${item.label}: ${item.count}`}
+                            key={`${item.label}-${index}-${sectorSignature}`}
+                            onPointerEnter={(event) => {
+                              const bounds =
+                                event.currentTarget.ownerSVGElement?.parentElement?.getBoundingClientRect();
+                              setHovered({
+                                index,
+                                x: event.clientX - (bounds?.left ?? 0) + 12,
+                                y: event.clientY - (bounds?.top ?? 0) + 12,
+                              });
+                            }}
+                            onPointerMove={(event) => {
+                              const bounds =
+                                event.currentTarget.ownerSVGElement?.parentElement?.getBoundingClientRect();
+                              setHovered({
+                                index,
+                                x: event.clientX - (bounds?.left ?? 0) + 12,
+                                y: event.clientY - (bounds?.top ?? 0) + 12,
+                              });
+                            }}
+                            onPointerLeave={() => setHovered(null)}
+                            onFocus={() =>
+                              setHovered({ index, x: 112, y: 92 })
+                            }
+                            onBlur={() => setHovered(null)}
+                          />
+                        ),
+                    )}
+                  </g>
+                </>
               ) : (
                 <circle
                   className="profile-donut-empty"
