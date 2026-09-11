@@ -99,6 +99,11 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
     try {
       const res = await updateFamilyPlanSection(profileId, key, { content: sectionDrafts[key] ?? "" });
       applySections(res.sections);
+      const savedSection = res.sections.find((section) => section.key === key);
+      setSectionDrafts((prev) => ({
+        ...prev,
+        [key]: savedSection?.content ?? prev[key] ?? "",
+      }));
     } catch (err) {
       Alert.alert(t("familyRoom.sections.saveError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
     } finally {
@@ -330,7 +335,7 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
                 ? t("familyRoom.sections.waitingOnYou", { name: displayName || "" })
                 : t("familyRoom.sections.notStarted");
           const draft = sectionDrafts[key] ?? "";
-          const dirty = draft !== (section?.content ?? "");
+          const canSaveSection = Boolean(section) && savingSection !== key;
           return (
             <View key={key} style={styles.sectionPlanBlock}>
               <Pressable
@@ -374,9 +379,9 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
                       )}
                     </Pressable>
                     <Pressable
-                      style={[styles.primaryButton, styles.sectionSaveButton, (!dirty || savingSection === key) && styles.primaryButtonDisabled]}
+                      style={[styles.primaryButton, styles.sectionSaveButton, !canSaveSection && styles.primaryButtonDisabled]}
                       onPress={() => void handleSaveSection(key)}
-                      disabled={!dirty || savingSection === key}
+                      disabled={!canSaveSection}
                     >
                       {savingSection === key ? (
                         <ActivityIndicator color={colors.white} />
