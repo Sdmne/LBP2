@@ -58,6 +58,7 @@ type AdminIconName =
   | "crown"
   | "shield"
   | "building"
+  | "map"
   | "mapPin"
   | "user"
   | "award"
@@ -1702,6 +1703,13 @@ function AdminIcon({ name }: { name: AdminIconName }) {
         <path d="M14 21v-3a2 2 0 0 0-4 0v3" />
         <path d="M6 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2" />
         <path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" />
+      </>
+    ),
+    map: (
+      <>
+        <path d="M14.106 5.553a2 2 0 0 0-1.788-.122l-4.636 2A2 2 0 0 1 6.106 7.3l-2.318-1A1.25 1.25 0 0 0 2 7.447v11.106a2 2 0 0 0 1.212 1.838l2.894 1.24a2 2 0 0 0 1.576 0l4.636-2a2 2 0 0 1 1.576 0l4.318 1.85A1.25 1.25 0 0 0 20 20.334V9.447a2 2 0 0 0-1.212-1.838z" />
+        <path d="M8 7.5v14" />
+        <path d="M14 5.5v14" />
       </>
     ),
     mapPin: (
@@ -9686,6 +9694,7 @@ function SettingsList({ view }: { view: string }) {
           </header>
           <div className="settings-api-grid">
             <article>
+              <AdminIcon name="map" />
               <div>
                 <h3>Google Places API</h3>
                 <p>
@@ -9702,6 +9711,7 @@ function SettingsList({ view }: { view: string }) {
               </span>
             </article>
             <article>
+              <AdminIcon name="eye" />
               <div>
                 <h3>Google Vision API</h3>
                 <p>Automatic photo moderation (SafeSearch detection)</p>

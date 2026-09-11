@@ -6490,14 +6490,20 @@ body {
   gap: 12px;
 }
 .settings-api-grid article {
-  display: flex;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 20px;
   padding: 20px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #fff;
+}
+.settings-api-grid article > svg {
+  width: 28px;
+  height: 28px;
+  justify-self: center;
+  color: #64748b;
 }
 .settings-api-grid h3 {
   margin: 0;
