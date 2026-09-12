@@ -2948,6 +2948,40 @@ function useStoredState<T>(key: string, initial: T) {
   }, [key, value]);
   return [value, setValue] as const;
 }
+function chartDayKey(value: unknown) {
+  const text = String(value ?? "");
+  const match = text.match(/\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : text.slice(0, 10);
+}
+function chartCalendarDays(days: number) {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(today);
+    date.setUTCDate(today.getUTCDate() - (days - index - 1));
+    return date.toISOString().slice(0, 10);
+  });
+}
+function dailyMetricMap(rows: RecordValue[], metric: string) {
+  return new Map(
+    rows.map((row) => [
+      chartDayKey(row.date ?? row.day),
+      Number(row[metric] ?? row.count ?? 0),
+    ]),
+  );
+}
+function dailyMetricRows(rows: RecordValue[], days: number, metrics: string[]) {
+  const maps = new Map(
+    metrics.map((metric) => [metric, dailyMetricMap(rows, metric)]),
+  );
+  return chartCalendarDays(days).map((date) => {
+    const row: RecordValue = { date };
+    metrics.forEach((metric) => {
+      row[metric] = maps.get(metric)?.get(date) ?? 0;
+    });
+    return row;
+  });
+}
 function LineChart({
   rows,
   series,
@@ -3247,13 +3281,10 @@ function DashboardSeries({
     ? (series.deletionsDaily as RecordValue[])
     : [];
   const isEngagement = mode === "engagement";
-  const source = (isEngagement ? engagement : registrations).slice(-period);
-  const deletionByDay = new Map(
-    deletions.map((row) => [
-      String(row.date ?? row.day),
-      Number(row.count ?? 0),
-    ]),
-  );
+  const source = isEngagement
+    ? dailyMetricRows(engagement, period, ["likes", "matches", "messages"])
+    : dailyMetricRows(registrations, period, ["count"]);
+  const deletionByDay = dailyMetricMap(deletions, "count");
   const chartSeries: ChartSeries[] = isEngagement
     ? [
         {
@@ -3303,22 +3334,15 @@ function DashboardSeries({
       ];
   const registrationByDay = new Map(
     registrations.map((row) => [
-      String(row.date ?? row.day),
+      chartDayKey(row.date ?? row.day),
       Number(row.count ?? 0),
     ]),
   );
-  const registrationRows = Array.from(
-    { length: registrationPeriod },
-    (_, index) => {
-      const date = new Date();
-      date.setUTCHours(0, 0, 0, 0);
-      date.setUTCDate(date.getUTCDate() - (registrationPeriod - index - 1));
-      const dateKey = date.toISOString().slice(0, 10);
-      return {
-        date: dateKey,
-        count: registrationByDay.get(dateKey) ?? 0,
-      };
-    },
+  const registrationRows = chartCalendarDays(registrationPeriod).map(
+    (dateKey) => ({
+      date: dateKey,
+      count: registrationByDay.get(dateKey) ?? 0,
+    }),
   );
   const registrationSeries: ChartSeries[] = [
     {

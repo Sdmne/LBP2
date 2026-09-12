@@ -109,6 +109,28 @@
   font-size: 12px !important;
 }
 
+.app .like-flow-table table,
+.app .like-flow-table table :not(svg, svg *) {
+  font-size: 12px !important;
+  line-height: 16px !important;
+}
+
+.app .funnel-table table,
+.app .funnel-table table :not(svg, svg *) {
+  font-size: 12px !important;
+  line-height: 16px !important;
+}
+
+.app .funnel-table table :is(th, td):first-child {
+  padding-left: 0 !important;
+  text-align: left !important;
+}
+
+.app .funnel-table tbody td:not(:first-child),
+.app .funnel-table tbody td:not(:first-child) :not(svg, svg *) {
+  font-weight: 700 !important;
+}
+
 /* Compact subscription chips and identity markers match the desktop reference. */
 .app .subscriptions-table :is(
     .subscription-plan-badge,

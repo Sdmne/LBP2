@@ -2366,6 +2366,9 @@ def normalize_browser_name(raw_value: Any) -> str:
     if not text:
         return "Unknown"
     lowered = text.lower()
+    is_mobile = any(token in lowered for token in ("iphone", "ipad", "ipod", "android", "mobile", "mobi"))
+    if "gsa/" in lowered or "gsa " in lowered:
+        return "GSA"
     if "edg/" in lowered or "edge/" in lowered or "edge " in lowered or "msedge" in lowered:
         return "Edge"
     if "opr/" in lowered or "opera/" in lowered:
@@ -2381,9 +2384,9 @@ def normalize_browser_name(raw_value: Any) -> str:
     if "fxios" in lowered or "firefox/" in lowered:
         return "Firefox"
     if "crios" in lowered or ("chrome/" in lowered and "edg/" not in lowered and "opr/" not in lowered):
-        return "Chrome"
+        return "Mobile Chrome" if is_mobile else "Chrome"
     if "safari/" in lowered:
-        return "Safari"
+        return "Mobile Safari" if is_mobile else "Safari"
     if "msie" in lowered or "trident/" in lowered:
         return "Internet Explorer"
     return "Unknown"
@@ -9702,8 +9705,13 @@ def admin_stats(_admin: str = Depends(require_admin)):
                 "CO_PARENTING_PARTNER": "Co-Parenting Partner",
                 "EGG_DONOR": "Egg Donor",
             }
+            looking_aliases = {
+                "SPERM_DONOR": "sperm_donor",
+                "CO_PARENTING_PARTNER": "co_parenting_partner",
+                "EGG_DONOR": "egg_donor",
+            }
             looking_selects = ",\n".join(
-                f"SUM(CASE WHEN JSON_CONTAINS(JSON_EXTRACT(data, '$.lookingFor'), JSON_QUOTE('{key}')) = 1 THEN 1 ELSE 0 END) AS `{key}`"
+                f"SUM(CASE WHEN JSON_CONTAINS(JSON_EXTRACT(data, '$.lookingFor'), JSON_QUOTE('{key}')) = 1 THEN 1 ELSE 0 END) AS {looking_aliases[key]}"
                 for key in looking_labels
             )
             looking_any = " OR ".join(
@@ -9720,9 +9728,10 @@ def admin_stats(_admin: str = Depends(require_admin)):
             )
             looking_counts = cursor.fetchone() or {}
             profile_dashboard["lookingFor"] = [
-                {"label": label, "count": int(looking_counts.get(key) or 0)}
+                {"label": label, "count": int(looking_counts.get(looking_aliases[key]) or 0)}
                 for key, label in looking_labels.items()
             ]
+            profile_dashboard["lookingForTotal"] = int(looking_counts.get("total") or 0)
         except psycopg.Error as error:
             logger.warning("Admin profile dashboard stats failed: %s", error)
             warnings.append("profile_dashboard")
@@ -9983,12 +9992,12 @@ def admin_stats(_admin: str = Depends(require_admin)):
                 browser = normalize_browser_name(profile.get("browser"))
                 if browser == "Unknown":
                     browser = normalize_browser_name(profile.get("session_user_agent"))
-                browser_counts[browser] = browser_counts.get(browser, 0) + 1
+                if browser != "Unknown":
+                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
 
             device_counts = {
                 "mobile": platform_stats["iOS"]["users"] + platform_stats["Android"]["users"],
                 "desktop": platform_stats["Web"]["users"],
-                "unknown": platform_stats["Unknown"]["users"],
             }
             devices_dashboard["devices"] = [
                 {"label": label, "count": count}
