@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -42,6 +43,12 @@ const PAGE_SIZE = 24;
 const REFILL_THRESHOLD = 5;
 const SWIPE_OUT_DISTANCE = 500;
 const SWIPE_THRESHOLD = 120;
+// Alena: swipe left/right had no explanation anywhere on this screen -
+// "уже просила подсказку" (already asked for a hint before). Shown until
+// the person dismisses it or has swiped a couple of times, then
+// remembered via AsyncStorage so it never nags again after that.
+const SWIPE_HINT_STORAGE_KEY = "catalogSwipeHintDismissedV1";
+const SWIPE_HINT_AUTO_DISMISS_AFTER = 2;
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Catalog">;
 
@@ -158,6 +165,29 @@ export default function CatalogScreen({ navigation, route }: Props) {
   // separate screen). Only ever one card expanded at a time, and it
   // collapses automatically once the deck moves past it.
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [showSwipeHint, setShowSwipeHint] = useState(false);
+  const swipeCountRef = useRef(0);
+
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(SWIPE_HINT_STORAGE_KEY)
+      .then((value) => {
+        if (alive && value !== "1") setShowSwipeHint(true);
+      })
+      .catch(() => {
+        // If storage can't be read for some reason, default to NOT
+        // showing it - better to under-show a one-time hint than risk it
+        // reappearing every launch.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function dismissSwipeHint() {
+    setShowSwipeHint(false);
+    AsyncStorage.setItem(SWIPE_HINT_STORAGE_KEY, "1").catch(() => {});
+  }
   const [expandedDetail, setExpandedDetail] = useState<ProfileDetailData | null>(null);
   const [expandedLoading, setExpandedLoading] = useState(false);
   const [expandedError, setExpandedError] = useState<string | null>(null);
@@ -192,6 +222,10 @@ export default function CatalogScreen({ navigation, route }: Props) {
   async function advance(direction: "like" | "pass", profile: CatalogProfile) {
     setActionError(null);
     setIndex((i) => i + 1);
+    if (showSwipeHint) {
+      swipeCountRef.current += 1;
+      if (swipeCountRef.current >= SWIPE_HINT_AUTO_DISMISS_AFTER) dismissSwipeHint();
+    }
     if (direction === "like") {
       try {
         const res = await likeProfile(profile.id);
@@ -304,6 +338,12 @@ export default function CatalogScreen({ navigation, route }: Props) {
         ) : (
           <>
             <View style={styles.cardArea}>
+              {showSwipeHint ? (
+                <Pressable style={styles.swipeHintPill} onPress={dismissSwipeHint} hitSlop={8}>
+                  <Text style={styles.swipeHintText}>{t("catalog.swipeHint")}</Text>
+                  <Feather name="x" size={13} color={colors.white} />
+                </Pressable>
+              ) : null}
               {next ? <SwipeCard key={`under-${next.id}`} profile={next} isTop={false} /> : null}
               {expandedId === current.id ? (
                 <ExpandedProfileCard
@@ -776,6 +816,21 @@ const styles = StyleSheet.create({
   // exactly this area and nothing else, with the button row sized to its
   // own content right underneath in normal layout flow.
   cardArea: { flex: 1, position: "relative", marginBottom: spacing.sm },
+  swipeHintPill: {
+    position: "absolute",
+    top: spacing.sm,
+    alignSelf: "center",
+    zIndex: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    maxWidth: "88%",
+  },
+  swipeHintText: { color: colors.white, fontSize: 12.5, fontWeight: "600", flexShrink: 1 },
   card: {
     position: "absolute",
     top: 0,

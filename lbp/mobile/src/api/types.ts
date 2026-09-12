@@ -82,14 +82,24 @@ export type ProfileSummary = {
   likeReadOnly?: boolean;
   likedAt?: string | null;
   matchedAt?: string | null;
+  // Present on a free-tier viewer's "who liked you" preview rows only
+  // (see anonymized_admirer_summary() in main.py) - when identityHidden is
+  // true, displayName/avatarUrl/city/country are NOT sent at all (not just
+  // visually blurred client-side), so age is the only real signal about
+  // who this is. LikesScreen must render a generic placeholder + age for
+  // these rows, never assume displayName/avatarUrl are present.
+  age?: number | null;
+  identityHidden?: boolean;
 };
 
 // GET /api/member/likes - member_likes() in main.py, exact response shape
 // (previously this app incorrectly assumed a flat `{ items: [...] }` shape -
 // the real endpoint returns these 4 named lists, not one array).
-// `likesYou` is only populated (non-empty) server-side when the viewer is
-// Premium; otherwise it's `[]` and `likesYouLocked` is true - same paywall
-// shown on the website's Likes page.
+// `likesYou` is always populated for everyone now (was `[]` for free
+// accounts) - a free-tier viewer just gets fewer rows (LIKES_FREE_PREVIEW_COUNT)
+// and those rows have identityHidden=true (see the age/identityHidden note
+// on ProfileSummary above) instead of real name/photo. `likesYouLocked`
+// still indicates whether the FULL list is paywalled.
 export type LikesResponse = {
   likesYou: ProfileSummary[];
   likesYouCount: number;

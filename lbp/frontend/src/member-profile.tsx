@@ -1,3 +1,4 @@
+import { PRICING_TEXT } from "./pricing-reference";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -340,6 +341,9 @@ export function PremiumDialog({
     common = PROFILE_COPY[locale];
   const [subscription, setSubscription] = useState<Row | null>(null);
   const [error, setError] = useState(false);
+  const [tier, setTier] = useState<1 | 2>(1);
+  const pricing = PRICING_TEXT[locale];
+  const selectedPlan = pricing.plans[tier];
   const [plan, setPlan] = useState("quarterly");
   const [mobile, setMobile] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -368,46 +372,19 @@ export function PremiumDialog({
     subscription?.isPremium !== undefined
       ? bool(subscription.isPremium)
       : subscription?.status === "ACTIVE";
-  const limit = (key: string) => {
-    const value = row(subscription?.limits)[key];
-    return typeof value === "number" && Number.isFinite(value) && value >= 0
-      ? value
-      : null;
-  };
-  const features: [
-    string,
-    string,
-    keyof typeof icons,
-    boolean | number | null,
-    boolean | number | null,
-  ][] = [
-    [
-      "likes",
-      c.likes,
-      "heartIcon",
-      limit("freeLikesPerDay"),
-      limit("premiumLikesPerDay"),
-    ],
-    ["directMessage", c.directMessage, "messageIcon", false, true],
-    ["likedMe", c.likedMe, "heartIcon", false, true],
-    ["visitors", c.visitors, "eyeIcon", false, true],
-    ["videoCalls", c.videoCalls, "videoIcon", false, true],
-    ["filters", c.filters, "slidersIcon", false, true],
-    ["priority", c.priority, "starIcon", false, true],
-  ];
-  const feature = (value: boolean | number | null) =>
-    value === null || typeof value === "number" ? (
-      <span className="premium-feature-number">{value ?? "—"}</span>
+  const currentTier = subscription?.tier ?? (active ? "PRO" : "EXPLORE");
+  const topTier = active && currentTier === "PRO";
+  const feature = (value: string) =>
+    value !== "check" && value !== "" ? (
+      <span className="premium-feature-number">{value}</span>
     ) : (
-      <span
-        className={`premium-feature-state ${value ? "included" : "excluded"}`}
-      >
-        <Icon
-          name={value ? "premiumCheckIcon" : "premiumXIcon"}
-          label={value ? c.included : c.notIncluded}
-        />
+      <span className={`premium-feature-state ${value ? "included" : "excluded"}`}>
+        <Icon name={value ? "premiumCheckIcon" : "premiumXIcon"} label={value ? c.included : c.notIncluded} />
       </span>
     );
+  useEffect(() => {
+    if (active && currentTier === "BUILDER") { setTier(2); setPlan("monthly"); }
+  }, [active, currentTier]);
   return (
     <>
       <Overlay className="premium-paywall" label={c.title} close={close}>
@@ -469,7 +446,7 @@ export function PremiumDialog({
               <div className="loading" role="status" aria-label={c.title}>
                 <span className="loading-spinner" />
               </div>
-            ) : active ? (
+            ) : topTier ? (
               <section className="premium-current-plan">
                 <span>
                   <Icon name="premiumCheckIcon" />
@@ -481,12 +458,23 @@ export function PremiumDialog({
               </section>
             ) : (
               <>
+                <div className="premium-tier-grid" role="group" aria-label={pricing.compareTitle}>
+                  {([1, 2] as const).map((value) => (
+                    <button type="button" key={value} aria-pressed={tier === value}
+                      className={`premium-tier${tier === value ? " selected" : ""}`}
+                      disabled={active && currentTier === "BUILDER" && value === 1}
+                      onClick={() => { setTier(value); setPlan(value === 2 ? "monthly" : "quarterly"); }}>
+                      {pricing.plans[value].name}
+                    </button>
+                  ))}
+                </div>
+                <p className="premium-plan-tagline">{selectedPlan.tagline}</p>
                 <div
-                  className="premium-plan-grid"
+                  className={`premium-plan-grid${tier === 2 ? " single-plan" : ""}`}
                   role="radiogroup"
                   aria-label={c.title}
                 >
-                  {["monthly", "quarterly"].map((value) => (
+                  {(tier === 2 ? ["monthly"] : ["monthly", "quarterly"]).map((value) => (
                     <button
                       key={value}
                       type="button"
@@ -505,8 +493,7 @@ export function PremiumDialog({
                           ].includes(event.key)
                         ) {
                           event.preventDefault();
-                          const next =
-                            value === "monthly" ? "quarterly" : "monthly";
+                          const next = tier === 2 ? "monthly" : value === "monthly" ? "quarterly" : "monthly";
                           setPlan(next);
                           const group = event.currentTarget.parentElement;
                           group
@@ -522,7 +509,7 @@ export function PremiumDialog({
                       </span>
                       <strong>
                         {value === "monthly"
-                          ? c.monthlyPrice
+                          ? selectedPlan.price
                           : c.quarterlyPrice}
                       </strong>
                       <em>{c.perMonth}</em>
@@ -532,33 +519,34 @@ export function PremiumDialog({
                     </button>
                   ))}
                 </div>
-                <div className="premium-comparison">
+                <div className="premium-comparison premium-tier-comparison">
                   <div className="premium-comparison-head">
                     <span />
-                    <strong>{c.free}</strong>
-                    <strong>{c.premium}</strong>
+                    <strong>{pricing.plans[0].name}</strong>
+                    <strong>{selectedPlan.name}</strong>
                   </div>
-                  {features.map(([key, label, icon, free, premium]) => (
-                    <div className="premium-comparison-row" key={key}>
-                      <span className="premium-feature-label">
-                        <i>
-                          <Icon name={icon} />
-                        </i>
-                        <span>{label}</span>
-                      </span>
-                      {feature(free)}
-                      {feature(premium)}
-                    </div>
+                  {pricing.matrixGroups.map((group) => (
+                    <section key={group.name}>
+                      <h3 className="premium-comparison-group">{group.name}</h3>
+                      {group.rows.map((entry) => (
+                        <div className="premium-comparison-row" key={entry.label}>
+                          <span className="premium-feature-label"><span>{entry.label}</span></span>
+                          {feature(entry.values[0])}
+                          {feature(entry.values[tier])}
+                        </div>
+                      ))}
+                    </section>
                   ))}
                 </div>
+                <p className="premium-pricing-note">{pricing.footnote}</p>
                 <div className="premium-paywall-spacer" aria-hidden="true" />
               </>
             )}
           </div>
-          {subscription && !active && (
+          {subscription && !topTier && !error && (
             <footer className="premium-paywall-footer">
               <button type="button" onClick={() => setMobile(true)}>
-                {plan === "monthly" ? c.getMonthly : c.getQuarterly}
+                {tier === 2 ? `${selectedPlan.cta} — ${selectedPlan.price} / ${c.perMonth}` : plan === "monthly" ? c.getMonthly : c.getQuarterly}
               </button>
             </footer>
           )}
@@ -882,9 +870,29 @@ function ProfileScreen({
   locale: Locale;
 }) {
   const c = PROFILE_COPY[locale];
+  const loadCopy = {
+    en: {
+      unavailable: "This profile may have been deleted or is no longer available.",
+      failedTitle: "Unable to load profile",
+      failedDescription: "Please check your connection and try again.",
+      retry: "Try again",
+    },
+    ru: {
+      unavailable: "Этот профиль мог быть удалён или больше недоступен.",
+      failedTitle: "Не удалось загрузить профиль",
+      failedDescription: "Проверьте подключение к интернету и попробуйте ещё раз.",
+      retry: "Повторить",
+    },
+    es: {
+      unavailable: "Es posible que este perfil se haya eliminado o ya no esté disponible.",
+      failedTitle: "No se pudo cargar el perfil",
+      failedDescription: "Comprueba tu conexión e inténtalo de nuevo.",
+      retry: "Reintentar",
+    },
+  }[locale];
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Row | null>(null);
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState<"unavailable" | "failed" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
@@ -905,7 +913,8 @@ function ProfileScreen({
   }, []);
   useEffect(() => {
     let cancelled = false;
-    setLoadError("");
+    setLoadError(null);
+    setProfile(null);
     api
       .get<Row>(`/member/catalog/${encodeURIComponent(id)}`)
       .then((result) => {
@@ -915,12 +924,17 @@ function ProfileScreen({
         if (cancelled) return;
         if (failure instanceof ApiError && failure.status === 401)
           navigate(`/${locale}/auth/login`, { replace: true });
-        else setLoadError(c.profileNotFound);
+        else
+          setLoadError(
+            failure instanceof ApiError && [404, 410].includes(failure.status)
+              ? "unavailable"
+              : "failed",
+          );
       });
     return () => {
       cancelled = true;
     };
-  }, [id, retry, c.profileNotFound, locale, navigate]);
+  }, [id, retry, locale, navigate]);
   const close = () => {
     if (!inFlight.current) {
       closeProfileOverlay(() => {
@@ -1025,21 +1039,40 @@ function ProfileScreen({
   };
   if (loadError)
     return (
-      <section className="member-profile-surface">
-        <p role="alert">{loadError}</p>
-        <Link to={back}>{c.goBack}</Link>
-        <button
-          className="soft-button"
-          onClick={() => setRetry((value) => value + 1)}
-        >
-          {{ en: "Try again", ru: "Повторить", es: "Reintentar" }[locale]}
-        </button>
+      <section
+        className="member-profile-surface member-profile-load-state"
+        role="alert"
+        aria-labelledby="profile-load-heading"
+      >
+        <h2 id="profile-load-heading">
+          {loadError === "unavailable" ? c.profileNotFound : loadCopy.failedTitle}
+        </h2>
+        <p>
+          {loadError === "unavailable"
+            ? loadCopy.unavailable
+            : loadCopy.failedDescription}
+        </p>
+        <div className="profile-load-actions">
+          <Link className="profile-load-button" to={back}>{c.goBack}</Link>
+          {loadError === "failed" && (
+            <button
+              type="button"
+              className="profile-load-button"
+              onClick={() => {
+                setLoadError(null);
+                setRetry((value) => value + 1);
+              }}
+            >
+              {loadCopy.retry}
+            </button>
+          )}
+        </div>
       </section>
     );
   if (!profile)
     return (
       <section
-        className="member-profile-surface loading"
+        className="member-profile-surface member-profile-load-state loading"
         role="status"
         aria-busy="true"
         aria-label={

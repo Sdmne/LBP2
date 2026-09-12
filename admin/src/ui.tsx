@@ -2,6 +2,7 @@ import {
   Children,
   FormEvent,
   isValidElement,
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -339,6 +340,11 @@ function valueOf(value: unknown) {
     : typeof value === "object"
       ? JSON.stringify(value)
       : String(value);
+}
+
+function metricNumber(value: unknown, digits = 2) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(digits) : valueOf(value);
 }
 
 function clinicPartnerName(row: RecordValue) {
@@ -2487,16 +2493,19 @@ function ProfileDonutPanel({
   );
 }
 
-function Dashboard() {
+function Dashboard({ onStatsLoaded }: { onStatsLoaded?: (stats: RecordValue) => void }) {
   const [stats, setStats] = useState<RecordValue | null>(null);
   const [tab, setTab] = useState("users");
   const [error, setError] = useState("");
   useEffect(() => {
     api
       .get<RecordValue>("/admin/stats")
-      .then(setStats)
+      .then((payload) => {
+        setStats(payload);
+        onStatsLoaded?.(payload);
+      })
       .catch(() => setError("Could not load dashboard metrics."));
-  }, []);
+  }, [onStatsLoaded]);
   if (error) return <p className="error">{error}</p>;
   if (!stats) return <p className="loading-inline">Loading dashboard…</p>;
   const counts = (stats.counts ?? {}) as RecordValue;
@@ -3889,14 +3898,14 @@ function MonitoringPage() {
               />
               <MonitorMetric
                 title="Load Average"
-                value={valueOf(
+                value={
                   Array.isArray(system.loadAverage)
-                    ? system.loadAverage[0]
-                    : "—",
-                )}
+                    ? metricNumber(system.loadAverage[0])
+                    : "—"
+                }
                 hint={
                   Array.isArray(system.loadAverage)
-                    ? `5m: ${valueOf(system.loadAverage[1])} / 15m: ${valueOf(system.loadAverage[2])}`
+                    ? `5m: ${metricNumber(system.loadAverage[1])} / 15m: ${metricNumber(system.loadAverage[2])}`
                     : undefined
                 }
                 icon="activity"
@@ -5083,11 +5092,12 @@ function ModerationPhotos() {
             const imageSources = moderationPhotoSources(row);
             const profileId = row.profileId;
             const deleted = Boolean(row.isDeleted);
+            const unavailable = Boolean(row.isUnavailable);
             const rejected = status === "REJECTED";
             return (
               <article
                 key={String(row.id ?? index)}
-                className={`${rejected ? "rejected" : ""}${deleted ? " deleted" : ""}`.trim()}
+                className={`${rejected ? "rejected" : ""}${deleted ? " deleted" : ""}${unavailable ? " unavailable" : ""}`.trim()}
               >
                 <div className="moderation-photo-media">
                   <span>Photo unavailable</span>
@@ -5097,6 +5107,9 @@ function ModerationPhotos() {
                   )}
                   {deleted && (
                     <em className="moderation-photo-state deleted">Deleted</em>
+                  )}
+                  {unavailable && !deleted && (
+                    <em className="moderation-photo-state deleted">Unavailable</em>
                   )}
                 </div>
                 <div className="moderation-photo-details">
@@ -5113,8 +5126,8 @@ function ModerationPhotos() {
                       {valueOf(row.moderationReason)}
                     </p>
                   )}
-                  {deleted ? (
-                    <p>Photo deleted — no action available</p>
+                  {deleted || unavailable ? (
+                    <p>{deleted ? "Photo deleted" : "Photo file unavailable"} — no action available</p>
                   ) : (
                     <p className="row-actions">
                       {status !== "APPROVED" && (
@@ -7687,15 +7700,7 @@ function GenericList({ view }: { view: string }) {
                                           D
                                         </em>
                                       )}
-                                    {view === "users" &&
-                                      isDonorProfile(row) && (
-                                        <em
-                                          className="donor-badge"
-                                          title="Donor"
-                                        >
-                                          D
-                                        </em>
-                                      )}
+                                    {view === "users" && ["DELETED", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
                                   </span>
                                   <small>
                                     {valueOf(
@@ -9843,7 +9848,7 @@ function SettingsList({ view }: { view: string }) {
                   description:
                     "Destination address for contact form messages. Must be a working inbox you read regularly.",
                   type: "email",
-                  fallback: "",
+                  fallback: "support@letsbeparents.com",
                 },
               ],
             )}
@@ -9975,7 +9980,7 @@ function SettingsList({ view }: { view: string }) {
               description:
                 "Feature flag for the new ranking formula. Keep OFF on production until the new formula has been A/B tested.",
               type: "toggle",
-              fallback: true,
+              fallback: false,
             },
             {
               key: "ranking.weights.completeness",
@@ -13140,8 +13145,12 @@ export function AdminApp() {
       .then(setSession)
       .catch(() => setSession(null));
   }, []);
+  const handleDashboardStatsLoaded = useCallback((payload: RecordValue) => {
+    setNavCounts((payload.counts ?? {}) as RecordValue);
+  }, []);
   useEffect(() => {
     if (!session) return;
+    if (location.pathname === "/dashboard" || location.pathname === "/") return;
     let live = true;
     const loadNavCounts = () =>
       api
@@ -13332,7 +13341,7 @@ export function AdminApp() {
           <Navigate to={fallbackPath} replace />
         ) : (
           <Routes>
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={<Dashboard onStatsLoaded={handleDashboardStatsLoaded} />} />
             <Route
               path="/monitoring"
               element={<Operations kind="monitoring" />}

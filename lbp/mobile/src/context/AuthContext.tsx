@@ -1,9 +1,10 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as SecureStore from "expo-secure-store";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
 import { setSessionToken } from "../api/session";
 import type { PublicUser } from "../api/types";
+import { registerForPushNotifications, unregisterCurrentPushToken } from "../utils/pushNotifications";
 
 const TOKEN_STORAGE_KEY = "lbp_session_token";
 
@@ -54,6 +55,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingProfileWizard, setPendingProfileWizard] = useState(false);
+  // Item 16 - the Expo push token this device last registered, so logout()
+  // can unregister the exact same one. A ref, not state - nothing on
+  // screen ever needs to read it, and it must survive without triggering
+  // re-renders.
+  const pushTokenRef = useRef<string | null>(null);
+  const pushSyncRef = useRef<Promise<void>>(Promise.resolve());
+  function syncPushToken() {
+    pushSyncRef.current = (async () => {
+      pushTokenRef.current = await registerForPushNotifications();
+    })();
+    return pushSyncRef.current;
+  }
 
   // On app start: if we have a saved token, verify it's still valid against
   // the real backend (GET /api/auth/me) rather than trusting it blindly -
@@ -66,6 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSessionToken(savedToken);
         const { user: freshUser } = await authApi.me();
         setUser(freshUser);
+        void syncPushToken();
       } catch (err) {
         // Invalid/expired token - clear it and fall through to the login screen.
         setSessionToken(null);
@@ -91,6 +105,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
         setPendingProfileWizard(false);
+        void syncPushToken();
       },
       async signup(email, password, displayName) {
         const res = await authApi.signup(email, password, displayName);
@@ -98,6 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
         setPendingProfileWizard(true);
+        void syncPushToken();
       },
       async socialLogin(idToken, displayName, intent) {
         const res = await authApi.authenticateWithFirebase(idToken, displayName, intent);
@@ -107,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Only a brand-new social account needs the wizard - one that already
         // existed (a returning Google/Apple login) already has a profile.
         setPendingProfileWizard(!!res.isNewUser);
+        void syncPushToken();
       },
       async refreshUser() {
         const { user: freshUser } = await authApi.me();
@@ -121,12 +138,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return res.status;
       },
       async deleteAccount(reason, details = "") {
+        await pushSyncRef.current;
+        await unregisterCurrentPushToken(pushTokenRef.current);
+        pushTokenRef.current = null;
         await authApi.requestAccountDeletion(reason, details);
         setSessionToken(null);
         await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
         setUser(null);
       },
       async logout() {
+        await pushSyncRef.current;
+        await unregisterCurrentPushToken(pushTokenRef.current);
+        pushTokenRef.current = null;
         try {
           await authApi.logout();
         } catch (err) {

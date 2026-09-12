@@ -24,6 +24,7 @@ import {
 } from "./member-profile";
 import { PROFILE_COPY } from "./member-profile-reference";
 import { UserAvatar } from "./user-avatar";
+import { SlidingTabs } from "./sliding-tabs";
 
 const api = createApiClient("/api");
 export const LIKE_TABS = [
@@ -416,41 +417,18 @@ function LikesContent({
     <section className="member-account-surface member-likes">
       <h1>{c.likesTitle}</h1>
       <div className="member-likes-tabs-scroll">
-        <div
+        <SlidingTabs
           className="member-likes-tabs"
-          role="tablist"
-          aria-label={c.likesTitle}
-        >
-          {LIKE_TABS.map((key, index) => (
-            <button
-              type="button"
-              key={key}
-              id={`likes-tab-${key}`}
-              role="tab"
-              aria-selected={tab === key}
-              aria-controls="likes-panel"
-              tabIndex={tab === key ? 0 : -1}
-              onClick={() => select(key)}
-              onKeyDown={(event) => {
-                let next: number | undefined;
-                if (event.key === "ArrowRight")
-                  next = (index + 1) % LIKE_TABS.length;
-                if (event.key === "ArrowLeft")
-                  next = (index + LIKE_TABS.length - 1) % LIKE_TABS.length;
-                if (event.key === "Home") next = 0;
-                if (event.key === "End") next = LIKE_TABS.length - 1;
-                if (next === undefined) return;
-                event.preventDefault();
-                select(LIKE_TABS[next]);
-                document
-                  .getElementById(`likes-tab-${LIKE_TABS[next]}`)
-                  ?.focus();
-              }}
-            >
-              {c[key]}
-            </button>
-          ))}
-        </div>
+          label={c.likesTitle}
+          value={tab}
+          onChange={select}
+          options={LIKE_TABS.map((key) => ({
+            value: key,
+            label: c[key],
+            id: `likes-tab-${key}`,
+            controls: "likes-panel",
+          }))}
+        />
       </div>
       {error && (
         <p className="account-error" role="alert">

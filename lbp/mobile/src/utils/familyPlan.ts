@@ -35,6 +35,33 @@ export async function openFamilyPlan(navigation: FamilyPlanNav, t: (key: string,
   }
 }
 
+// Item 10 follow-up - Alena: "Pregnancy только же в моем профиле сделать
+// чуть ниже под family room" - a Pregnancy Room shortcut on her own
+// profile menu (MeProfileScreen.tsx), placed right under Family Room.
+// PregnancyRoomScreen needs a specific matched profile's id exactly like
+// FamilyRoom does, so this is the identical fetchLikes() zero/one/many
+// branch as openFamilyPlan above, just landing in PregnancyRoom (and,
+// for 2+ matches, telling FamilyPlanPickerScreen to land there too via
+// its target param) instead of FamilyRoom.
+export async function openPregnancyRoom(navigation: FamilyPlanNav, t: (key: string, vars?: Record<string, string | number>) => string) {
+  try {
+    const res = await fetchLikes();
+    const matches = res.matches;
+    if (matches.length === 0) {
+      Alert.alert(t("pregnancyRoom.noMatches.title"), t("pregnancyRoom.noMatches.body"), [
+        { text: t("common.cancel"), style: "cancel" },
+        { text: t("pregnancyRoom.noMatches.browse"), onPress: () => navigation.navigate("MainTabs", { screen: "Catalog" }) },
+      ]);
+    } else if (matches.length === 1) {
+      navigation.navigate("PregnancyRoom", { profileId: matches[0].id, displayName: matches[0].displayName });
+    } else {
+      navigation.navigate("FamilyPlanPicker", { target: "PregnancyRoom" });
+    }
+  } catch (err) {
+    Alert.alert(t("familyPlan.loadErrorTitle"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
+  }
+}
+
 // The 10 fixed Family Plan sections (Alena's reference mockup, "Your
 // Family Plan"). Order + keys must match FAMILY_PLAN_SECTION_KEYS in
 // backend/main.py exactly - this is the client's copy for ordering the

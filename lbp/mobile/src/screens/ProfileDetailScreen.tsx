@@ -238,20 +238,13 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
               <Feather name="heart" size={15} color={colors.ink} />
               <Text style={styles.familyLinkText}>{t("profileDetail.compatibilityReport")}</Text>
             </Pressable>
-            {/* Deliberately its own top-level entry point, not only the
-                card inside FamilyRoomScreen - Pregnancy Room is free for
-                everyone (Alena: "убрать ограничение навсегда"), unlike the
-                rest of Family Room which requires Premium, so it can't
-                live only behind that screen's premium-gated entry. Still
-                needs an active match (PregnancyRoomScreen enforces that
-                itself), same as the two links above. */}
-            <Pressable
-              style={styles.familyLink}
-              onPress={() => navigation.navigate("PregnancyRoom", { profileId: profile.id, displayName: profile.displayName })}
-            >
-              <Feather name="activity" size={15} color={colors.ink} />
-              <Text style={styles.familyLinkText}>{t("profileDetail.pregnancyRoom")}</Text>
-            </Pressable>
+            {/* Item 10 - Alena: "Pregnancy здесь не надо" - the standalone
+                Pregnancy pill shouldn't show when viewing SOMEONE ELSE's
+                profile (this whole row only ever renders for !isSelf - see
+                above). Pregnancy Room itself is untouched and still free
+                for everyone via its own entry point on FamilyRoomScreen
+                (the "pregnancyCard" there) - only this second, redundant
+                top-level pill is removed. */}
           </View>
         ) : null}
       </ScrollView>

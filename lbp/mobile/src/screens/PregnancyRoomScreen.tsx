@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { ApiError } from "../api/client";
+import { ApiError, downloadAndOpenPrivateFile } from "../api/client";
 import {
   deletePregnancyEntry,
   fetchPregnancyRoom,
@@ -32,6 +32,23 @@ const CATEGORIES: { key: PregnancyEntryCategory; labelKey: string; icon: string 
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Some share-sheet/"Recent files" sources (seen on Alena's device: a
+// screen-recording shared out of another app) hand DocumentPicker a name
+// that's still percent-encoded (e.g. "Common%20screens%20after...") rather
+// than the human-readable one - happens upstream of this app, nothing sent
+// a real filename with literal "%20" in it. Decoding defensively (falling
+// back to the raw string for a name that merely contains a literal "%",
+// which isn't valid percent-encoding and throws) is enough to undo it
+// wherever it's shown, without needing a backend migration for names
+// already stored encoded.
+function displayFileName(name: string): string {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }
 
 export default function PregnancyRoomScreen({ route, navigation }: Props) {
@@ -189,13 +206,17 @@ export default function PregnancyRoomScreen({ route, navigation }: Props) {
               <Pressable
                 key={entry.id}
                 style={styles.entryRow}
-                onPress={() => Linking.openURL(entry.contentUrl).catch(() => Alert.alert(t("pregnancyRoom.openError")))}
+                onPress={() =>
+                  downloadAndOpenPrivateFile(entry.contentUrl, displayFileName(entry.displayName), entry.mimeType).catch((err) =>
+                    Alert.alert(t("pregnancyRoom.openError"), err instanceof ApiError ? err.message : undefined),
+                  )
+                }
                 onLongPress={() => handleDeleteEntry(entry)}
               >
                 <Text style={styles.entryIcon}>{entry.mimeType === "application/pdf" ? "📄" : "🖼️"}</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.entryName} numberOfLines={1}>
-                    {entry.displayName}
+                    {displayFileName(entry.displayName)}
                   </Text>
                   <Text style={styles.entryMeta}>{formatEntryDate(entry.entryDate)}</Text>
                   {entry.note ? (

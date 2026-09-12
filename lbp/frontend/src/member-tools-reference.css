@@ -369,7 +369,7 @@
 .profile-tools-surface .profile-picker-search-wrap { padding: 8px; border-bottom: 1px solid var(--line); }
 .profile-tools-surface .profile-edit-form .profile-picker-search { min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; line-height: 20px; }
 .profile-tools-surface .profile-edit-form .profile-picker-search:focus { border-color: var(--pink); outline: 0; box-shadow: 0 0 0 2px rgba(247, 10, 104, .16); }
-.profile-tools-surface .profile-picker-popover button { width: 100%; min-height: 30px; display: flex; align-items: center; gap: 8px; padding: 3px 10px; border: 0; color: var(--ink); background: #fff; text-align: left; font: inherit; font-size: 14px; line-height: 20px; font-weight: 400; cursor: pointer; }
+.profile-tools-surface .profile-picker-popover button { width: 100%; min-height: 30px; display: flex; align-items: center; gap: 8px; padding: 3px 6px; border: 0; color: var(--ink); background: #fff; text-align: left; font: inherit; font-size: 14px; line-height: 20px; font-weight: 400; cursor: pointer; }
 .profile-tools-surface .profile-picker-popover button:hover,
 .profile-tools-surface .profile-picker-popover button:focus-visible { background: #fff4f8; outline: 0; }
 .profile-tools-surface .profile-picker-popover button.selected,
@@ -378,7 +378,7 @@
 .profile-tools-surface .language-editor { position: relative; }
 .profile-tools-surface .profile-autocomplete { position: absolute; z-index: 24; top: calc(100% + 4px); right: 0; left: 0; overflow: auto; max-height: 288px; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y; border: 1px solid #d9e1ec; border-radius: 0 0 8px 8px; background: #fff; box-shadow: 0 8px 16px rgba(15,23,42,.16); }
 .profile-tools-surface .profile-autocomplete[hidden] { display: none; }
-.profile-tools-surface .profile-autocomplete button { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 0; padding: 5px 18px; border: 0; color: var(--ink); background: #fff; text-align: left; font-size: 15px; line-height: 20px; font-weight: 400; cursor: pointer; }
+.profile-tools-surface .profile-autocomplete button { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 0; padding: 5px 10px; border: 0; color: var(--ink); background: #fff; text-align: left; font-size: 15px; line-height: 20px; font-weight: 400; cursor: pointer; }
 .profile-tools-surface .profile-autocomplete button:hover,
 .profile-tools-surface .profile-autocomplete button:focus-visible { color: var(--ink); background: #fff4f8; outline: 0; }
 .profile-tools-surface .profile-autocomplete-option > span:first-child { min-width: 0; }

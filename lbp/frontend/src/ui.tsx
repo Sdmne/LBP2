@@ -1,5 +1,7 @@
+import { PRICING_TEXT } from "./pricing-reference";
 import {
   FormEvent,
+  type CSSProperties,
   type ReactNode,
   useEffect,
   useLayoutEffect,
@@ -20,9 +22,10 @@ import {
 import { ApiError, createApiClient } from "./api";
 import { loadKnowledgeArticles, normalizeArticle } from "./articles";
 import { firstAvatarText, userInitials, UserAvatar } from "./user-avatar";
-import { MemberProfile } from "./member-profile";
-import { MemberAccount, ownProfileData } from "./member-account";
+import { MemberProfile, profileAge, profileCountry } from "./member-profile";
+import { AccountPremium, MemberAccount, ownProfileData } from "./member-account";
 import { MemberLikes } from "./member-likes";
+import { SlidingTabs } from "./sliding-tabs";
 import { MemberChat, ChatLegacyRedirect } from "./member-chat";
 import { MemberProfileEdit } from "./member-profile-edit";
 import { MemberProfilePhotos, MemberProfileVerification } from "./member-profile-tools";
@@ -124,8 +127,7 @@ const saveConsentCookies = (
         : "necessary";
   writeCookie("lbp_consent", level, COOKIE_MAX_AGE);
   writeCookie("lbp_consent_id", consentId, COOKIE_MAX_AGE);
-  if (preferences) writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
-  else writeCookie("NEXT_LOCALE", "", 0);
+  writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
 };
 
 const COOKIE_TEXT = {
@@ -147,20 +149,19 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 days", description: "Remembers how you first reached us (first touch), used to understand where new members come from." },
         { name: "lbp_attr_last", duration: "90 days", description: "Remembers how you most recently reached us (last touch), used to understand where new members come from." },
         { name: "lbp_consent_id", duration: "180 days", description: "Anonymous consent reference id, kept as proof of the consent choice you made here (GDPR Art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 year", description: "Remembers the interface language for the localized site." },
       ],
-      preferences: [
-        { name: "NEXT_LOCALE", duration: "1 year", description: "Remembers your selected interface language." },
-      ],
+      preferences: [],
       statistics: [
         { name: "AMP_*", duration: "Up to 1 year", description: "Product analytics — measures usage to improve the product." },
         { name: "AMP_MKTG_*", duration: "Up to 1 year", description: "Product analytics — measures how visitors first reached the app." },
       ],
     },
     about: [
-      "Cookies are small text files that websites can use to make a user's experience more efficient.",
-      "The law states that we can store cookies on your device if they are strictly necessary for the operation of this site. For all other types of cookies, we need your permission. Necessary cookies are processed under Art. 6(1)(f) GDPR; all other categories only with your consent under Art. 6(1)(a) GDPR.",
-      "This site uses different types of cookies. Some cookies are placed by third-party services that appear on our pages.",
-      "You can change or withdraw your consent at any time from the Cookie settings link at the bottom of the page.",
+      "Cookies are small text files that websites use to make a user's experience more efficient.",
+      "The law lets us store cookies that are strictly necessary for this site to work; for everything else we need your permission. Necessary cookies are used on the basis of GDPR Art. 6(1)(f); all other categories are used only with your consent (GDPR Art. 6(1)(a)).",
+      "This site uses different types of cookies; some are set by third-party services that appear on our pages.",
+      "You can change or withdraw your consent at any time using the \"Cookie settings\" link in the footer of the page.",
     ],
     learnMore: "Learn more about how we process personal data in our Privacy Policy.",
     rejectAll: "Reject all",
@@ -186,8 +187,9 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 дней", description: "Запоминает, как вы впервые попали к нам (первое посещение), чтобы понимать, откуда приходят новые участники." },
         { name: "lbp_attr_last", duration: "90 дней", description: "Запоминает, как вы попали к нам в последний раз (последнее посещение), чтобы понимать, откуда приходят новые участники." },
         { name: "lbp_consent_id", duration: "180 дней", description: "Анонимный идентификатор согласия, хранится как подтверждение сделанного вами здесь выбора (GDPR ст. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 год", description: "Запоминает язык интерфейса для локализованного сайта." },
       ],
-      preferences: [{ name: "NEXT_LOCALE", duration: "1 год", description: "Запоминает выбранный язык интерфейса." }],
+      preferences: [],
       statistics: [
         { name: "AMP_*", duration: "До 1 года", description: "Продуктовая аналитика — измеряет использование для улучшения продукта." },
         { name: "AMP_MKTG_*", duration: "До 1 года", description: "Продуктовая аналитика — измеряет, как посетители впервые попали в приложение." },
@@ -223,8 +225,9 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 días", description: "Recuerda cómo llegaste a nosotros por primera vez (primer contacto), para entender de dónde vienen los nuevos miembros." },
         { name: "lbp_attr_last", duration: "90 días", description: "Recuerda cómo llegaste a nosotros la última vez (último contacto), para entender de dónde vienen los nuevos miembros." },
         { name: "lbp_consent_id", duration: "180 días", description: "Identificador de consentimiento anónimo, conservado como prueba de la elección de consentimiento que hizo aquí (RGPD art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 año", description: "Recuerda el idioma de interfaz para el sitio localizado." },
       ],
-      preferences: [{ name: "NEXT_LOCALE", duration: "1 año", description: "Recuerda el idioma de interfaz que has seleccionado." }],
+      preferences: [],
       statistics: [
         { name: "AMP_*", duration: "Hasta 1 año", description: "Análisis de producto — mide el uso para mejorar el producto." },
         { name: "AMP_MKTG_*", duration: "Hasta 1 año", description: "Análisis de producto — mide cómo llegaron los visitantes a la app por primera vez." },
@@ -274,6 +277,7 @@ function CookieConsent() {
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let live = true;
+    writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
     const browserChoice = readConsentCookie();
     const browserConsentId = ensureConsentId();
     setConsentId(browserConsentId);
@@ -337,8 +341,8 @@ function CookieConsent() {
     checked: boolean;
     cookies: CookieDefinition[];
   }> = [
-    { key: "necessary", count: 5, disabled: true, checked: true, cookies: text.cookies.necessary },
-    { key: "preferences", count: 1, checked: preferences, cookies: text.cookies.preferences },
+    { key: "necessary", count: text.cookies.necessary.length, disabled: true, checked: true, cookies: text.cookies.necessary },
+    { key: "preferences", count: text.cookies.preferences.length, checked: preferences, cookies: text.cookies.preferences },
     { key: "statistics", count: 2, checked: statistics, cookies: text.cookies.statistics },
   ];
   const setCategory = (key: CookieCategoryKey, checked: boolean) => {
@@ -576,12 +580,12 @@ function MemberCounters({
   const displayName = firstAvatarText(profile.displayName, profile.display_name, data.displayName, data.display_name, session.user.displayName, session.user.display_name, "Member");
   return (
     <div className={menu ? "member-menu-counters" : "member-header-actions"} aria-label={text.notifications}>
-      <Link className={menu ? "member-menu-action" : "member-icon-link"} onClick={onNavigate} to={`/${locale}/likes`} aria-label={text.likes} aria-current={window.location.pathname === `/${locale}/likes` ? "page" : undefined}>
+      <Link className={menu ? "member-menu-action" : "member-icon-link"} role={menu ? "menuitem" : undefined} onClick={onNavigate} to={`/${locale}/likes`} aria-label={text.likes} aria-current={window.location.pathname === `/${locale}/likes` ? "page" : undefined}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /><path d="M7 10v12" /></svg>
         {menu && <span>{text.likes}</span>}
         {likes > 0 ? <b>{likes > 99 ? "99+" : likes}</b> : null}
       </Link>
-      <Link className={menu ? "member-menu-action" : "member-icon-link"} onClick={onNavigate} to={`/${locale}/chat`} aria-label={text.messages} aria-current={new RegExp(`^/${locale}/(?:messages|chat)(?:/|$)`).test(window.location.pathname) ? "page" : undefined}>
+      <Link className={menu ? "member-menu-action" : "member-icon-link"} role={menu ? "menuitem" : undefined} onClick={onNavigate} to={`/${locale}/chat`} aria-label={text.messages} aria-current={new RegExp(`^/${locale}/(?:messages|chat)(?:/|$)`).test(window.location.pathname) ? "page" : undefined}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /></svg>
         {menu && <span>{text.messages}</span>}
         {messages > 0 ? <b>{messages > 99 ? "99+" : messages}</b> : null}
@@ -597,21 +601,26 @@ function Shell({
   session,
   onLogout,
   children,
+  pendingSession = false,
 }: {
   session: Session;
   onLogout: () => Promise<void>;
   children: React.ReactNode;
+  pendingSession?: boolean;
 }) {
   const locale = localeOf();
   const text = SITE_TEXT[locale];
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const navigationRef = useRef<HTMLElement>(null);
+  const focusMenuOnOpen = useRef<"first" | "last" | null>(null);
   const [headerScrolled, setHeaderScrolled] = useState(() => window.scrollY > 24);
   const isLanding = new RegExp(`^/${locale}/?$`).test(window.location.pathname);
   const isAuth = new RegExp(`^/${locale}/auth/`).test(window.location.pathname);
   const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(window.location.pathname);
   const isChat = new RegExp(`^/${locale}/(?:chat|messages)(?:/|$)`).test(window.location.pathname);
   const isProfileTool = new RegExp(`^/${locale}/(?:profile/(?:edit|photos|verification)|photos|verification)/?$`).test(window.location.pathname);
-  const hasMemberMenu = isChat || isProfileTool;
+  const hasMemberMenu = Boolean(session);
   const isAccount = new RegExp(`^/${locale}/(?:profile(?:/(?:notifications|blocked))?|likes)/?$`).test(window.location.pathname);
   const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(window.location.pathname);
   const isCatalog = !isProfileTool && new RegExp(`^/${locale}/(?:catalog(?:/|$)|profile/[^/]+/?$)`).test(window.location.pathname);
@@ -627,17 +636,36 @@ function Shell({
   const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(window.location.pathname);
   const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(window.location.pathname);
   const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(window.location.pathname);
+  const menuItems = () => Array.from(navigationRef.current?.querySelectorAll<HTMLElement>("a, button") || [])
+    .filter((item) => item.getClientRects().length > 0 && !item.hasAttribute("disabled"));
+  const focusMenuEdge = (edge: "first" | "last") => {
+    const items = menuItems();
+    (edge === "last" ? items[items.length - 1] : items[0])?.focus();
+  };
   useEffect(() => {
     if (!menuOpen) return;
+    if (focusMenuOnOpen.current) {
+      focusMenuEdge(focusMenuOnOpen.current);
+      focusMenuOnOpen.current = null;
+    }
     const closeOutside = (event: PointerEvent) => {
       if (event.target instanceof Element && !event.target.closest(".mobile-menu, .web-header nav")) setMenuOpen(false);
     };
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      menuTriggerRef.current?.focus();
+    };
+    const closeOnDesktop = () => {
+      if (window.innerWidth >= 768) setMenuOpen(false);
+    };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnDesktop);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnDesktop);
     };
   }, [hasMemberMenu, menuOpen]);
   useEffect(() => {
@@ -670,38 +698,39 @@ function Shell({
     window.location.assign(`/${parts.join("/")}${window.location.search}${window.location.hash}`);
   };
   const navigation = (
-    <nav className={menuOpen ? "open" : ""} aria-label={locale === "ru" ? "Основная навигация" : locale === "es" ? "Navegación principal" : "Primary navigation"}>
-      <Link className={isKnowledge ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/knowledge-hub`}>
+    <nav ref={navigationRef} id="public-site-navigation" className={menuOpen ? "open" : ""} role={menuOpen ? "menu" : undefined} aria-label={locale === "ru" ? "Основная навигация" : locale === "es" ? "Navegación principal" : "Primary navigation"}
+      onKeyDown={(event) => {
+        if (!menuOpen || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const items = menuItems();
+        const current = items.findIndex((item) => item === document.activeElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+          : event.key === "ArrowDown" ? (current + 1) % items.length
+          : current <= 0 ? items.length - 1 : current - 1;
+        items[next]?.focus();
+      }}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isKnowledge ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/knowledge-hub`}>
         {text.knowledge}
       </Link>
-      <Link className={isCatalog ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/catalog`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isCatalog ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/catalog`}>
         {text.match}
       </Link>
-      <Link className={isClinics ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/clinics`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isClinics ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/clinics`}>
         {text.clinics}
       </Link>
-      <Link className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
         {text.lawyers}
       </Link>
-      <Link className={isResources ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
-        {text.resources}
-      </Link>
-      <Link className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
-        {text.safety}
-      </Link>
-      <Link className={isPricing ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/pricing`}>
-        {text.pricing}
-      </Link>
       <div className="mobile-nav-actions">
-        {session && hasMemberMenu ? (menuOpen && <MemberCounters session={session} menu onNavigate={() => setMenuOpen(false)} />) : session ? (
+        {pendingSession ? null : session && hasMemberMenu ? (menuOpen && <MemberCounters session={session} menu onNavigate={() => setMenuOpen(false)} />) : session ? (
           <>
-            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
-            <button className="plain-button" onClick={() => void onLogout()}>{text.signOut}</button>
+            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
+            <button role={menuOpen ? "menuitem" : undefined} className="plain-button" onClick={() => void onLogout()}>{text.signOut}</button>
           </>
         ) : (
           <>
-            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/auth/login`}>{text.signIn}</Link>
-            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/auth/register`}>{text.signUp}</Link>
+            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/auth/login`}>{text.signIn}</Link>
+            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/auth/register`}>{text.signUp}</Link>
           </>
         )}
       </div>
@@ -716,15 +745,28 @@ function Shell({
           </Link>
           {navigation}
           <button
-            className={`mobile-menu${session ? " has-member-actions" : ""}`}
+            ref={menuTriggerRef}
+            className={`mobile-menu${session || pendingSession ? " has-member-actions" : ""}`}
             type="button"
             aria-label="Toggle menu"
             aria-expanded={menuOpen}
+            aria-controls="public-site-navigation"
+            aria-haspopup="menu"
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              event.preventDefault();
+              const edge = event.key === "ArrowUp" ? "last" : "first";
+              if (menuOpen) focusMenuEdge(edge);
+              else {
+                focusMenuOnOpen.current = edge;
+                setMenuOpen(true);
+              }
+            }}
             onClick={() => setMenuOpen((value) => !value)}
           >
             {hasMemberMenu ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" /></svg> : <><span /><span /><span /></>}
           </button>
-          {session ? (
+          {pendingSession ? <div className="header-actions pending-header-actions" aria-hidden="true" /> : session ? (
             <div className="header-actions member-header-actions-wrap">
               <MemberCounters session={session} />
             </div>
@@ -756,9 +798,6 @@ function Shell({
               <Link to={`/${locale}/catalog`}>{text.match}</Link>
               <Link to={`/${locale}/clinics`}>{text.clinics}</Link>
               <Link to={`/${locale}/lawyers`}>{text.lawyers}</Link>
-              <Link to={`/${locale}/resources`}>{text.resources}</Link>
-              <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
-              <Link to={`/${locale}/pricing`}>{text.pricing}</Link>
             </nav>
           </div>
           <div className="footer-column">
@@ -2400,33 +2439,33 @@ const CATALOG_COPY = {
   en: {
     browse: "Browse profiles", collections: "Collections", all: "All", day: "day", days: "days", month: "month",
     filters: "Filters", allFilters: "All filters", closeFilters: "Close filters", clear: "Clear all", apply: "Apply filters",
-    country: "Country", city: "City", anyCountry: "Any country", cityFirst: "Select a single country to filter by city",
+    country: "Country", city: "City", anyCountry: "Any country", cityFirst: "Select a single country to filter by city", cityPlaceholder: "Start typing a city name...",
     profileType: "Profile type", donor: "Donor", lookingFor: "Looking for", allTypes: "All types",
     matches: "Matches profiles that fit any of these options", verified: "Verified only", age: "Age", from: "From", to: "To",
     ethnicity: "Ethnicity", hair: "Hair color", eye: "Eye color", education: "Education", religion: "Religion",
-    premium: "Premium only", search: "Search...", none: "No options found", noProfiles: "No profiles found", noProfilesHelp: "Try changing or clearing the filters.",
+    premium: "Premium only", premiumTitle: "Premium filters", premiumText: "Choose Premium to unlock advanced filters and find more compatible profiles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Close Premium offer", search: "Search...", none: "No options found", noProfiles: "No profiles found", noProfilesHelp: "Try changing or clearing the filters.",
     loadMore: "Load more", loading: "Loading ...", locationHidden: "Location hidden", message: "Message", like: "Like", liked: "Liked",
     ageError: "Minimum age cannot be greater than maximum age.", failed: "Could not load the catalog.", actionFailed: "This action could not be completed.",
   },
   ru: {
     browse: "Каталог профилей", collections: "Коллекции", all: "Все", day: "день", days: "дней", month: "месяц",
     filters: "Фильтры", allFilters: "Все фильтры", closeFilters: "Закрыть фильтры", clear: "Очистить всё", apply: "Применить фильтры",
-    country: "Страна", city: "Город", anyCountry: "Любая страна", cityFirst: "Сначала выберите одну страну",
+    country: "Страна", city: "Город", anyCountry: "Любая страна", cityFirst: "Сначала выберите одну страну", cityPlaceholder: "Начните вводить город...",
     profileType: "Тип профиля", donor: "Донор", lookingFor: "Ищет", allTypes: "Все типы",
     matches: "Показываем анкеты, соответствующие любому из выбранных вариантов", verified: "Только подтверждённые", age: "Возраст", from: "От", to: "До",
     ethnicity: "Этническая принадлежность", hair: "Цвет волос", eye: "Цвет глаз", education: "Образование", religion: "Религия",
-    premium: "Только Premium", search: "Поиск...", none: "Варианты не найдены", noProfiles: "Анкеты не найдены", noProfilesHelp: "Измените или очистите фильтры.",
+    premium: "Только Premium", premiumTitle: "Premium-фильтры", premiumText: "Оформите Premium, чтобы открыть расширенные фильтры и точнее искать подходящие анкеты.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Закрыть предложение Premium", search: "Поиск...", none: "Варианты не найдены", noProfiles: "Анкеты не найдены", noProfilesHelp: "Измените или очистите фильтры.",
     loadMore: "Показать ещё", loading: "Загрузка ...", locationHidden: "Местоположение скрыто", message: "Написать", like: "Нравится", liked: "Liked",
     ageError: "Минимальный возраст не может быть больше максимального.", failed: "Не удалось загрузить каталог.", actionFailed: "Не удалось выполнить действие.",
   },
   es: {
     browse: "Explorar perfiles", collections: "Colecciones", all: "Todos", day: "día", days: "días", month: "mes",
     filters: "Filtros", allFilters: "Todos los filtros", closeFilters: "Cerrar filtros", clear: "Borrar todo", apply: "Aplicar filtros",
-    country: "País", city: "Ciudad", anyCountry: "Cualquier país", cityFirst: "Selecciona primero un país",
+    country: "País", city: "Ciudad", anyCountry: "Cualquier país", cityFirst: "Selecciona primero un país", cityPlaceholder: "Empieza a escribir una ciudad...",
     profileType: "Tipo de perfil", donor: "Donante", lookingFor: "Busca", allTypes: "Todos los tipos",
     matches: "Muestra perfiles que coincidan con cualquiera de estas opciones", verified: "Solo verificados", age: "Edad", from: "Desde", to: "Hasta",
     ethnicity: "Origen étnico", hair: "Color de pelo", eye: "Color de ojos", education: "Educación", religion: "Religión",
-    premium: "Solo Premium", search: "Buscar...", none: "No se encontraron opciones", noProfiles: "No se encontraron perfiles", noProfilesHelp: "Cambia o borra los filtros.",
+    premium: "Solo Premium", premiumTitle: "Filtros Premium", premiumText: "Elige Premium para desbloquear filtros avanzados y encontrar perfiles más compatibles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Cerrar oferta Premium", search: "Buscar...", none: "No se encontraron opciones", noProfiles: "No se encontraron perfiles", noProfilesHelp: "Cambia o borra los filtros.",
     loadMore: "Mostrar más", loading: "Cargando ...", locationHidden: "Ubicación oculta", message: "Escribir", like: "Me gusta", liked: "Liked",
     ageError: "La edad mínima no puede superar la máxima.", failed: "No se pudo cargar el catálogo.", actionFailed: "No se pudo completar la acción.",
   },
@@ -2508,9 +2547,9 @@ const catalogPhotoUrls = (item: Row) => {
   const urls: string[] = [];
   const add = (value: unknown) => {
     const url = typeof value === "string"
-      ? value.trim()
+      ? firstAvatarText(value)
       : value && typeof value === "object"
-        ? catalogText((value as Row).publicUrl ?? (value as Row).url)
+        ? firstAvatarText((value as Row).publicUrl, (value as Row).url)
         : "";
     if (url && url !== "—" && !urls.includes(url)) urls.push(url);
   };
@@ -2551,8 +2590,8 @@ function CatalogCard({
   const [photoIndex, setPhotoIndex] = useState(0);
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<Set<string>>(() => new Set());
   const name = catalogText(item.displayName ?? data.displayName, "LetsBeParents member");
-  const age = catalogText(item.age ?? data.age);
-  const location = [item.city ?? data.city, item.countryName ?? data.countryName ?? item.country ?? data.country]
+  const age = profileAge(item);
+  const location = [item.city ?? data.city, profileCountry(item.countryName ?? data.countryName ?? item.country ?? data.country, locale)]
     .filter(Boolean).map(String).join(", ");
   const donorTypes = catalogList(item.donorType ?? data.donorType);
   const lookingFor = catalogList(item.lookingFor ?? data.lookingFor ?? item.recipientType ?? data.recipientType);
@@ -2637,6 +2676,7 @@ function CatalogFilterModal({
   cities,
   premium,
   onPremium,
+  premiumPromptOpen,
 }: {
   locale: CookieLocale;
   value: CatalogFilters;
@@ -2647,15 +2687,19 @@ function CatalogFilterModal({
   cities: CatalogOption[];
   premium: boolean;
   onPremium: () => void;
+  premiumPromptOpen: boolean;
 }) {
   const copy = CATALOG_COPY[locale];
   const [openField, setOpenField] = useState("");
   const [query, setQuery] = useState("");
+  const [cityQuery, setCityQuery] = useState(catalogText(value.city));
+  const [cityActiveIndex, setCityActiveIndex] = useState(-1);
+  const [dropdownActiveIndex, setDropdownActiveIndex] = useState(-1);
   const set = <K extends keyof CatalogFilters>(key: K, next: CatalogFilters[K]) => onChange({ ...value, [key]: next });
   useEffect(() => {
     document.body.classList.add("catalog-filter-open");
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented || premiumPromptOpen) return;
       if (openField) setOpenField("");
       else onClose();
     };
@@ -2664,7 +2708,30 @@ function CatalogFilterModal({
       document.body.classList.remove("catalog-filter-open");
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [onClose, openField]);
+  }, [onClose, openField, premiumPromptOpen]);
+  useEffect(() => {
+    if (!openField) return;
+    const closeOutside = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const activeWrap = document.querySelector(`[data-catalog-filter-field="${openField}"]`);
+      if (activeWrap?.contains(target)) return;
+      setOpenField("");
+      setQuery("");
+      setDropdownActiveIndex(-1);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [openField]);
+  useEffect(() => {
+    setCityQuery(catalogText(value.city));
+    setCityActiveIndex(-1);
+  }, [value.city, value.country.join(",")]);
+  useEffect(() => {
+    if (!openField) return;
+    const index = openField === "city" ? cityActiveIndex : dropdownActiveIndex;
+    document.getElementById(`catalog-filter-${openField}-option-${index}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [openField, cityActiveIndex, dropdownActiveIndex, query, cityQuery]);
   const fieldOptions = (field: string) => field === "country" ? countries : field === "city" ? cities : CATALOG_ENUM_OPTIONS[field] || [];
   const selectedValues = (field: string) => {
     if (["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)) return value[field as keyof CatalogFilters] as string[];
@@ -2677,11 +2744,90 @@ function CatalogFilterModal({
       const current = value[key];
       const next = current.includes(optionValue) ? current.filter((item) => item !== optionValue) : [...current, optionValue];
       onChange({ ...value, [key]: next, ...(key === "country" ? { city: "" } : {}) });
+      if (key === "country") { setCityQuery(""); setCityActiveIndex(-1); }
     } else {
       const key = field as "city" | "ethnicity" | "hairColor" | "eyeColor" | "education" | "religion";
       set(key, value[key] === optionValue ? "" : optionValue);
       setOpenField("");
+      setDropdownActiveIndex(-1);
     }
+  };
+  const cityField = () => {
+    const disabled = value.country.length !== 1;
+    const controlId = "catalog-filter-city";
+    const labelId = `${controlId}-label`;
+    const selectedCountry = value.country[0] || "";
+    const countryLabel = countries.find((option) => option.value === selectedCountry)?.label || profileCountry(selectedCountry, locale);
+    const term = cityQuery.trim().toLowerCase();
+    const filtered = term ? cities.filter((option) => option.label.toLowerCase().includes(term) || option.value.toLowerCase().includes(term)).slice(0, 24) : [];
+    const dropdownOpen = openField === "city" && !disabled && filtered.length > 0;
+    const activeIndex = filtered.length ? Math.min(cityActiveIndex, filtered.length - 1) : -1;
+    const chooseCity = (option: CatalogOption) => {
+      set("city", option.value);
+      setCityQuery(option.label);
+      setCityActiveIndex(-1);
+      setOpenField("");
+    };
+    return (
+      <div className={`catalog-filter-field catalog-city-field${disabled ? " disabled" : ""}`} key="city">
+        <label id={labelId} htmlFor={controlId}>{copy.city}</label>
+        <div className="catalog-filter-select-wrap" data-catalog-filter-field="city">
+          <input
+            id={controlId}
+            className="catalog-city-autocomplete"
+            type="text"
+            role="combobox"
+            value={disabled ? "" : cityQuery}
+            disabled={disabled}
+            placeholder={disabled ? copy.cityFirst : copy.cityPlaceholder}
+            aria-labelledby={labelId}
+            aria-autocomplete="list"
+            aria-expanded={dropdownOpen}
+            aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
+            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
+
+            autoComplete="off"
+            onFocus={() => { if (!disabled) setOpenField("city"); }}
+            onKeyDown={(event) => {
+              if (disabled) return;
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setOpenField("city");
+                setCityActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setCityActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
+              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
+                event.preventDefault();
+                chooseCity(filtered[activeIndex]);
+              } else if (event.key === "Escape" && openField === "city") {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenField("");
+              }
+            }}
+            onChange={(event) => {
+              const next = event.target.value;
+              setCityQuery(next);
+              set("city", next);
+              setCityActiveIndex(-1);
+              setOpenField("city");
+            }}
+          />
+          {dropdownOpen && (
+            <div id={`${controlId}-options`} className="catalog-filter-dropdown catalog-city-dropdown" role="listbox" aria-labelledby={labelId}>
+              <section>
+                {filtered.map((option, index) => {
+                  const [name, rest] = option.label.split(/,\s*/, 2);
+                  const active = index === activeIndex;
+                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={option.value === value.city} className={`${option.value === value.city ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setCityActiveIndex(index)} onClick={() => chooseCity(option)}><span className="catalog-city-option-name">{name}</span>{countryLabel || rest ? <span className="catalog-city-option-country">, {countryLabel || rest}</span> : null}</button>;
+                })}
+              </section>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
   const filterField = (field: string, label: string, placeholder: string, options: { premium?: boolean; disabled?: boolean; description?: string } = {}) => {
     const locked = Boolean(options.premium && !premium);
@@ -2694,10 +2840,11 @@ function CatalogFilterModal({
     const valueId = `${controlId}-value`;
     const premiumId = `${controlId}-premium`;
     const dropdownOpen = openField === field && !locked && !options.disabled;
+    const activeIndex = filtered.length ? Math.min(dropdownActiveIndex, filtered.length - 1) : -1;
     return (
       <div className={`catalog-filter-field${options.disabled ? " disabled" : ""}${field === "lookingFor" ? " looking-field" : ""}`} key={field}>
         <label id={labelId} htmlFor={controlId}>{label}</label>
-        <div className="catalog-filter-select-wrap">
+        <div className="catalog-filter-select-wrap" data-catalog-filter-field={field}>
           <button
             id={controlId}
             className={`catalog-filter-select${locked ? " premium" : ""}`}
@@ -2707,23 +2854,64 @@ function CatalogFilterModal({
             aria-haspopup={locked || options.disabled ? undefined : "listbox"}
             aria-expanded={locked || options.disabled ? undefined : dropdownOpen}
             aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
+            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
             onClick={() => {
               if (locked) { onPremium(); return; }
               setOpenField((current) => current === field ? "" : field);
               setQuery("");
+              setDropdownActiveIndex(-1);
+            }}
+            onKeyDown={(event) => {
+              if (locked || options.disabled) return;
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setOpenField(field);
+                setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setOpenField(field);
+                setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
+              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
+                event.preventDefault();
+                choose(field, filtered[activeIndex].value);
+              } else if (event.key === "Escape" && dropdownOpen) {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenField("");
+                setQuery("");
+                setDropdownActiveIndex(-1);
+              }
             }}
           >
-            <span id={valueId} className="catalog-filter-value">{selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : placeholder}</span>
+            <span id={valueId} className={`catalog-filter-value${selectedLabels.length ? "" : " placeholder"}`}>{selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : placeholder}</span>
             {locked ? <span id={premiumId} className="catalog-filter-premium-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg><span>{copy.premium}</span></span> : null}
             {!options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
           </button>
           {dropdownOpen && (
             <div id={`${controlId}-options`} className="catalog-filter-dropdown" role="listbox" aria-labelledby={labelId} aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
-              <div><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /></div>
+              <div><input autoFocus value={query} role="combobox" aria-expanded={dropdownOpen} aria-controls={`${controlId}-options`} aria-activedescendant={filtered.length && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined} aria-autocomplete="list" onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
+                } else if (event.key === "Enter" && filtered[activeIndex]) {
+                  event.preventDefault();
+                  choose(field, filtered[activeIndex].value);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setOpenField("");
+                  setQuery("");
+                  setDropdownActiveIndex(-1);
+                }
+              }} onChange={(event) => { setQuery(event.target.value); setDropdownActiveIndex(-1); }} placeholder={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} aria-label={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} /></div>
               <section>
-                {filtered.length ? filtered.map((option) => {
+                {filtered.length ? filtered.map((option, index) => {
                   const isSelected = selected.includes(option.value);
-                  return <button type="button" role="option" aria-selected={isSelected} className={isSelected ? "selected" : ""} key={option.value} onClick={() => choose(field, option.value)}><i aria-hidden="true" />{option.icon ? <span>{option.icon}</span> : null}<span>{option.label}</span></button>;
+                  const active = index === activeIndex;
+                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={isSelected} className={`${isSelected ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setDropdownActiveIndex(index)} onClick={() => choose(field, option.value)}><i aria-hidden="true" />{option.icon ? <span>{option.icon}</span> : null}<span>{option.label}</span></button>;
                 }) : <p>{copy.none}</p>}
               </section>
             </div>
@@ -2740,7 +2928,7 @@ function CatalogFilterModal({
         <header><h2 id="catalog-filter-title">{copy.allFilters}</h2><button type="button" aria-label={copy.closeFilters} onClick={onClose}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></header>
         <div className="catalog-filter-scroll"><div className="catalog-filter-content">
           {filterField("country", copy.country, copy.anyCountry)}
-          {filterField("city", copy.city, copy.cityFirst, { disabled: value.country.length !== 1 })}
+          {cityField()}
           {filterField("profileTypes", copy.profileType, copy.allTypes)}
           {filterField("donorTypes", copy.donor, copy.allTypes)}
           {filterField("lookingFor", copy.lookingFor, copy.allTypes, { description: copy.matches })}
@@ -2753,12 +2941,32 @@ function CatalogFilterModal({
           {filterField("religion", copy.religion, "—", { premium: true })}
         </div></div>
         <footer>
-          <button type="button" className="catalog-filter-clear" hidden={activeCatalogFilterCount(value) === 0} onClick={() => { onChange(emptyCatalogFilters()); setOpenField(""); setQuery(""); }}>{copy.clear}</button>
+          <button type="button" className="catalog-filter-clear" onClick={() => { onChange(emptyCatalogFilters()); setOpenField(""); setQuery(""); setDropdownActiveIndex(-1); setCityActiveIndex(-1); }}>{copy.clear}</button>
           <button type="button" className="catalog-filter-apply" onClick={onApply}>{copy.apply}</button>
         </footer>
       </section>
     </div>
   );
+}
+
+function useCatalogCities(country: string, query: string, enabled: boolean): CatalogOption[] {
+  const [result, setResult] = useState<{ key: string; cities: CatalogOption[] }>({ key: "", cities: [] });
+  const term = query.trim();
+  const key = enabled && country && term ? JSON.stringify([country, term]) : "";
+  useEffect(() => {
+    if (!key) return;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ country, q: term, limit: "200" });
+      api.get<{ cities?: Row[] }>(`/member/catalog/filter-options?${params}`)
+        .then((data) => {
+          if (alive) setResult({ key, cities: (data.cities || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })) });
+        })
+        .catch(() => { if (alive) setResult({ key, cities: [] }); });
+    }, 200);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [country, key, term]);
+  return key && result.key === key ? result.cities : [];
 }
 
 function Catalog({ session }: { session: Session }) {
@@ -2779,8 +2987,10 @@ function Catalog({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [premiumPromptOpen, setPremiumPromptOpen] = useState(false);
   const loadMoreSentinel = useRef<HTMLDivElement | null>(null);
-  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; cities: CatalogOption[]; premium: boolean }>({ countries: [], cities: [], premium: catalogBoolean(session?.user.isPremium) });
+  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; premium: boolean }>({ countries: [], premium: catalogBoolean(session?.user.isPremium) });
+  const cities = useCatalogCities(draftFilters.country.length === 1 ? draftFilters.country[0] : "", draftFilters.city, filterOpen);
   const querySignature = JSON.stringify([period, filters]);
   useEffect(() => {
     let alive = true;
@@ -2828,17 +3038,6 @@ function Catalog({ session }: { session: Session }) {
       .catch(() => undefined);
     return () => { alive = false; };
   }, [filterOpen]);
-  useEffect(() => {
-    if (!filterOpen || draftFilters.country.length !== 1) {
-      setCatalogOptions((current) => current.cities.length ? { ...current, cities: [] } : current);
-      return;
-    }
-    let alive = true;
-    api.get<{ cities?: Row[] }>(`/member/catalog/filter-options?country=${encodeURIComponent(draftFilters.country[0])}&limit=200`)
-      .then((data) => alive && setCatalogOptions((current) => ({ ...current, cities: (data.cities || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })) })))
-      .catch(() => undefined);
-    return () => { alive = false; };
-  }, [draftFilters.country, filterOpen]);
   const persist = (nextFilters: CatalogFilters, nextPeriod = period) => {
     try { sessionStorage.setItem(storageKey, JSON.stringify({ period: nextPeriod, filters: nextFilters })); } catch { /* optional */ }
   };
@@ -2864,6 +3063,9 @@ function Catalog({ session }: { session: Session }) {
       else setError(copy.actionFailed);
     }
   };
+  const openPremiumPrompt = () => {
+    setPremiumPromptOpen(true);
+  };
   const applyFilters = () => {
     const min = Number(draftFilters.ageMin || 0);
     const max = Number(draftFilters.ageMax || 0);
@@ -2873,6 +3075,7 @@ function Catalog({ session }: { session: Session }) {
     setOffset(0);
     persist(next);
     setFilterOpen(false);
+    setPremiumPromptOpen(false);
   };
   const changePeriod = (next: number) => {
     setPeriod(next);
@@ -2896,12 +3099,18 @@ function Catalog({ session }: { session: Session }) {
       <h1>{copy.browse}</h1>
       <div className="catalog-reference-controls">
         <span>{copy.collections}</span>
-        <div className="catalog-reference-periods" role="tablist" aria-label={copy.collections}>
-          <button type="button" role="tab" aria-selected={period === 0} className={period === 0 ? "active" : ""} onClick={() => changePeriod(0)}><span>{copy.all}</span></button>
-          <button type="button" role="tab" aria-selected={period === 1} className={period === 1 ? "active" : ""} onClick={() => changePeriod(1)}><span>1</span><small>{copy.day}</small></button>
-          <button type="button" role="tab" aria-selected={period === 7} className={period === 7 ? "active" : ""} onClick={() => changePeriod(7)}><span>7</span><small>{copy.days}</small></button>
-          <button type="button" role="tab" aria-selected={period === 30} className={period === 30 ? "active" : ""} onClick={() => changePeriod(30)}><span>1</span><small>{copy.month}</small></button>
-        </div>
+        <SlidingTabs
+          className="catalog-reference-periods sliding-tabs--catalog"
+          label={copy.collections}
+          value={period}
+          onChange={changePeriod}
+          options={[
+            { value: 0, label: copy.all },
+            { value: 1, label: `1 ${copy.day}` },
+            { value: 7, label: `7 ${copy.days}` },
+            { value: 30, label: `1 ${copy.month}` },
+          ]}
+        />
         <button className="catalog-reference-filter-button" type="button" aria-label={copy.allFilters} onClick={() => { setDraftFilters({ ...filters }); setFilterOpen(true); }}>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M21 4h-7" />
@@ -2921,8 +3130,9 @@ function Catalog({ session }: { session: Session }) {
       {loading && offset === 0 ? <div className="catalog-reference-loading" role="status" aria-label={copy.loading}><span /></div> : error && items.length === 0 ? null : items.length ? (
         <div className="catalog-reference-grid">{items.map((item) => <CatalogCard key={catalogText(item.id)} item={item} locale={locale} onLike={(profile) => void like(profile)} onMessage={(profile) => void message(profile)} />)}</div>
       ) : <div className="catalog-reference-empty"><strong>{copy.noProfiles}</strong><span>{copy.noProfilesHelp}</span></div>}
-      {items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
-      {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={applyFilters} countries={catalogOptions.countries} cities={catalogOptions.cities} premium={catalogOptions.premium} onPremium={() => { setFilterOpen(false); navigate(`/${locale}/subscription`); }} /> : null}
+      {!(loading && offset === 0) && items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
+      {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => { setFilterOpen(false); setPremiumPromptOpen(false); }} onApply={applyFilters} countries={catalogOptions.countries} cities={cities} premium={catalogOptions.premium} onPremium={openPremiumPrompt} premiumPromptOpen={premiumPromptOpen} /> : null}
+      {filterOpen && premiumPromptOpen ? <AccountPremium locale={locale} close={() => setPremiumPromptOpen(false)} /> : null}
     </section>
   );
 }
@@ -4081,7 +4291,7 @@ function FamilyRoom({ session }: { session: Session }) {
     return (
       <section className="access-card">
         <h1>Family Room</h1>
-        <p>Loading…</p>
+        <LoadingIndicator />
       </section>
     );
   }
@@ -4284,182 +4494,6 @@ function FamilyRoom({ session }: { session: Session }) {
 }
 
 
-const PRICING_TEXT = {
-  en: {
-    eyebrow: "PRICING",
-    title: "Find the right person to build a family with.",
-    intro: "Better matches. Deeper compatibility. More confidence. Start free, upgrade when you're ready to go deeper.",
-    plans: [
-      {
-        key: "explore", name: "Explore", price: "€0", priceNote: "Free forever", altNote: "",
-        tagline: "Create your profile and start discovering.",
-        features: ["Full profile & basic discovery", "3 likes per day", "Basic matching"],
-        cta: "Get started free", badge: "",
-      },
-      {
-        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "per month, billed monthly",
-        altNote: "or €49.99 for 3 months - €16.66/month, save 33%",
-        tagline: "For members ready to match with intention.",
-        features: ["Compatibility Score & Why you match", "Advanced family filters", "See who liked you", "Video & audio calls", "15 likes/day, 5 reach-outs/day", "Priority in discovery"],
-        cta: "Start Family Builder", badge: "Best value",
-      },
-      {
-        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "per month", altNote: "",
-        tagline: "Everything in Family Builder, plus deeper guidance.",
-        features: ["Everything in Family Builder", "AI Family Advisor", "Detailed Compatibility Report", "Family Plan & Shared Family Room", "Document & checklist tools", "Priority support"],
-        cta: "Go Pro", badge: "",
-      },
-    ],
-    footnote: "Prices shown in EUR and may vary by region. Cancel anytime. Premium requires profile verification.",
-    faqLinkLabel: "See how we verify members",
-    compareTitle: "Compare all features",
-    compareSub: "See exactly what's included in each plan.",
-    matrixGroups: [
-      { name: "Match better", rows: [
-        { label: "Daily likes", values: ["3", "15", "Unlimited"] },
-        { label: "Reach out first", values: ["", "5/day", "Unlimited"] },
-        { label: "Advanced family filters", values: ["", "check", "check"] },
-        { label: "Priority in catalog", values: ["", "check", "check"] },
-        { label: "See who liked you", values: ["", "check", "check"] },
-        { label: "See profile visitors", values: ["", "check", "check"] },
-      ] },
-      { name: "Understand compatibility", rows: [
-        { label: "Compatibility Score", values: ["", "check", "check"] },
-        { label: "Why you match", values: ["", "check", "check"] },
-        { label: "Expanded profile info", values: ["", "check", "check"] },
-        { label: "Verification info", values: ["", "check", "check"] },
-      ] },
-      { name: "Connect & communicate", rows: [
-        { label: "Video & audio calls", values: ["", "check", "check"] },
-        { label: "Private photos", values: ["", "check", "check"] },
-        { label: "Incognito mode", values: ["", "check", "check"] },
-      ] },
-      { name: "Build your family", rows: [
-        { label: "Family Plan (shared)", values: ["", "Limited", "check"] },
-        { label: "AI Family Advisor", values: ["", "", "check"] },
-        { label: "Detailed Compatibility Report", values: ["", "", "check"] },
-        { label: "Document & checklist tools", values: ["", "", "check"] },
-        { label: "Priority support", values: ["", "", "check"] },
-      ] },
-    ],
-  },
-  ru: {
-    eyebrow: "ЦЕНЫ",
-    title: "Найдите того, с кем строить семью.",
-    intro: "Более точные совпадения. Глубже совместимость. Больше уверенности. Начните бесплатно, обновитесь, когда будете готовы к большему.",
-    plans: [
-      {
-        key: "explore", name: "Explore", price: "€0", priceNote: "Бесплатно навсегда", altNote: "",
-        tagline: "Создайте профиль и начните знакомиться.",
-        features: ["Полный профиль и базовый поиск", "3 лайка в день", "Базовый подбор пар"],
-        cta: "Начать бесплатно", badge: "",
-      },
-      {
-        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "в месяц, ежемесячная оплата",
-        altNote: "или €49.99 за 3 месяца - €16.66/мес, экономия 33%",
-        tagline: "Для тех, кто готов искать пару осознанно.",
-        features: ["Оценка совместимости и «почему вы подходите»", "Расширенные семейные фильтры", "Кто лайкнул вас", "Видео- и аудиозвонки", "15 лайков/день, 5 обращений/день", "Приоритет в поиске"],
-        cta: "Начать Family Builder", badge: "Лучшая цена",
-      },
-      {
-        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "в месяц", altNote: "",
-        tagline: "Всё из Family Builder плюс более глубокое сопровождение.",
-        features: ["Всё из Family Builder", "AI Family Advisor", "Подробный отчёт о совместимости", "Family Plan и общая комната семьи", "Документы и чек-листы", "Приоритетная поддержка"],
-        cta: "Перейти на Pro", badge: "",
-      },
-    ],
-    footnote: "Цены указаны в евро и могут отличаться в зависимости от региона. Отмена в любой момент. Premium доступен после верификации профиля.",
-    faqLinkLabel: "Как мы проверяем участников",
-    compareTitle: "Сравните все возможности",
-    compareSub: "Точный список того, что включено в каждый тариф.",
-    matrixGroups: [
-      { name: "Больше совпадений", rows: [
-        { label: "Лайки в день", values: ["3", "15", "Без ограничений"] },
-        { label: "Первым написать", values: ["", "5 в день", "Без ограничений"] },
-        { label: "Расширенные семейные фильтры", values: ["", "check", "check"] },
-        { label: "Приоритет в каталоге", values: ["", "check", "check"] },
-        { label: "Кто лайкнул вас", values: ["", "check", "check"] },
-        { label: "Кто смотрел профиль", values: ["", "check", "check"] },
-      ] },
-      { name: "Понимание совместимости", rows: [
-        { label: "Оценка совместимости", values: ["", "check", "check"] },
-        { label: "Почему вы подходите", values: ["", "check", "check"] },
-        { label: "Расширенная информация профиля", values: ["", "check", "check"] },
-        { label: "Информация о верификации", values: ["", "check", "check"] },
-      ] },
-      { name: "Связь и общение", rows: [
-        { label: "Видео- и аудиозвонки", values: ["", "check", "check"] },
-        { label: "Приватные фото", values: ["", "check", "check"] },
-        { label: "Режим инкогнито", values: ["", "check", "check"] },
-      ] },
-      { name: "Постройте свою семью", rows: [
-        { label: "Семейный план (общий)", values: ["", "Ограниченно", "check"] },
-        { label: "AI Family Advisor", values: ["", "", "check"] },
-        { label: "Подробный отчёт о совместимости", values: ["", "", "check"] },
-        { label: "Документы и чек-листы", values: ["", "", "check"] },
-        { label: "Приоритетная поддержка", values: ["", "", "check"] },
-      ] },
-    ],
-  },
-  es: {
-    eyebrow: "PRECIOS",
-    title: "Encuentra a la persona adecuada para formar una familia.",
-    intro: "Mejores matches. Mayor compatibilidad. Más confianza. Empieza gratis y mejora cuando quieras ir más allá.",
-    plans: [
-      {
-        key: "explore", name: "Explore", price: "€0", priceNote: "Gratis para siempre", altNote: "",
-        tagline: "Crea tu perfil y empieza a descubrir.",
-        features: ["Perfil completo y descubrimiento básico", "3 likes al día", "Emparejamiento básico"],
-        cta: "Empieza gratis", badge: "",
-      },
-      {
-        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "al mes, facturación mensual",
-        altNote: "o €49.99 por 3 meses - €16.66/mes, ahorra 33%",
-        tagline: "Para quienes buscan match con intención.",
-        features: ["Puntuación de compatibilidad y «por qué haces match»", "Filtros familiares avanzados", "Ver quién te dio like", "Videollamadas y llamadas de audio", "15 likes/día, 5 contactos/día", "Prioridad en el descubrimiento"],
-        cta: "Empezar Family Builder", badge: "Mejor precio",
-      },
-      {
-        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "al mes", altNote: "",
-        tagline: "Todo lo de Family Builder, con acompañamiento más profundo.",
-        features: ["Todo lo de Family Builder", "AI Family Advisor", "Informe de compatibilidad detallado", "Family Plan y Sala Familiar Compartida", "Documentos y listas de verificación", "Soporte prioritario"],
-        cta: "Pasar a Pro", badge: "",
-      },
-    ],
-    footnote: "Los precios se muestran en EUR y pueden variar según la región. Cancela cuando quieras. Premium requiere verificación de perfil.",
-    faqLinkLabel: "Cómo verificamos a los miembros",
-    compareTitle: "Compara todas las funciones",
-    compareSub: "Mira exactamente qué incluye cada plan.",
-    matrixGroups: [
-      { name: "Mejores coincidencias", rows: [
-        { label: "Me gusta diarios", values: ["3", "15", "Ilimitado"] },
-        { label: "Escribir primero", values: ["", "5/día", "Ilimitado"] },
-        { label: "Filtros familiares avanzados", values: ["", "check", "check"] },
-        { label: "Prioridad en el catálogo", values: ["", "check", "check"] },
-        { label: "Ver quién te dio like", values: ["", "check", "check"] },
-        { label: "Ver visitantes del perfil", values: ["", "check", "check"] },
-      ] },
-      { name: "Entender la compatibilidad", rows: [
-        { label: "Puntuación de compatibilidad", values: ["", "check", "check"] },
-        { label: "Por qué coincidís", values: ["", "check", "check"] },
-        { label: "Información ampliada del perfil", values: ["", "check", "check"] },
-        { label: "Información de verificación", values: ["", "check", "check"] },
-      ] },
-      { name: "Conectar y comunicarse", rows: [
-        { label: "Videollamadas y llamadas de audio", values: ["", "check", "check"] },
-        { label: "Fotos privadas", values: ["", "check", "check"] },
-        { label: "Modo incógnito", values: ["", "check", "check"] },
-      ] },
-      { name: "Construye tu familia", rows: [
-        { label: "Plan familiar (compartido)", values: ["", "Limitado", "check"] },
-        { label: "AI Family Advisor", values: ["", "", "check"] },
-        { label: "Informe de compatibilidad detallado", values: ["", "", "check"] },
-        { label: "Documentos y listas de verificación", values: ["", "", "check"] },
-        { label: "Soporte prioritario", values: ["", "", "check"] },
-      ] },
-    ],
-  },
-} satisfies Record<CookieLocale, Record<string, unknown>>;
 
 function Pricing({ session }: { session: Session }) {
   const locale = localeOf();
@@ -4975,7 +5009,7 @@ function Contact() {
           <dt>{copy.phone}</dt>
           <dd><a href="tel:+38268530700">+382 68 530 700</a></dd>
           <dt>{copy.email}</dt>
-          <dd><a href="mailto:contact@letsbeparents.com">contact@letsbeparents.com</a></dd>
+          <dd><a href="mailto:support@letsbeparents.com">support@letsbeparents.com</a></dd>
         </dl>
       </aside>
       <div className="contact-form-panel">
@@ -6788,7 +6822,7 @@ export function WebApp() {
     await api.post("/auth/logout");
     setSession(null);
   };
-  if (session === undefined) return <LoadingIndicator fullPage />;
+  if (session === undefined) return <Shell session={null} onLogout={logout} pendingSession><LoadingIndicator fullPage /></Shell>;
   const content = (element: React.ReactNode) => (
     <Shell session={session} onLogout={logout}>
       {element}

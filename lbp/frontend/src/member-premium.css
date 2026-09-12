@@ -978,3 +978,33 @@
     font-size: clamp(10px, 2.8vw, 12px);
   }
 }
+
+/* Pricing and all purchase dialogs share the same plans and feature matrix. */
+.member-profile-surface .premium-tier-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px; margin: 16px 24px 0;
+}
+.member-profile-surface .premium-tier {
+  min-width: 0; padding: 10px 8px; border: 2px solid #e2e8f0;
+  border-radius: 12px; color: #020617; background: #fff;
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.member-profile-surface .premium-tier.selected { border-color: #ff0068; background: #fff5f9; }
+.member-profile-surface .premium-tier:disabled { opacity: .5; cursor: default; }
+.member-profile-surface .premium-tier:focus-visible { outline: 2px solid #ff0068; outline-offset: 2px; }
+.member-profile-surface .premium-plan-tagline,
+.member-profile-surface .premium-pricing-note { margin: 12px 24px; color: #64748b; font-size: 12px; line-height: 18px; }
+.member-profile-surface .premium-plan-grid.single-plan { grid-template-columns: minmax(0, 1fr); }
+.member-profile-surface .premium-comparison-group {
+  margin: 0; padding: 8px 12px; background: #f8fafc; color: #64748b;
+  font-size: 12px; font-weight: 600; line-height: 18px;
+}
+.member-profile-surface .premium-tier-comparison .premium-comparison-head,
+.member-profile-surface .premium-tier-comparison .premium-comparison-row { grid-template-columns: minmax(0,1fr) 56px 90px; }
+.member-profile-surface .premium-tier-comparison .premium-comparison-head strong { white-space: normal; overflow-wrap: normal; font-size: 12px; line-height: 16px; }
+.member-profile-surface .premium-tier-comparison .premium-feature-number { font-size: 12px; line-height: 16px; }
+@media (max-width: 520px) {
+  .member-profile-surface .premium-tier-grid { margin-inline: 14px; }
+  .member-profile-surface .premium-plan-tagline,
+  .member-profile-surface .premium-pricing-note { margin-inline: 14px; }
+}

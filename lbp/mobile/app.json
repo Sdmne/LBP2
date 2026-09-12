@@ -3,7 +3,7 @@
     "name": "LetsBeParents",
     "slug": "letsbeparents-mobile",
     "scheme": "letsbeparents",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
@@ -49,7 +49,8 @@
     },
     "plugins": [
       "@config-plugins/react-native-webrtc",
-      "expo-video"
+      "expo-video",
+      "expo-notifications"
     ],
     "extra": {
       "eas": {

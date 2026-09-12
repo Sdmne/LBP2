@@ -288,12 +288,34 @@ function TierComparison({
             <Text style={[styles.tableColHeader, styles.tableColHeaderPro]}>{t("subscription.tierNameProShort")}</Text>
           </View>
 
+          {/* FIX (Sept 2026): Alena compared this table against the
+              website's own Family Builder / Pro tier pages and found this
+              table was missing several rows the site already promises for
+              the same tiers - "Advanced family filters", "Priority in
+              discovery" (Builder), "Detailed Compatibility Report",
+              "Document & checklist tools", "Priority support" (Pro). The
+              content already existed as unused translations
+              (builderFeature2/6, proFeature2/4/5 below) - they were
+              written for the "already on PRO" FeatureList further up this
+              file (see the status.tier === "PRO" branch) but never also
+              added as rows here, in the table a Free/Builder viewer
+              actually sees when deciding whether to upgrade. Deliberately
+              NOT adding a "Video & audio calls" row or a separate
+              "reach-outs/day" row: the former is already covered by
+              connectRowLabel just below ("See who liked you, calls") and
+              the latter is the same underlying per-day cap already shown
+              with its real number in likesPerDayLabel - adding either as
+              a second row would just restate the same feature twice
+              rather than surface something genuinely missing. */}
           <TableGroup title={t("subscription.groupMatch")}>
             <TableRow label={t("subscription.likesPerDayLabel")} free={String(freeLikes)} builder={String(premiumLikes)} pro={String(premiumLikes)} />
+            <TableRow label={t("subscription.builderFeature2")} builder pro />
+            <TableRow label={t("subscription.builderFeature6")} builder pro />
           </TableGroup>
 
           <TableGroup title={t("subscription.groupCompatibility")}>
             <TableRow label={t("subscription.compatibilityRowLabel")} builder pro />
+            <TableRow label={t("subscription.proFeature2")} pro />
           </TableGroup>
 
           <TableGroup title={t("subscription.groupConnect")}>
@@ -302,6 +324,8 @@ function TierComparison({
 
           <TableGroup title={t("subscription.groupFamily")}>
             <TableRow label={t("subscription.proFeature3")} pro />
+            <TableRow label={t("subscription.proFeature4")} pro />
+            <TableRow label={t("subscription.proFeature5")} pro />
           </TableGroup>
         </View>
 
@@ -457,7 +481,20 @@ const styles = StyleSheet.create({
   badge: { fontSize: 20, fontWeight: "800", color: colors.premium },
   success: { fontSize: 13, color: colors.success },
   errorText: { fontSize: 13, color: colors.danger },
-  tierRow: { flexDirection: "row", gap: 8, marginTop: spacing.sm },
+  // FIX (Sept 2026): the "best value" badge on the PRO card is
+  // position:"absolute", top:-10 (see bestValueBadgeWrap below) - it
+  // pokes above the card's own top border. tierCardBest used to
+  // compensate with its OWN marginTop:10, but that only shifted the PRO
+  // card down, not its neighbours - so its top edge sat 10px lower than
+  // the FREE/BUILDER cards' top edges, which is exactly the "Криво
+  // сделай под одна высоту" (crooked, make them one height) Alena
+  // reported: the three cards' TOPS didn't line up, even though each
+  // card's own height was fine. Moving that clearance up onto the row
+  // (paddingTop, applied to all three cards equally) means every card
+  // now starts at the same y - the badge still has room to poke above
+  // the PRO card specifically without needing that card individually
+  // offset from its siblings.
+  tierRow: { flexDirection: "row", gap: 8, marginTop: spacing.sm, paddingTop: 12 },
   tierCard: {
     flex: 1,
     backgroundColor: colors.card,
@@ -470,7 +507,7 @@ const styles = StyleSheet.create({
   },
   tierCardFree: { backgroundColor: colors.bgSoft },
   tierCardActive: { borderColor: colors.pink },
-  tierCardBest: { backgroundColor: colors.tintPink, borderColor: colors.pink, position: "relative", marginTop: 10 },
+  tierCardBest: { backgroundColor: colors.tintPink, borderColor: colors.pink, position: "relative" },
   tierCardLabel: { fontSize: 12.5, fontWeight: "700", color: colors.muted, textTransform: "uppercase" },
   tierCardLabelPro: { color: colors.pink },
   tierCardPrice: { fontSize: 16, fontWeight: "800", color: colors.ink, marginTop: 2 },

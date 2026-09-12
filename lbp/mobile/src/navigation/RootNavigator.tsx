@@ -22,6 +22,8 @@ import SettingsScreen from "../screens/SettingsScreen";
 import PhotosScreen from "../screens/PhotosScreen";
 import VerificationScreen from "../screens/VerificationScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
+import LikesPaywallScreen from "../screens/LikesPaywallScreen";
+import AiAdvisorScreen from "../screens/AiAdvisorScreen";
 import PrivacyScreen from "../screens/PrivacyScreen";
 import BlockedUsersScreen from "../screens/BlockedUsersScreen";
 import ReportProfileScreen from "../screens/ReportProfileScreen";
@@ -65,6 +67,8 @@ export type RootStackParamList = {
   Photos: undefined;
   Verification: undefined;
   Subscription: undefined;
+  LikesPaywall: undefined;
+  AiAdvisor: undefined;
   Privacy: undefined;
   BlockedUsers: undefined;
   ReportProfile: { profileId: number; displayName?: string | null };
@@ -96,7 +100,13 @@ export type RootStackParamList = {
   // choose from (0 matches -> Alert + Browse CTA, 1 match -> straight to
   // FamilyRoom, both handled in ExploreScreen.tsx without ever routing
   // here) - see FamilyPlanPickerScreen.tsx for the full story.
-  FamilyPlanPicker: undefined;
+  // Item 10 follow-up - Alena: "Pregnancy только же в моем профиле сделать
+  // чуть ниже под family room" - added a Pregnancy Room shortcut to her own
+  // profile menu (MeProfileScreen.tsx), right under Family Room. It needs
+  // the same match-picker flow as Family Room when there are 2+ matches,
+  // so this screen now takes an optional target to know which room to land
+  // in - see openPregnancyRoom()/openFamilyPlan() in utils/familyPlan.ts.
+  FamilyPlanPicker: { target?: "PregnancyRoom" } | undefined;
   // Persisted two-sided compatibility questionnaire (Family Builder
   // Pro's "Compatibility Score" / "Detailed Compatibility Report") -
   // answering it is free for everyone (no params); the two-sided
@@ -207,6 +217,7 @@ export default function RootNavigator() {
               options={{ headerShown: true, title: t("nav.profileDetailTitle") }}
             />
             <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: true, title: t("nav.settingsTitle") }} />
+            <Stack.Screen name="AiAdvisor" component={AiAdvisorScreen} options={{ headerShown: true, title: t("nav.aiAdvisorTitle") }} />
             <Stack.Screen name="Photos" component={PhotosScreen} options={{ headerShown: true, title: t("nav.photosTitle") }} />
             <Stack.Screen
               name="Verification"
@@ -234,6 +245,14 @@ export default function RootNavigator() {
                   </Pressable>
                 ),
               })}
+            />
+            {/* Item 0(b) - polished paywall reachable from the Likes
+                screen's upgrade entry points. Modal presentation + its
+                own in-screen close (X) button, no native header. */}
+            <Stack.Screen
+              name="LikesPaywall"
+              component={LikesPaywallScreen}
+              options={{ headerShown: false, presentation: "modal" }}
             />
             <Stack.Screen
               name="Privacy"

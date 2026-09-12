@@ -13,7 +13,7 @@ import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { openFamilyPlan } from "../utils/familyPlan";
+import { openFamilyPlan, openPregnancyRoom } from "../utils/familyPlan";
 import { fetchSubscriptionStatus } from "../api/subscription";
 import { fetchMe } from "../api/profile";
 import type { SubscriptionTier } from "../api/types";
@@ -149,6 +149,12 @@ export default function MeProfileScreen(_props: Props) {
     // existed as Explore's "Family Plan" tile, easy to miss as *the* place
     // Family Room lives. Same real routing here (see utils/familyPlan.ts).
     { icon: "home", label: t("me.familyRoom"), onPress: () => openFamilyPlan(rootNav, t) },
+    // Alena: "Pregnancy только же в моем профиле сделать чуть ниже под
+    // family room" - a real entry point into her own Pregnancy Room,
+    // placed right under Family Room here (own profile only - the
+    // standalone pill on OTHER people's profiles was removed in item 10).
+    // Same match-required flow as Family Room (see openPregnancyRoom()).
+    { icon: "activity", label: t("nav.pregnancyRoomTitle"), onPress: () => openPregnancyRoom(rootNav, t) },
     { icon: "heart", label: t("me.saved"), onPress: () => rootNav.navigate("Favourites") },
     { icon: "tool", label: t("me.resources"), onPress: () => rootNav.navigate("Resources") },
     { icon: "settings", label: t("me.settings"), onPress: () => rootNav.navigate("Settings") },

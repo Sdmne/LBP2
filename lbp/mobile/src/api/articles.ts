@@ -20,8 +20,15 @@ export type ArticleSummary = {
   views: number;
 };
 
+export type ArticleNeighbor = { slug: string; title: string };
+
 export type ArticleDetail = ArticleSummary & {
   body_html: string;
+  // Item 3 - next/previous article links, same ordering as the list
+  // (newest first): prev = shown just above this one (newer), next = shown
+  // just below (older). Either can be null at the newest/oldest end.
+  prev: ArticleNeighbor | null;
+  next: ArticleNeighbor | null;
 };
 
 export type ArticlesPage = {

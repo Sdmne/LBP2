@@ -71,6 +71,17 @@ export function sendMessage(conversationId: number, body: string) {
   );
 }
 
+// POST .../sticker - member_send_sticker() in main.py (item 13b). Premium-
+// gated server-side (402) - the client sends only a stickerId, the server
+// looks up the real emoji from its own STICKER_CATALOG and builds the
+// message body itself.
+export function sendSticker(conversationId: number, stickerId: string) {
+  return api.post<{ ok: true; message: Pick<ConversationMessage, "id" | "conversationId" | "senderProfileId" | "body"> }>(
+    `/api/member/conversations/${conversationId}/sticker`,
+    { stickerId },
+  );
+}
+
 // POST .../attachments - member_send_attachment() in main.py. Real, was
 // already built on the backend (image + PDF, with the same moderation
 // pass profile photos go through) but nothing on mobile called it - the

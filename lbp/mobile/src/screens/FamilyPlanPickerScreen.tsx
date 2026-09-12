@@ -26,8 +26,12 @@ type Props = NativeStackScreenProps<RootStackParamList, "FamilyPlanPicker">;
 // onPress skips this screen entirely and goes straight to that case
 // (Alert + Browse CTA) or straight to FamilyRoom when there's exactly one
 // match, so this screen only ever renders for the 2+ case.
-export default function FamilyPlanPickerScreen({ navigation }: Props) {
+export default function FamilyPlanPickerScreen({ navigation, route }: Props) {
   const { t } = useI18n();
+  // Reused for the Pregnancy Room shortcut (Alena, item 10 follow-up) -
+  // same 2+ matches picker flow, just landing in PregnancyRoom instead of
+  // FamilyRoom when this screen was opened via openPregnancyRoom().
+  const isPregnancy = route.params?.target === "PregnancyRoom";
   const insets = useSafeAreaInsets();
   const [matches, setMatches] = useState<ProfileSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,8 +47,8 @@ export default function FamilyPlanPickerScreen({ navigation }: Props) {
   return (
     <GradientBackground variant="soft">
       <View style={styles.screen}>
-        <Text style={styles.title}>{t("familyPlanPicker.title")}</Text>
-        <Text style={styles.subtitle}>{t("familyPlanPicker.subtitle")}</Text>
+        <Text style={styles.title}>{t(isPregnancy ? "familyPlanPicker.pregnancyTitle" : "familyPlanPicker.title")}</Text>
+        <Text style={styles.subtitle}>{t(isPregnancy ? "familyPlanPicker.pregnancySubtitle" : "familyPlanPicker.subtitle")}</Text>
 
         {loading ? (
           <View style={styles.center}>
@@ -62,7 +66,12 @@ export default function FamilyPlanPickerScreen({ navigation }: Props) {
             renderItem={({ item }) => (
               <Pressable
                 style={styles.row}
-                onPress={() => navigation.replace("FamilyRoom", { profileId: item.id, displayName: item.displayName })}
+                onPress={() =>
+                  navigation.replace(
+                    isPregnancy ? "PregnancyRoom" : "FamilyRoom",
+                    { profileId: item.id, displayName: item.displayName },
+                  )
+                }
               >
                 {item.avatarUrl ? (
                   <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />

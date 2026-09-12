@@ -1,0 +1,49 @@
+/* Collections geometry measured from the public reference across breakpoints. */
+.catalog-reference-page > h1 {
+  margin-bottom: 24px;
+}
+
+.catalog-reference-controls {
+  position: relative;
+  top: auto;
+  min-height: 0;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 0;
+}
+
+.catalog-reference-controls::before {
+  content: none;
+}
+
+.catalog-reference-controls > span {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 500;
+}
+
+.catalog-reference-controls > .catalog-reference-filter-button {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 44px;
+  flex: 0 0 auto;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.catalog-reference-controls > .catalog-reference-filter-button > span {
+  display: inline;
+}
+
+@media (max-width: 639px) {
+  .catalog-reference-controls > span,
+  .catalog-reference-controls > .catalog-reference-filter-button > span {
+    display: none;
+  }
+}

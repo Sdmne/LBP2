@@ -1,0 +1,80 @@
+/* Shared page indicators must keep one size as session and route data load. */
+.loading > .loading-spinner,
+.catalog-reference-loading > span,
+.catalog-reference-sentinel > span,
+.account-loading > span,
+.chat-loading > span {
+  display: block;
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  max-height: 28px;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+  padding: 0;
+  border: 3px solid #fbd0df;
+  border-top-color: #f31260;
+  border-radius: 50%;
+  animation: public-loading-spin 750ms linear infinite;
+}
+
+@keyframes public-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Use the same existing page-state reservation for loading and empty results. */
+.web-main {
+  --page-state-min-height: clamp(360px, calc(100svh - 80px - 252px), 720px);
+}
+
+.web-main .reference-directory-results,
+.web-main .reference-directory-list-shell:has(.reference-directory-loading),
+.web-main .reference-directory-empty,
+.web-main .account-loading,
+.web-main .account-empty {
+  min-height: var(--page-state-min-height);
+}
+
+/* The empty message is a sibling of the list shell, so reserve its height once. */
+.web-main .reference-directory-list-shell:not(:has(.reference-directory-card, .reference-directory-loading)) {
+  min-height: 0;
+}
+
+.web-main .reference-directory-loading {
+  inset: 0;
+  display: grid;
+  min-height: 0;
+  padding: 0;
+  place-items: center;
+}
+
+.web-main .reference-directory-loading > .loading {
+  min-height: 0;
+  padding: 0;
+}
+
+.web-main .reference-directory-empty,
+.web-main .account-empty {
+  display: grid;
+  margin: 0;
+  place-items: center;
+}
+
+.web-footer {
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading > .loading-spinner,
+  .catalog-reference-loading > span,
+  .catalog-reference-sentinel > span,
+  .account-loading > span,
+  .chat-loading > span {
+    animation: none;
+  }
+}

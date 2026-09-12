@@ -8,7 +8,7 @@ export const chatText = (...values: unknown[]) => {
 export const chatRow = (value: unknown): ChatRow => value && typeof value === 'object' && !Array.isArray(value) ? value as ChatRow : {};
 export const chatName = (item: ChatRow, locale: ChatLocale) => chatText(item.otherDisplayName,item.peerDisplayName,item.displayName,item.title) || CHAT_COPY[locale].member;
 export const chatPeer = (item: ChatRow) => chatText(item.otherProfileId,item.other_profile_id);
-export const chatSupport = (item: ChatRow) => chatText(item.otherRole,item.other_role).toUpperCase() === 'SUPPORT' || /support|поддерж/i.test(chatName(item,'en'));
+export const chatSupport = (item: ChatRow) => chatText(item.otherRole,item.other_role).toUpperCase() === 'SUPPORT';
 export const chatInitials = (name: unknown) => (chatText(name) || 'LB').normalize('NFC').split(/\s+/).slice(0,2).map(part=>Array.from(part)[0]).join('').toLocaleUpperCase();
 export const chatPath = (locale: string, id?: unknown) => `/${locale}/chat${chatText(id) ? '/'+encodeURIComponent(chatText(id)) : ''}`;
 export function legacyChatPath(pathname: string, search = '', hash = '') {

@@ -7,7 +7,7 @@ import type { DirectoryDetail, DirectoryListResponse } from "./types";
 // calls them without a session token too, which api.get already handles
 // fine (it just won't attach an Authorization header if there's none yet).
 export function fetchClinics(
-  params: { q?: string; country?: string[]; city?: string; serviceCategory?: string; offset?: number; limit?: number } = {},
+  params: { q?: string; country?: string[]; city?: string; serviceCategory?: string[]; offset?: number; limit?: number } = {},
 ) {
   return api.get<DirectoryListResponse>(`/api/public/clinics${queryString(params)}`);
 }
@@ -17,7 +17,7 @@ export function fetchClinicDetail(slugOrId: string | number) {
 }
 
 export function fetchLawyers(
-  params: { q?: string; country?: string[]; city?: string; practiceArea?: string; offset?: number; limit?: number } = {},
+  params: { q?: string; country?: string[]; city?: string; practiceArea?: string[]; offset?: number; limit?: number } = {},
 ) {
   return api.get<DirectoryListResponse>(`/api/public/lawyers${queryString(params)}`);
 }

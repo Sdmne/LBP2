@@ -63,7 +63,9 @@ export default function DirectoryScreen({ route, navigation }: Props) {
   // that don't match the real taxonomy the backend actually groups by, so
   // the chips below use the API's own labels/options rather than those.
   const [categories, setCategories] = useState<DirectoryCategoryOption[]>([]);
-  const [category, setCategory] = useState<string | null>(null);
+  // Alena: category needed to allow selecting several at once too, same
+  // as country above ("должны выбираться несколько сразу" applied here too).
+  const [category, setCategory] = useState<string[]>([]);
   // Both filter rows used to be horizontal chip scrollers - fine for a
   // handful of countries, unusable once a category list has 227 entries
   // (Alena: "не помещаются фильтры" - the row doesn't fit, and endlessly
@@ -81,14 +83,14 @@ export default function DirectoryScreen({ route, navigation }: Props) {
   const requestIdRef = useRef(0);
 
   const load = useCallback(
-    async (activeKind: Kind, q: string, activeCountry: string[], activeCategory: string | null) => {
+    async (activeKind: Kind, q: string, activeCountry: string[], activeCategory: string[]) => {
       const requestId = ++requestIdRef.current;
       setError(null);
       try {
         const listParams =
           activeKind === "clinics"
-            ? { q: q || undefined, country: activeCountry.length ? activeCountry : undefined, serviceCategory: activeCategory || undefined, limit: PAGE_SIZE, offset: 0 }
-            : { q: q || undefined, country: activeCountry.length ? activeCountry : undefined, practiceArea: activeCategory || undefined, limit: PAGE_SIZE, offset: 0 };
+            ? { q: q || undefined, country: activeCountry.length ? activeCountry : undefined, serviceCategory: activeCategory.length ? activeCategory : undefined, limit: PAGE_SIZE, offset: 0 }
+            : { q: q || undefined, country: activeCountry.length ? activeCountry : undefined, practiceArea: activeCategory.length ? activeCategory : undefined, limit: PAGE_SIZE, offset: 0 };
         const [listRes, favRes, optionsRes] = await Promise.all([
           activeKind === "clinics" ? fetchClinics(listParams) : fetchLawyers(listParams),
           fetchFavourites(),
@@ -124,8 +126,8 @@ export default function DirectoryScreen({ route, navigation }: Props) {
     try {
       const moreParams =
         kind === "clinics"
-          ? { q: query || undefined, country: country.length ? country : undefined, serviceCategory: category || undefined, limit: PAGE_SIZE, offset: items.length }
-          : { q: query || undefined, country: country.length ? country : undefined, practiceArea: category || undefined, limit: PAGE_SIZE, offset: items.length };
+          ? { q: query || undefined, country: country.length ? country : undefined, serviceCategory: category.length ? category : undefined, limit: PAGE_SIZE, offset: items.length }
+          : { q: query || undefined, country: country.length ? country : undefined, practiceArea: category.length ? category : undefined, limit: PAGE_SIZE, offset: items.length };
       const res = kind === "clinics" ? await fetchClinics(moreParams) : await fetchLawyers(moreParams);
       if (requestIdRef.current !== requestId) return;
       setItems((prev) => [...prev, ...res.items]);
@@ -141,8 +143,8 @@ export default function DirectoryScreen({ route, navigation }: Props) {
   useEffect(() => {
     setLoading(true);
     setCountry([]); // clinics/lawyers have different country breakdowns
-    setCategory(null); // ...and different specialty taxonomies
-    load(kind, query, [], null).finally(() => setLoading(false));
+    setCategory([]); // ...and different specialty taxonomies
+    load(kind, query, [], []).finally(() => setLoading(false));
     // Re-run when switching tabs; search re-runs on submit, not per keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind]);
@@ -156,7 +158,10 @@ export default function DirectoryScreen({ route, navigation }: Props) {
     load(kind, query, next, category).finally(() => setLoading(false));
   }
 
-  function selectCategory(next: string | null) {
+  function toggleCategory(value: string) {
+    // "" is the picker's own "All"/no-filter row - always clears the
+    // whole selection instead of toggling one value in/out of it.
+    const next = value === "" ? [] : category.includes(value) ? category.filter((c) => c !== value) : [...category, value];
     setCategory(next);
     setLoading(true);
     load(kind, query, country, next).finally(() => setLoading(false));
@@ -235,11 +240,15 @@ export default function DirectoryScreen({ route, navigation }: Props) {
       {categories.length > 0 || countries.length > 0 ? (
         <View style={styles.filterRow}>
           {categories.length > 0 ? (
-            <Pressable style={[styles.filterField, category && styles.filterFieldActive]} onPress={() => setPicker("category")}>
-              <Text style={[styles.filterFieldText, category && styles.filterFieldTextActive]} numberOfLines={1}>
-                {category ? categories.find((c) => c.value === category)?.label || category : t("directory.allCategories")}
+            <Pressable style={[styles.filterField, category.length > 0 && styles.filterFieldActive]} onPress={() => setPicker("category")}>
+              <Text style={[styles.filterFieldText, category.length > 0 && styles.filterFieldTextActive]} numberOfLines={1}>
+                {category.length === 0
+                  ? t("directory.allCategories")
+                  : category.length === 1
+                    ? categories.find((c) => c.value === category[0])?.label || category[0]
+                    : t("directory.categoriesSelected", { count: category.length })}
               </Text>
-              <Feather name="chevron-down" size={16} color={category ? colors.white : colors.ink} />
+              <Feather name="chevron-down" size={16} color={category.length > 0 ? colors.white : colors.ink} />
             </Pressable>
           ) : null}
           {countries.length > 0 ? (
@@ -254,6 +263,24 @@ export default function DirectoryScreen({ route, navigation }: Props) {
               <Feather name="chevron-down" size={16} color={country.length > 0 ? colors.white : colors.ink} />
             </Pressable>
           ) : null}
+          {/* Alena: no way to clear category+country filters back to
+              defaults in one tap - each picker's own "All" row only reset
+              that one filter. */}
+          {category.length > 0 || country.length > 0 ? (
+            <Pressable
+              style={styles.resetFiltersButton}
+              onPress={() => {
+                setCategory([]);
+                setCountry([]);
+                setLoading(true);
+                load(kind, query, [], []).finally(() => setLoading(false));
+              }}
+              hitSlop={8}
+            >
+              <Feather name="x-circle" size={14} color={colors.muted} />
+              <Text style={styles.resetFiltersText}>{t("directory.resetFilters")}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -261,12 +288,9 @@ export default function DirectoryScreen({ route, navigation }: Props) {
         <OptionListPicker
           title={t("directory.allCategories")}
           options={[{ value: "", label: t("directory.allCategories") }, ...categories.map((c) => ({ value: c.value, label: c.label, count: c.count ?? undefined }))]}
-          selected={category ? [category] : []}
-          multi={false}
-          onToggle={(value) => {
-            selectCategory(value || null);
-            setPicker(null);
-          }}
+          selected={category}
+          multi
+          onToggle={toggleCategory}
           onClose={() => setPicker(null)}
         />
       </Modal>
@@ -417,7 +441,14 @@ const styles = StyleSheet.create({
   // makes the row's box-model height unambiguous regardless of that.
   countryScroll: { height: 36, marginBottom: spacing.sm },
   countryRow: { paddingHorizontal: spacing.md, gap: spacing.xs, alignItems: "center" },
-  filterRow: { flexDirection: "row", gap: spacing.xs, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    alignItems: "center",
+  },
   filterField: {
     flex: 1,
     flexDirection: "row",
@@ -431,6 +462,14 @@ const styles = StyleSheet.create({
   filterFieldActive: { backgroundColor: colors.ink },
   filterFieldText: { fontSize: 13, fontWeight: "700", color: colors.muted, flexShrink: 1, marginRight: 6 },
   filterFieldTextActive: { color: colors.white },
+  resetFiltersButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  resetFiltersText: { fontSize: 12.5, fontWeight: "700", color: colors.muted, textDecorationLine: "underline" },
   chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.bgSoft },
   chipActive: { backgroundColor: colors.ink },
   chipText: { fontSize: 12.5, fontWeight: "700", color: colors.muted },

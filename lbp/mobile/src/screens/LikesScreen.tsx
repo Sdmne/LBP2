@@ -32,13 +32,17 @@ type Props = BottomTabScreenProps<MainTabsParamList, "Likes">;
 // "Browse profiles" CTA that jumps to the Catalog tab (.likes-empty).
 type Tab = "likesYou" | "matches" | "myLikes" | "visitors";
 
-// Alena's explicit spec (Sept 2026, after the first pass used the
-// reference mockup's "not just the first two" copy): show 5 rows clearly,
-// blur everything after that, with the upgrade card below - not 2. The
-// first FREE_PREVIEW_COUNT rows of a premium account's real
-// likesYou/Visitors list stay fully visible even with the "preview as
-// free" toggle on; only rows after that are blurred.
-const FREE_PREVIEW_COUNT = 5;
+// UPDATE (Sept 2026): Alena's original spec showed 5 real, clear rows as
+// a free-tier teaser. She has since reversed that ("Опять замыливания
+// нет! Я же вижу кто меня посмотрел! Я не должна на бесплатном тарифе")
+// after seeing a competitor app that never reveals identity at all on the
+// free tier (blurred photo, no name, age number only). The server
+// (member_likes() in main.py) now sends real free-tier preview rows with
+// identityHidden=true and no name/photo/location at all - see the
+// identityHidden branch in renderItem below. Reduced from 5 to 4 rows per
+// her explicit "оставь только 4 для примера" so the upgrade banner sits
+// higher on screen. Must match LIKES_FREE_PREVIEW_COUNT in main.py.
+const FREE_PREVIEW_COUNT = 4;
 
 export default function LikesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -334,13 +338,13 @@ export default function LikesScreen({ navigation }: Props) {
           <View style={styles.premiumBanner}>
             <Text style={styles.premiumTitle}>{t("likes.premiumTitle")}</Text>
             <Text style={styles.premiumBody}>{t("likes.premiumBody")}</Text>
-            <Pressable style={styles.premiumButton} onPress={() => rootNav.navigate("Subscription")}>
+            <Pressable style={styles.premiumButton} onPress={() => rootNav.navigate("LikesPaywall")}>
               <Text style={styles.premiumButtonText}>{t("likes.premiumButton")}</Text>
             </Pressable>
           </View>
           {lockedCount > 0
             ? Array.from({ length: lockedCount }, (_, i) => (
-                <Pressable key={i} style={styles.card} onPress={() => rootNav.navigate("Subscription")}>
+                <Pressable key={i} style={styles.card} onPress={() => rootNav.navigate("LikesPaywall")}>
                   <View style={[styles.avatar, styles.avatarLocked]}>
                     <Feather name="lock" size={18} color={colors.muted} />
                   </View>
@@ -381,7 +385,7 @@ export default function LikesScreen({ navigation }: Props) {
               <View style={styles.premiumBanner}>
                 <Text style={styles.premiumTitle}>{t("likes.previewLockedTitle")}</Text>
                 <Text style={styles.premiumBody}>{t("likes.previewLockedBody")}</Text>
-                <Pressable style={styles.premiumButton} onPress={() => rootNav.navigate("Subscription")}>
+                <Pressable style={styles.premiumButton} onPress={() => rootNav.navigate("LikesPaywall")}>
                   <Text style={styles.premiumButtonText}>{t("likes.previewUpgradeButton")}</Text>
                 </Pressable>
               </View>
@@ -412,9 +416,25 @@ export default function LikesScreen({ navigation }: Props) {
             return (
               <Pressable
                 style={styles.card}
-                onPress={() => (previewLocked ? rootNav.navigate("Subscription") : rootNav.navigate("ProfileDetail", { profileId: item.id }))}
+                onPress={() => (previewLocked ? rootNav.navigate("LikesPaywall") : rootNav.navigate("ProfileDetail", { profileId: item.id }))}
               >
-                {item.avatarUrl ? (
+                {/* item.identityHidden: a real free-tier preview row from
+                    member_likes() (main.py) - the server deliberately never
+                    sent avatarUrl/displayName/city/country for these, so
+                    there is nothing real here to show OR to blur. A
+                    generic silhouette + age (if known) replaces the photo
+                    and name entirely, matching the reference "blurred
+                    likes" screenshot (age number only, no name, no clear
+                    photo) - and unlike the old client-side BlurView
+                    approach, this can't fail open on a device where the
+                    blur effect doesn't render (confirmed happening on at
+                    least one Android device: lock icon showed, blur did
+                    not, real photo/name were fully visible underneath). */}
+                {item.identityHidden ? (
+                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <Feather name="user" size={22} color={colors.muted} />
+                  </View>
+                ) : item.avatarUrl ? (
                   <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
                 ) : (
                   <View style={[styles.avatar, styles.avatarPlaceholder]}>
@@ -422,12 +442,20 @@ export default function LikesScreen({ navigation }: Props) {
                   </View>
                 )}
                 <View style={styles.rowBody}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {item.displayName}
-                  </Text>
-                  <Text style={styles.subtitle} numberOfLines={1}>
-                    {[item.city, item.country].filter(Boolean).join(", ") || t("common.locationNotSet")}
-                  </Text>
+                  {item.identityHidden ? (
+                    <Text style={styles.name} numberOfLines={1}>
+                      {item.age != null ? t("likes.anonymousAge", { age: item.age }) : t("likes.anonymousAgeUnknown")}
+                    </Text>
+                  ) : (
+                    <>
+                      <Text style={styles.name} numberOfLines={1}>
+                        {item.displayName}
+                      </Text>
+                      <Text style={styles.subtitle} numberOfLines={1}>
+                        {[item.city, item.country].filter(Boolean).join(", ") || t("common.locationNotSet")}
+                      </Text>
+                    </>
+                  )}
                   {visitor ? (
                     <Text style={styles.visitorNote} numberOfLines={1}>
                       {visitor.viewCount > 1 ? t("likes.viewedTimes", { count: visitor.viewCount }) : t("likes.viewedOnce")}
@@ -469,8 +497,20 @@ export default function LikesScreen({ navigation }: Props) {
                 {/* Frosted-glass overlay over the WHOLE row (photo AND
                     name/location text) - not just the photo - since the
                     point is that no part of who this is should be
-                    readable. */}
-                {previewLocked ? (
+                    readable. Only needed when item.identityHidden is
+                    false - i.e. real premium data being shown through the
+                    "previewAsFree" self-test toggle (see isPreviewingFree
+                    above). A genuinely free-tier row (identityHidden=true)
+                    already has nothing real underneath to blur - the
+                    generic silhouette + age rendered above IS the safe
+                    view, no overlay needed, and skipping BlurView there
+                    also sidesteps the Android rendering gap noted below
+                    entirely for real free users (previously the ONLY
+                    protection for a real free user's data was this blur,
+                    which is exactly what silently failed to render on at
+                    least one Android device/version - lock icon showed,
+                    photo and name did not get obscured). */}
+                {previewLocked && !item.identityHidden ? (
                   <BlurView
                     intensity={50}
                     tint="light"

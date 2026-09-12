@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +11,7 @@ import {
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { ApiError } from "../api/client";
+import { ApiError, downloadAndOpenPrivateFile } from "../api/client";
 import {
   createFamilyChecklistItem,
   deleteFamilyChecklistItem,
@@ -489,13 +488,17 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
             <Pressable
               key={doc.id}
               style={styles.documentRow}
-              onPress={() => Linking.openURL(doc.contentUrl).catch(() => Alert.alert(t("familyRoom.documentsOpenError")))}
+              onPress={() =>
+                downloadAndOpenPrivateFile(doc.contentUrl, displayFileName(doc.displayName), doc.mimeType).catch((err) =>
+                  Alert.alert(t("familyRoom.documentsOpenError"), err instanceof ApiError ? err.message : undefined),
+                )
+              }
               onLongPress={() => handleDeleteDocument(doc)}
             >
               <Text style={styles.documentIcon}>{doc.mimeType === "application/pdf" ? "📄" : "🖼️"}</Text>
               <View style={{ flex: 1 }}>
                 <Text style={styles.documentName} numberOfLines={1}>
-                  {doc.displayName}
+                  {displayFileName(doc.displayName)}
                 </Text>
                 <Text style={styles.documentMeta}>{formatBytes(doc.bytes)}</Text>
               </View>
@@ -515,6 +518,16 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Same defensive decode as PregnancyRoomScreen.tsx - some share-sheet
+// sources hand the picker a still percent-encoded name.
+function displayFileName(name: string): string {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }
 
 const styles = StyleSheet.create({

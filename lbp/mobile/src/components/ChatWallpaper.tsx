@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Dimensions, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
+import { Dimensions, ImageBackground, StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors } from "../theme";
 
@@ -25,6 +25,20 @@ import { colors } from "../theme";
 // 8-icon set, and roughly doubled both the icon size and the spacing
 // between them for the "bigger and airier, not so tight" look she asked
 // for.
+// UPDATE (Sept 2026, item 11): Alena later sent an actual finished
+// wallpaper image (a scattered rainbow/sun/cloud/heart pattern on white -
+// "Сделать оба, с выбором", she wants several backgrounds with a picker,
+// starting with this one; a matching cloud+star image is still pending
+// from her). Unlike the icon-grid pattern above, this is a real bundled
+// image asset - that's fine with zero native-build risk (require()'ing a
+// bundled PNG is a normal JS/Metro asset, not a native module, unlike the
+// SVG-library problem the icon-grid comment above was avoiding). Rendered
+// with resizeMode "cover" rather than tiled/repeated since the source
+// image hasn't been confirmed seamless at the edges.
+export type ChatWallpaperVariant = "pattern" | "rainbow";
+export const CHAT_WALLPAPER_VARIANTS: ChatWallpaperVariant[] = ["pattern", "rainbow"];
+const RAINBOW_IMAGE = require("../../assets/chat-backgrounds/rainbow.png");
+
 const ICON_NAMES: (keyof typeof MaterialCommunityIcons.glyphMap)[] = [
   "teddy-bear",
   "baby-carriage",
@@ -60,12 +74,22 @@ function buildGrid(width: number, height: number): Cell[] {
 export default function ChatWallpaper({
   children,
   style,
+  variant = "pattern",
 }: {
   children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  variant?: ChatWallpaperVariant;
 }) {
   const { width, height } = Dimensions.get("window");
   const cells = useMemo(() => buildGrid(width, height), [width, height]);
+
+  if (variant === "rainbow") {
+    return (
+      <ImageBackground source={RAINBOW_IMAGE} resizeMode="cover" style={[styles.container, style]}>
+        {children}
+      </ImageBackground>
+    );
+  }
 
   return (
     <View style={[styles.container, style]}>

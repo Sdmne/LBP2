@@ -9,6 +9,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,7 +18,8 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import { deleteConversation, fetchConversationPeerProfile, fetchMessages, sendAttachment, sendMessage } from "../api/messages";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { deleteConversation, fetchConversationPeerProfile, fetchMessages, sendAttachment, sendMessage, sendSticker } from "../api/messages";
 import { blockProfile } from "../api/blocks";
 import { ApiError } from "../api/client";
 import type { ConversationMessage } from "../api/types";
@@ -26,14 +28,20 @@ import { useCall } from "../context/CallContext";
 import { useI18n } from "../i18n/I18nContext";
 import { Feather } from "@expo/vector-icons";
 import { colors, radius, spacing } from "../theme";
-import ChatWallpaper from "../components/ChatWallpaper";
+import ChatWallpaper, { CHAT_WALLPAPER_VARIANTS, type ChatWallpaperVariant } from "../components/ChatWallpaper";
+import { EMOJI_CATEGORIES } from "../data/emojiData";
+import { STICKERS } from "../data/stickerData";
+import { stickerEmojiFromBody } from "../utils/stickers";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Chat">;
 
 // Prototype's #scr-chat .emoji-strip quick-react row (see the reference
 // screenshot Alena sent) - the exact same 16 emoji, in the same order.
-const QUICK_EMOJI = ["😀", "😂", "🥰", "😊", "😍", "🤔", "😉", "😢", "👍", "👋", "🙏", "❤️", "🔥", "🎉", "👶", "😅"];
+// Item 11 - chat wallpaper picker. Global (not per-conversation - Alena
+// didn't ask for per-chat, and a single app-wide preference is simplest);
+// persisted locally since there's no backend field for it yet.
+const CHAT_WALLPAPER_STORAGE_KEY = "chatWallpaperVariant";
 
 function looksLikeImageUrl(url: string): boolean {
   return /\.(jpe?g|png|webp|gif)(\?|$)/i.test(url);
@@ -69,7 +77,38 @@ export default function ChatScreen({ route, navigation }: Props) {
   // blocking the whole screen over a menu nobody may even open.
   const [peerProfileId, setPeerProfileId] = useState<number | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [wallpaperVariant, setWallpaperVariant] = useState<ChatWallpaperVariant>("pattern");
+  const [wallpaperPickerVisible, setWallpaperPickerVisible] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(CHAT_WALLPAPER_STORAGE_KEY)
+      .then((value) => {
+        if (alive && value && (CHAT_WALLPAPER_VARIANTS as string[]).includes(value)) {
+          setWallpaperVariant(value as ChatWallpaperVariant);
+        }
+      })
+      .catch(() => {
+        // Falls back to the default "pattern" wallpaper - not worth
+        // surfacing an error for a purely cosmetic preference.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function chooseWallpaper(next: ChatWallpaperVariant) {
+    setWallpaperVariant(next);
+    setWallpaperPickerVisible(false);
+    AsyncStorage.setItem(CHAT_WALLPAPER_STORAGE_KEY, next).catch(() => {});
+  }
   const [showEmoji, setShowEmoji] = useState(false);
+  const [emojiCategoryIndex, setEmojiCategoryIndex] = useState(0);
+  // Item 13(b) - stickers live as one more tab inside the same picker
+  // panel as the emoji grid (reusing its category-tab UI) rather than a
+  // separate button - true when that tab is the one showing.
+  const [stickersTabActive, setStickersTabActive] = useState(false);
+  const [sendingSticker, setSendingSticker] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [menuBusy, setMenuBusy] = useState(false);
   // Chat image attachments were reported as rendering blank with no
@@ -178,6 +217,42 @@ export default function ChatScreen({ route, navigation }: Props) {
     setDraft((prev) => prev + emoji);
   }
 
+  // Item 13(b) - unlike insertEmoji above, tapping a sticker sends it
+  // immediately (one-tap-to-send, matching how stickers work in every
+  // other chat app) rather than inserting into the draft. Not Premium
+  // gated client-side beyond the small lock hint in the tab/grid - the
+  // real gate is server-side (member_send_sticker -> 402), surfaced here
+  // as a friendly upsell alert rather than a raw error.
+  async function handleSendSticker(stickerId: string) {
+    if (sendingSticker) return;
+    setSendingSticker(true);
+    try {
+      const res = await sendSticker(conversationId, stickerId);
+      const sent: ConversationMessage = {
+        id: res.message.id,
+        conversationId: res.message.conversationId,
+        senderProfileId: res.message.senderProfileId,
+        body: res.message.body,
+        mediaUrl: null,
+        created_at: new Date().toISOString(),
+        deliveredAt: null,
+        readAt: null,
+        status: "ACTIVE",
+      };
+      setMessages((prev) => [...prev, sent]);
+      setShowEmoji(false);
+      requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) {
+        Alert.alert(t("chat.stickersPremiumTitle"), t("chat.stickersPremiumBody"));
+      } else {
+        Alert.alert(t("chat.stickerSendError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
+      }
+    } finally {
+      setSendingSticker(false);
+    }
+  }
+
   // The prototype's #scr-chat has no header overflow menu at all (its
   // ".dots" is just the mockup's fake status-bar signal dots, not a real
   // button) - Alena asked for Block/Report/Delete from inside the chat
@@ -277,7 +352,7 @@ export default function ChatScreen({ route, navigation }: Props) {
           white, Telegram-style wallpaper with a repeating kid/family
           doodle pattern, not a gradient. See ChatWallpaper.tsx for why
           this is a tiled-emoji grid rather than an SVG asset. */}
-      <ChatWallpaper style={styles.chatBg}>
+      <ChatWallpaper style={styles.chatBg} variant={wallpaperVariant}>
         <FlatList
           ref={listRef}
           data={messages}
@@ -288,9 +363,17 @@ export default function ChatScreen({ route, navigation }: Props) {
             const isMine = user?.profileId != null && item.senderProfileId === user.profileId;
             const isImage = !!item.mediaUrl && looksLikeImageUrl(item.mediaUrl);
             const isFile = !!item.mediaUrl && !isImage;
+            // Item 13(b) - a sticker message has no mediaUrl (it's plain
+            // text with a recognized prefix, see utils/stickers.ts), so
+            // this check has to come before the image/file branches below
+            // but renders the emoji bare (no bubble background), matching
+            // how stickers look in every other chat app.
+            const stickerEmoji = stickerEmojiFromBody(item.body);
             return (
               <View style={[styles.msgRow, isMine ? styles.msgRowOut : styles.msgRowIn]}>
-                {isImage ? (
+                {stickerEmoji ? (
+                  <Text style={styles.stickerMessageEmoji}>{stickerEmoji}</Text>
+                ) : isImage ? (
                   imageLoadErrors.has(item.id) ? (
                     <Pressable
                       style={styles.msgPhotoError}
@@ -329,12 +412,70 @@ export default function ChatScreen({ route, navigation }: Props) {
         />
       </ChatWallpaper>
       {showEmoji ? (
-        <View style={styles.emojiStrip}>
-          {QUICK_EMOJI.map((emoji) => (
-            <Pressable key={emoji} style={styles.emojiStripItem} onPress={() => insertEmoji(emoji)} hitSlop={4}>
-              <Text style={styles.emojiStripText}>{emoji}</Text>
+        <View style={styles.emojiPicker}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.emojiCategoryTabs}>
+            {EMOJI_CATEGORIES.map((category, index) => (
+              <Pressable
+                key={category.key}
+                style={[styles.emojiCategoryTab, !stickersTabActive && index === emojiCategoryIndex && styles.emojiCategoryTabActive]}
+                onPress={() => {
+                  setStickersTabActive(false);
+                  setEmojiCategoryIndex(index);
+                }}
+                accessibilityLabel={t(category.labelKey)}
+              >
+                <Text style={styles.emojiCategoryTabEmoji}>{category.emojis[0]}</Text>
+              </Pressable>
+            ))}
+            {/* Item 13(b) - one more tab for stickers, reusing this same
+                category-tab row rather than a separate button. The small
+                lock badge is just a hint (Free members can still open this
+                tab and see what they'd get) - the real gate is server-side,
+                see handleSendSticker's 402 handling. */}
+            <Pressable
+              style={[styles.emojiCategoryTab, stickersTabActive && styles.emojiCategoryTabActive]}
+              onPress={() => setStickersTabActive(true)}
+              accessibilityLabel={t("chat.stickersTabLabel")}
+            >
+              <Text style={styles.emojiCategoryTabEmoji}>{STICKERS[0].emoji}</Text>
+              {!user?.isPremium ? (
+                <View style={styles.stickerTabLockBadge}>
+                  <Feather name="lock" size={8} color={colors.white} />
+                </View>
+              ) : null}
             </Pressable>
-          ))}
+          </ScrollView>
+          {stickersTabActive ? (
+            <>
+              {!user?.isPremium ? (
+                <View style={styles.stickersPremiumBanner}>
+                  <Feather name="lock" size={12} color={colors.pink} />
+                  <Text style={styles.stickersPremiumBannerText}>{t("chat.stickersPremiumHint")}</Text>
+                </View>
+              ) : null}
+              <ScrollView style={styles.emojiGridScroll} contentContainerStyle={styles.emojiGrid}>
+                {STICKERS.map((sticker) => (
+                  <Pressable
+                    key={sticker.id}
+                    style={styles.stickerGridItem}
+                    onPress={() => void handleSendSticker(sticker.id)}
+                    disabled={sendingSticker}
+                    hitSlop={4}
+                  >
+                    <Text style={styles.stickerGridEmoji}>{sticker.emoji}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </>
+          ) : (
+            <ScrollView style={styles.emojiGridScroll} contentContainerStyle={styles.emojiGrid}>
+              {EMOJI_CATEGORIES[emojiCategoryIndex].emojis.map((emoji, i) => (
+                <Pressable key={`${emoji}-${i}`} style={styles.emojiStripItem} onPress={() => insertEmoji(emoji)} hitSlop={4}>
+                  <Text style={styles.emojiStripText}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          )}
         </View>
       ) : null}
       <View style={[styles.inputBar, { paddingBottom: Math.max(spacing.sm, insets.bottom) }]}>
@@ -364,6 +505,16 @@ export default function ChatScreen({ route, navigation }: Props) {
         <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
           <View style={[styles.menuSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
             <View style={styles.menuHandle} />
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                setMenuVisible(false);
+                setWallpaperPickerVisible(true);
+              }}
+            >
+              <Feather name="image" size={18} color={colors.ink} />
+              <Text style={styles.menuRowText}>{t("chat.menuWallpaper")}</Text>
+            </Pressable>
             <Pressable style={styles.menuRow} onPress={handleReport} disabled={!peerProfileId || menuBusy}>
               <Feather name="flag" size={18} color={colors.ink} />
               <Text style={styles.menuRowText}>{t("chat.menuReport")}</Text>
@@ -376,6 +527,33 @@ export default function ChatScreen({ route, navigation }: Props) {
               <Feather name="trash-2" size={18} color={colors.danger} />
               <Text style={[styles.menuRowText, { color: colors.danger }]}>{t("chat.menuDelete")}</Text>
             </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Item 11 - wallpaper picker. Only "rainbow" exists as a real image
+          option so far (Alena's matching cloud+star asset is still
+          pending) - "pattern" is the existing icon-grid default, always
+          available. */}
+      <Modal visible={wallpaperPickerVisible} transparent animationType="fade" onRequestClose={() => setWallpaperPickerVisible(false)}>
+        <Pressable style={styles.menuOverlay} onPress={() => setWallpaperPickerVisible(false)}>
+          <View style={[styles.menuSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
+            <View style={styles.menuHandle} />
+            <Text style={styles.wallpaperPickerTitle}>{t("chat.wallpaperPickerTitle")}</Text>
+            <View style={styles.wallpaperOptionsRow}>
+              <Pressable style={styles.wallpaperOption} onPress={() => chooseWallpaper("pattern")}>
+                <View style={[styles.wallpaperThumb, styles.wallpaperThumbPattern]}>
+                  <Feather name="grid" size={22} color={colors.muted} />
+                </View>
+                <Text style={styles.wallpaperOptionLabel}>{t("chat.wallpaperPattern")}</Text>
+                {wallpaperVariant === "pattern" ? <Feather name="check-circle" size={16} color={colors.pink} /> : null}
+              </Pressable>
+              <Pressable style={styles.wallpaperOption} onPress={() => chooseWallpaper("rainbow")}>
+                <Image source={require("../../assets/chat-backgrounds/rainbow.png")} style={styles.wallpaperThumb} />
+                <Text style={styles.wallpaperOptionLabel}>{t("chat.wallpaperRainbow")}</Text>
+                {wallpaperVariant === "rainbow" ? <Feather name="check-circle" size={16} color={colors.pink} /> : null}
+              </Pressable>
+            </View>
           </View>
         </Pressable>
       </Modal>
@@ -467,18 +645,75 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   inputIconButton: { width: 28, height: 38, alignItems: "center", justifyContent: "center" },
-  emojiStrip: {
+  emojiPicker: {
+    height: 260,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  emojiCategoryTabs: {
+    flexDirection: "row",
+    flexGrow: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    paddingHorizontal: spacing.sm,
+  },
+  emojiCategoryTab: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+    position: "relative",
+  },
+  emojiCategoryTabActive: { borderBottomColor: colors.pink },
+  emojiCategoryTabEmoji: { fontSize: 18 },
+  emojiGridScroll: { flex: 1 },
+  emojiGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 4,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.card,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
   },
   emojiStripItem: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   emojiStripText: { fontSize: 21 },
+  // Item 13(b) - stickers tab/grid, sharing the emoji picker panel above.
+  stickerTabLockBadge: {
+    position: "absolute",
+    top: 2,
+    right: 2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.pink,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stickersPremiumBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    backgroundColor: colors.tintPink,
+  },
+  stickersPremiumBannerText: { fontSize: 11.5, color: colors.pink, fontWeight: "600", flexShrink: 1 },
+  stickerGridItem: {
+    width: 52,
+    height: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stickerGridEmoji: { fontSize: 30 },
+  // A sent/received sticker renders bare (no bubble background), much
+  // bigger than an inline emoji character - the visual difference is what
+  // makes it read as "a sticker" rather than "a message that's just an
+  // emoji".
+  stickerMessageEmoji: { fontSize: 64, marginVertical: 2 },
   menuOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(2,8,23,0.45)" },
   menuSheet: {
     backgroundColor: colors.card,
@@ -490,6 +725,12 @@ const styles = StyleSheet.create({
   menuHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.line, alignSelf: "center", marginBottom: spacing.md },
   menuRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, height: 52 },
   menuRowText: { fontSize: 15, fontWeight: "600", color: colors.ink },
+  wallpaperPickerTitle: { fontSize: 16, fontWeight: "800", color: colors.ink, marginBottom: spacing.md },
+  wallpaperOptionsRow: { flexDirection: "row", gap: spacing.md },
+  wallpaperOption: { alignItems: "center", gap: 6 },
+  wallpaperThumb: { width: 72, height: 72, borderRadius: 14, backgroundColor: colors.bgSoft },
+  wallpaperThumbPattern: { alignItems: "center", justifyContent: "center" },
+  wallpaperOptionLabel: { fontSize: 12.5, fontWeight: "600", color: colors.ink },
   sendButton: {
     width: 38,
     height: 38,

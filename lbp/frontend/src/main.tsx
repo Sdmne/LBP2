@@ -11,5 +11,9 @@ import "./member-chat.css";
 import "./member-tools-reference.css";
 import "./member-tools.css";
 import "./site-navigation.css";
+import "./sliding-tabs.css";
+import "./catalog-layout-reference.css";
+import "./catalog-filters-reference.css";
+import "./loading-reference.css";
 
 createRoot(document.getElementById("root")!).render(<StrictMode><BrowserRouter><WebApp /></BrowserRouter></StrictMode>);

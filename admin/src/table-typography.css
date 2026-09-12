@@ -9,6 +9,10 @@
   line-height: 20px !important;
 }
 
+.app :is(table, [role="table"]) .deleted-user-badge {
+  line-height: 1 !important;
+}
+
 /* Keep every table control and label inside the bordered table area. */
 .app :is(table, [role="table"]) {
   max-width: 100%;

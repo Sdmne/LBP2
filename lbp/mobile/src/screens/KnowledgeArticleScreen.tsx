@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { fetchArticle, type ArticleDetail } from "../api/articles";
@@ -59,7 +60,7 @@ function htmlToBlocks(html: string): Block[] {
     }));
 }
 
-export default function KnowledgeArticleScreen({ route }: Props) {
+export default function KnowledgeArticleScreen({ route, navigation }: Props) {
   const { slug } = route.params;
   const { t, locale } = useI18n();
   const insets = useSafeAreaInsets();
@@ -129,6 +130,39 @@ export default function KnowledgeArticleScreen({ route }: Props) {
           </Text>
         ))}
       </View>
+      {/* Item 3 - "next"/"previous article" links, from public_article()'s
+          prev/next fields (same effective ordering as the Knowledge Hub
+          list). push() (not navigate()) so tapping through several
+          articles in a row keeps each one on the back stack, matching how
+          a reader would expect "back" to behave here. */}
+      {article.prev || article.next ? (
+        <View style={styles.neighborNav}>
+          {article.prev ? (
+            <Pressable
+              style={styles.neighborRow}
+              onPress={() => navigation.push("KnowledgeArticle", { slug: article.prev!.slug, title: article.prev!.title })}
+            >
+              <Feather name="chevron-left" size={16} color={colors.pink} />
+              <View style={styles.neighborTextCol}>
+                <Text style={styles.neighborLabel}>{t("knowledgeArticle.previousArticle")}</Text>
+                <Text style={styles.neighborTitle} numberOfLines={2}>{article.prev.title}</Text>
+              </View>
+            </Pressable>
+          ) : null}
+          {article.next ? (
+            <Pressable
+              style={[styles.neighborRow, styles.neighborRowNext]}
+              onPress={() => navigation.push("KnowledgeArticle", { slug: article.next!.slug, title: article.next!.title })}
+            >
+              <View style={[styles.neighborTextCol, styles.neighborTextColNext]}>
+                <Text style={[styles.neighborLabel, styles.neighborLabelNext]}>{t("knowledgeArticle.nextArticle")}</Text>
+                <Text style={[styles.neighborTitle, styles.neighborTitleNext]} numberOfLines={2}>{article.next.title}</Text>
+              </View>
+              <Feather name="chevron-right" size={16} color={colors.pink} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       </View>
     </ScrollView>
   );
@@ -158,4 +192,19 @@ const styles = StyleSheet.create({
   paragraph: { fontSize: 14.5, color: colors.text, lineHeight: 22 },
   heading: { fontSize: 17, fontWeight: "800", color: colors.ink, marginTop: spacing.sm },
   bullet: { paddingLeft: spacing.xs },
+  neighborNav: {
+    marginTop: spacing.xl,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    gap: spacing.sm,
+  },
+  neighborRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8 },
+  neighborRowNext: { justifyContent: "flex-end" },
+  neighborTextCol: { flex: 1 },
+  neighborTextColNext: { alignItems: "flex-end" },
+  neighborLabel: { fontSize: 11.5, fontWeight: "700", color: colors.pink, textTransform: "uppercase" },
+  neighborLabelNext: { textAlign: "right" },
+  neighborTitle: { fontSize: 14, color: colors.ink, fontWeight: "600", marginTop: 2 },
+  neighborTitleNext: { textAlign: "right" },
 });

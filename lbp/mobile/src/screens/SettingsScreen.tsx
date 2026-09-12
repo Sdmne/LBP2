@@ -116,6 +116,7 @@ export default function SettingsScreen({ navigation }: Props) {
     { icon: "image", label: t("settings.photos"), onPress: () => navigation.navigate("Photos") },
     { icon: "check-circle", label: t("settings.verification"), onPress: () => navigation.navigate("Verification") },
     { icon: "star", label: t("settings.premium"), onPress: () => navigation.navigate("Subscription") },
+    { icon: "message-circle", label: t("settings.aiAdvisor"), onPress: () => navigation.navigate("AiAdvisor") },
     { icon: "slash", label: t("settings.blockedUsers"), onPress: () => navigation.navigate("BlockedUsers") },
     { icon: "bookmark", label: t("settings.savedListings"), onPress: () => navigation.navigate("Favourites") },
     { icon: "heart", label: t("settings.compatibilityProfile"), onPress: () => navigation.navigate("CompatibilityAnswers") },
@@ -151,7 +152,17 @@ export default function SettingsScreen({ navigation }: Props) {
         })}
       </View>
 
+      {/* Alena: "здесь тоже надо добавить про пуш" - this list of toggles
+          already gates NEW_MATCH/NEW_LIKE/NEW_MESSAGE/PROFILE_VIEW/
+          MARKETING on the backend (notification_preference_enabled() in
+          main.py), and send_profile_notification() now sends a push alert
+          through the same per-type gate whenever the profile has a
+          registered push token, alongside email - see item 16. So the
+          section title/caption here now say "Notifications" covering both
+          channels, not just email, without adding a second set of toggles
+          nobody asked for. */}
       <Text style={styles.sectionTitle}>{t("settings.emailNotifications")}</Text>
+      <Text style={styles.sectionCaption}>{t("settings.notificationsCaption")}</Text>
       <View style={styles.card}>
         {settings.notificationSettings.map((row, index) => (
           <View key={row.type} style={[styles.row, index < settings.notificationSettings.length - 1 && styles.rowDivider]}>
@@ -205,6 +216,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     marginTop: spacing.lg,
     marginBottom: 8,
+  },
+  sectionCaption: {
+    fontSize: 12.5,
+    color: colors.muted,
+    marginTop: -4,
+    marginBottom: 8,
+    lineHeight: 17,
   },
   card: {
     backgroundColor: colors.card,
