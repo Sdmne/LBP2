@@ -3196,6 +3196,40 @@ def fetch_family_documents(cursor, match_id: int) -> list[dict[str, Any]]:
     return documents
 
 
+# Pregnancy Room - a separate, additive room next to the general Family
+# Room documents above, for exactly the 3 things Alena asked for: lab
+# results, ultrasound scans, and doctor's prescriptions/appointments.
+# DELIBERATELY NOT behind require_family_premium (Alena: "убрать
+# ограничение навсегда" - make it free for every account), unlike the rest
+# of Family Room - only an ACTIVE mutual match is required, since the data
+# model itself is keyed by match_id (there's no partner to share with
+# otherwise). Same private-storage pattern as family_plan_documents -
+# reuses family_document_storage_path (any key under "family-room/...")
+# and media_files, just a dedicated table so the mobile app can show its
+# own 3-category screen instead of mixing these in with the generic
+# Documents list.
+PREGNANCY_ROOM_CATEGORIES = ("lab_test", "ultrasound", "prescription")
+
+
+def fetch_pregnancy_room_entries(cursor, match_id: int) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT pre.id, pre.match_id AS matchId, pre.category, pre.display_name AS displayName,
+               pre.note, pre.entry_date AS entryDate, pre.uploaded_by_profile_id AS uploadedByProfileId,
+               pre.created_at AS createdAt, mf.mime_type AS mimeType, mf.bytes AS bytes
+        FROM pregnancy_room_entries pre
+        JOIN media_files mf ON mf.id = pre.media_file_id
+        WHERE pre.match_id = %s
+        ORDER BY pre.entry_date DESC, pre.created_at DESC, pre.id DESC
+        """,
+        (match_id,),
+    )
+    entries = [normalize_row(row) for row in cursor.fetchall()]
+    for entry in entries:
+        entry["contentUrl"] = f"/api/member/family-room/pregnancy/{entry['id']}/content"
+    return entries
+
+
 FAMILY_PLAN_SECTION_KEYS: list[str] = [
     "values-motivation",
     "parenting-roles",
@@ -7348,6 +7382,206 @@ def member_delete_family_document(document_id: int, user: dict[str, Any] = Depen
             conn.commit()
     except Exception:
         logger.warning("Private Family Room media metadata cleanup requires retry")
+        return {"ok": True, "storageCleanupPending": True}
+    return {"ok": True}
+
+
+@app.get("/api/member/family-room/{profile_identifier}/pregnancy")
+def member_pregnancy_room(profile_identifier: str, response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie, Authorization"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        return {"ok": True, "matchId": match_id, "entries": fetch_pregnancy_room_entries(cursor, match_id)}
+
+
+@app.post("/api/member/family-room/{profile_identifier}/pregnancy")
+async def member_upload_pregnancy_entry(
+    profile_identifier: str,
+    file: UploadFile = File(...),
+    category: str = Form(...),
+    note: str = Form(""),
+    entryDate: str | None = Form(None),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    if category not in PREGNANCY_ROOM_CATEGORIES:
+        raise HTTPException(status_code=400, detail="Unknown category - use lab_test, ultrasound or prescription")
+    note = (note or "").strip()[:1000]
+    parsed_entry_date = date.today()
+    if entryDate:
+        try:
+            parsed_entry_date = date.fromisoformat(entryDate.strip())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="entryDate must be an ISO date (YYYY-MM-DD)")
+
+    with db_cursor() as (_, cursor):
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        require_active_match(cursor, profile_id, other_profile_id)
+
+    content_type = (file.content_type or "").split(";")[0].lower()
+    ext = ALLOWED_CHAT_ATTACHMENT_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(status_code=415, detail="Unsupported file type - use JPEG, PNG, WebP or PDF")
+    body = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File is too large")
+    if not body:
+        raise HTTPException(status_code=422, detail="File is empty")
+    if content_type == "application/pdf" and not body.startswith(b"%PDF-"):
+        raise HTTPException(status_code=422, detail="The uploaded file is not a valid PDF")
+    if content_type.startswith("image/"):
+        inspection = inspect_chat_image(body)
+        expected_format = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}[content_type]
+        if inspection["sourceFormat"] != expected_format:
+            raise HTTPException(status_code=422, detail="File contents do not match the declared image type")
+    original_name = str(file.filename or f"entry{ext}").replace("\\", "/").rsplit("/", 1)[-1]
+    original_name = re.sub(r"[\x00-\x1f\x7f]", "", original_name).strip()[:255]
+    if original_name in {"", ".", ".."}:
+        original_name = f"entry{ext}"
+
+    storage_path: Path | None = None
+    created_file = False
+    committed = False
+    try:
+        with db_cursor() as (conn, cursor):
+            match_id = require_active_match(cursor, profile_id, other_profile_id)
+            storage_key = f"family-room/{match_id}/pregnancy/{secrets.token_hex(16)}{ext}"
+            storage_path = family_document_storage_path(storage_key)
+            storage_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with storage_path.open("xb") as target:
+                created_file = True
+                target.write(body)
+            storage_path.chmod(0o600)
+            metadata = {
+                "originalName": original_name,
+                "matchId": match_id,
+                "uploadedByProfileId": profile_id,
+                "purpose": "pregnancy_room_entry",
+                "privateStorage": True,
+            }
+            cursor.execute(
+                """
+                INSERT INTO media_files (storage_key, public_url, mime_type, bytes, metadata)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (storage_key, None, content_type, len(body), json.dumps(metadata, ensure_ascii=False)),
+            )
+            media_file_id = cursor.lastrowid
+            cursor.execute(
+                """
+                INSERT INTO pregnancy_room_entries
+                    (match_id, media_file_id, category, display_name, note, entry_date, uploaded_by_profile_id, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
+                """,
+                (match_id, media_file_id, category, original_name, note, parsed_entry_date, profile_id),
+            )
+            entry_id = cursor.lastrowid
+            content_url = f"/api/member/family-room/pregnancy/{entry_id}/content"
+            cursor.execute("UPDATE media_files SET public_url = %s WHERE id = %s", (content_url, media_file_id))
+            cursor.execute(
+                """
+                SELECT pre.id, pre.match_id AS matchId, pre.category, pre.display_name AS displayName,
+                       pre.note, pre.entry_date AS entryDate, pre.uploaded_by_profile_id AS uploadedByProfileId,
+                       pre.created_at AS createdAt, mf.mime_type AS mimeType, mf.bytes AS bytes
+                FROM pregnancy_room_entries pre JOIN media_files mf ON mf.id = pre.media_file_id
+                WHERE pre.id = %s
+                """,
+                (entry_id,),
+            )
+            entry = normalize_row(cursor.fetchone())
+            entry["contentUrl"] = content_url
+            conn.commit()
+            committed = True
+    finally:
+        if created_file and not committed and storage_path is not None:
+            try:
+                storage_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Private Pregnancy Room upload rollback requires storage cleanup")
+    return {"ok": True, "entry": entry}
+
+
+def _load_pregnancy_entry_for_member(cursor, entry_id: int, profile_id: int) -> dict[str, Any]:
+    cursor.execute(
+        """
+        SELECT pre.id, pre.match_id, pre.display_name AS displayName,
+               mf.id AS mediaFileId, mf.storage_key AS storageKey, mf.mime_type AS mimeType,
+               pm.profile_a_id, pm.profile_b_id
+        FROM pregnancy_room_entries pre
+        JOIN media_files mf ON mf.id = pre.media_file_id
+        JOIN profile_matches pm ON pm.id = pre.match_id
+        WHERE pre.id = %s AND (pm.profile_a_id = %s OR pm.profile_b_id = %s) AND pm.status = 'ACTIVE'
+          AND mf.metadata->>'purpose' = 'pregnancy_room_entry'
+        LIMIT 1 FOR UPDATE OF pre
+        """,
+        (entry_id, profile_id, profile_id),
+    )
+    entry = cursor.fetchone()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    require_active_match(cursor, int(entry["profile_a_id"]), int(entry["profile_b_id"]))
+    return entry
+
+
+@app.get("/api/member/family-room/pregnancy/{entry_id}/content")
+def member_pregnancy_entry_content(entry_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        entry = _load_pregnancy_entry_for_member(cursor, entry_id, profile_id)
+    storage_path = family_document_storage_path(str(entry.get("storageKey") or ""))
+    try:
+        body = storage_path.read_bytes()
+    except OSError as error:
+        raise HTTPException(status_code=404, detail="File is unavailable") from error
+    return Response(
+        content=body,
+        media_type=str(entry.get("mimeType") or "application/octet-stream"),
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "attachment; filename*=UTF-8''" + urllib.parse.quote(str(entry.get("displayName") or "file"), safe=""),
+        },
+    )
+
+
+@app.delete("/api/member/family-room/pregnancy/{entry_id}")
+def member_delete_pregnancy_entry(entry_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        entry = _load_pregnancy_entry_for_member(cursor, entry_id, profile_id)
+        storage_path = family_document_storage_path(str(entry.get("storageKey") or ""))
+        cursor.execute("DELETE FROM pregnancy_room_entries WHERE id = %s", (entry_id,))
+        cursor.execute(
+            """
+            UPDATE media_files SET public_url = NULL,
+                metadata = COALESCE(metadata, '{}'::jsonb) || '{"pregnancyRoomDeletionPending": true}'::jsonb
+            WHERE id = %s AND metadata->>'purpose' = 'pregnancy_room_entry'
+            """,
+            (int(entry["mediaFileId"]),),
+        )
+        conn.commit()
+    try:
+        storage_path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Private Pregnancy Room file cleanup requires retry")
+        return {"ok": True, "storageCleanupPending": True}
+    try:
+        with db_cursor() as (conn, cursor):
+            cursor.execute(
+                """
+                DELETE FROM media_files WHERE id = %s
+                  AND metadata->>'purpose' = 'pregnancy_room_entry'
+                  AND metadata->>'pregnancyRoomDeletionPending' = 'true'
+                  AND NOT EXISTS (SELECT 1 FROM pregnancy_room_entries WHERE media_file_id = media_files.id)
+                """,
+                (int(entry["mediaFileId"]),),
+            )
+            conn.commit()
+    except Exception:
+        logger.warning("Private Pregnancy Room media metadata cleanup requires retry")
         return {"ok": True, "storageCleanupPending": True}
     return {"ok": True}
 

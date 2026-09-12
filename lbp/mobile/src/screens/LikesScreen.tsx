@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
-import { BlurView } from "expo-blur";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { BlurView } from "expo-blur";
 import { ApiError } from "../api/client";
 import { likeProfile, unlikeProfile } from "../api/catalog";
 import { createConversation } from "../api/messages";
@@ -278,7 +278,15 @@ export default function LikesScreen({ navigation }: Props) {
   // rows up to the count, capped at 6 so it doesn't produce a huge
   // empty-looking list of identical rows.
   const lockedCount = Math.min(tab === "visitors" ? visitorsTotal : data?.likesYouCount || 0, 6);
-  const profileItems: ProfileSummary[] = tab === "visitors" ? visitors || [] : tab === "likesYou" ? data?.likesYou || [] : tab === "matches" ? data?.matches || [] : data?.myLikes || [];
+  const allProfileItems: ProfileSummary[] = tab === "visitors" ? visitors || [] : tab === "likesYou" ? data?.likesYou || [] : tab === "matches" ? data?.matches || [] : data?.myLikes || [];
+  // Alena's spec, repeated many times: 5 clear rows, then the upgrade card
+  // - visible WITHOUT scrolling, since "никто листать вниз не будет".
+  // An earlier version of this screen rendered every remaining liker as an
+  // extra blurred row before the upgrade card, which pushed the card back
+  // below the fold whenever there were more than a couple of them. Capping
+  // the list itself to FREE_PREVIEW_COUNT means the upgrade banner
+  // (ListFooterComponent below) always lands directly under row 5.
+  const profileItems: ProfileSummary[] = previewMode ? allProfileItems.slice(0, FREE_PREVIEW_COUNT) : allProfileItems;
   // The existing *long* copy (e.g. "likes.empty") reads well as the
   // description line under a short title, so it's reused there rather than
   // adding a parallel set of near-duplicate description keys.
@@ -379,16 +387,17 @@ export default function LikesScreen({ navigation }: Props) {
               </View>
             ) : null
           }
-          renderItem={({ item, index }) => {
+          renderItem={({ item }) => {
             const visitor = tab === "visitors" ? (item as ProfileVisitor) : null;
-            // Reference mockup: only rows from FREE_PREVIEW_COUNT onward get
-            // the blurred/locked treatment - the first FREE_PREVIEW_COUNT
-            // stay exactly like a normal unlocked row, whether this is a
-            // genuinely free account (real data, capped server-side at
-            // FREE_PREVIEW_COUNT so this condition rarely even triggers) or
-            // a Premium account self-testing via the previewAsFree toggle
-            // (real data, up to 100 rows, so this DOES trigger beyond row 5).
-            const previewLocked = previewMode && index >= FREE_PREVIEW_COUNT;
+            // Alena, precisely: "надо замылить чтобы не было видно вообще
+            // кто лайк поставил" - a free viewer must not be able to tell
+            // WHO liked them, not even for the handful of rows shown as a
+            // teaser. So every row is blurred while previewMode is on
+            // (profileItems is already capped to FREE_PREVIEW_COUNT rows
+            // in that case - see where it's built above), not just rows
+            // past some "free" cutoff the way an earlier version of this
+            // screen did it.
+            const previewLocked = previewMode;
             // Reference mockup (#scr-likes): a "message" + "like back" round
             // button pair on rows for people you haven't acted on yet.
             // Doesn't apply to Matches (already mutual) or My likes (you
@@ -457,13 +466,23 @@ export default function LikesScreen({ navigation }: Props) {
                 ) : (
                   <Text style={styles.heart}>♥</Text>
                 )}
-                {/* Frosted-glass overlay simulating the free-tier blurred
-                    view, over this account's own real photo/name - see the
-                    previewAsFree comment above for why real data is used
-                    instead of generic placeholder bars here. Only rows from
-                    FREE_PREVIEW_COUNT onward (previewLocked), not every row. */}
+                {/* Frosted-glass overlay over the WHOLE row (photo AND
+                    name/location text) - not just the photo - since the
+                    point is that no part of who this is should be
+                    readable. */}
                 {previewLocked ? (
-                  <BlurView intensity={35} tint="light" style={StyleSheet.absoluteFill} pointerEvents="none" />
+                  <BlurView
+                    intensity={50}
+                    tint="light"
+                    // Android's default BlurView needs API 31+ (RenderEffect)
+                    // to actually blur - on anything older it silently
+                    // renders nothing at all. This library-based method
+                    // works on Android API 21+ too; iOS ignores the prop
+                    // and uses its own native blur regardless.
+                    experimentalBlurMethod="dimezisBlurView"
+                    style={StyleSheet.absoluteFill}
+                    pointerEvents="none"
+                  />
                 ) : null}
               </Pressable>
             );
@@ -537,8 +556,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 10,
     elevation: 2,
-    // overflow:"hidden" clips the previewAsFree BlurView overlay to the
-    // card's own rounded corners instead of spilling past them.
     overflow: "hidden",
   },
   headerToggle: { flexDirection: "row", alignItems: "center", gap: 6, marginRight: spacing.sm },

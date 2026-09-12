@@ -35,6 +35,7 @@ import KnowledgeHubScreen from "../screens/KnowledgeHubScreen";
 import KnowledgeArticleScreen from "../screens/KnowledgeArticleScreen";
 import CompatibilityQuizScreen from "../screens/CompatibilityQuizScreen";
 import FamilyRoomScreen from "../screens/FamilyRoomScreen";
+import PregnancyRoomScreen from "../screens/PregnancyRoomScreen";
 import FamilyPlanPickerScreen from "../screens/FamilyPlanPickerScreen";
 import CompatibilityAnswersScreen from "../screens/CompatibilityAnswersScreen";
 import CompatibilityReportScreen from "../screens/CompatibilityReportScreen";
@@ -87,6 +88,10 @@ export type RootStackParamList = {
   // through just for the header title; the screen itself refetches
   // everything else from GET /api/member/family-room/{profileId}.
   FamilyRoom: { profileId: number; displayName?: string | null };
+  // Pregnancy Room - lab results/ultrasounds/prescriptions shared with the
+  // same matched partner, opened from a card inside FamilyRoomScreen.
+  // Same params shape and same server-side gate (Premium + active match).
+  PregnancyRoom: { profileId: number; displayName?: string | null };
   // Picker shown when Explore's "Family Plan" tile has 2+ real matches to
   // choose from (0 matches -> Alert + Browse CTA, 1 match -> straight to
   // FamilyRoom, both handled in ExploreScreen.tsx without ever routing
@@ -293,6 +298,11 @@ export default function RootNavigator() {
               name="FamilyRoom"
               component={FamilyRoomScreen}
               options={{ headerShown: true, title: t("nav.familyRoomTitle") }}
+            />
+            <Stack.Screen
+              name="PregnancyRoom"
+              component={PregnancyRoomScreen}
+              options={{ headerShown: true, title: t("nav.pregnancyRoomTitle") }}
             />
             <Stack.Screen
               name="FamilyPlanPicker"

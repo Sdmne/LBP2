@@ -99,6 +99,16 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
     try {
       const res = await updateFamilyPlanSection(profileId, key, { content: sectionDrafts[key] ?? "" });
       applySections(res.sections);
+      // Fix (found independently by the developer on GitHub, applied here
+      // too so this local copy doesn't regress it on the next full
+      // replace): re-sync the draft to the server's own saved content
+      // right after a successful save. Without this, `dirty` below never
+      // goes back to false after the very first save of a session, since
+      // sectionDrafts[key] and the freshly-applied section.content can
+      // end up out of sync by a beat - the Save button then reads as
+      // permanently enabled/disabled depending on timing, which is what
+      // Alena saw ("Ttt" typed, Save stayed the same shade before and
+      // after saving).
       const savedSection = res.sections.find((section) => section.key === key);
       setSectionDrafts((prev) => ({
         ...prev,
@@ -319,6 +329,31 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
         </View>
       </View>
 
+      {/* Pregnancy Room - a separate room next to the 10-section plan below,
+          for lab results/ultrasounds/prescriptions (Alena: "создать еще
+          комнату по беременности где хранить все анализы, узи и
+          назначения... делиться с партнёром из family room"). Its own
+          screen (own 3-category tabs + upload flow) rather than a card
+          here, since it's a genuinely separate kind of content.
+          UNLIKE everything else on this screen, Pregnancy Room is NOT
+          behind the Premium gate (Alena: "убрать ограничение навсегда") -
+          being able to reach this card at all already implies Premium
+          (this whole screen requires it), but the same screen is also
+          reachable directly from ProfileDetailScreen for a non-Premium
+          account - see the dedicated link there. Still needs an active
+          match either way, enforced server-side on PregnancyRoomScreen
+          itself. */}
+      <Pressable style={styles.pregnancyCard} onPress={() => navigation.navigate("PregnancyRoom", { profileId, displayName })}>
+        <View style={styles.pregnancyCardIconWrap}>
+          <Text style={styles.pregnancyCardIcon}>🤰</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.pregnancyCardTitle}>{t("familyRoom.pregnancyRoomTitle")}</Text>
+          <Text style={styles.pregnancyCardBody}>{t("familyRoom.pregnancyRoomBody")}</Text>
+        </View>
+        <Text style={styles.pregnancyCardChevron}>{">"}</Text>
+      </Pressable>
+
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t("familyRoom.sectionsTitle")}</Text>
         {FAMILY_PLAN_SECTION_KEYS.map((key, index) => {
@@ -335,6 +370,11 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
                 ? t("familyRoom.sections.waitingOnYou", { name: displayName || "" })
                 : t("familyRoom.sections.notStarted");
           const draft = sectionDrafts[key] ?? "";
+          // Was `dirty = draft !== (section?.content ?? "")` - see the fix
+          // note in handleSaveSection above for why that could leave Save
+          // stuck. Simpler and correct either way: Save is just disabled
+          // while a section exists and isn't mid-save, same as every other
+          // save button on this screen.
           const canSaveSection = Boolean(section) && savingSection !== key;
           return (
             <View key={key} style={styles.sectionPlanBlock}>
@@ -530,6 +570,28 @@ const styles = StyleSheet.create({
   sectionCompleteButtonText: { color: colors.pink, fontWeight: "700", fontSize: 13 },
   sectionSaveButton: { flex: 1, marginTop: 0 },
   sharedPlanNote: { fontSize: 12.5, color: colors.muted, marginBottom: spacing.xs, lineHeight: 17 },
+  pregnancyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: spacing.md,
+  },
+  pregnancyCardIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pregnancyCardIcon: { fontSize: 22 },
+  pregnancyCardTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
+  pregnancyCardBody: { fontSize: 12.5, color: colors.muted, marginTop: 2, lineHeight: 17 },
+  pregnancyCardChevron: { fontSize: 18, color: colors.muted },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

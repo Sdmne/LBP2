@@ -238,6 +238,20 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
               <Feather name="heart" size={15} color={colors.ink} />
               <Text style={styles.familyLinkText}>{t("profileDetail.compatibilityReport")}</Text>
             </Pressable>
+            {/* Deliberately its own top-level entry point, not only the
+                card inside FamilyRoomScreen - Pregnancy Room is free for
+                everyone (Alena: "убрать ограничение навсегда"), unlike the
+                rest of Family Room which requires Premium, so it can't
+                live only behind that screen's premium-gated entry. Still
+                needs an active match (PregnancyRoomScreen enforces that
+                itself), same as the two links above. */}
+            <Pressable
+              style={styles.familyLink}
+              onPress={() => navigation.navigate("PregnancyRoom", { profileId: profile.id, displayName: profile.displayName })}
+            >
+              <Feather name="activity" size={15} color={colors.ink} />
+              <Text style={styles.familyLinkText}>{t("profileDetail.pregnancyRoom")}</Text>
+            </Pressable>
           </View>
         ) : null}
       </ScrollView>
@@ -358,9 +372,13 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     overflow: "hidden",
   },
-  familyLinksRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, backgroundColor: colors.card, paddingBottom: spacing.lg },
+  // flexWrap - now 3 links (Family Room / Compatibility Report / Pregnancy
+  // Room), not 2 - wrapping to a second line beats squeezing 3 equal
+  // thirds into one row and clipping/wrapping "Compatibility Report".
+  familyLinksRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, paddingHorizontal: spacing.lg, backgroundColor: colors.card, paddingBottom: spacing.lg },
   familyLink: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: "30%",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
