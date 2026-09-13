@@ -26,6 +26,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { createApiClient } from "./api";
+import { UserPhotos } from "./user-photos";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
@@ -47,6 +48,13 @@ type SettingField = {
   fallback: unknown;
 };
 type FilterOption = { value?: unknown; label?: unknown; count?: unknown };
+const USER_PROFILE_TYPE_OPTIONS = [
+  ["SINGLE_WOMAN", "Single Woman"],
+  ["SINGLE_MAN", "Single Man"],
+  ["HETERO_COUPLE", "Hetero Couple"],
+  ["LESBIAN_COUPLE", "Lesbian Couple"],
+  ["GAY_COUPLE", "Gay Couple"],
+] as const;
 type ContentTransitionBounds = {
   top: number;
   right: number;
@@ -71,6 +79,7 @@ type AdminIconName =
   | "send"
   | "headphones"
   | "image"
+  | "crop"
   | "flag"
   | "phone"
   | "video"
@@ -303,6 +312,20 @@ function countryFilterLabel(option: FilterOption, showCount = false) {
     Number.isFinite(count)
     ? `${name} (${Math.max(0, Math.trunc(count))})`
     : name;
+}
+function rankedCountryFilterOptions(options: FilterOption[]) {
+  return options
+    .filter(
+      (option) =>
+        String(option.value ?? "").trim() !== "" &&
+        Number.isFinite(Number(option.count)) &&
+        Number(option.count) > 0,
+    )
+    .sort(
+      (a, b) =>
+        Number(b.count) - Number(a.count) ||
+        countryFilterLabel(a).localeCompare(countryFilterLabel(b), "en"),
+    );
 }
 function columnLabel(view: string, column: string) {
   if (view === "users") {
@@ -1109,6 +1132,25 @@ function articleDate(value: unknown) {
   return compactDate(value).replaceAll("/", ".");
 }
 
+function UserLocationMismatchFlag({ row }: { row: RecordValue }) {
+  const data = recordValue(row.data) ?? {};
+  const raw = [
+    row.locationMismatch,
+    data.locationMismatchType,
+    data.locationMismatch,
+    data.locationRisk,
+  ].find((value) => value !== null && value !== undefined && String(value).trim() !== "");
+  const value = String(raw ?? "").trim().toLowerCase();
+  const kind = value === "hard" ? "hard" : ["soft", "true", "1"].includes(value) ? "soft" : "";
+  if (!kind) return null;
+  const title = `Location mismatch (${kind})`;
+  return (
+    <span className={`user-location-mismatch ${kind}`} title={title} aria-label={title} role="img">
+      <AdminIcon name="flag" />
+    </span>
+  );
+}
+
 function profileTypeLabel(value: unknown) {
   const key = String(value ?? "")
     .trim()
@@ -1130,6 +1172,31 @@ function profileTypeLabel(value: unknown) {
     USER: "User",
   };
   return labels[key] ?? (key ? label(key) : "—");
+}
+
+function profileIdentityVerified(row: RecordValue) {
+  const data = recordValue(row.data) ?? {};
+  const value = row.isVerified ?? data.isVerified ?? data.verified;
+  return value !== undefined && value !== null
+    ? settingBoolean(value)
+    : Boolean(data.verifiedAt) || String(row.verificationStatus ?? "").toUpperCase() === "APPROVED";
+}
+
+function profileIdentityPremium(row: RecordValue) {
+  const data = recordValue(row.data) ?? {};
+  const tier = String(row.tier ?? data.tier ?? "").toUpperCase();
+  return tier ? ["BUILDER", "PRO"].includes(tier) : settingBoolean(row.isPremium ?? data.isPremium ?? data.premium);
+}
+
+function profileBirthDate(value: unknown, today = new Date()) {
+  const parts = String(value ?? "").match(/^(\d{4})[-/ ](\d{2})[-/ ](\d{2})(?:T.*| .*)?$/);
+  if (!parts) return "-";
+  const [year, month, day] = parts.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || date > today) return "-";
+  const birthdayPending = today.getUTCMonth() < month - 1 || (today.getUTCMonth() === month - 1 && today.getUTCDate() < day);
+  const age = today.getUTCFullYear() - year - Number(birthdayPending);
+  return `${date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} (${age} y.o.)`;
 }
 
 function registrationSourceLabel(value: unknown) {
@@ -1674,6 +1741,12 @@ function AdminIcon({ name }: { name: AdminIconName }) {
     strokeLinejoin: "round" as const,
   };
   const paths: Record<AdminIconName, JSX.Element> = {
+    crop: (
+      <>
+        <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+        <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+      </>
+    ),
     dashboard: (
       <>
         <rect width="7" height="9" x="3" y="3" rx="1" />
@@ -4668,6 +4741,14 @@ function supportTime(value: unknown) {
     : "";
 }
 
+function profileSupportDate(value: unknown) {
+  const raw = String(value ?? "").trim().replace(" ", "T");
+  const date = raw ? new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : `${raw}Z`) : null;
+  return date && !Number.isNaN(date.valueOf())
+    ? date.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })
+    : "";
+}
+
 function supportListDate(value: unknown) {
   const date = supportDate(value);
   if (!date) return "";
@@ -6639,6 +6720,8 @@ function GenericList({ view }: { view: string }) {
   );
   const [filterOptions, setFilterOptions] = useState<RecordValue>({});
   const [summaryCounts, setSummaryCounts] = useState<RecordValue>({});
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState("");
   const [grantOpen, setGrantOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [grantUser, setGrantUser] = useState("");
@@ -6688,6 +6771,7 @@ function GenericList({ view }: { view: string }) {
     setOffset(0);
   }, [view, isPartnerUsers]);
   useEffect(() => {
+    if (view === "subscriptions") return;
     let live = true;
     api
       .get<RecordValue>("/admin/filter-options")
@@ -6696,7 +6780,7 @@ function GenericList({ view }: { view: string }) {
     return () => {
       live = false;
     };
-  }, []);
+  }, [view, refresh]);
   useEffect(() => {
     if (!openUserMenu) return;
     const closeOutside = (event: PointerEvent) => {
@@ -6716,10 +6800,15 @@ function GenericList({ view }: { view: string }) {
   }, [openUserMenu]);
   useEffect(() => {
     if (view !== "subscriptions") return;
+    let live = true;
+    setSummaryLoading(true);
+    setSummaryError("");
     api
-      .get<RecordValue>("/admin/stats")
-      .then((data) => setSummaryCounts((data.counts ?? {}) as RecordValue))
-      .catch(() => setSummaryCounts({}));
+      .get<RecordValue>("/admin/subscriptions/summary")
+      .then((data) => live && setSummaryCounts((data.counts ?? {}) as RecordValue))
+      .catch(() => live && setSummaryError("Could not load subscription statistics."))
+      .finally(() => live && setSummaryLoading(false));
+    return () => { live = false; };
   }, [view, refresh]);
   useEffect(() => {
     if (
@@ -6823,14 +6912,16 @@ function GenericList({ view }: { view: string }) {
           ? "profileStatuses"
           : "entityStatuses",
   );
-  const countryOptions = optionsFor(
+  const countriesForView = optionsFor(
     view === "clinics"
       ? "clinicCountries"
       : view === "lawyers"
         ? "lawyerCountries"
-        : "userCountries",
+        : isPartnerUsers
+          ? "partnerCountries"
+          : "userCountries",
   );
-  const profileTypeOptions = optionsFor("profileTypes");
+  const countryOptions = rankedCountryFilterOptions(countriesForView);
   const choose = (row: RecordValue) => {
     const data = row.data as RecordValue | undefined;
     const userId = row.sourceId ?? row.profileId ?? row.profile_id ?? row.id;
@@ -7021,6 +7112,12 @@ function GenericList({ view }: { view: string }) {
       setSaving(false);
     }
   };
+  if (view === "subscriptions" && (error || summaryError)) {
+    return <div role="alert"><p className="error">{error || summaryError}</p><button type="button" onClick={() => setRefresh(value => value + 1)}>Try again</button></div>;
+  }
+  if (view === "subscriptions" && (summaryLoading || result === null)) {
+    return <p className="loading-inline" role="status" aria-label="Loading subscriptions">Loading subscriptions…</p>;
+  }
   if (view === "articles" && editing) {
     return (
       <ArticleEditor
@@ -7099,7 +7196,7 @@ function GenericList({ view }: { view: string }) {
           <MetricCard
             title="Total Premium"
             value={summaryCounts.active_subscriptions}
-            hint={`${valueOf(summaryCounts.active_subscriptions && total ? Math.round((Number(summaryCounts.active_subscriptions) / Math.max(1, Number(summaryCounts.profiles ?? total))) * 1000) / 10 : 0)}% conversion rate`}
+            hint={`${Math.round((Number(summaryCounts.active_subscriptions ?? 0) / Math.max(1, Number(summaryCounts.profiles ?? 0))) * 1000) / 10}% conversion rate`}
             icon="crown"
           />
           <MetricCard
@@ -7267,6 +7364,7 @@ function GenericList({ view }: { view: string }) {
             )}
             {view === "users" && (
               <>
+                {!isPartnerUsers && <>
                 <AdminSelect
                   value={filters.profileType ?? ""}
                   onChange={(event) => {
@@ -7278,14 +7376,11 @@ function GenericList({ view }: { view: string }) {
                   }}
                 >
                   <option value="">All Types</option>
-                  {profileTypeOptions.map((option) => {
-                    const value = String(option.value ?? "");
-                    return value ? (
-                      <option key={value} value={value}>
-                        {label(value)}
-                      </option>
-                    ) : null;
-                  })}
+                  {USER_PROFILE_TYPE_OPTIONS.map(([value, title]) => (
+                    <option key={value} value={value}>
+                      {title}
+                    </option>
+                  ))}
                 </AdminSelect>
                 <label className="inline-toggle">
                   <input
@@ -7315,6 +7410,7 @@ function GenericList({ view }: { view: string }) {
                   />
                   Co-parenting
                 </label>
+                </>}
                 <AdminSelect
                   value={filters.country ?? ""}
                   menuMaxHeight={520}
@@ -7331,7 +7427,7 @@ function GenericList({ view }: { view: string }) {
                     const value = String(option.value ?? "");
                     return value ? (
                       <option key={value} value={value}>
-                        {countryFilterLabel(option)}
+                        {countryFilterLabel(option, true)}
                       </option>
                     ) : null;
                   })}
@@ -7363,6 +7459,7 @@ function GenericList({ view }: { view: string }) {
                 </label>
                 <AdminSelect
                   value={filters.mismatch ?? "off"}
+                  aria-label="Location mismatch"
                   onChange={(event) => {
                     setOffset(0);
                     setFilters((current) => ({
@@ -7377,6 +7474,7 @@ function GenericList({ view }: { view: string }) {
                 </AdminSelect>
                 <AdminSelect
                   value={filters.orderBy ?? "newest"}
+                  aria-label="User sorting"
                   onChange={(event) => {
                     setOffset(0);
                     setFilters((current) => ({
@@ -7386,7 +7484,8 @@ function GenericList({ view }: { view: string }) {
                   }}
                 >
                   <option value="newest">Sort: Newest</option>
-                  <option value="oldest">Sort: Oldest</option>
+                  <option value="blocked">Most blocked</option>
+                  <option value="reported">Most reported</option>
                 </AdminSelect>
               </>
             )}
@@ -7660,6 +7759,8 @@ function GenericList({ view }: { view: string }) {
                                 <span>
                                   <span className="person-name-line">
                                     <b>{rowName(row)}</b>
+                                    {view === "users" && profileIdentityVerified(row) && <span className="verified-mark" title="Verified" aria-label="Verified"><AdminIcon name="badgeCheck" /></span>}
+                                    {view === "users" && profileIdentityPremium(row) && <span className="premium-mark" title="Premium" aria-label="Premium"><AdminIcon name="crown" /></span>}
                                     {view === "subscriptions" &&
                                       subscriptionIsVerified(row) && (
                                         <span
@@ -7701,6 +7802,7 @@ function GenericList({ view }: { view: string }) {
                                         </em>
                                       )}
                                     {view === "users" && ["DELETED", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
+                                    {view === "users" && <UserLocationMismatchFlag row={row} />}
                                   </span>
                                   <small>
                                     {valueOf(
@@ -7762,7 +7864,7 @@ function GenericList({ view }: { view: string }) {
                                         setUserAction({ row, kind: "delete" })
                                       }
                                     >
-                                      Permanent Delete
+                                      <AdminIcon name="trash" /> Permanent Delete
                                     </button>
                                   </span>
                                 )}
@@ -11059,6 +11161,8 @@ function UserTabContent({
   onReload: () => void;
 }) {
   const [supportDraft, setSupportDraft] = useState("");
+  const [supportError, setSupportError] = useState("");
+  const supportMessagesRef = useRef<HTMLDivElement>(null);
   const [messageSearch, setMessageSearch] = useState("");
   const [messageMode, setMessageMode] = useState<"visible" | "hidden">(
     "visible",
@@ -11067,20 +11171,29 @@ function UserTabContent({
   const [revealedSubscriptionId, setRevealedSubscriptionId] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => setRevealedSubscriptionId(""), [tab]);
+  useEffect(() => {
+    setSupportDraft("");
+    setSupportError("");
+  }, [profileId]);
+  useEffect(() => {
+    const messages = supportMessagesRef.current;
+    if (tab === "support" && messages) messages.scrollTop = messages.scrollHeight;
+  }, [tab, rows]);
   if (error) return <p className="error">{error}</p>;
   const nested = (row: RecordValue, key = "data") =>
     row[key] && typeof row[key] === "object" ? (row[key] as RecordValue) : {};
-  const detailDeviceDate = (value: unknown) => {
-    const date = value ? new Date(String(value)) : null;
-    return date && !Number.isNaN(date.valueOf())
-      ? date.toLocaleString("en-US", {
+  const detailDeviceDate = (value: unknown, utc = false) => {
+    const raw = String(value ?? "").trim().replace(" ", "T");
+    const date = raw ? new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw) ? raw : `${raw}Z`) : null;
+    if (!date || Number.isNaN(date.valueOf())) return "—";
+    if (utc) return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    return date.toLocaleString("en-US", {
           month: "short",
           day: "numeric",
           year: "numeric",
           hour: "2-digit",
           minute: "2-digit",
-        })
-      : "—";
+        });
   };
   const person = (row: RecordValue) =>
     row.profile && typeof row.profile === "object"
@@ -11124,127 +11237,49 @@ function UserTabContent({
     </div>
   );
   if (tab === "devices") {
-    const registration = rows.find((row) =>
-      String(row.kind ?? "")
-        .toLowerCase()
-        .includes("registration"),
-    );
-    const last = rows.find(
-      (row) =>
-        String(row.kind ?? "")
-          .toLowerCase()
-          .includes("session") ||
-        String(row.kind ?? "")
-          .toLowerCase()
-          .includes("last"),
-    );
+    const registration = rows.find((row) => String(row.kind ?? "").toLowerCase().includes("registration"));
+    const last = rows.find((row) => /last|session/i.test(String(row.kind ?? "")) && row !== registration);
     const profile = (overview.profile ?? {}) as RecordValue;
     const profileData = nested(profile);
-    const deviceCard = (title: string, row?: RecordValue) => {
-      const data = row ? nested(row) : {};
-      const source = registrationSourceLabel(
-        data.source ?? data.platform ?? data.deviceType,
-      );
-      return (
-        <article className="user-info-card">
-          <h4>{title}</h4>
-          <p>
-            <span>Source</span>
-            <b>{source}</b>
-          </p>
-          <p>
-            <span>IP Address</span>
-            <b>{valueOf(data.ipAddress ?? data.ip ?? row?.ip_address)}</b>
-          </p>
-          <p>
-            <span>Location</span>
-            <b>
-              {valueOf(
-                data.location ??
-                  [data.city, countryName(data.country)]
-                    .filter(Boolean)
-                    .join(", "),
-              )}
-            </b>
-          </p>
-          <p>
-            <span>Timezone</span>
-            <b>{valueOf(data.timezone)}</b>
-          </p>
-          <p>
-            <span>Screen</span>
-            <b>
-              {valueOf(
-                data.screen ??
-                  (data.screenWidth && data.screenHeight
-                    ? `${data.screenWidth}x${data.screenHeight}`
-                    : null),
-              )}
-            </b>
-          </p>
-          <p>
-            <span>Date</span>
-            <b>{detailDeviceDate(row?.created_at ?? data.createdAt)}</b>
-          </p>
-          <h5>Mobile Device</h5>
-          <p>
-            <span>OS</span>
-            <b>{valueOf(data.os ?? data.osVersion)}</b>
-          </p>
-          <p>
-            <span>Device</span>
-            <b>{valueOf(data.device ?? data.model)}</b>
-          </p>
-          <p>
-            <span>App Version</span>
-            <b>{valueOf(data.appVersion)}</b>
-          </p>
-          <p>
-            <span>Pixel Ratio</span>
-            <b>{data.pixelRatio ? `${data.pixelRatio}x` : "—"}</b>
-          </p>
-          <p>
-            <span>Emulator</span>
-            <b>
-              {data.isEmulator === undefined
-                ? "—"
-                : data.isEmulator
-                  ? "Yes"
-                  : "No"}
-            </b>
-          </p>
-        </article>
-      );
-    };
     const lastData = nested(last ?? {});
+    const field = (label: string, value: unknown) => <p><span>{label}</span><b>{valueOf(value)}</b></p>;
+    const sourceLabel = (value: unknown) => value ? registrationSourceLabel(value) : "—";
+    const location = (data: RecordValue) => data.location || [data.city, data.country ? countryName(data.country) : null].filter(Boolean).join(", ");
+    const deviceFields = (title: string, row?: RecordValue) => {
+      const data = nested(row ?? {});
+      const source = sourceLabel(data.source);
+      return <>
+        <h4>{title}</h4>
+        <p><span>Source</span><b>{data.source ? <span className={`source-badge ${registrationSourceClass(data.source)}`}>{source}</span> : "—"}</b></p>
+        {field("IP Address", data.ipAddress || data.ip || row?.ip_address)}
+        {field("Location", location(data))}
+        {field("Timezone", data.timezone)}
+        {field("Screen", typeof data.screen === "string" ? data.screen.replace(/(\d)\s*[x×]\s*(?=\d)/, "$1×") : data.screenWidth && data.screenHeight ? `${data.screenWidth}×${data.screenHeight}` : null)}
+        {field("Date", detailDeviceDate(row?.created_at ?? data.signedInAt ?? data.createdAt))}
+        <h5>Mobile Device</h5>
+        {field("OS", data.os || [data.osName, data.osVersion].filter(Boolean).join(" "))}
+        {field("Device", data.device || data.model)}
+        {field("App Version", data.appVersion)}
+        {field("Pixel Ratio", data.pixelRatio ? `${String(data.pixelRatio).replace(/x$/, "")}x` : null)}
+        {field("Emulator", typeof data.isEmulator === "boolean" ? data.isEmulator ? "Yes" : "No" : null)}
+      </>;
+    };
+    const ipCountry = lastData.ipCountry || lastData.country;
+    const lastSession = detailDeviceDate(last?.created_at ?? lastData.signedInAt ?? lastData.createdAt, true);
     return (
-      <section className="user-info-grid">
-        {deviceCard("Registration Device", registration)}
-        {deviceCard("Last Session Device", last)}
-        <article className="user-info-card">
-          <h4>Location</h4>
-          <p>
-            <span>Stated</span>
-            <b>{valueOf(profileData.country)}</b>
-          </p>
-          <p>
-            <span>IP country</span>
-            <b>
-              {valueOf(
-                lastData.ipCountry ??
-                  [lastData.country, lastData.city].filter(Boolean).join(" ("),
-              )}
-              {lastData.country && lastData.city ? ")" : ""}
-            </b>
-          </p>
-          <p>
-            <span>Device TZ</span>
-            <b>{valueOf(lastData.timezone)}</b>
-          </p>
-          <p>
-            <span>Last session</span>
-            <b>{detailDeviceDate(last?.created_at ?? lastData.createdAt)}</b>
-          </p>
+      <section className="user-devices-card" aria-label="Devices">
+        <article className="user-device-column">
+          {deviceFields("Registration Device", registration)}
+        </article>
+        <article className="user-device-column">
+          {deviceFields("Last Session Device", last)}
+          <section className="user-device-location" aria-label="Location">
+            <h4>Location</h4>
+            {field("Stated", profileData.country || profile.country)}
+            {field("IP country", ipCountry ? `${ipCountry}${lastData.city ? ` (${lastData.city})` : ""}` : null)}
+            {field("Device TZ", lastData.timezone ? `${lastData.timezone}${lastData.timezoneCountry ? ` → ${lastData.timezoneCountry}` : ""}` : null)}
+            {field("Last session", lastSession)}
+          </section>
         </article>
       </section>
     );
@@ -11304,7 +11339,10 @@ function UserTabContent({
         </div>
       </section>
     ) : (
-      emptyState("No verification sessions")
+      <div className="user-empty-state user-verification-empty">
+        <AdminIcon name="shield" />
+        <p>No verification sessions</p>
+      </div>
     );
   if (tab === "support") {
     const conversationId =
@@ -11313,41 +11351,52 @@ function UserTabContent({
       rows.find((row) => row.conversationId)?.conversationId;
     const send = async (event: FormEvent) => {
       event.preventDefault();
-      if (!supportDraft.trim() || !conversationId) return;
+      if (busy || !supportDraft.trim() || !conversationId) return;
       setBusy(true);
+      setSupportError("");
       try {
         await api.post(`/admin/support/${conversationId}/messages`, {
           body: supportDraft.trim(),
         });
         setSupportDraft("");
         onReload();
+      } catch {
+        setSupportError("Could not send the message. Please try again.");
       } finally {
         setBusy(false);
       }
     };
     return (
-      <section className="profile-support">
+      <section className="profile-support-card">
+        <div className="profile-support">
         <h3>
           Support Chat <span>({rows.length} messages)</span>
         </h3>
-        <div className="profile-support-messages">
-          {[...rows].reverse().map((row, index) => (
+        <div className="profile-support-messages" ref={supportMessagesRef} role="log" aria-label="Support messages">
+          {[...rows].sort((a, b) => {
+            const left = String(a.created_at ?? a.createdAt ?? "");
+            const right = String(b.created_at ?? b.createdAt ?? "");
+            return left.localeCompare(right) || String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { numeric: true });
+          }).map((row, index) => {
+            const isSupport = String(row.sender_role ?? row.senderRole ?? "").toUpperCase() === "SUPPORT";
+            const stamp = profileSupportDate(row.created_at ?? row.createdAt);
+            return (
             <article
               key={String(row.id ?? index)}
-              className={
-                String(row.sender_role ?? "").toUpperCase() === "SUPPORT"
-                  ? "support"
-                  : "member"
-              }
+              className={isSupport ? "support" : "member"}
             >
               <p>{valueOf(row.body)}</p>
-              <small>{verificationDate(row.created_at)}</small>
+              <small>{stamp}{stamp ? " · " : ""}{isSupport ? "Support" : String(row.sender_name ?? row.senderName ?? "User")}</small>
             </article>
-          ))}
+            );
+          })}
           {!rows.length && empty("No support messages.")}
         </div>
         <form onSubmit={send}>
+          {supportError && <p className="profile-support-error" role="alert">{supportError}</p>}
           <input
+            aria-label="Message as support"
+            disabled={busy || !conversationId}
             value={supportDraft}
             onChange={(event) => setSupportDraft(event.target.value)}
             placeholder="Type a message as support..."
@@ -11357,9 +11406,10 @@ function UserTabContent({
             disabled={busy || !conversationId || !supportDraft.trim()}
             aria-label="Send support message"
           >
-            Send
+            <AdminIcon name="send" />
           </button>
         </form>
+        </div>
       </section>
     );
   }
@@ -11386,7 +11436,12 @@ function UserTabContent({
         String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")),
       );
     if (!conversations.length)
-      return emptyState("No Conversations", "This user has no chat history.");
+      return (
+        <div className="user-empty-state user-conversations-empty">
+          <AdminIcon name="messageCircle" />
+          <div><h3>No Conversations</h3><p>This user has no chat history.</p></div>
+        </div>
+      );
     return (
       <section className="profile-messages">
         <aside>
@@ -11456,90 +11511,7 @@ function UserTabContent({
     );
   }
   if (tab === "photos") {
-    const action = async (path: string, method: "post" | "delete") => {
-      setBusy(true);
-      try {
-        if (method === "post") await api.post(path, {});
-        else await api.delete(path);
-        onReload();
-      } finally {
-        setBusy(false);
-      }
-    };
-    return (
-      <section className="profile-photos">
-        <p>{rows.length} photos</p>
-        <div>
-          {rows.map((row, index) => {
-            const photoId = String(row.id);
-            const url = String(row.public_url ?? row.publicUrl ?? "");
-            const primary = Number(row.position ?? index) === 0;
-            return (
-              <article key={photoId}>
-                {url ? (
-                  <a href={url} target="_blank" rel="noopener noreferrer">
-                    <img
-                      src={url}
-                      alt=""
-                      onError={(event) => event.currentTarget.remove()}
-                    />
-                  </a>
-                ) : (
-                  <div className="profile-photo-unavailable">
-                    Photo unavailable
-                  </div>
-                )}
-                <span
-                  className={`table-badge status-${String(row.moderation_status ?? row.status ?? "").toLowerCase()}`}
-                >
-                  {valueOf(row.moderation_status ?? row.status)}
-                </span>
-                <div>
-                  {!primary && (
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        action(
-                          `/admin/users/${profileId}/photos/${photoId}/primary`,
-                          "post",
-                        )
-                      }
-                    >
-                      Make this the primary photo
-                    </button>
-                  )}
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      action(
-                        `/admin/users/${profileId}/photos/${photoId}/avatar`,
-                        "post",
-                      )
-                    }
-                  >
-                    Crop as avatar
-                  </button>
-                  <button
-                    className="danger-text"
-                    disabled={busy}
-                    onClick={() => {
-                      if (window.confirm("Permanently delete this photo?"))
-                        void action(
-                          `/admin/users/${profileId}/photos/${photoId}`,
-                          "delete",
-                        );
-                    }}
-                  >
-                    Permanently delete this photo
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-        {!rows.length && empty("No photos.")}
-      </section>
-    );
+    return <UserPhotos key={profileId} profileId={profileId} rows={rows} onReload={onReload} cropIcon={<AdminIcon name="crop" />} trashIcon={<AdminIcon name="trash" />} closeIcon={<AdminIcon name="x" />} />;
   }
   if (
     [
@@ -11588,6 +11560,16 @@ function UserTabContent({
               </table>
             </div>
           </>
+        ) : ["sent-likes", "received-likes", "matches"].includes(tab) ? (
+          <div className="user-empty-state user-relations-empty">
+            <AdminIcon name={tab === "sent-likes" ? "thumbsUp" : tab === "received-likes" ? "heart" : "users"} />
+            <div><h3>{emptyTitle}</h3><p>{emptyText}</p></div>
+          </div>
+        ) : tab === "blocked" || tab === "blocked-by" ? (
+          <div className="user-empty-state user-relations-empty">
+            <AdminIcon name="ban" />
+            <p>{emptyText}</p>
+          </div>
         ) : emptyTitle ? (
           emptyState(emptyTitle, emptyText)
         ) : (
@@ -11726,10 +11708,13 @@ function UserTabContent({
             </table>
           </div>
         ) : (
-          emptyState(
-            "No Liked Clinics",
-            "This user hasn't liked any clinics yet.",
-          )
+          <div className="user-empty-state user-relations-empty">
+            <AdminIcon name="building" />
+            <div>
+              <h3>No Liked Clinics</h3>
+              <p>This user hasn't liked any clinics yet.</p>
+            </div>
+          </div>
         )}
       </section>
     );
@@ -11758,7 +11743,13 @@ function UserTabContent({
         })}
       </section>
     ) : (
-      emptyState("No Visitors", "No one has viewed this user's profile yet.")
+      <div className="user-empty-state user-relations-empty">
+        <AdminIcon name="eye" />
+        <div>
+          <h3>No Visitors</h3>
+          <p>No one has viewed this user's profile yet.</p>
+        </div>
+      </div>
     );
   return empty("No records.");
 }
@@ -11774,17 +11765,20 @@ function UserDetail() {
   const [tabError, setTabError] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
   const [notice, setNotice] = useState("");
+  const [actionError, setActionError] = useState("");
   const [bioEditing, setBioEditing] = useState(false);
   const [bioDraft, setBioDraft] = useState("");
   const [bioSaving, setBioSaving] = useState(false);
   const [reload, setReload] = useState(0);
   useEffect(() => {
+    let live = true;
     setDetail(null);
     setError("");
     api
       .get<RecordValue>(`/admin/users/${encodeURIComponent(id)}/overview`)
-      .then(setDetail)
-      .catch(() => setError("Could not load the user profile."));
+      .then(data => live && setDetail(data))
+      .catch(() => live && setError("Could not load the user profile."));
+    return () => { live = false; };
   }, [id, reload]);
   useEffect(() => {
     let cancelled = false;
@@ -11798,10 +11792,10 @@ function UserDetail() {
     }
     setTabRows([]);
     setTabLoading(true);
-    api
-      .get<{ items: RecordValue[] }>(
-        `/admin/users/${encodeURIComponent(id)}/tabs/${encodeURIComponent(tab)}`,
-      )
+    const request = tab === "support"
+      ? api.post<{ items: RecordValue[] }>(`/admin/users/${encodeURIComponent(id)}/support/ensure`)
+      : api.get<{ items: RecordValue[] }>(`/admin/users/${encodeURIComponent(id)}/tabs/${encodeURIComponent(tab)}`);
+    request
       .then((payload) => {
         if (!cancelled)
           setTabRows(Array.isArray(payload.items) ? payload.items : []);
@@ -11823,6 +11817,7 @@ function UserDetail() {
   const profileId = String(profile.id ?? id);
   const list = tab === "profile" ? [] : tabRows;
   const profileData = (profile.data ?? {}) as RecordValue;
+  const activity = recordValue(detail.activity) ?? {};
   const dataValue = (...keys: string[]) => {
     for (const key of keys) {
       const value = profileData[key] ?? profile[key];
@@ -11921,39 +11916,53 @@ function UserDetail() {
     setReload((value) => value + 1);
   };
   const openAmplitude = async () => {
-    const target = window.open("about:blank", "_blank", "noopener");
+    setActionError("");
+    if (detail.amplitudeConfigured === false) {
+      setActionError("Amplitude is not configured.");
+      return;
+    }
+    const target = window.open("about:blank", "_blank");
+    if (target) target.opener = null;
     try {
       const result = await api.post<{ url?: string }>(
         `/admin/users/${encodeURIComponent(profileId)}/amplitude`,
       );
       if (!result.url) throw new Error();
+      const url = new URL(result.url);
+      if (url.protocol !== "https:" || !(url.hostname === "amplitude.com" || url.hostname.endsWith(".amplitude.com"))) throw new Error();
       if (target) target.location.replace(result.url);
       else window.open(result.url, "_blank", "noopener");
     } catch {
       target?.close();
-      setNotice("Amplitude is not configured or unavailable.");
+      setActionError("Could not open Amplitude. Please check the integration settings and try again.");
     }
   };
   const toggleVerification = async () => {
-    const enabled = !settingBoolean(dataValue("isVerified"));
-    await api.patch(`/admin/item/users/${encodeURIComponent(profileId)}`, {
-      values: {
-        data: {
-          ...profileData,
-          isVerified: enabled,
-          verifiedAt: enabled ? new Date().toISOString() : null,
+    const enabled = !verified;
+    setActionError("");
+    try {
+      await api.patch(`/admin/item/users/${encodeURIComponent(profileId)}`, {
+        values: {
+          data: {
+            ...profileData,
+            isVerified: enabled,
+            verifiedAt: enabled ? new Date().toISOString() : null,
+          },
         },
-      },
-    });
-    setNotice(enabled ? "User verified." : "Verification removed.");
-    setReload((value) => value + 1);
+      });
+      setNotice(enabled ? "User verified." : "Verification removed.");
+      setReload((value) => value + 1);
+    } catch {
+      setActionError("Could not update verification. Please try again.");
+    }
   };
   const avatarUrl = String(dataValue("avatarUrl", "avatar_url") ?? "");
-  const verified = settingBoolean(dataValue("isVerified", "verified"));
-  const premium = settingBoolean(dataValue("isPremium", "premium"));
-  const online = settingBoolean(dataValue("isOnlineNow", "online"));
+  const verified = typeof detail.isVerified === "boolean" ? detail.isVerified : profileIdentityVerified(profile);
+  const premium = typeof detail.isPremium === "boolean" ? detail.isPremium : profileIdentityPremium(profile);
+  const online = settingBoolean(detail.isOnline ?? dataValue("isOnline", "isOnlineNow", "online"));
   const saveBio = async () => {
     setBioSaving(true);
+    setActionError("");
     try {
       await api.patch(`/admin/item/users/${encodeURIComponent(profileId)}`, {
         values: { data: { ...profileData, bio: bioDraft.trim() } },
@@ -11961,6 +11970,8 @@ function UserDetail() {
       setBioEditing(false);
       setNotice("Bio saved.");
       setReload((value) => value + 1);
+    } catch {
+      setActionError("Could not save the bio. Please try again.");
     } finally {
       setBioSaving(false);
     }
@@ -11971,6 +11982,7 @@ function UserDetail() {
         <AdminIcon name="arrowLeft" /> Back to Users
       </Link>
       {notice && <p className="notice">{notice}</p>}
+      {actionError && <p className="error" role="alert">{actionError}</p>}
       <header className="detail-heading user-detail-heading">
         <div className="user-detail-identity">
           <PersonAvatar
@@ -11986,10 +11998,11 @@ function UserDetail() {
                 profile.display_name ?? profile.displayName ?? "No profile",
               )}{" "}
               {verified && (
-                <span className="verified-mark" title="Verified">
+                <span className="verified-mark" title="Verified" aria-label="Verified">
                   <AdminIcon name="badgeCheck" />
                 </span>
               )}{" "}
+              {premium && <span className="premium-mark" title="Premium" aria-label="Premium"><AdminIcon name="crown" /></span>}
               <em>{online ? "Online" : "Offline"}</em>
             </h1>
             <p>{valueOf(profile.email)}</p>
@@ -12004,15 +12017,15 @@ function UserDetail() {
           <button onClick={openAmplitude}>
             <AdminIcon name="externalLink" /> Open in Amplitude
           </button>
-          {verified && !premium && (
-            <button
-              onClick={() =>
-                setModal({ kind: "grant", title: "Grant Premium" })
-              }
-            >
-              <AdminIcon name="crown" /> Grant Premium
-            </button>
-          )}
+          <button
+            type="button"
+            className="user-grant-premium"
+            disabled={!verified || premium}
+            title={premium ? "Premium is already active" : !verified ? "Verify the profile before granting Premium" : "Grant Premium"}
+            onClick={() => setModal({ kind: "grant", title: "Grant Premium" })}
+          >
+            <AdminIcon name="crown" /> Grant Premium
+          </button>
           <button onClick={() => void toggleVerification()}>
             {verified ? "Unverify" : "Verify"}
           </button>
@@ -12087,8 +12100,9 @@ function UserDetail() {
             {section("Basic Info", [
               ["Display Name", dataValue("displayName", "display_name")],
               ["User Type (legacy)", dataValue("donorType", "userType")],
-              ["Date of Birth", dataValue("dateOfBirth", "birthDate")],
+              ["Date of Birth", profileBirthDate(dataValue("dateOfBirth", "birthDate"))],
               ["Country", dataValue("country")],
+              ["State", dataValue("state", "region", "stateName")],
               ["City", dataValue("city")],
             ])}
             {section("Reproductive Model", [
@@ -12136,14 +12150,15 @@ function UserDetail() {
               {bioEditing ? (
                 <div className="profile-bio-editor">
                   <textarea
-                    aria-label="No bio"
+                    aria-label="Bio"
                     maxLength={2000}
                     value={bioDraft}
                     onChange={(event) => setBioDraft(event.target.value)}
                     autoFocus
                   />
-                  <small>{bioDraft.length} / 2000</small>
-                  <p>
+                  <div className="profile-bio-footer">
+                    <small>{bioDraft.length} / 2000</small>
+                    <div className="profile-bio-actions">
                     <button type="button" onClick={() => setBioEditing(false)}>
                       Cancel
                     </button>
@@ -12155,7 +12170,8 @@ function UserDetail() {
                     >
                       {bioSaving ? "Saving…" : "Save"}
                     </button>
-                  </p>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div
@@ -12183,7 +12199,7 @@ function UserDetail() {
               ["Email", dataValue("email")],
               ["Email Verified", dataValue("emailVerified", "isEmailVerified")],
               ["Auth Type", dataValue("authType")],
-              ["Premium", dataValue("isPremium")],
+              ["Premium", premium],
               ["Status", profile.status],
               ["Locale", dataValue("locale")],
             ])}
@@ -12191,12 +12207,12 @@ function UserDetail() {
               [
                 "Registered",
                 detailDate(
-                  dataValue("createdAt", "created_at") ?? profile.created_at,
+                  activity.registeredAt ?? dataValue("createdAt", "created_at") ?? profile.created_at,
                 ),
               ],
-              ["Last Login", detailDate(dataValue("lastLoginAt"))],
-              ["Registration Source", dataValue("registrationSource")],
-              ["Last Login Source", dataValue("lastLoginSource")],
+              ["Last Login", activity.lastLoginAt || dataValue("lastLoginAt", "last_login_at") ? detailDate(activity.lastLoginAt ?? dataValue("lastLoginAt", "last_login_at")) : "No sign-in recorded"],
+              ["Registration Source", activity.registrationSource ?? dataValue("registrationSource", "source", "platform") ?? "Not recorded"],
+              ["Last Login Source", activity.lastLoginSource ?? dataValue("lastLoginSource") ?? "Not recorded"],
             ])}
             {section("Profile Status", [
               [
@@ -12207,11 +12223,6 @@ function UserDetail() {
               ["Verified At", detailDate(dataValue("verifiedAt"))],
               ["Wizard Completed", dataValue("wizardCompleted")],
               ["Completeness Score", dataValue("completenessScore")],
-            ])}
-            {section("Donor Details", [
-              ["Contact Willingness", dataValue("contactWillingness")],
-              ["Previous Donations", dataValue("previousDonations")],
-              ["Willing to Donate To", dataValue("willingToDonateTo")],
             ])}
           </article>
         </section>

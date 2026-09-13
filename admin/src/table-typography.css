@@ -74,6 +74,7 @@
 
 /* Responsive tables render column headings from the cell label. */
 .app table td[data-label]::before {
+  color: rgb(2, 8, 23) !important;
   font-size: var(--admin-table-font-size) !important;
   font-weight: 500 !important;
   line-height: 20px !important;
@@ -85,10 +86,32 @@
 /* Column headings never split words and use the medium reference weight. */
 .app table thead th,
 .app [role="table"] [role="columnheader"] {
+  color: rgb(2, 8, 23) !important;
   font-weight: 500 !important;
   overflow-wrap: normal !important;
   white-space: nowrap !important;
   word-break: normal !important;
+}
+
+.app .users-table tbody :is(.table-column-location, .table-column-createdAt) {
+  color: rgb(100, 116, 139);
+}
+
+.app table thead th :is(span, button, a),
+.app [role="table"] [role="columnheader"] :is(span, button, a) {
+  color: rgb(2, 8, 23) !important;
+}
+.app table tbody tr:hover,
+.app table tbody tr:hover > td {
+  background-color: #f8fafc !important;
+}
+.app table :is(.row-menu-button, .admin-action-trigger, .campaign-manage) {
+  color: rgb(2, 8, 23) !important;
+  font-size: 14px !important;
+}
+.app table :is(.row-menu-button, .admin-action-trigger, .campaign-manage) svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* Status chips stay compact in every admin table. */

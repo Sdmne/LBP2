@@ -27,6 +27,8 @@ from datetime import date, datetime, timedelta, timezone
 from contextlib import contextmanager
 from threading import Lock, Thread
 from typing import Any, Literal
+from functools import lru_cache
+from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 
 try:
     import bcrypt
@@ -1299,17 +1301,20 @@ class SignupPayload(BaseModel):
     password: str = Field(min_length=8, max_length=200)
     displayName: str = Field(min_length=1, max_length=255)
     locale: str = Field(default="en", max_length=8)
+    deviceInfo: dict[str, Any] = Field(default_factory=dict)
 
 
 class LoginPayload(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=1, max_length=200)
+    deviceInfo: dict[str, Any] = Field(default_factory=dict)
 
 
 class FirebaseAuthPayload(BaseModel):
     idToken: str = Field(min_length=100, max_length=20000)
     displayName: str | None = Field(default=None, max_length=255)
     intent: Literal["login", "register"] = "login"
+    deviceInfo: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthSessionResponse(BaseModel):
@@ -2524,21 +2529,51 @@ def as_dict(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def record_device_session(cursor, profile_id: int, request: Request, source: str) -> None:
+def device_client_metadata(value: Any) -> dict[str, Any]:
+    """Allow only device properties; identity, IP and timestamps are server-owned."""
+    raw = as_dict(value)
+    result: dict[str, Any] = {}
+    for key in ("source", "osName", "osVersion", "brand", "model", "appVersion"):
+        if isinstance(raw.get(key), str) and raw[key].strip():
+            result[key] = raw[key].strip()[:120]
+    if result.get("source") not in {"Web App", "Mobile App (iOS)", "Mobile App (Android)"}:
+        result.pop("source", None)
+    zone = raw.get("timezone")
+    if isinstance(zone, str) and len(zone) <= 100:
+        try:
+            ZoneInfo(zone)
+            result["timezone"] = zone
+        except (ValueError, ZoneInfoNotFoundError):
+            pass
+    for key, maximum in (("screenWidth", 20000), ("screenHeight", 20000), ("pixelRatio", 20)):
+        number = raw.get(key)
+        if isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number) and 0 < number <= maximum:
+            result[key] = number
+    if isinstance(raw.get("isEmulator"), bool):
+        result["isEmulator"] = raw["isEmulator"]
+    return result
+
+
+def record_device_session(cursor, profile_id: int, request: Request, source: str, device_info: Any = None, *, is_registration: bool = False) -> None:
     """Persist a factual sign-in record for the admin Devices history."""
     forwarded_for = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
     client_host = getattr(request.client, "host", "") if request.client else ""
     user_agent = str(request.headers.get("user-agent") or "").strip()
     normalized_agent = user_agent.lower()
-    device_type = "mobile" if any(token in normalized_agent for token in ("android", "iphone", "ipad", "mobile")) else "desktop"
+    client_info = device_client_metadata(device_info)
+    device_type = "mobile" if str(client_info.get("source") or "").startswith("Mobile App") or any(token in normalized_agent for token in ("android", "iphone", "ipad", "mobile")) else "desktop"
     data = {
+        **client_info,
         "profileId": profile_id,
         "signedInAt": now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": source,
+        "authMethod": source,
         "ip": forwarded_for or client_host,
         "userAgent": user_agent[:1000],
         "deviceType": device_type,
+        "isRegistration": is_registration,
     }
+    if "source" not in data and user_agent.startswith("Mozilla/"):
+        data["source"] = "Web App"
     cursor.execute(
         """
         INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at)
@@ -2549,6 +2584,16 @@ def record_device_session(cursor, profile_id: int, request: Request, source: str
             f"Sign-in session for profile {profile_id}",
             json.dumps(data, ensure_ascii=False),
         ),
+    )
+    cursor.execute(
+        """
+        UPDATE profiles
+        SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('lastSessionDevice', %s::jsonb)
+            || CASE WHEN %s AND COALESCE(data->'registrationDevice', 'null'::jsonb) = 'null'::jsonb
+                    THEN jsonb_build_object('registrationDevice', %s::jsonb) ELSE '{}'::jsonb END
+        WHERE id = %s
+        """,
+        (json.dumps(data, ensure_ascii=False), is_registration, json.dumps(data, ensure_ascii=False), profile_id),
     )
 
 
@@ -3812,6 +3857,8 @@ def ensure_support_welcome(cursor, profile_id: int) -> int | None:
     if not support_conversation:
         return None
     conversation_id, support_profile_id = support_conversation
+    # Serialize the existence check for concurrent sign-ins and admin initialization.
+    cursor.execute("SELECT id FROM conversations WHERE id = %s FOR UPDATE", (conversation_id,))
     cursor.execute(
         """
         INSERT IGNORE INTO support_welcome_deliveries (profile_id, support_profile_id, conversation_id, created_at)
@@ -4053,7 +4100,7 @@ def api_root():
 
 
 @app.post("/api/auth/signup", response_model=SignupSessionResponse)
-def auth_signup(payload: SignupPayload, response: Response):
+def auth_signup(payload: SignupPayload, response: Response, request: Request):
     email = normalize_email(payload.email)
     if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
         raise HTTPException(status_code=422, detail="Valid email is required")
@@ -4091,6 +4138,7 @@ def auth_signup(payload: SignupPayload, response: Response):
         )
         user_id = cursor.lastrowid
         ensure_support_welcome(cursor, int(profile_id))
+        record_device_session(cursor, int(profile_id), request, "password", payload.deviceInfo, is_registration=True)
         token, expires_at = create_session(cursor, user_id)
         verification_token, _ = issue_auth_action_token(
             cursor,
@@ -4273,7 +4321,7 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
             user = cursor.fetchone()
 
         ensure_support_welcome(cursor, int(user["profile_id"]))
-        record_device_session(cursor, int(user["profile_id"]), request, f"social:{provider}")
+        record_device_session(cursor, int(user["profile_id"]), request, f"social:{provider}", payload.deviceInfo, is_registration=is_new_user)
         token, expires_at = create_session(cursor, user["id"])
         conn.commit()
 
@@ -4311,7 +4359,7 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
             )
             user["password_hash"] = upgraded_hash
         ensure_support_welcome(cursor, int(user["profile_id"]))
-        record_device_session(cursor, int(user["profile_id"]), request, "password")
+        record_device_session(cursor, int(user["profile_id"]), request, "password", payload.deviceInfo)
         token, expires_at = create_session(cursor, user["id"])
         conn.commit()
     return auth_session_response(response, token, expires_at, user)
@@ -5681,6 +5729,15 @@ def apply_avatar_crop_moderation(
     public_url = None
     with db_cursor() as (conn, cursor):
         if decision == "APPROVED":
+            cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
+            if not cursor.fetchone():
+                raise HTTPException(status_code=404, detail="User not found")
+            cursor.execute(
+                "SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE",
+                (primary_photo_id, profile_id),
+            )
+            if not cursor.fetchone():
+                raise HTTPException(status_code=409, detail="Approved primary photo is unavailable")
             public_url = promote_media_file(cursor, media_file_id)
             if not public_url:
                 raise HTTPException(status_code=409, detail="Avatar media is unavailable")
@@ -5688,7 +5745,7 @@ def apply_avatar_crop_moderation(
                 """
                 UPDATE profile_photos
                 SET avatar_media_file_id = %s, updated_at = UTC_TIMESTAMP()
-                WHERE id = %s AND profile_id = %s AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
+                WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
                 """,
                 (media_file_id, primary_photo_id, profile_id),
             )
@@ -6029,7 +6086,16 @@ async def member_upload_avatar(
     file: UploadFile = File(...),
     user: dict[str, Any] = Depends(require_user),
 ):
-    profile_id = require_profile_id(user)
+    return await upload_profile_avatar(file, require_profile_id(user))
+
+
+async def upload_profile_avatar(
+    file: UploadFile,
+    profile_id: int,
+    *,
+    expected_photo_id: int | None = None,
+    actor: str = "google_vision",
+):
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
@@ -6044,6 +6110,8 @@ async def member_upload_avatar(
         primary_photo = cursor.fetchone()
     if not primary_photo:
         raise HTTPException(status_code=409, detail="Upload and approve a primary profile photo first")
+    if expected_photo_id is not None and int(primary_photo["id"]) != expected_photo_id:
+        raise HTTPException(status_code=409, detail="This photo is no longer the primary photo")
     content_type, ext, body, image_metadata = await read_profile_image(file)
     storage_dir = PRIVATE_UPLOAD_DIR / "profiles" / str(profile_id)
     storage_dir.mkdir(parents=True, exist_ok=True)
@@ -6096,6 +6164,7 @@ async def member_upload_avatar(
         profile_id,
         int(primary_photo["id"]),
         moderation,
+        actor=actor,
     )
     if outcome["status"] == "REJECTED":
         raise HTTPException(status_code=422, detail="Avatar photo was rejected by moderation")
@@ -9937,6 +10006,28 @@ def admin_test_notification(
     return result
 
 
+@app.get("/api/admin/subscriptions/summary")
+def admin_subscription_summary(_admin: str = Depends(require_admin)):
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'ACTIVE') AS active_subscriptions,
+                COUNT(*) FILTER (WHERE status = 'ACTIVE' AND source IN ('MANUAL', 'MANUAL_REVIEW')) AS manual_subscriptions,
+                COUNT(*) FILTER (WHERE source IN ('MANUAL', 'MANUAL_REVIEW') AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days') AS manual_subscriptions_30d,
+                COUNT(*) FILTER (WHERE status = 'ACTIVE' AND source IN ('APP_STORE', 'APP STORE', 'IOS')) AS app_store_subscriptions,
+                COUNT(*) FILTER (WHERE status = 'ACTIVE' AND source IN ('PLAY_STORE', 'PLAY STORE', 'ANDROID')) AS play_store_subscriptions,
+                (SELECT COUNT(*) FROM profiles WHERE role = 'USER') AS profiles
+            FROM (
+                SELECT status, created_at, UPPER(COALESCE(data ->> 'source', '')) AS source
+                FROM app_entities WHERE entity_type = 'subscription'
+            ) subscriptions
+            """
+        )
+        counts = cursor.fetchone()
+    return {"counts": {key: int(value or 0) for key, value in counts.items()}}
+
+
 @app.get("/api/admin/stats")
 def admin_stats(_admin: str = Depends(require_admin)):
     profile_dashboard: dict[str, Any] = {
@@ -11268,35 +11359,171 @@ def admin_detail_person(row: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+@lru_cache(maxsize=1)
+def device_timezone_countries() -> dict[str, str]:
+    for folder in TZPATH:
+        try:
+            lines = (Path(folder) / "zone.tab").read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        return {parts[2]: parts[0] for line in lines if not line.startswith("#") and len(parts := line.split("\t")) >= 3}
+    return {}
+
+
+def admin_device_data(value: Any) -> dict[str, Any]:
+    raw = as_dict(value)
+    screen = as_dict(raw.get("screen"))
+    location = as_dict(raw.get("location"))
+    def first(*values):
+        return next((v for v in values if v is not None and v != "" and not isinstance(v, (dict, list))), None)
+    source = str(first(raw.get("source"), raw.get("platform")) or "").strip()
+    if source.lower() in {"web", "web app", "local_signup", "firebase_auth"}:
+        source = "Web App"
+    elif source.lower() in {"ios", "mobile app (ios)", "app_store"}:
+        source = "Mobile App (iOS)"
+    elif source.lower() in {"android", "mobile app (android)", "play_store"}:
+        source = "Mobile App (Android)"
+    elif source.lower() == "password" or source.lower().startswith("social:") or not source:
+        source = "Web App" if str(raw.get("userAgent") or "").startswith("Mozilla/") else ""
+    os_name = first(raw.get("os"), raw.get("osName"))
+    os_version = first(raw.get("osVersion"))
+    os_label = str(os_name or "")
+    if os_version and str(os_version) not in os_label:
+        os_label = f"{os_label} {os_version}".strip()
+    if not os_label:
+        agent = str(raw.get("userAgent") or "")
+        for pattern, name in ((r"(?:iPhone OS|CPU OS) ([\d_]+)", "iOS"), (r"Android ([\d.]+)", "Android"), (r"Mac OS X ([\d_]+)", "macOS")):
+            match = re.search(pattern, agent)
+            if match:
+                os_label = name + " " + match.group(1).replace("_", ".")
+                break
+    model = first(raw.get("device"), raw.get("model"), raw.get("modelName"))
+    brand = first(raw.get("brand"), raw.get("manufacturer"))
+    device_label = f"{brand} {model}" if brand and model and not str(model).lower().startswith(str(brand).lower()) else model or brand
+    width, height = first(raw.get("screenWidth"), screen.get("width")), first(raw.get("screenHeight"), screen.get("height"))
+    zone = first(raw.get("timezone"), raw.get("timeZone"))
+    emulator = raw.get("isEmulator")
+    if not isinstance(emulator, bool):
+        emulator = {"true": True, "1": True, "false": False, "0": False}.get(str(emulator).lower())
+    return {
+        **raw, "source": source or None,
+        "ip": first(raw.get("ipAddress"), raw.get("ip"), raw.get("ip_address")),
+        "location": first(raw.get("location")),
+        "city": first(raw.get("city"), location.get("city")),
+        "country": first(raw.get("ipCountry"), raw.get("country"), location.get("country")),
+        "timezone": zone,
+        "timezoneCountry": first(raw.get("timezoneCountry"), raw.get("tzCountry"), device_timezone_countries().get(str(zone))),
+        "screen": f"{width}×{height}" if width and height else first(raw.get("screen")),
+        "os": os_label or None, "device": device_label, "isEmulator": emulator,
+    }
+
+
 def admin_profile_device_history(profile: dict[str, Any], session_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return only persisted device records and profile snapshots, never placeholders."""
+    """Keep roles distinct and choose the latest factual session without inventing history."""
     data = as_dict(profile.get("data"))
-    devices: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for key, label, fallback_date in (
-        ("registrationDevice", "Registration device", profile.get("created_at")),
-        ("lastSessionDevice", "Last session device", profile.get("updated_at")),
-        ("device", "Saved device", profile.get("created_at")),
-        ("lastDevice", "Last known device", profile.get("updated_at")),
-    ):
-        item = as_dict(data.get(key))
+    def record(value, fallback_date=None):
+        item = as_dict(value)
         if not item:
-            continue
-        fingerprint = json.dumps(item, sort_keys=True, default=str)
-        if fingerprint in seen:
-            continue
-        seen.add(fingerprint)
-        devices.append({"kind": label, "created_at": item.get("date") or item.get("createdAt") or fallback_date, "data": item})
-    for row in session_rows:
-        item = as_dict(row.get("data"))
-        if item:
-            devices.append({"kind": "Sign-in session", "created_at": item.get("signedInAt") or row.get("created_at"), "data": item})
-    return devices
+            return None
+        stamp = next((stamp for v in (item.get("signedInAt"), item.get("date"), item.get("createdAt"), fallback_date) if (stamp := admin_activity_timestamp(v))), None)
+        return {"created_at": stamp.isoformat() if stamp else None, "data": admin_device_data(item)}
+    registered = data.get("createdAt") or data.get("registeredAt") or profile.get("created_at")
+    registration = record(data.get("registrationDevice"), registered)
+    sessions = [item for row in session_rows if (item := record(row.get("data"), row.get("created_at")))]
+    if not registration:
+        registrations = [item for item in sessions if item["data"].get("isRegistration") is True]
+        registration = min(registrations, key=lambda item: item["created_at"] or "") if registrations else None
+    candidates = [item for key in ("lastSessionDevice", "lastDevice", "device") if (item := record(data.get(key)))] + sessions
+    last = max(candidates, key=lambda item: item["created_at"] or "") if candidates else None
+    return [dict(item, kind=label) for label, item in (("Registration device", registration), ("Last session device", last)) if item]
 
 
 def admin_detail_rows(cursor, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
     cursor.execute(query, params)
     return [normalize_row(row) for row in cursor.fetchall()]
+
+
+def admin_activity_timestamp(value: Any) -> datetime | None:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def admin_activity_source(source: Any, user_agent: Any = None) -> str | None:
+    text = str(source or "").strip()
+    platform_source = "" if text.lower() == "password" or text.lower().startswith("social:") else source
+    platform = normalize_platform_name(platform_source, user_agent)
+    if platform in {"Web", "Android", "iOS"}:
+        return {"Web": "Web App", "Android": "Mobile App (Android)", "iOS": "Mobile App (iOS)"}[platform]
+    if not text:
+        return None
+    return {"password": "Email/password", "social:google.com": "Google", "social:apple.com": "Apple"}.get(text.lower(), text)
+
+
+def admin_profile_activity(profile: dict[str, Any], sessions: list[dict[str, Any]], auth: dict[str, Any]) -> dict[str, Any]:
+    data = as_dict(profile.get("data"))
+    registered = next((stamp for value in (data.get("createdAt"), data.get("registeredAt"), profile.get("created_at"), profile.get("createdAt")) if (stamp := admin_activity_timestamp(value))), None)
+    registration_device = as_dict(data.get("registrationDevice"))
+    registration_source = admin_activity_source(
+        registration_device.get("source") or data.get("registrationSource") or data.get("source") or data.get("platform"),
+        registration_device.get("userAgent"),
+    )
+    candidates: list[tuple[datetime, str | None]] = []
+    for key in ("lastLoginAt", "last_login_at", "lastSignInAt"):
+        stamp = admin_activity_timestamp(data.get(key))
+        if stamp:
+            candidates.append((stamp, admin_activity_source(data.get("lastLoginSource"))))
+    last_device = as_dict(data.get("lastSessionDevice"))
+    last_device_stamp = admin_activity_timestamp(last_device.get("signedInAt") or last_device.get("date") or last_device.get("createdAt"))
+    if last_device_stamp:
+        candidates.append((last_device_stamp, admin_activity_source(last_device.get("source"), last_device.get("userAgent"))))
+    for session in sessions:
+        saved = as_dict(session.get("data"))
+        stamp = admin_activity_timestamp(saved.get("signedInAt") or session.get("created_at") or session.get("createdAt"))
+        if not stamp:
+            continue
+        source = admin_activity_source(saved.get("source"), saved.get("userAgent"))
+        candidates.append((stamp, source))
+        if not registration_source and registered and abs((stamp - registered).total_seconds()) <= 600:
+            registration_source = source
+    auth_login = admin_activity_timestamp(auth.get("last_login_at"))
+    if auth_login:
+        candidates.append((auth_login, None))
+    last_login, last_source = max(candidates, key=lambda item: (item[0], bool(item[1]))) if candidates else (None, None)
+    if last_login and not last_source:
+        last_source = next((source for stamp, source in sorted(candidates, reverse=True, key=lambda item: item[0]) if source and abs((last_login - stamp).total_seconds()) <= 120), None)
+    return {
+        "registeredAt": registered.isoformat() if registered else None,
+        "lastLoginAt": last_login.isoformat() if last_login else None,
+        "registrationSource": registration_source,
+        "lastLoginSource": last_source,
+    }
+
+
+def admin_profile_identity(profile: dict[str, Any], verifications: list[dict[str, Any]], subscriptions: list[dict[str, Any]]) -> dict[str, bool]:
+    data = as_dict(profile.get("data"))
+    verified = (json_bool(data, "isVerified") if "isVerified" in data else
+                json_bool(data, "verified") if "verified" in data else
+                bool(data.get("verifiedAt")) or bool(verifications and str(verifications[0].get("status")).upper() == "APPROVED"))
+    premium = profile_is_premium(profile)
+    for subscription in subscriptions:
+        if subscription.get("entity_type") != "subscription" or str(subscription.get("status") or "").upper() not in {"ACTIVE", "APPROVED"}:
+            continue
+        raw_expiry = as_dict(subscription.get("data")).get("expiresAt")
+        expires = admin_activity_timestamp(raw_expiry)
+        if not raw_expiry or expires and expires > now_utc():
+            premium = True
+    return {"isVerified": verified, "isPremium": premium}
+
+
+def amplitude_is_configured() -> bool:
+    url = urllib.parse.urlparse(AMPLITUDE_USER_PROFILE_URL_TEMPLATE)
+    host = url.hostname or ""
+    return bool(AMPLITUDE_API_KEY and "{user_id}" in AMPLITUDE_USER_PROFILE_URL_TEMPLATE and url.scheme == "https" and (host == "amplitude.com" or host.endswith(".amplitude.com")))
 
 
 @app.get("/api/admin/users/{profile_id}/overview")
@@ -11316,7 +11543,17 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         profile_ref = str(profile_id)
 
         cursor.execute(
-            "SELECT id, public_url, position, status, moderation_status, created_at, updated_at FROM profile_photos WHERE profile_id = %s ORDER BY position ASC, id ASC",
+            """
+            SELECT pp.id, pp.public_url, pp.position, pp.status, pp.moderation_status,
+                   pp.created_at, pp.updated_at,
+                   CASE WHEN pp.status = 'DELETED' THEN pp.updated_at ELSE NULL END AS deleted_at,
+                   (pp.id = (SELECT primary_photo.id FROM profile_photos primary_photo
+                             WHERE primary_photo.profile_id = pp.profile_id AND primary_photo.position = 0
+                               AND primary_photo.status = 'ACTIVE' AND primary_photo.moderation_status = 'APPROVED'
+                             ORDER BY primary_photo.id DESC LIMIT 1)) AS isPrimary
+            FROM profile_photos pp WHERE pp.profile_id = %s
+            ORDER BY pp.position ASC, pp.id ASC
+            """,
             (profile_id,),
         )
         photos = [normalize_row(row) for row in cursor.fetchall()]
@@ -11373,7 +11610,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
             SELECT b.id, b.status, b.reason, b.created_at, b.updated_at,
                    p.id AS profile_id, p.display_name, p.email, p.status AS profile_status, p.data AS profile_data
             FROM profile_blocks b JOIN profiles p ON p.id = b.blocked_profile_id
-            WHERE b.blocker_profile_id = %s
+            WHERE b.blocker_profile_id = %s AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE'
             ORDER BY b.created_at DESC, b.id DESC
             """,
             (profile_id,),
@@ -11384,7 +11621,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
             SELECT b.id, b.status, b.reason, b.created_at, b.updated_at,
                    p.id AS profile_id, p.display_name, p.email, p.status AS profile_status, p.data AS profile_data
             FROM profile_blocks b JOIN profiles p ON p.id = b.blocker_profile_id
-            WHERE b.blocked_profile_id = %s
+            WHERE b.blocked_profile_id = %s AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE'
             ORDER BY b.created_at DESC, b.id DESC
             """,
             (profile_id,),
@@ -11421,21 +11658,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
             """,
             (profile_id, profile_id, profile_id),
         )
-        support_messages = admin_detail_rows(
-            cursor,
-            """
-            SELECT cm.id, cm.conversation_id, cm.sender_profile_id, cm.body, cm.media_url, cm.status,
-                   cm.read_at, cm.delivered_at, cm.created_at,
-                   s.display_name AS sender_name, s.email AS sender_email, s.role AS sender_role
-            FROM conversation_messages cm
-            JOIN conversations c ON c.id = cm.conversation_id
-            JOIN profiles peer ON peer.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
-            LEFT JOIN profiles s ON s.id = cm.sender_profile_id
-            WHERE (c.profile_a_id = %s OR c.profile_b_id = %s) AND peer.role = 'SUPPORT'
-            ORDER BY cm.created_at DESC, cm.id DESC
-            """,
-            (profile_id, profile_id, profile_id),
-        )
+        support_messages = admin_profile_support_messages(cursor, profile_id)
 
         subscriptions = admin_detail_rows(
             cursor,
@@ -11501,6 +11724,18 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
 
         cursor.execute(
             """
+            SELECT MAX(s.created_at) AS last_login_at,
+                   COALESCE(BOOL_OR(s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
+                       AND s.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'), FALSE) AS is_online
+            FROM local_users u JOIN auth_sessions s ON s.user_id = u.id
+            WHERE u.profile_id = %s
+            """,
+            (profile_id,),
+        )
+        auth_activity = cursor.fetchone() or {}
+
+        cursor.execute(
+            """
             SELECT COUNT(*) AS cnt FROM app_entities
             WHERE entity_type = 'moderation_report'
               AND (data->>'targetProfileId' = %s OR data->>'reportedProfileId' = %s)
@@ -11524,12 +11759,50 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
     }
     return {
         "profile": normalize_row(profile), "counts": counts, "photos": photos,
+        "activity": admin_profile_activity(profile, device_sessions, auth_activity),
+        "isOnline": bool(auth_activity.get("is_online")),
+        **admin_profile_identity(profile, verification_rows, subscriptions),
+        "amplitudeConfigured": amplitude_is_configured(),
         "devices": admin_profile_device_history(profile, device_sessions), "verifications": verification_rows,
         "supportMessages": support_messages, "conversations": conversations, "messages": messages,
         "sentLikes": sent_likes, "receivedLikes": received_likes, "matches": matches,
         "subscriptions": subscriptions, "likedClinics": liked_clinics, "visitors": visitors,
         "blocked": blocked, "blockedBy": blocked_by,
     }
+
+
+def admin_profile_support_messages(cursor, profile_id: int) -> list[dict[str, Any]]:
+    return admin_detail_rows(
+        cursor,
+        """
+        SELECT cm.id, cm.conversation_id, cm.sender_profile_id, cm.body, cm.media_url, cm.status,
+               cm.read_at, cm.delivered_at, cm.created_at,
+               s.display_name AS sender_name, s.role AS sender_role
+        FROM conversation_messages cm
+        JOIN conversations c ON c.id = cm.conversation_id
+        JOIN profiles peer ON peer.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
+        LEFT JOIN profiles s ON s.id = cm.sender_profile_id
+        WHERE (c.profile_a_id = %s OR c.profile_b_id = %s) AND peer.role = 'SUPPORT'
+        ORDER BY cm.created_at DESC, cm.id DESC
+        """,
+        (profile_id, profile_id, profile_id),
+    )
+
+
+@app.post("/api/admin/users/{profile_id}/support/ensure")
+def admin_ensure_user_support(profile_id: str, _admin: str = Depends(require_admin)):
+    """Initialize the existing welcome flow explicitly, including migrated accounts."""
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        items = admin_profile_support_messages(cursor, resolved_id)
+        welcome = next((item for item in items if item.get("sender_role") == "SUPPORT" and item.get("body") == SUPPORT_WELCOME_MESSAGE and item.get("status") == "ACTIVE"), None)
+        if welcome:
+            conversation_id = welcome["conversation_id"]
+        else:
+            conversation_id = ensure_support_welcome(cursor, resolved_id)
+            items = admin_profile_support_messages(cursor, resolved_id)
+        conn.commit()
+    return {"items": items, "total": len(items), "conversationId": conversation_id}
 
 
 @app.get("/api/admin/users/{profile_id}/tabs/{tab_name}")
@@ -11561,7 +11834,7 @@ def admin_open_user_in_amplitude(profile_id: str, actor: str = Depends(require_a
     The ingestion key lives only in server configuration. Email, phone number,
     and message content are deliberately excluded from Amplitude properties.
     """
-    if not AMPLITUDE_API_KEY:
+    if not amplitude_is_configured():
         raise HTTPException(status_code=503, detail="Amplitude is not configured")
     with db_cursor() as (conn, cursor):
         profile_id = resolve_admin_profile_id(cursor, profile_id)
@@ -12343,10 +12616,26 @@ def admin_send_support_message(conversation_id: int, payload: AdminSupportMessag
     return {"ok": True, "messageId": message_id}
 
 
+ADMIN_LOCATION_MISMATCH_SQL = """
+    CASE LOWER(COALESCE(
+        NULLIF(TRIM(data ->> 'locationMismatchType'), ''),
+        NULLIF(TRIM(data ->> 'locationMismatch'), ''),
+        NULLIF(TRIM(data ->> 'locationRisk'), ''),
+        ''
+    ))
+        WHEN 'hard' THEN 'hard'
+        WHEN 'soft' THEN 'soft'
+        WHEN 'true' THEN 'soft'
+        WHEN '1' THEN 'soft'
+        ELSE ''
+    END
+"""
+
+
 ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
     "users": {
         "table": "profiles",
-        "select": """
+        "select": f"""
             id, role, display_name, email, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) AS sourceId,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileType')) AS profileType,
@@ -12397,13 +12686,9 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                   AND aus.revoked_at IS NULL
                   AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
             ) AS isOnline,
-            COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatchType')),
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatch')),
-                ''
-            ) AS locationMismatch,
+            {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
-             WHERE b.blocker_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
+             WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
             (SELECT COUNT(*) FROM app_entities r
              WHERE r.entity_type = 'moderation_report'
                AND CAST(COALESCE(
@@ -12428,11 +12713,11 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
             "country": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.country'))",
             "city": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.city'))",
         },
-        "order": "id DESC",
+        "order": "created_at DESC NULLS LAST, id DESC",
     },
     "profiles": {
         "table": "profiles",
-        "select": """
+        "select": f"""
             id, role, display_name, email, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) AS sourceId,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileType')) AS profileType,
@@ -12483,13 +12768,9 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                   AND aus.revoked_at IS NULL
                   AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
             ) AS isOnline,
-            COALESCE(
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatchType')),
-                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatch')),
-                ''
-            ) AS locationMismatch,
+            {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
-             WHERE b.blocker_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
+             WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
             (SELECT COUNT(*) FROM app_entities r
              WHERE r.entity_type = 'moderation_report'
                AND CAST(COALESCE(
@@ -12514,7 +12795,7 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
             "country": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.country'))",
             "city": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.city'))",
         },
-        "order": "id DESC",
+        "order": "created_at DESC NULLS LAST, id DESC",
     },
     "clinics": {
         "table": "clinics",
@@ -13641,14 +13922,17 @@ def build_list_where(
     filter_values = {
         "status": status_filter,
         "country": country,
-        "city": city,
+        "city": (city or "").strip(),
         "role": role,
         "locale": locale,
         "profileType": profile_type,
     }
     for key, value in filter_values.items():
         if value and key in filters:
-            where_parts.append(f"{filters[key]} = %s")
+            if key == "city":
+                where_parts.append(f"STRPOS(LOWER(COALESCE({filters[key]}, '')), LOWER(%s)) > 0")
+            else:
+                where_parts.append(f"{filters[key]} = %s")
             params.append(value)
     if group and definition.get("table") == "app_entities":
         where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.group')) = %s")
@@ -13660,18 +13944,12 @@ def build_list_where(
                 where_parts.append(f"({expr} IS NOT NULL AND {expr} <> '')")
             elif str(value).lower() in {"0", "false", "no", "missing"}:
                 where_parts.append(f"({expr} IS NULL OR {expr} = '')")
-    mismatch_value = str(mismatch or "").lower()
-    if mismatch_value in {"any", "hard"} and "profileType" in filters:
-        mismatch_expression = (
-            "LOWER(COALESCE("
-            "JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatchType')), "
-            "JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatch')), "
-            "JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationRisk')), ''))"
-        )
+    mismatch_value = str(mismatch or "").strip().lower()
+    if mismatch_value in {"any", "hard"} and definition.get("table") == "profiles":
         if mismatch_value == "hard":
-            where_parts.append(f"{mismatch_expression} = 'hard'")
+            where_parts.append(f"({ADMIN_LOCATION_MISMATCH_SQL}) = 'hard'")
         else:
-            where_parts.append(f"{mismatch_expression} IN ('hard', 'soft', 'true', '1')")
+            where_parts.append(f"({ADMIN_LOCATION_MISMATCH_SQL}) IN ('hard', 'soft')")
     if definition.get("table") == "profiles":
         if is_donor and str(is_donor).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) <> ''")
@@ -13729,11 +14007,13 @@ def admin_list(
         order = definition["order"]
         if view in {"users", "profiles"}:
             order = {
-                "newest": "id DESC",
-                "oldest": "id ASC",
+                "newest": "created_at DESC NULLS LAST, id DESC",
+                "oldest": "created_at ASC NULLS LAST, id ASC",
+                "blocked": '"blocksCount" DESC, created_at DESC NULLS LAST, id DESC',
+                "reported": '"reportsCount" DESC, created_at DESC NULLS LAST, id DESC',
                 "name": "display_name ASC, id DESC",
                 "updated": "updated_at DESC, id DESC",
-            }.get(str(order_by or "").lower(), order)
+            }.get(str(order_by or "newest").strip().lower(), order)
         with db_cursor() as (_, cursor):
             cursor.execute(f"SELECT COUNT(*) AS cnt FROM `{table}` {where}", params)
             total = int(cursor.fetchone()["cnt"])
@@ -14370,6 +14650,98 @@ def admin_storage(
     }
 
 
+@app.post("/api/admin/users/{profile_id}/photos/{photo_id}/avatar")
+async def admin_crop_user_photo(
+    profile_id: str,
+    photo_id: int,
+    file: UploadFile = File(...),
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (_, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute("SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s", (photo_id, resolved_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Photo not found")
+    return await upload_profile_avatar(file, resolved_id, expected_photo_id=photo_id, actor=f"admin:{actor}")
+
+
+def permanently_delete_profile_photo(cursor, profile_id: int, photo_id: int) -> list[str]:
+    cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="User not found")
+    cursor.execute(
+        "SELECT id, position, status, media_file_id, avatar_media_file_id FROM profile_photos WHERE id = %s AND profile_id = %s FOR UPDATE",
+        (photo_id, profile_id),
+    )
+    photo = cursor.fetchone()
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    media_ids = {int(value) for value in (photo.get("media_file_id"), photo.get("avatar_media_file_id")) if value is not None}
+    # Include previous crops owned by this photo, including rejected crops.
+    cursor.execute(
+        "SELECT id FROM media_files WHERE metadata->>'profileId' = %s AND metadata->>'primaryPhotoId' = %s",
+        (str(profile_id), str(photo_id)),
+    )
+    media_ids.update(int(row["id"]) for row in cursor.fetchall())
+    cursor.execute("DELETE FROM profile_photos WHERE id = %s AND profile_id = %s", (photo_id, profile_id))
+    cursor.execute(
+        """
+        DELETE FROM app_entities WHERE entity_type = 'moderation_photo'
+          AND (source_key = %s OR (data->>'profileId' = %s AND data->>'profilePhotoId' = %s))
+        """,
+        (f"profile-photo-{photo_id}", str(profile_id), str(photo_id)),
+    )
+    if int(photo.get("position") or 0) == 0 and str(photo.get("status") or "").upper() == "ACTIVE":
+        cursor.execute(
+            """
+            SELECT pp.id, COALESCE(NULLIF(mf.public_url, ''), pp.public_url) AS avatar_url
+            FROM profile_photos pp LEFT JOIN media_files mf ON mf.id = pp.avatar_media_file_id
+            WHERE pp.profile_id = %s AND pp.status = 'ACTIVE' AND pp.moderation_status = 'APPROVED'
+            ORDER BY pp.position ASC, pp.id ASC LIMIT 1
+            """,
+            (profile_id,),
+        )
+        replacement = cursor.fetchone()
+        avatar_url = replacement.get("avatar_url") if replacement else None
+        if replacement:
+            cursor.execute("UPDATE profile_photos SET position = 0, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (replacement["id"],))
+        update_profile_data(cursor, profile_id, {"avatarUrl": avatar_url, "isWizardCompleted": bool(avatar_url), "isVerified": False, "verifiedAt": None, "verificationProvider": None})
+        reset_verification_after_primary_photo_change(cursor, profile_id)
+    storage_keys = []
+    for media_id in sorted(media_ids):
+        cursor.execute(
+            """
+            SELECT mf.id, mf.storage_key FROM media_files mf WHERE mf.id = %s
+              AND NOT EXISTS (SELECT 1 FROM profile_photos pp WHERE pp.media_file_id = mf.id OR pp.avatar_media_file_id = mf.id)
+              AND NOT EXISTS (SELECT 1 FROM app_entities e WHERE e.data->>'mediaFileId' = CAST(mf.id AS TEXT) OR e.data->>'avatarMediaFileId' = CAST(mf.id AS TEXT))
+              AND NOT EXISTS (SELECT 1 FROM profiles p WHERE NULLIF(p.data->>'avatarUrl', '') = mf.public_url)
+            FOR UPDATE
+            """,
+            (media_id,),
+        )
+        media = cursor.fetchone()
+        if not media:
+            continue
+        cursor.execute("DELETE FROM media_files WHERE id = %s", (media_id,))
+        storage_key = str(media.get("storage_key") or "")
+        if storage_key:
+            cursor.execute("SELECT id FROM media_files WHERE storage_key = %s LIMIT 1", (storage_key,))
+            if not cursor.fetchone():
+                storage_keys.append(storage_key)
+    return storage_keys
+
+
+@app.delete("/api/admin/users/{profile_id}/photos/{photo_id}")
+def admin_delete_user_photo(profile_id: str, photo_id: int, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        storage_keys = permanently_delete_profile_photo(cursor, resolved_id, photo_id)
+        audit(conn, actor, "permanent_delete", "profile_photos", photo_id, {"profileId": resolved_id})
+        conn.commit()
+    remove_deleted_profile_files(storage_keys)
+    return {"ok": True, "id": photo_id, "deleted": True}
+
+
 @app.get("/api/admin/profile-photos/{photo_id}/content")
 def admin_profile_photo_content(photo_id: int, _admin: str = Depends(require_admin)):
     with db_cursor() as (_, cursor):
@@ -14377,7 +14749,7 @@ def admin_profile_photo_content(photo_id: int, _admin: str = Depends(require_adm
             """
             SELECT pp.public_url AS publicUrl, mf.storage_key AS storageKey, mf.mime_type AS mimeType
             FROM profile_photos pp
-            JOIN media_files mf ON mf.id = pp.media_file_id
+            LEFT JOIN media_files mf ON mf.id = pp.media_file_id
             WHERE pp.id = %s
             LIMIT 1
             """,
@@ -14425,18 +14797,20 @@ def admin_filter_options(_admin: str = Depends(require_admin)):
             """
         )
         profile_types = cursor.fetchall()
-        cursor.execute(
-            """
-            SELECT JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) AS value, COUNT(*) AS count
-            FROM profiles
-            WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) IS NOT NULL
-              AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) <> ''
-            GROUP BY value
-            ORDER BY count DESC
-            LIMIT 250
-            """
-        )
-        user_countries = cursor.fetchall()
+        profile_countries = {}
+        for profile_role in ("USER", "PARTNER"):
+            cursor.execute(
+                """
+                SELECT data ->> 'country' AS value, COUNT(*) AS count
+                FROM profiles
+                WHERE role = %s
+                  AND NULLIF(TRIM(data ->> 'country'), '') IS NOT NULL
+                GROUP BY value
+                ORDER BY count DESC, value ASC
+                """,
+                (profile_role,),
+            )
+            profile_countries[profile_role] = cursor.fetchall()
         cursor.execute("SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM clinics WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY count DESC LIMIT 250")
         clinic_countries = cursor.fetchall()
         cursor.execute("SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM lawyers WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY count DESC LIMIT 250")
@@ -14462,7 +14836,8 @@ def admin_filter_options(_admin: str = Depends(require_admin)):
         "roles": roles,
         "profileStatuses": profile_statuses,
         "profileTypes": profile_types,
-        "userCountries": user_countries,
+        "userCountries": profile_countries["USER"],
+        "partnerCountries": profile_countries["PARTNER"],
         "clinicCountries": clinic_countries,
         "lawyerCountries": lawyer_countries,
         "clinicStatuses": clinic_statuses,

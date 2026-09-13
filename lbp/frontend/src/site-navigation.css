@@ -17,7 +17,7 @@
 
 .web-app > .web-header .web-header-inner {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1536px;
   height: 80px;
   padding: 0 16px;
 }
@@ -36,8 +36,14 @@
 }
 
 .web-footer {
-  padding: 48px 60px 32px;
+  padding: 48px 0 32px;
   line-height: 24px;
+}
+
+.web-footer .web-footer-inner {
+  width: 100%;
+  max-width: 1536px;
+  padding: 0 16px;
 }
 
 .web-footer .footer-brand {
@@ -62,7 +68,7 @@
   height: 18px;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1280px) {
   .web-app > .web-header nav,
   .web-app > .web-header nav.open {
     position: static;
@@ -86,7 +92,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1279px) {
   .web-app > .web-header nav,
   .web-app > .web-header nav.open {
     display: none;
@@ -212,11 +218,15 @@
     line-height: 14px;
   }
 
+}
+
+@media (max-width: 767px) {
   .web-footer {
     padding: 48px 24px 24px;
   }
 
   .web-footer .web-footer-inner {
+    padding: 0;
     grid-template-columns: max-content minmax(0, 1fr);
     column-gap: 40px;
   }
@@ -224,4 +234,20 @@
   .web-footer .footer-brand {
     justify-self: stretch;
   }
+}
+
+.web-app > .web-header .member-icon-link > svg,
+.web-app > .web-header .member-menu-action > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+@media (min-width: 768px) and (max-width: 1279px) {
+  .web-app > .web-header nav.open { top: 80px; }
+  .web-app > .web-header .mobile-menu { margin-left: auto; }
+  .web-app > .web-header .header-actions { margin-left: 16px; }
+}
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .web-app > .web-header nav { margin-left: 16px; gap: 0; }
+  .web-app > .web-header nav > a { padding-inline: 12px; }
 }

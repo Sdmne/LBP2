@@ -608,6 +608,7 @@ function Shell({
   children: React.ReactNode;
   pendingSession?: boolean;
 }) {
+  const { pathname } = useLocation();
   const locale = localeOf();
   const text = SITE_TEXT[locale];
   const [menuOpen, setMenuOpen] = useState(false);
@@ -615,27 +616,27 @@ function Shell({
   const navigationRef = useRef<HTMLElement>(null);
   const focusMenuOnOpen = useRef<"first" | "last" | null>(null);
   const [headerScrolled, setHeaderScrolled] = useState(() => window.scrollY > 24);
-  const isLanding = new RegExp(`^/${locale}/?$`).test(window.location.pathname);
-  const isAuth = new RegExp(`^/${locale}/auth/`).test(window.location.pathname);
-  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(window.location.pathname);
-  const isChat = new RegExp(`^/${locale}/(?:chat|messages)(?:/|$)`).test(window.location.pathname);
-  const isProfileTool = new RegExp(`^/${locale}/(?:profile/(?:edit|photos|verification)|photos|verification)/?$`).test(window.location.pathname);
+  const isLanding = new RegExp(`^/${locale}/?$`).test(pathname);
+  const isAuth = new RegExp(`^/${locale}/auth/`).test(pathname);
+  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(pathname);
+  const isChat = new RegExp(`^/${locale}/(?:chat|messages)(?:/|$)`).test(pathname);
+  const isProfileTool = new RegExp(`^/${locale}/(?:profile/(?:edit|photos|verification)|photos|verification)/?$`).test(pathname);
   const hasMemberMenu = Boolean(session);
-  const isAccount = new RegExp(`^/${locale}/(?:profile(?:/(?:notifications|blocked))?|likes)/?$`).test(window.location.pathname);
-  const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(window.location.pathname);
-  const isCatalog = !isProfileTool && new RegExp(`^/${locale}/(?:catalog(?:/|$)|profile/[^/]+/?$)`).test(window.location.pathname);
-  const isMemberDetail = !isProfileTool && new RegExp(`^/${locale}/(?:catalog|profile)/[^/]+/?$`).test(window.location.pathname);
-  const isClinics = new RegExp(`^/${locale}/clinics(?:/|$)`).test(window.location.pathname);
-  const isLawyers = new RegExp(`^/${locale}/lawyers(?:/|$)`).test(window.location.pathname);
+  const isAccount = new RegExp(`^/${locale}/(?:profile(?:/(?:notifications|blocked))?|likes)/?$`).test(pathname);
+  const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(pathname);
+  const isCatalog = !isProfileTool && new RegExp(`^/${locale}/(?:catalog(?:/|$)|profile/[^/]+/?$)`).test(pathname);
+  const isMemberDetail = !isProfileTool && new RegExp(`^/${locale}/(?:catalog|profile)/[^/]+/?$`).test(pathname);
+  const isClinics = new RegExp(`^/${locale}/clinics(?:/|$)`).test(pathname);
+  const isLawyers = new RegExp(`^/${locale}/lawyers(?:/|$)`).test(pathname);
   const isDirectory = isClinics || isLawyers;
-  const isDirectoryDetail = new RegExp(`^/${locale}/(?:clinics|lawyers)/[^/]+/?$`).test(window.location.pathname);
-  const isArticle = new RegExp(`^/${locale}/knowledge-hub/[^/]+/?$`).test(window.location.pathname);
-  const isContact = new RegExp(`^/${locale}/contact/?$`).test(window.location.pathname);
-  const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(window.location.pathname);
-  const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(window.location.pathname);
-  const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(window.location.pathname);
-  const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(window.location.pathname);
-  const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(window.location.pathname);
+  const isDirectoryDetail = new RegExp(`^/${locale}/(?:clinics|lawyers)/[^/]+/?$`).test(pathname);
+  const isArticle = new RegExp(`^/${locale}/knowledge-hub/[^/]+/?$`).test(pathname);
+  const isContact = new RegExp(`^/${locale}/contact/?$`).test(pathname);
+  const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(pathname);
+  const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(pathname);
+  const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(pathname);
+  const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(pathname);
+  const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(pathname);
   const menuItems = () => Array.from(navigationRef.current?.querySelectorAll<HTMLElement>("a, button") || [])
     .filter((item) => item.getClientRects().length > 0 && !item.hasAttribute("disabled"));
   const focusMenuEdge = (edge: "first" | "last") => {
@@ -657,7 +658,7 @@ function Shell({
       menuTriggerRef.current?.focus();
     };
     const closeOnDesktop = () => {
-      if (window.innerWidth >= 768) setMenuOpen(false);
+      if (window.innerWidth >= 1280) setMenuOpen(false);
     };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -720,6 +721,15 @@ function Shell({
       </Link>
       <Link role={menuOpen ? "menuitem" : undefined} className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
         {text.lawyers}
+      </Link>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isResources || isFindYourPath ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
+        {text.resources}
+      </Link>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
+        {text.safety}
+      </Link>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isPricing ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/pricing`}>
+        {text.pricing}
       </Link>
       <div className="mobile-nav-actions">
         {pendingSession ? null : session && hasMemberMenu ? (menuOpen && <MemberCounters session={session} menu onNavigate={() => setMenuOpen(false)} />) : session ? (
@@ -798,12 +808,15 @@ function Shell({
               <Link to={`/${locale}/catalog`}>{text.match}</Link>
               <Link to={`/${locale}/clinics`}>{text.clinics}</Link>
               <Link to={`/${locale}/lawyers`}>{text.lawyers}</Link>
+              <Link to={`/${locale}/resources`}>{text.resources}</Link>
+              <Link to={`/${locale}/pricing`}>{text.pricing}</Link>
             </nav>
           </div>
           <div className="footer-column">
             <h3>{text.company}</h3>
             <nav>
               <Link to={`/${locale}/contact`}>{text.contact}</Link>
+              <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
               <Link to={`/${locale}/pages/terms-of-use`}>{text.terms}</Link>
               <Link to={`/${locale}/pages/privacy-policy`}>{text.privacy}</Link>
             </nav>

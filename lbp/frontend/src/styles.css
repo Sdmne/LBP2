@@ -82,7 +82,7 @@ body {
   display: flex;
   align-items: center;
   gap: 48px;
-  padding: 0 max(16px, calc((100vw - 1280px) / 2 + 16px));
+  padding: 0 max(16px, calc((100vw - 1536px) / 2 + 16px));
   background: #fff;
 }
 .logo {
@@ -157,16 +157,17 @@ body {
   cursor: pointer;
 }
 .web-main {
-  width: min(1280px, calc(100% - 32px));
+  width: 100%;
+  max-width: 1536px;
   margin: 0 auto;
-  padding: 56px 0 72px;
+  padding: 56px 16px 72px;
   flex: 1;
 }
 .web-footer {
   background: #050505;
   color: #fff;
   min-height: 190px;
-  padding: 48px max(16px, calc((100vw - 1280px) / 2 + 16px)) 32px;
+  padding: 48px max(16px, calc((100vw - 1536px) / 2 + 16px)) 32px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1428,7 +1429,7 @@ body {
   display: flex;
   align-items: center;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1536px;
   height: 80px;
   margin: 0 auto;
   padding: 0 16px;
@@ -1554,9 +1555,10 @@ body {
 }
 
 .web-main {
-  width: min(1536px, calc(100% - 32px));
+  width: 100%;
+  max-width: 1536px;
   margin: 0 auto;
-  padding: 56px 0 72px;
+  padding: 56px 16px 72px;
   flex: 1;
 }
 
@@ -4647,7 +4649,7 @@ button.landing-gradient-button:disabled {
 /* Catalog parity with the original HTML member directory. */
 .web-main.catalog-main {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1536px;
   padding: 32px 16px 40px;
 }
 
@@ -4670,8 +4672,8 @@ button.landing-gradient-button:disabled {
 }
 
 .member-icon-link svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
@@ -6936,7 +6938,7 @@ body.catalog-filter-open {
 /* Public directories mirror the deployed legacy HTML reference. */
 .web-main.directory-main {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1536px;
   padding: 32px 16px 40px;
 }
 
@@ -7775,7 +7777,7 @@ body.reference-filters-open {
 /* Directory detail pages mirror the deployed HTML reference. */
 .web-main.directory-detail-main {
   width: 100%;
-  max-width: 1280px;
+  max-width: 1536px;
   min-height: 0;
   flex: 0 0 auto;
   margin: 0 auto;
