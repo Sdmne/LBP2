@@ -2459,6 +2459,8 @@ const CATALOG_COPY = {
     premium: "Premium only", premiumTitle: "Premium filters", premiumText: "Choose Premium to unlock advanced filters and find more compatible profiles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Close Premium offer", search: "Search...", none: "No options found", noProfiles: "No profiles found", noProfilesHelp: "Try changing or clearing the filters.",
     loadMore: "Load more", loading: "Loading ...", locationHidden: "Location hidden", message: "Message", like: "Like", liked: "Liked",
     ageError: "Minimum age cannot be greater than maximum age.", failed: "Could not load the catalog.", actionFailed: "This action could not be completed.",
+    dailyLikeLimit: "You have reached today's like limit. You can like more profiles tomorrow.", dailyChatLimit: "You have reached today's new chat limit. You can start more chats tomorrow.",
+    profileUnavailable: "This profile is no longer available.", chatUnavailable: "This conversation cannot be opened right now.",
   },
   ru: {
     browse: "Каталог профилей", collections: "Коллекции", all: "Все", day: "день", days: "дней", month: "месяц",
@@ -2470,6 +2472,8 @@ const CATALOG_COPY = {
     premium: "Только Premium", premiumTitle: "Premium-фильтры", premiumText: "Оформите Premium, чтобы открыть расширенные фильтры и точнее искать подходящие анкеты.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Закрыть предложение Premium", search: "Поиск...", none: "Варианты не найдены", noProfiles: "Анкеты не найдены", noProfilesHelp: "Измените или очистите фильтры.",
     loadMore: "Показать ещё", loading: "Загрузка ...", locationHidden: "Местоположение скрыто", message: "Написать", like: "Нравится", liked: "Liked",
     ageError: "Минимальный возраст не может быть больше максимального.", failed: "Не удалось загрузить каталог.", actionFailed: "Не удалось выполнить действие.",
+    dailyLikeLimit: "Дневной лимит лайков исчерпан. Новые лайки будут доступны завтра.", dailyChatLimit: "Дневной лимит новых чатов исчерпан. Новые диалоги будут доступны завтра.",
+    profileUnavailable: "Этот профиль больше недоступен.", chatUnavailable: "Сейчас не удалось открыть этот диалог.",
   },
   es: {
     browse: "Explorar perfiles", collections: "Colecciones", all: "Todos", day: "día", days: "días", month: "mes",
@@ -2481,6 +2485,8 @@ const CATALOG_COPY = {
     premium: "Solo Premium", premiumTitle: "Filtros Premium", premiumText: "Elige Premium para desbloquear filtros avanzados y encontrar perfiles más compatibles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Cerrar oferta Premium", search: "Buscar...", none: "No se encontraron opciones", noProfiles: "No se encontraron perfiles", noProfilesHelp: "Cambia o borra los filtros.",
     loadMore: "Mostrar más", loading: "Cargando ...", locationHidden: "Ubicación oculta", message: "Escribir", like: "Me gusta", liked: "Liked",
     ageError: "La edad mínima no puede superar la máxima.", failed: "No se pudo cargar el catálogo.", actionFailed: "No se pudo completar la acción.",
+    dailyLikeLimit: "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana.", dailyChatLimit: "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
+    profileUnavailable: "Este perfil ya no está disponible.", chatUnavailable: "No se puede abrir esta conversación ahora mismo.",
   },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
@@ -3057,22 +3063,34 @@ function Catalog({ session }: { session: Session }) {
   const like = async (item: Row) => {
     const id = catalogText(item.id);
     if (catalogBoolean(item.likedByViewer ?? catalogData(item).likedByViewer)) return;
+    setError("");
     setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: true } : profile));
     try {
-      await api.post(`/member/likes/${encodeURIComponent(id)}`);
+      const result = await api.post<Row>(`/member/likes/${encodeURIComponent(id)}`);
+      if (catalogBoolean(result.matched) && result.conversationId)
+        navigate(`/${locale}/chat/${encodeURIComponent(String(result.conversationId))}`);
     } catch (failure) {
       setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: false } : profile));
-      if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
+      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
+      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyLikeLimit);
+      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.profileUnavailable);
       else setError(copy.actionFailed);
     }
   };
   const message = async (item: Row) => {
+    setError("");
     try {
       const conversation = await api.post<Row>("/member/conversations", { targetProfileId: catalogText(item.id) });
       if (!conversation.conversationId) throw new Error("Conversation was not created");
       navigate(`/${locale}/chat/${encodeURIComponent(String(conversation.conversationId))}`);
     } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
+      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
+      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyChatLimit);
+      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.chatUnavailable);
       else setError(copy.actionFailed);
     }
   };
@@ -3145,7 +3163,7 @@ function Catalog({ session }: { session: Session }) {
       ) : <div className="catalog-reference-empty"><strong>{copy.noProfiles}</strong><span>{copy.noProfilesHelp}</span></div>}
       {!(loading && offset === 0) && items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
       {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => { setFilterOpen(false); setPremiumPromptOpen(false); }} onApply={applyFilters} countries={catalogOptions.countries} cities={cities} premium={catalogOptions.premium} onPremium={openPremiumPrompt} premiumPromptOpen={premiumPromptOpen} /> : null}
-      {filterOpen && premiumPromptOpen ? <AccountPremium locale={locale} close={() => setPremiumPromptOpen(false)} /> : null}
+      {premiumPromptOpen ? <AccountPremium locale={locale} close={() => setPremiumPromptOpen(false)} /> : null}
     </section>
   );
 }

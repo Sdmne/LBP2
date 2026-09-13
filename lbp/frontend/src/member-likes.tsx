@@ -45,6 +45,10 @@ type CardProps = {
 const COPY = {
   en: {
     error: "This action could not be completed. Please try again.",
+    likeLimit: "You have reached today's like limit. You can like more profiles tomorrow.",
+    chatLimit: "You have reached today's new chat limit. You can start more chats tomorrow.",
+    profileUnavailable: "This profile is no longer available.",
+    chatUnavailable: "This conversation cannot be opened right now.",
     premium: "Upgrade to Premium",
     remove: "Remove from favorites",
     website: "Website",
@@ -53,6 +57,10 @@ const COPY = {
   },
   ru: {
     error: "Не удалось выполнить действие. Попробуйте ещё раз.",
+    likeLimit: "Дневной лимит лайков исчерпан. Новые лайки будут доступны завтра.",
+    chatLimit: "Дневной лимит новых чатов исчерпан. Новые диалоги будут доступны завтра.",
+    profileUnavailable: "Этот профиль больше недоступен.",
+    chatUnavailable: "Сейчас не удалось открыть этот диалог.",
     premium: "Перейти на Premium",
     remove: "Удалить из избранного",
     website: "Сайт",
@@ -61,6 +69,10 @@ const COPY = {
   },
   es: {
     error: "No se pudo completar la acción. Inténtalo de nuevo.",
+    likeLimit: "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana.",
+    chatLimit: "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
+    profileUnavailable: "Este perfil ya no está disponible.",
+    chatUnavailable: "No se puede abrir esta conversación ahora mismo.",
     premium: "Mejorar a Premium",
     remove: "Quitar de favoritos",
     website: "Sitio web",
@@ -266,7 +278,7 @@ function LikesContent({
     tab === "clinics" || tab === "lawyers",
   );
   const [dialog, setDialog] = useState<"premium" | "verification" | null>(null);
-  const [error, setError] = useState(false),
+  const [error, setError] = useState(""),
     [pendingId, setPendingId] = useState("");
   const inFlight = useRef(false),
     alive = useRef(true),
@@ -282,7 +294,7 @@ function LikesContent({
     };
   }, []);
   useEffect(() => {
-    setError(false);
+    setError("");
   }, [tab]);
   useEffect(() => {
     const id = Number(likes.data?.readThroughId);
@@ -323,10 +335,22 @@ function LikesContent({
       return;
     inFlight.current = true;
     setPendingId(id);
-    setError(false);
+    setError("");
     try {
       if (kind === "like") {
-        await api.post(`/member/likes/${encodeURIComponent(id)}`);
+        const result = await api.post<MemberRow>(
+          `/member/likes/${encodeURIComponent(id)}`,
+        );
+        const matchedConversation = memberBoolean(result.matched)
+          ? text(result.conversationId)
+          : "";
+        if (matchedConversation && alive.current) {
+          notifyMemberChanged();
+          navigate(
+            `/${locale}/chat/${encodeURIComponent(matchedConversation)}`,
+          );
+          return;
+        }
         const data = await api.get<MemberRow>("/member/likes");
         if (alive.current) {
           likes.replace(data);
@@ -364,7 +388,14 @@ function LikesContent({
           /verif/i.test(failure.message)
         )
           setDialog("verification");
-        else setError(true);
+        else if (failure instanceof ApiError && failure.status === 429)
+          setError(kind === "like" ? copy.likeLimit : copy.chatLimit);
+        else if (
+          failure instanceof ApiError &&
+          [403, 404, 409, 422].includes(failure.status)
+        )
+          setError(kind === "like" ? copy.profileUnavailable : copy.chatUnavailable);
+        else setError(copy.error);
       }
     } finally {
       inFlight.current = false;
@@ -376,13 +407,13 @@ function LikesContent({
     if (!id || inFlight.current) return;
     inFlight.current = true;
     setPendingId(`${kind}:${id}`);
-    setError(false);
+    setError("");
     try {
       await api.delete(`/member/favourites/${kind}/${encodeURIComponent(id)}`);
       const result = await api.get<MemberRow>("/member/favourites");
       if (alive.current) favourites.replace(result);
     } catch {
-      if (alive.current) setError(true);
+      if (alive.current) setError(copy.error);
     } finally {
       inFlight.current = false;
       if (alive.current) setPendingId("");
@@ -432,7 +463,7 @@ function LikesContent({
       </div>
       {error && (
         <p className="account-error" role="alert">
-          {copy.error}
+          {error}
         </p>
       )}
       <div

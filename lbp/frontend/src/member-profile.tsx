@@ -971,10 +971,18 @@ function ProfileScreen({
     const target = encodeURIComponent(text(profile.id, id));
     try {
       if (kind === "like") {
-        await api.post(`/member/likes/${target}`);
+        const result = await api.post<Row>(`/member/likes/${target}`);
         if (mounted.current)
           setProfile((current) =>
             current ? { ...current, likedByViewer: true } : current,
+          );
+        if (
+          mounted.current &&
+          bool(result.matched) &&
+          text(String(result.conversationId ?? ""))
+        )
+          navigate(
+            `/${locale}/chat/${encodeURIComponent(String(result.conversationId))}`,
           );
       }
       if (kind === "message") {
@@ -1016,6 +1024,48 @@ function ProfileScreen({
         setDialog("verification");
       else if (failure instanceof ApiError && failure.status === 402)
         setDialog("premium");
+      else if (
+        failure instanceof ApiError &&
+        failure.status === 429 &&
+        (kind === "like" || kind === "message")
+      )
+        setError(
+          {
+            en:
+              kind === "like"
+                ? "You have reached today's like limit. You can like more profiles tomorrow."
+                : "You have reached today's new chat limit. You can start more chats tomorrow.",
+            ru:
+              kind === "like"
+                ? "Дневной лимит лайков исчерпан. Новые лайки будут доступны завтра."
+                : "Дневной лимит новых чатов исчерпан. Новые диалоги будут доступны завтра.",
+            es:
+              kind === "like"
+                ? "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana."
+                : "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
+          }[locale],
+        );
+      else if (
+        failure instanceof ApiError &&
+        [403, 404, 409, 422].includes(failure.status) &&
+        (kind === "like" || kind === "message")
+      )
+        setError(
+          {
+            en:
+              kind === "like"
+                ? "This profile is no longer available."
+                : "This conversation cannot be opened right now.",
+            ru:
+              kind === "like"
+                ? "Этот профиль больше недоступен."
+                : "Сейчас не удалось открыть этот диалог.",
+            es:
+              kind === "like"
+                ? "Este perfil ya no está disponible."
+                : "No se puede abrir esta conversación ahora mismo.",
+          }[locale],
+        );
       else {
         let message = {
           en: "Unable to complete this action. Please try again.",
