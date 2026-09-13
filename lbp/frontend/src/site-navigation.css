@@ -1,3 +1,12 @@
+/* Shared responsive container widths measured from the public reference. */
+.web-app { --site-container-max: 100%; }
+@media (min-width: 480px) { .web-app { --site-container-max: 480px; } }
+@media (min-width: 640px) { .web-app { --site-container-max: 640px; } }
+@media (min-width: 768px) { .web-app { --site-container-max: 768px; } }
+@media (min-width: 1024px) { .web-app { --site-container-max: 1024px; } }
+@media (min-width: 1280px) { .web-app { --site-container-max: 1280px; } }
+@media (min-width: 1536px) { .web-app { --site-container-max: 1536px; } }
+
 .web-app > .web-header {
   height: auto;
   min-height: 0;
@@ -17,7 +26,7 @@
 
 .web-app > .web-header .web-header-inner {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   height: 80px;
   padding: 0 16px;
 }
@@ -42,7 +51,7 @@
 
 .web-footer .web-footer-inner {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   padding: 0 16px;
 }
 
@@ -247,7 +256,7 @@
   .web-app > .web-header .mobile-menu { margin-left: auto; }
   .web-app > .web-header .header-actions { margin-left: 16px; }
 }
-@media (min-width: 1280px) and (max-width: 1439px) {
+@media (min-width: 1280px) and (max-width: 1535px) {
   .web-app > .web-header nav { margin-left: 16px; gap: 0; }
   .web-app > .web-header nav > a { padding-inline: 12px; }
 }

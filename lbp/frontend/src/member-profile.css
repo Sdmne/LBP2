@@ -1,7 +1,7 @@
 /* Scoped HTML profile rules: no styles or assets are fetched from the reference at runtime. */
 .web-main.member-profile-main {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   min-height: calc(100dvh - 80px - 302px);
   flex: 1 0 auto;
   padding: 28px 16px 40px;

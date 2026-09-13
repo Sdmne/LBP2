@@ -5,7 +5,7 @@
 .profile-tools-app > .web-footer { display:block; flex:0 0 auto; }
 .profile-tools-app .footer-brand p { line-height:1.625; }
 .profile-tools-app .web-header { height:81px; min-height:81px; flex:0 0 81px; padding-block:0; background:#fff; backdrop-filter:none; }
-.profile-tools-app .web-header-inner { height:80px; min-height:80px; max-width:1536px; padding-inline:16px; }
+.profile-tools-app .web-header-inner { height:80px; min-height:80px; max-width:var(--site-container-max); padding-inline:16px; }
 .profile-tools-surface { color:#020817; font-family:Geologica,Arial,sans-serif; font-size:16px; line-height:24px; font-weight:400; }
 .profile-tools-surface * { box-sizing:border-box; }
 .profile-tools-surface button,.profile-tools-surface input,.profile-tools-surface textarea { font-family:inherit; letter-spacing:0; }
@@ -49,9 +49,9 @@
 
 /* Shared page width and single-select inset requested for the public site. */
 .profile-tools-surface {
-  --lbp-shell-max: 1536px !important;
-  --lbp-header-max: 1536px !important;
-  --lbp-responsive-header-max: 1536px;
+  --lbp-shell-max: var(--site-container-max) !important;
+  --lbp-header-max: var(--site-container-max) !important;
+  --lbp-responsive-header-max: var(--site-container-max);
 }
 .profile-tools-surface .profile-picker-popover .profile-picker-option,
 .profile-tools-surface .profile-autocomplete button[role="option"] {

@@ -1,11 +1,4 @@
-// Item 13(b) - Premium-exclusive chat stickers. Alena chose to start with
-// emoji placeholders (large glyphs in a colored badge, see ChatScreen.tsx's
-// sticker grid) rather than wait on real custom artwork - swapping in real
-// sticker images later only means changing this catalog (and how
-// ChatScreen renders a sticker bubble); the premium-gating and message
-// plumbing built around it (member_send_sticker in main.py) doesn't
-// change. Ids and emoji here must match backend/main.py's STICKER_CATALOG
-// exactly - kept in sync by hand since there are only 16.
+// Premium sticker IDs and glyphs must match backend/main.py.
 export type StickerDef = { id: string; emoji: string };
 
 export const STICKERS: StickerDef[] = [
@@ -25,4 +18,14 @@ export const STICKERS: StickerDef[] = [
   { id: "love", emoji: "😍" },
   { id: "hug", emoji: "🤗" },
   { id: "sparkles", emoji: "✨" },
+  { id: "unicorn", emoji: "🦄" },
+  { id: "butterfly", emoji: "🦋" },
+  { id: "balloon", emoji: "🎈" },
+  { id: "gift", emoji: "🎁" },
+  { id: "cake", emoji: "🎂" },
+  { id: "wave", emoji: "👋" },
+  { id: "kiss", emoji: "😘" },
+  { id: "clap", emoji: "👏" },
+  { id: "rainbow", emoji: "🌈" },
+  { id: "moon", emoji: "🌙" },
 ];

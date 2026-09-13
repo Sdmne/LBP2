@@ -41,9 +41,10 @@ except ImportError:  # pragma: no cover - optional until the image is rebuilt
     redis_client = None
 
 try:
-    from PIL import Image, ImageOps, UnidentifiedImageError
+    from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
 except ImportError:  # pragma: no cover - optional until the image is rebuilt
     Image = None
+    ImageFilter = None
     ImageOps = None
     UnidentifiedImageError = OSError
 
@@ -466,6 +467,16 @@ STICKER_CATALOG: dict[str, str] = {
     "love": "😍",
     "hug": "🤗",
     "sparkles": "✨",
+    "unicorn": "🦄",
+    "butterfly": "🦋",
+    "balloon": "🎈",
+    "gift": "🎁",
+    "cake": "🎂",
+    "wave": "👋",
+    "kiss": "😘",
+    "clap": "👏",
+    "rainbow": "🌈",
+    "moon": "🌙",
 }
 
 STICKER_BODY_PREFIX = "::sticker::"
@@ -6359,13 +6370,87 @@ def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depend
 LIKES_FREE_PREVIEW_COUNT = 4
 
 
+BLURRED_PREVIEW_DIR_NAME = "blurred-previews"
+BLURRED_PREVIEW_RADIUS = 22
+BLURRED_PREVIEW_MAX_SIDE = 240
+
+
+def blurred_preview_url_for(avatar_url: str | None) -> str | None:
+    """Return only a server-blurred JPEG; an unavailable source stays hidden."""
+    if not avatar_url or Image is None or ImageFilter is None or ImageOps is None:
+        return None
+    prefix = UPLOAD_URL_PREFIX.rstrip("/") + "/"
+    temporary_path = None
+    try:
+        source_path = None
+        cache_source = str(avatar_url)
+        if avatar_url.startswith(prefix):
+            source_path = safe_storage_path(UPLOAD_DIR, avatar_url[len(prefix):])
+            if not source_path.is_file():
+                return None
+            source_stat = source_path.stat()
+            cache_source += f":{source_stat.st_size}:{source_stat.st_mtime_ns}"
+        else:
+            parsed = urllib.parse.urlsplit(avatar_url)
+            decoded_path = urllib.parse.unquote(parsed.path)
+            if (parsed.scheme != "https" or parsed.netloc != "letsbeparents.com"
+                    or not decoded_path.startswith("/photos/")
+                    or ".." in decoded_path.split("/") or "\\" in decoded_path):
+                return None
+        digest = hashlib.sha256(f"v1:{cache_source}".encode("utf-8")).hexdigest()
+        blurred_key = f"{BLURRED_PREVIEW_DIR_NAME}/{digest}.jpg"
+        blurred_path = safe_storage_path(UPLOAD_DIR, blurred_key)
+        if not blurred_path.is_file():
+            if source_path is not None:
+                if source_stat.st_size > MAX_UPLOAD_BYTES:
+                    return None
+                with source_path.open("rb") as source_file:
+                    body = source_file.read(MAX_UPLOAD_BYTES + 1)
+            else:
+                class NoPreviewRedirects(urllib.request.HTTPRedirectHandler):
+                    def redirect_request(self, req, fp, code, msg, headers, newurl):
+                        raise ValueError("Photo preview redirects are not supported")
+
+                request = urllib.request.Request(avatar_url, headers={"User-Agent": "LetsBeParents/1.0", "Accept": "image/*"})
+                with urllib.request.build_opener(NoPreviewRedirects()).open(request, timeout=5) as remote:
+                    if remote.headers.get_content_type().lower() not in ALLOWED_IMAGE_TYPES:
+                        return None
+                    body = remote.read(MAX_UPLOAD_BYTES + 1)
+            if not body or len(body) > MAX_UPLOAD_BYTES:
+                return None
+            with Image.open(io.BytesIO(body)) as source:
+                if source.width * source.height > MAX_IMAGE_PIXELS:
+                    return None
+                normalized = ImageOps.exif_transpose(source).convert("RGB")
+                normalized.thumbnail((BLURRED_PREVIEW_MAX_SIDE, BLURRED_PREVIEW_MAX_SIDE))
+                blurred = normalized.filter(ImageFilter.GaussianBlur(radius=BLURRED_PREVIEW_RADIUS))
+                output = io.BytesIO()
+                blurred.save(output, format="JPEG", quality=70, optimize=True)
+            blurred_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = blurred_path.with_name(f".{digest}.{secrets.token_hex(8)}.tmp")
+            with temporary_path.open("xb") as target:
+                target.write(output.getvalue())
+            os.replace(temporary_path, blurred_path)
+        return prefix + blurred_key
+    except (HTTPException, OSError, ValueError, Image.DecompressionBombError):
+        return None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def anonymized_admirer_summary(row: dict[str, Any]) -> dict[str, Any]:
     data = as_dict(row.get("data"))
     birth = profile_birth_date(data.get("dateOfBirth"))
     today = now_utc().date()
     age = (today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))) if birth else int_or_none(row.get("age") or data.get("age"))
     return {"id": row.get("profileId", row.get("id")), "role": row.get("role"),
-            "status": row.get("status"), "age": age, "identityHidden": True, "likedAt": row.get("likedAt")}
+            "status": row.get("status"), "age": age,
+            "avatarUrl": blurred_preview_url_for(row.get("avatarUrl") or data.get("avatarUrl")),
+            "identityHidden": True, "likedAt": row.get("likedAt")}
 
 
 @app.get("/api/member/likes")

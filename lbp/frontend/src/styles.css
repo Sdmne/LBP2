@@ -158,7 +158,7 @@ body {
 }
 .web-main {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   margin: 0 auto;
   padding: 56px 16px 72px;
   flex: 1;
@@ -1429,7 +1429,7 @@ body {
   display: flex;
   align-items: center;
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   height: 80px;
   margin: 0 auto;
   padding: 0 16px;
@@ -1556,7 +1556,7 @@ body {
 
 .web-main {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   margin: 0 auto;
   padding: 56px 16px 72px;
   flex: 1;
@@ -4649,7 +4649,7 @@ button.landing-gradient-button:disabled {
 /* Catalog parity with the original HTML member directory. */
 .web-main.catalog-main {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   padding: 32px 16px 40px;
 }
 
@@ -5773,7 +5773,7 @@ body.catalog-filter-open {
 
 @media (min-width: 1536px) {
   .web-main.catalog-main {
-    max-width: 1536px;
+    max-width: var(--site-container-max);
   }
 }
 
@@ -6938,13 +6938,13 @@ body.catalog-filter-open {
 /* Public directories mirror the deployed legacy HTML reference. */
 .web-main.directory-main {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   padding: 32px 16px 40px;
 }
 
 @media (min-width: 1536px) {
   .web-main.directory-main {
-    max-width: 1536px;
+    max-width: var(--site-container-max);
   }
 }
 
@@ -7777,7 +7777,7 @@ body.reference-filters-open {
 /* Directory detail pages mirror the deployed HTML reference. */
 .web-main.directory-detail-main {
   width: 100%;
-  max-width: 1536px;
+  max-width: var(--site-container-max);
   min-height: 0;
   flex: 0 0 auto;
   margin: 0 auto;
@@ -7786,7 +7786,7 @@ body.reference-filters-open {
 
 @media (min-width: 1536px) {
   .web-main.directory-detail-main {
-    max-width: 1536px;
+    max-width: var(--site-container-max);
   }
 }
 

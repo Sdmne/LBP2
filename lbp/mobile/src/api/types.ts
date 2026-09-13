@@ -82,12 +82,8 @@ export type ProfileSummary = {
   likeReadOnly?: boolean;
   likedAt?: string | null;
   matchedAt?: string | null;
-  // Present on a free-tier viewer's "who liked you" preview rows only
-  // (see anonymized_admirer_summary() in main.py) - when identityHidden is
-  // true, displayName/avatarUrl/city/country are NOT sent at all (not just
-  // visually blurred client-side), so age is the only real signal about
-  // who this is. LikesScreen must render a generic placeholder + age for
-  // these rows, never assume displayName/avatarUrl are present.
+  // Free previews omit name/location and contain only a server-blurred avatar,
+  // when available. Never fall back to another photo for a hidden identity.
   age?: number | null;
   identityHidden?: boolean;
 };
@@ -98,7 +94,7 @@ export type ProfileSummary = {
 // `likesYou` is always populated for everyone now (was `[]` for free
 // accounts) - a free-tier viewer just gets fewer rows (LIKES_FREE_PREVIEW_COUNT)
 // and those rows have identityHidden=true (see the age/identityHidden note
-// on ProfileSummary above) instead of real name/photo. `likesYouLocked`
+// on ProfileSummary above) instead of a name or clear photo. `likesYouLocked`
 // still indicates whether the FULL list is paywalled.
 export type LikesResponse = {
   likesYou: ProfileSummary[];
