@@ -11,6 +11,7 @@ import {
   PROFILE_TRANSLATIONS,
 } from "./member-profile-reference";
 import { PREMIUM_COPY, PREMIUM_ICONS } from "./member-premium-reference";
+import { NotFoundPage } from "./not-found";
 
 type Row = Record<string, unknown>;
 type Locale = keyof typeof PROFILE_COPY;
@@ -1087,6 +1088,7 @@ function ProfileScreen({
       if (mounted.current) setPending(false);
     }
   };
+  if (loadError === "unavailable") return <NotFoundPage locale={locale} />;
   if (loadError)
     return (
       <section
@@ -1095,27 +1097,23 @@ function ProfileScreen({
         aria-labelledby="profile-load-heading"
       >
         <h2 id="profile-load-heading">
-          {loadError === "unavailable" ? c.profileNotFound : loadCopy.failedTitle}
+          {loadCopy.failedTitle}
         </h2>
         <p>
-          {loadError === "unavailable"
-            ? loadCopy.unavailable
-            : loadCopy.failedDescription}
+          {loadCopy.failedDescription}
         </p>
         <div className="profile-load-actions">
           <Link className="profile-load-button" to={back}>{c.goBack}</Link>
-          {loadError === "failed" && (
-            <button
-              type="button"
-              className="profile-load-button"
-              onClick={() => {
-                setLoadError(null);
-                setRetry((value) => value + 1);
-              }}
-            >
-              {loadCopy.retry}
-            </button>
-          )}
+          <button
+            type="button"
+            className="profile-load-button"
+            onClick={() => {
+              setLoadError(null);
+              setRetry((value) => value + 1);
+            }}
+          >
+            {loadCopy.retry}
+          </button>
         </div>
       </section>
     );

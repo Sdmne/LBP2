@@ -34,6 +34,7 @@ import {
   socialErrorMessage,
   type SocialProvider,
 } from "./firebase-auth";
+import { NotFoundPage } from "./not-found";
 
 const api = createApiClient("/api");
 type Row = Record<string, unknown>;
@@ -7336,7 +7337,7 @@ export function WebApp() {
         path="/:locale/subscription"
         element={content(<Subscription session={session} />)}
       />
-      <Route path="*" element={<Navigate to="/en" replace />} />
+      <Route path="*" element={content(<NotFoundPage locale={locale} />)} />
       </Routes>
     </>
   );

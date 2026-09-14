@@ -15,5 +15,6 @@ import "./sliding-tabs.css";
 import "./catalog-layout-reference.css";
 import "./catalog-filters-reference.css";
 import "./loading-reference.css";
+import "./not-found.css";
 
 createRoot(document.getElementById("root")!).render(<StrictMode><BrowserRouter><WebApp /></BrowserRouter></StrictMode>);
