@@ -3447,6 +3447,7 @@ function MemberLinks({ locale }: { locale: string }) {
   return (
     <nav className="member-links">
       <Link to={`/${locale}/profile`}>Profile</Link>
+      <Link to={`/${locale}/ai-advisor`}>AI Advisor</Link>
       <Link to={`/${locale}/photos`}>Photos</Link>
       <Link to={`/${locale}/verification`}>Verification</Link>
       <Link to={`/${locale}/chat`}>Messages</Link>
@@ -4120,6 +4121,12 @@ const FAMILY_ROOM_SECTION_LABELS: Record<string, string> = {
   general: "General",
 };
 
+const PREGNANCY_CATEGORY_LABELS: Record<string, string> = {
+  lab_test: "Lab result",
+  ultrasound: "Ultrasound",
+  prescription: "Prescription",
+};
+
 function formatFamilyRoomBytes(bytes: number): string {
   if (!Number.isFinite(bytes)) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -4143,6 +4150,22 @@ function FamilyRoom({ session }: { session: Session }) {
   const [newItemText, setNewItemText] = useState<Record<string, string>>({});
   const [addingSection, setAddingSection] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [pregnancyEntries, setPregnancyEntries] = useState<Row[]>([]);
+  const [pregnancyCategory, setPregnancyCategory] = useState<
+    "lab_test" | "ultrasound" | "prescription"
+  >("lab_test");
+  const [pregnancyNote, setPregnancyNote] = useState("");
+  const [pregnancyUploading, setPregnancyUploading] = useState(false);
+
+  const loadPregnancy = () => {
+    if (!session || !profileId) return;
+    api
+      .get<{ ok: true; entries: Row[] }>(
+        `/member/family-room/${encodeURIComponent(profileId)}/pregnancy`,
+      )
+      .then((data) => setPregnancyEntries(data.entries || []))
+      .catch(() => undefined);
+  };
 
   const load = () => {
     if (!session || !profileId) return;
@@ -4165,6 +4188,7 @@ function FamilyRoom({ session }: { session: Session }) {
       });
   };
   useEffect(load, [session, profileId]);
+  useEffect(loadPregnancy, [session, profileId]);
 
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
 
@@ -4315,6 +4339,43 @@ function FamilyRoom({ session }: { session: Session }) {
     } catch {
       setNotice("Could not remove that document.");
       load();
+    }
+  };
+
+  const uploadPregnancyEntry = async (file: File | undefined) => {
+    if (!file || !profileId) return;
+    setPregnancyUploading(true);
+    setNotice("");
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      data.append("category", pregnancyCategory);
+      if (pregnancyNote.trim()) data.append("note", pregnancyNote.trim());
+      const response = await api.upload<{ ok: true; entry: Row }>(
+        `/member/family-room/${encodeURIComponent(profileId)}/pregnancy`,
+        data,
+      );
+      setPregnancyEntries((previous) => [response.entry, ...previous]);
+      setPregnancyNote("");
+    } catch {
+      setNotice("Could not upload that file to the Pregnancy Room.");
+    } finally {
+      setPregnancyUploading(false);
+    }
+  };
+
+  const deletePregnancyEntry = async (entry: Row) => {
+    const entryId = entry.id;
+    setPregnancyEntries((previous) =>
+      previous.filter((item) => item.id !== entryId),
+    );
+    try {
+      await api.delete(
+        `/member/family-room/pregnancy/${encodeURIComponent(asText(entryId))}`,
+      );
+    } catch {
+      setNotice("Could not remove that entry.");
+      loadPregnancy();
     }
   };
 
@@ -4519,6 +4580,240 @@ function FamilyRoom({ session }: { session: Session }) {
             onChange={(event) => void uploadDocument(event.target.files?.[0])}
           />
         </label>
+      </div>
+
+      <div className="list-card family-room-card">
+        <h2>Pregnancy Room</h2>
+        <p>
+          Keep lab results, ultrasounds and prescriptions in one shared,
+          private place - free for any active match, no Premium needed.
+        </p>
+        {pregnancyEntries.length === 0 ? (
+          <p className="notice">No entries yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {pregnancyEntries.map((entry) => (
+              <li key={asText(entry.id)}>
+                <a href={asText(entry.contentUrl)} target="_blank" rel="noreferrer">
+                  {PREGNANCY_CATEGORY_LABELS[asText(entry.category)] ||
+                    asText(entry.category)}
+                  {entry.note ? ` - ${asText(entry.note)}` : ""}
+                </a>
+                <span>{formatFamilyRoomBytes(Number(entry.bytes) || 0)}</span>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => void deletePregnancyEntry(entry)}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="pregnancy-upload-row">
+          <select
+            aria-label="Category"
+            value={pregnancyCategory}
+            onChange={(event) =>
+              setPregnancyCategory(event.target.value as typeof pregnancyCategory)
+            }
+          >
+            <option value="lab_test">Lab result</option>
+            <option value="ultrasound">Ultrasound</option>
+            <option value="prescription">Prescription</option>
+          </select>
+          <input
+            type="text"
+            value={pregnancyNote}
+            placeholder="Note (optional)"
+            onChange={(event) => setPregnancyNote(event.target.value)}
+          />
+          <label className="attachment-control">
+            {pregnancyUploading ? "Uploading…" : "Upload"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              disabled={pregnancyUploading}
+              onChange={(event) =>
+                void uploadPregnancyEntry(event.target.files?.[0])
+              }
+            />
+          </label>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type AiAdvisorMessage = {
+  role: "user" | "assistant";
+  text: string;
+  at: string;
+};
+
+function AiAdvisor({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<
+    "loading" | "ok" | "needsPremium" | "error"
+  >("loading");
+  const [configured, setConfigured] = useState(true);
+  const [messages, setMessages] = useState<AiAdvisorMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; configured: boolean; messages: AiAdvisorMessage[] }>(
+        "/member/ai-advisor/messages",
+      )
+      .then((data) => {
+        setMessages(data.messages);
+        setConfigured(data.configured);
+        setStatus("ok");
+      })
+      .catch((error) => {
+        if (error instanceof ApiError && error.status === 402)
+          setStatus("needsPremium");
+        else setStatus("error");
+      });
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const send = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!text || sending) return;
+    setDraft("");
+    setSending(true);
+    setNotice("");
+    const optimistic: AiAdvisorMessage = {
+      role: "user",
+      text,
+      at: new Date().toISOString(),
+    };
+    setMessages((previous) => [...previous, optimistic]);
+    try {
+      const response = await api.post<{
+        ok: true;
+        reply: string;
+        messages: AiAdvisorMessage[];
+      }>("/member/ai-advisor/messages", { text });
+      setMessages(response.messages);
+    } catch (error) {
+      setMessages((previous) => previous.filter((item) => item !== optimistic));
+      setDraft(text);
+      if (error instanceof ApiError && error.status === 402)
+        setStatus("needsPremium");
+      else setNotice("Could not send that message. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const clear = async () => {
+    try {
+      await api.delete("/member/ai-advisor/messages");
+      setMessages([]);
+    } catch {
+      setNotice("Could not clear the conversation. Please try again.");
+    }
+  };
+
+  if (status === "loading") {
+    return (
+      <section className="access-card">
+        <h1>AI Family Advisor</h1>
+        <LoadingIndicator />
+      </section>
+    );
+  }
+
+  if (status === "needsPremium") {
+    return (
+      <section className="access-card">
+        <h1>AI Family Advisor</h1>
+        <p>
+          The AI Family Advisor is part of Family Builder Pro. Upgrade to ask
+          questions about the process, terminology, or how to use
+          LetsBeParents at any time.
+        </p>
+        <Link className="primary" to={`/${locale}/subscription`}>
+          View Premium
+        </Link>
+      </section>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <section className="access-card">
+        <h1>AI Family Advisor</h1>
+        <p className="error">
+          Could not load the AI Family Advisor. Please try again.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="advisor-page">
+      <div className="list-card advisor-card">
+        <div className="message-title">
+          <h1>AI Family Advisor</h1>
+          <button type="button" className="secondary" onClick={() => void clear()}>
+            Clear conversation
+          </button>
+        </div>
+        <p>
+          Ask about the process, terminology, or how to use LetsBeParents -
+          I'll help you find the right next step. This isn't medical, legal or
+          financial advice.
+        </p>
+        {!configured && (
+          <p className="error">
+            The AI Family Advisor isn't set up yet - please check back soon.
+          </p>
+        )}
+        {notice && <p className="error">{notice}</p>}
+        <div className="message-list advisor-list">
+          {messages.length === 0 ? (
+            <p className="notice">Say hello to get started.</p>
+          ) : (
+            messages.map((message, index) => (
+              <div
+                key={`${message.role}-${message.at}-${index}`}
+                className={`message-bubble ${
+                  message.role === "user"
+                    ? "advisor-bubble-user"
+                    : "advisor-bubble-assistant"
+                }`}
+              >
+                <span>{message.text}</span>
+              </div>
+            ))
+          )}
+          {sending && <p className="notice">Typing…</p>}
+        </div>
+        <form className="advisor-form" onSubmit={(event) => void send(event)}>
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Ask the Family Advisor…"
+            disabled={!configured}
+          />
+          <button
+            className="primary"
+            disabled={!draft.trim() || sending || !configured}
+          >
+            Send
+          </button>
+        </form>
       </div>
     </section>
   );
@@ -4925,7 +5220,8 @@ function Article() {
   const bodyHtml = article.bodyHtml ?? article.body_html ?? article.content;
   const referenceBodyHtml = asText(bodyHtml).replaceAll("https://letsbeparents.com/", "/");
   const navigationIndex = navigationArticles.findIndex((item) => asText(item.slug) === slug);
-  const previous = (article.previous as Row | null | undefined)
+  const previous = (article.prev as Row | null | undefined)
+      ?? (article.previous as Row | null | undefined)
       ?? (navigationIndex > 0 ? navigationArticles[navigationIndex - 1] : null);
   const next = (article.next as Row | null | undefined)
       ?? (navigationIndex >= 0 && navigationIndex < navigationArticles.length - 1
@@ -7031,6 +7327,10 @@ export function WebApp() {
       <Route
         path="/:locale/family-room/:profileId"
         element={content(<FamilyRoom session={session} />)}
+      />
+      <Route
+        path="/:locale/ai-advisor"
+        element={content(<AiAdvisor session={session} />)}
       />
       <Route
         path="/:locale/subscription"

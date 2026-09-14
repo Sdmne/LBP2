@@ -843,6 +843,51 @@ body {
   color: #0b68d8;
   font-weight: 700;
 }
+.advisor-page {
+  max-width: 760px;
+}
+.advisor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 480px;
+  overflow-y: auto;
+  margin: 16px 0;
+}
+.advisor-bubble-user {
+  align-self: flex-end;
+  background: #f31260;
+  color: #fff;
+}
+.advisor-bubble-assistant {
+  align-self: flex-start;
+}
+.advisor-form {
+  display: flex;
+  gap: 9px;
+}
+.advisor-form input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  padding: 10px 13px;
+}
+.pregnancy-upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+.pregnancy-upload-row select,
+.pregnancy-upload-row input[type="text"] {
+  padding: 8px 10px;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  font: inherit;
+}
 .attachment-control {
   display: inline-flex;
   align-items: center;
@@ -866,6 +911,12 @@ body {
   }
   .message-pane form input {
     min-width: 0;
+    flex: 1 1 180px;
+  }
+  .advisor-form {
+    flex-wrap: wrap;
+  }
+  .advisor-form input {
     flex: 1 1 180px;
   }
 }

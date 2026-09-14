@@ -720,6 +720,7 @@ function Overview({
             {setting("premium", c.premium, undefined, () =>
               setDialog("premium"),
             )}
+            {setting("premium", c.advisor, `/${locale}/ai-advisor`)}
             {setting(
               "verification",
               c.verification,
