@@ -53,13 +53,16 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   const [appleBusy, setAppleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
+  const googleClientId = Platform.select({
+    ios: GOOGLE_OAUTH_CLIENT_IDS.ios || GOOGLE_OAUTH_CLIENT_IDS.web,
+    android: GOOGLE_OAUTH_CLIENT_IDS.android || GOOGLE_OAUTH_CLIENT_IDS.web,
+    default: GOOGLE_OAUTH_CLIENT_IDS.web || GOOGLE_OAUTH_CLIENT_IDS.ios || GOOGLE_OAUTH_CLIENT_IDS.android,
+  });
 
   // Whether Google sign-in is actually usable - computed from the REAL
   // config values, before the placeholder fallback below. Drives the
   // button's disabled state; the placeholder is never reachable through it.
-  const googleConfigured = Boolean(
-    GOOGLE_OAUTH_CLIENT_IDS.ios || GOOGLE_OAUTH_CLIENT_IDS.android || GOOGLE_OAUTH_CLIENT_IDS.web
-  );
+  const googleConfigured = Boolean(googleClientId);
 
   // Confirmed on a real device run: contrary to this file's original
   // assumption, Google.useAuthRequest() doesn't quietly return a null
@@ -76,7 +79,7 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
     iosClientId: GOOGLE_OAUTH_CLIENT_IDS.ios || undefined,
     androidClientId: GOOGLE_OAUTH_CLIENT_IDS.android || undefined,
     webClientId: GOOGLE_OAUTH_CLIENT_IDS.web || undefined,
-    clientId: "not-configured",
+    clientId: googleClientId || "not-configured",
   });
 
   useEffect(() => {
