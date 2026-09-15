@@ -2,6 +2,9 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import { Feather } from "@expo/vector-icons";
 import { colors } from "../theme";
@@ -12,6 +15,7 @@ import LikesScreen from "../screens/LikesScreen";
 import MessagesScreen from "../screens/MessagesScreen";
 import MeProfileScreen from "../screens/MeProfileScreen";
 import type { CatalogFilters } from "../api/catalogFilters";
+import type { RootStackParamList } from "./RootNavigator";
 
 export type MainTabsParamList = {
   Explore: undefined;
@@ -115,6 +119,7 @@ function CustomTabBar({ state, descriptors, navigation, insets }: BottomTabBarPr
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   bar: {
     position: "absolute",
     left: 16,
@@ -141,7 +146,50 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  fab: {
+    position: "absolute",
+    right: 16,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.pink,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#020817",
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    zIndex: 5,
+  },
 });
+
+// Persistent "AI Family Advisor" shortcut (Alena: "надо сделать типа
+// значка чата где-то справа чтобы в любой момент человек мог перейти") -
+// a floating round button above the tab bar, on every main tab, so the
+// advisor is reachable without digging through Settings. Free-tier
+// members can tap it too - AiAdvisorScreen already renders its own
+// "Premium only" message for a 402 (see aiAdvisor.premiumTitle/Body), so
+// this button doesn't need to know or guess the member's tier itself.
+function AiAdvisorFab() {
+  const insets = useSafeAreaInsets();
+  const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  return (
+    <Pressable
+      onPress={() => rootNav.navigate("AiAdvisor")}
+      // Nudged down slightly (was 22+14=36px clear of the tab bar) - on the
+      // Catalog/Browse screen the swipe-card's own action row (X/profile/
+      // message/like buttons) sits close enough above the tab bar that the
+      // FAB was overlapping the like button there; Alena flagged it via
+      // screenshot. 8px still clears the tab bar with room to spare.
+      style={[styles.fab, { bottom: 8 + insets.bottom + TAB_BAR_HEIGHT }]}
+      accessibilityRole="button"
+      accessibilityLabel="AI Family Advisor"
+    >
+      <Feather name="message-circle" size={24} color="#fff" />
+    </Pressable>
+  );
+}
 
 export default function MainTabs() {
   const { t } = useI18n();
@@ -157,6 +205,7 @@ export default function MainTabs() {
   // `insets` from its own BottomTabBarProps (react-navigation passes the
   // same safe-area value in), so nothing here needs it directly anymore.
   return (
+    <View style={styles.root}>
     <Tab.Navigator
       tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
@@ -193,5 +242,7 @@ export default function MainTabs() {
       />
       <Tab.Screen name="Me" component={MeProfileScreen} options={{ title: t("nav.profile"), headerShown: false }} />
     </Tab.Navigator>
+    <AiAdvisorFab />
+    </View>
   );
 }

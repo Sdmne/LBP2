@@ -38,6 +38,124 @@ function daysInMonth(year: number | null, month: number | null): number {
   return new Date(year, month, 0).getDate();
 }
 
+// Fixed, alphabetical world-language list for the "Languages you speak"
+// picker (Basic info) - same static-table approach as MONTH_NAMES above,
+// since this doesn't need to track any backend catalog. Values are the
+// English language name, matching what was already stored in
+// profile.data.languages back when this was a free-text field, so existing
+// profiles' saved languages still render as selected without a migration.
+const LANGUAGE_OPTIONS: OptionRow[] = [
+  { value: "Afrikaans", label: "Afrikaans" },
+  { value: "Albanian", label: "Albanian" },
+  { value: "Amharic", label: "Amharic" },
+  { value: "Arabic", label: "Arabic" },
+  { value: "Armenian", label: "Armenian" },
+  { value: "Azerbaijani", label: "Azerbaijani" },
+  { value: "Basque", label: "Basque" },
+  { value: "Belarusian", label: "Belarusian" },
+  { value: "Bengali", label: "Bengali" },
+  { value: "Bosnian", label: "Bosnian" },
+  { value: "Bulgarian", label: "Bulgarian" },
+  { value: "Burmese", label: "Burmese" },
+  { value: "Catalan", label: "Catalan" },
+  { value: "Cebuano", label: "Cebuano" },
+  { value: "Chichewa", label: "Chichewa" },
+  { value: "Chinese", label: "Chinese" },
+  { value: "Corsican", label: "Corsican" },
+  { value: "Croatian", label: "Croatian" },
+  { value: "Czech", label: "Czech" },
+  { value: "Danish", label: "Danish" },
+  { value: "Dutch", label: "Dutch" },
+  { value: "English", label: "English" },
+  { value: "Esperanto", label: "Esperanto" },
+  { value: "Estonian", label: "Estonian" },
+  { value: "Filipino", label: "Filipino" },
+  { value: "Finnish", label: "Finnish" },
+  { value: "French", label: "French" },
+  { value: "Frisian", label: "Frisian" },
+  { value: "Galician", label: "Galician" },
+  { value: "Georgian", label: "Georgian" },
+  { value: "German", label: "German" },
+  { value: "Greek", label: "Greek" },
+  { value: "Gujarati", label: "Gujarati" },
+  { value: "Haitian Creole", label: "Haitian Creole" },
+  { value: "Hausa", label: "Hausa" },
+  { value: "Hawaiian", label: "Hawaiian" },
+  { value: "Hebrew", label: "Hebrew" },
+  { value: "Hindi", label: "Hindi" },
+  { value: "Hmong", label: "Hmong" },
+  { value: "Hungarian", label: "Hungarian" },
+  { value: "Icelandic", label: "Icelandic" },
+  { value: "Igbo", label: "Igbo" },
+  { value: "Indonesian", label: "Indonesian" },
+  { value: "Irish", label: "Irish" },
+  { value: "Italian", label: "Italian" },
+  { value: "Japanese", label: "Japanese" },
+  { value: "Javanese", label: "Javanese" },
+  { value: "Kannada", label: "Kannada" },
+  { value: "Kazakh", label: "Kazakh" },
+  { value: "Khmer", label: "Khmer" },
+  { value: "Kinyarwanda", label: "Kinyarwanda" },
+  { value: "Korean", label: "Korean" },
+  { value: "Kurdish", label: "Kurdish" },
+  { value: "Kyrgyz", label: "Kyrgyz" },
+  { value: "Lao", label: "Lao" },
+  { value: "Latin", label: "Latin" },
+  { value: "Latvian", label: "Latvian" },
+  { value: "Lithuanian", label: "Lithuanian" },
+  { value: "Luxembourgish", label: "Luxembourgish" },
+  { value: "Macedonian", label: "Macedonian" },
+  { value: "Malagasy", label: "Malagasy" },
+  { value: "Malay", label: "Malay" },
+  { value: "Malayalam", label: "Malayalam" },
+  { value: "Maltese", label: "Maltese" },
+  { value: "Maori", label: "Maori" },
+  { value: "Marathi", label: "Marathi" },
+  { value: "Mongolian", label: "Mongolian" },
+  { value: "Montenegrin", label: "Montenegrin" },
+  { value: "Nepali", label: "Nepali" },
+  { value: "Norwegian", label: "Norwegian" },
+  { value: "Odia", label: "Odia" },
+  { value: "Pashto", label: "Pashto" },
+  { value: "Persian", label: "Persian" },
+  { value: "Polish", label: "Polish" },
+  { value: "Portuguese", label: "Portuguese" },
+  { value: "Punjabi", label: "Punjabi" },
+  { value: "Romanian", label: "Romanian" },
+  { value: "Russian", label: "Russian" },
+  { value: "Samoan", label: "Samoan" },
+  { value: "Scots Gaelic", label: "Scots Gaelic" },
+  { value: "Serbian", label: "Serbian" },
+  { value: "Sesotho", label: "Sesotho" },
+  { value: "Shona", label: "Shona" },
+  { value: "Sindhi", label: "Sindhi" },
+  { value: "Sinhala", label: "Sinhala" },
+  { value: "Slovak", label: "Slovak" },
+  { value: "Slovenian", label: "Slovenian" },
+  { value: "Somali", label: "Somali" },
+  { value: "Spanish", label: "Spanish" },
+  { value: "Sundanese", label: "Sundanese" },
+  { value: "Swahili", label: "Swahili" },
+  { value: "Swedish", label: "Swedish" },
+  { value: "Tajik", label: "Tajik" },
+  { value: "Tamil", label: "Tamil" },
+  { value: "Tatar", label: "Tatar" },
+  { value: "Telugu", label: "Telugu" },
+  { value: "Thai", label: "Thai" },
+  { value: "Turkish", label: "Turkish" },
+  { value: "Turkmen", label: "Turkmen" },
+  { value: "Ukrainian", label: "Ukrainian" },
+  { value: "Urdu", label: "Urdu" },
+  { value: "Uyghur", label: "Uyghur" },
+  { value: "Uzbek", label: "Uzbek" },
+  { value: "Vietnamese", label: "Vietnamese" },
+  { value: "Welsh", label: "Welsh" },
+  { value: "Xhosa", label: "Xhosa" },
+  { value: "Yiddish", label: "Yiddish" },
+  { value: "Yoruba", label: "Yoruba" },
+  { value: "Zulu", label: "Zulu" },
+];
+
 // Matches the prototype's #scr-edit-profile. Backend support is real
 // (PATCH /api/member/profile - main.py's member_update_profile) but there's
 // no GET /api/member/profile to prefill from; GET /api/member/me
@@ -100,8 +218,6 @@ export default function EditProfileScreen({ navigation }: Props) {
   const [ethnicity, setEthnicity] = useState("");
   const [about, setAbout] = useState("");
   const [languages, setLanguages] = useState<string[]>([]);
-  const [addingLanguage, setAddingLanguage] = useState(false);
-  const [languageDraft, setLanguageDraft] = useState("");
 
   const [profileType, setProfileType] = useState<string | null>(null);
   const [lookingFor, setLookingFor] = useState<string[]>([]);
@@ -112,7 +228,7 @@ export default function EditProfileScreen({ navigation }: Props) {
   const [loadingCountries, setLoadingCountries] = useState(false);
   const [loadingCities, setLoadingCities] = useState(false);
   const [picker, setPicker] = useState<
-    "country" | "city" | "ethnicity" | "dobDay" | "dobMonth" | "dobYear" | "profileType" | "lookingFor" | null
+    "country" | "city" | "ethnicity" | "dobDay" | "dobMonth" | "dobYear" | "profileType" | "lookingFor" | "donorContact" | "language" | null
   >(null);
 
   function applyProfile(profile: MemberProfileSummary) {
@@ -164,13 +280,8 @@ export default function EditProfileScreen({ navigation }: Props) {
       .finally(() => setLoadingCities(false));
   }, [picker, country]);
 
-  function addLanguage() {
-    const value = languageDraft.trim();
-    if (value && !languages.some((l) => l.toLowerCase() === value.toLowerCase())) {
-      setLanguages((prev) => [...prev, value]);
-    }
-    setLanguageDraft("");
-    setAddingLanguage(false);
+  function toggleLanguage(value: string) {
+    setLanguages((prev) => (prev.includes(value) ? prev.filter((l) => l !== value) : [...prev, value]));
   }
 
   function removeLanguage(value: string) {
@@ -334,13 +445,12 @@ export default function EditProfileScreen({ navigation }: Props) {
           </Pressable>
 
           <Text style={styles.label}>{t("editProfile.donorContact")}</Text>
-          <TextInput
-            style={styles.input}
-            value={desiredDonorContact || ""}
-            onChangeText={(v) => setDesiredDonorContact(v.slice(0, 120))}
-            placeholder={t("editProfile.donorContactPlaceholder")}
-            placeholderTextColor={colors.muted}
-          />
+          <Pressable style={[styles.field, desiredDonorContact && styles.fieldFilled]} onPress={() => setPicker("donorContact")}>
+            <Text style={[styles.fieldText, desiredDonorContact && styles.fieldTextFilled]} numberOfLines={1}>
+              {desiredDonorContact ? catalogOptionLabel("donorContact", desiredDonorContact) : t("editProfile.select")}
+            </Text>
+            <Text style={styles.chevron}>{"⌄"}</Text>
+          </Pressable>
         </View>
 
         <Text style={styles.sectionTitle}>{t("editProfile.aboutYou")}</Text>
@@ -366,22 +476,9 @@ export default function EditProfileScreen({ navigation }: Props) {
               </Text>
             </Pressable>
           ))}
-          {addingLanguage ? (
-            <TextInput
-              style={styles.chipInput}
-              value={languageDraft}
-              onChangeText={setLanguageDraft}
-              onSubmitEditing={addLanguage}
-              onBlur={addLanguage}
-              placeholder={t("editProfile.languagePlaceholder")}
-              placeholderTextColor={colors.muted}
-              autoFocus
-            />
-          ) : (
-            <Pressable style={styles.chipAdd} onPress={() => setAddingLanguage(true)}>
-              <Text style={styles.chipAddText}>{t("editProfile.addLanguage")}</Text>
-            </Pressable>
-          )}
+          <Pressable style={styles.chipAdd} onPress={() => setPicker("language")}>
+            <Text style={styles.chipAddText}>{t("editProfile.addLanguage")}</Text>
+          </Pressable>
         </View>
 
         {saveError ? <Text style={styles.saveError}>{saveError}</Text> : null}
@@ -434,6 +531,18 @@ export default function EditProfileScreen({ navigation }: Props) {
             setEthnicity(value);
             setPicker(null);
           }}
+          onClose={() => setPicker(null)}
+        />
+      </Modal>
+
+      <Modal visible={picker === "language"} animationType="slide" onRequestClose={() => setPicker(null)}>
+        <OptionListPicker
+          title={t("editProfile.languagesTitle")}
+          options={LANGUAGE_OPTIONS}
+          selected={languages}
+          multi
+          searchable
+          onToggle={toggleLanguage}
           onClose={() => setPicker(null)}
         />
       </Modal>
@@ -522,6 +631,20 @@ export default function EditProfileScreen({ navigation }: Props) {
           onClose={() => setPicker(null)}
         />
       </Modal>
+
+      <Modal visible={picker === "donorContact"} animationType="slide" onRequestClose={() => setPicker(null)}>
+        <OptionListPicker
+          title={t("editProfile.donorContact")}
+          options={CATALOG_ENUM_OPTIONS.donorContact}
+          selected={desiredDonorContact ? [desiredDonorContact] : []}
+          multi={false}
+          onToggle={(value) => {
+            setDesiredDonorContact(value);
+            setPicker(null);
+          }}
+          onClose={() => setPicker(null)}
+        />
+      </Modal>
     </View>
     </GradientBackground>
   );
@@ -605,16 +728,6 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   chipAddText: { fontSize: 13, color: colors.pink, fontWeight: "700" },
-  chipInput: {
-    height: 36,
-    minWidth: 110,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.pink,
-    paddingHorizontal: 14,
-    fontSize: 13,
-    color: colors.ink,
-  },
   saveError: { fontSize: 13, color: colors.danger, marginTop: spacing.md, textAlign: "center" },
   saveBar: {
     position: "absolute",

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { api, ApiError } from "../api/client";
 import { blockProfile } from "../api/blocks";
@@ -181,43 +182,68 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
       <ScrollView
         contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + 92 + insets.bottom }]}
       >
-        {photos.length > 0 ? (
-          <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-            {photos.map((url, i) => (
-              <Image key={i} source={{ uri: url }} style={styles.photo} />
-            ))}
-          </ScrollView>
-        ) : (
-          <View style={[styles.photo, styles.photoPlaceholder]}>
-            <Feather name="user" size={56} color={colors.blue} />
-          </View>
-        )}
+        {/* Redesigned (2026-09-13) against Alena's Figma reference: name/
+            location/badges now sit directly on the photo, over a dark
+            gradient scrim fading up from its bottom edge, with the white
+            detail card (ProfileDetailSections' rounded-top infoCard)
+            following immediately after - no separate flat-color panel in
+            between. Same scrim/overlay pattern CatalogScreen's card
+            already uses (its own "почему чёрная заливка" fix). Previously
+            this screen put name/location in a transparent `header` View
+            that sat directly on GradientBackground's vivid gradient,
+            which read as a solid lilac block between the photo and the
+            white card - that's what Alena's "без сиреневого" flagged. */}
+        <View style={styles.photoWrap}>
+          {photos.length > 0 ? (
+            <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+              {photos.map((url, i) => (
+                <Image key={i} source={{ uri: url }} style={styles.photo} />
+              ))}
+            </ScrollView>
+          ) : (
+            <View style={[styles.photo, styles.photoPlaceholder]}>
+              <Feather name="user" size={56} color={colors.blue} />
+            </View>
+          )}
 
-        {isSelf ? (
-          <View style={styles.previewBanner}>
-            <Feather name="eye" size={14} color={colors.ink} />
-            <Text style={styles.previewBannerText}>{t("profileDetail.previewBanner")}</Text>
-          </View>
-        ) : null}
+          <LinearGradient
+            colors={["transparent", "rgba(10,4,10,0.55)", "rgba(10,4,10,0.92)"]}
+            locations={[0, 0.55, 1]}
+            style={styles.photoScrim}
+            pointerEvents="none"
+          />
 
-        <View style={styles.header}>
-          <View style={styles.nameRow}>
-            <Text style={styles.name}>{profile.displayName}</Text>
-            {profile.isVerified ? (
-              <View style={styles.verifiedBadge}>
-                <Feather name="check" size={11} color="#fff" />
+          {isSelf ? (
+            <View style={styles.previewBanner}>
+              <Feather name="eye" size={14} color={colors.ink} />
+              <Text style={styles.previewBannerText}>{t("profileDetail.previewBanner")}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.overlayInfo}>
+            <View style={styles.nameRow}>
+              <Text style={styles.name}>{profile.displayName}</Text>
+              {profile.isVerified ? (
+                <View style={styles.verifiedBadge}>
+                  <Feather name="check" size={11} color="#fff" />
+                </View>
+              ) : null}
+              {profile.isVideoVerified ? (
+                <View style={styles.videoVerifiedBadge}>
+                  <Feather name="video" size={10} color="#fff" />
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.subtitle}>
+              {[profile.city, profile.country].filter(Boolean).join(", ") || t("common.locationNotSet")}
+            </Text>
+            {profile.isPremium ? <Text style={styles.badge}>{t("profileDetail.premium")}</Text> : null}
+            {profile.profileType ? (
+              <View style={styles.typeBadgeRow}>
+                <Text style={styles.typeBadge}>{catalogOptionLabel("profileTypes", profile.profileType)}</Text>
               </View>
             ) : null}
           </View>
-          <Text style={styles.subtitle}>
-            {[profile.city, profile.country].filter(Boolean).join(", ") || t("common.locationNotSet")}
-          </Text>
-          {profile.isPremium ? <Text style={styles.badge}>{t("profileDetail.premium")}</Text> : null}
-          {profile.profileType ? (
-            <View style={styles.typeBadgeRow}>
-              <Text style={styles.typeBadge}>{catalogOptionLabel("profileTypes", profile.profileType)}</Text>
-            </View>
-          ) : null}
         </View>
 
         <ProfileDetailSections profile={profile} />
@@ -310,33 +336,54 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
   errorText: { color: colors.danger },
   container: { paddingBottom: spacing.xl, backgroundColor: "transparent" },
+  // photoWrap is the positioning root for the scrim + overlaid text below -
+  // photo itself is unchanged (full-width, fixed height).
+  photoWrap: { position: "relative" },
   photo: { width: 390, height: 390, backgroundColor: colors.border },
   photoPlaceholder: { alignItems: "center", justifyContent: "center", width: "100%" },
   headerMenuBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
+  // Dark gradient fading up from the photo's bottom edge, so the overlaid
+  // name/location/badges stay readable without a separate solid-color
+  // panel underneath - same fix CatalogScreen's card already got for the
+  // same complaint ("почему чёрная заливка"/"без сиреневого").
+  photoScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: "55%" },
   previewBanner: {
+    position: "absolute",
+    top: spacing.md,
+    left: spacing.lg,
+    right: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: 8,
     borderRadius: radius.md,
     backgroundColor: "rgba(255,255,255,0.85)",
+    alignSelf: "flex-start",
   },
   previewBannerText: { fontSize: 12.5, fontWeight: "600", color: colors.ink },
-  // Prototype's #scr-profile-detail keeps the vivid gradient only behind the
-  // header text + photo (.pd-header/.pd-photo-card have no background of
-  // their own - the gradient shows straight through); the actual detail
-  // rows sit inside .pd-info-card, a white rounded card that overlaps the
-  // photo (margin-top:-18).
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm, gap: spacing.xs },
+  // Name/location/badges float directly over the photo + scrim now
+  // (Alena's Figma reference), instead of a transparent `header` box that
+  // sat on GradientBackground's vivid gradient below the photo - that read
+  // as a solid lilac panel between the photo and the white detail card.
+  // ProfileDetailSections' own infoCard (rounded top corners) follows
+  // immediately after photoWrap with no gap, so it visually overlaps the
+  // photo's bottom edge exactly like the reference.
+  overlayInfo: { position: "absolute", left: spacing.lg, right: spacing.lg, bottom: spacing.lg, gap: spacing.xs },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   verifiedBadge: {
     width: 18,
     height: 18,
     borderRadius: 9,
     backgroundColor: colors.blue,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoVerifiedBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.pink,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -25,7 +25,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { createApiClient } from "./api";
+import { ADMIN_AUTH_REQUIRED_EVENT, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
@@ -13151,10 +13151,23 @@ export function AdminApp() {
   const location = useLocation();
   const navigate = useNavigate();
   useEffect(() => {
-    api
+    const requireAuthentication = () => {
+      setSession(null);
+      setContentTransitioning(false);
+      setContentTransitionBounds(null);
+      if (transitionTimer.current !== null) {
+        window.clearTimeout(transitionTimer.current);
+        transitionTimer.current = null;
+      }
+    };
+    window.addEventListener(ADMIN_AUTH_REQUIRED_EVENT, requireAuthentication);
+    void api
       .get<Session>("/admin/session")
       .then(setSession)
       .catch(() => setSession(null));
+    return () => {
+      window.removeEventListener(ADMIN_AUTH_REQUIRED_EVENT, requireAuthentication);
+    };
   }, []);
   const handleDashboardStatsLoaded = useCallback((payload: RecordValue) => {
     setNavCounts((payload.counts ?? {}) as RecordValue);

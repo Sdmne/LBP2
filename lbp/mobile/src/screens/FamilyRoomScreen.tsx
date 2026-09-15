@@ -353,6 +353,30 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
         <Text style={styles.pregnancyCardChevron}>{">"}</Text>
       </Pressable>
 
+      {/* Co-Parenting Agreement (premium roadmap step 5) - the "sign" layer
+          on top of the 10 sections below. Body text is derived from the
+          same bothDoneCount/totalSections this screen already computes for
+          its own progress bar, so no extra fetch is needed just to render
+          this card - CoParentingAgreementScreen does its own fetch for the
+          real signed/pending detail once opened. */}
+      <Pressable
+        style={styles.agreementCard}
+        onPress={() => navigation.navigate("CoParentingAgreement", { profileId, displayName })}
+      >
+        <View style={styles.agreementCardIconWrap}>
+          <Text style={styles.agreementCardIcon}>✍️</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.agreementCardTitle}>{t("familyRoom.agreementCardTitle")}</Text>
+          <Text style={styles.agreementCardBody}>
+            {bothDoneCount >= totalSections
+              ? t("familyRoom.agreementCardBodyReady")
+              : t("familyRoom.agreementCardBodyLocked", { done: bothDoneCount, total: totalSections })}
+          </Text>
+        </View>
+        <Text style={styles.agreementCardChevron}>{">"}</Text>
+      </Pressable>
+
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{t("familyRoom.sectionsTitle")}</Text>
         {FAMILY_PLAN_SECTION_KEYS.map((key, index) => {
@@ -605,6 +629,28 @@ const styles = StyleSheet.create({
   pregnancyCardTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
   pregnancyCardBody: { fontSize: 12.5, color: colors.muted, marginTop: 2, lineHeight: 17 },
   pregnancyCardChevron: { fontSize: 18, color: colors.muted },
+  agreementCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: spacing.md,
+  },
+  agreementCardIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  agreementCardIcon: { fontSize: 20 },
+  agreementCardTitle: { fontSize: 15.5, fontWeight: "800", color: colors.ink },
+  agreementCardBody: { fontSize: 12.5, color: colors.muted, marginTop: 2, lineHeight: 17 },
+  agreementCardChevron: { fontSize: 18, color: colors.muted },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

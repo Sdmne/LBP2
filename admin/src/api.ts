@@ -5,6 +5,8 @@ export class ApiError extends Error {
   }
 }
 
+export const ADMIN_AUTH_REQUIRED_EVENT = "lbp-admin-auth-required";
+
 export type ApiClient = {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
@@ -31,6 +33,13 @@ export function createApiClient(basePath = "/api"): ApiClient {
     });
     if (!response.ok) {
       const message = await response.text();
+      if (
+        response.status === 401 &&
+        typeof window !== "undefined" &&
+        path !== "/admin/login"
+      ) {
+        window.dispatchEvent(new Event(ADMIN_AUTH_REQUIRED_EVENT));
+      }
       throw new ApiError(response.status, message || `Request failed (${response.status})`);
     }
     return response.status === 204 ? (undefined as T) : response.json() as Promise<T>;

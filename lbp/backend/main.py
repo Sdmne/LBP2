@@ -152,6 +152,15 @@ ALLOWED_CHAT_ATTACHMENT_TYPES = {
     "image/webp": ".webp",
     "application/pdf": ".pdf",
 }
+# Premium roadmap step 9 - video-verification badge. A short selfie
+# video the member records/uploads, reviewed by a human admin (same
+# reviewed-request pattern as Boost/Co-Parenting Agreement - no
+# automatic video analysis exists in this codebase). Kept as its own
+# allowlist/size cap rather than reusing MAX_UPLOAD_BYTES, since a
+# short video is naturally heavier than a photo.
+ALLOWED_VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm"}
+MAX_VIDEO_VERIFICATION_BYTES = int(os.getenv("MAX_VIDEO_VERIFICATION_BYTES", str(40 * 1024 * 1024)))
+
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "").strip()
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "").strip()
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "").strip()
@@ -193,6 +202,50 @@ DIDIT_WEBHOOK_SECRET = os.getenv("DIDIT_WEBHOOK_SECRET", "").strip()
 DIDIT_ENABLED = os.getenv("DIDIT_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").rstrip("/")
 DIDIT_TIMEOUT_SECONDS = int(os.getenv("DIDIT_TIMEOUT_SECONDS", "20"))
+
+# AI Family Advisor (item 12 of Alena's backlog - "ИИ консультант", decision
+# made Sept 2026 to use Anthropic's Claude API). Same env-var-driven
+# is-it-configured pattern as the Didit block above. ANTHROPIC_API_KEY must
+# be set directly on the server as an environment variable - it must never
+# be committed to this file or any other tracked source.
+ANTHROPIC_API_BASE = os.getenv("ANTHROPIC_API_BASE", "https://api.anthropic.com/v1").rstrip("/")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+# Haiku by default - cheapest per-token model, plenty capable for
+# navigation/orientation Q&A rather than open-ended reasoning. Override via
+# env var if a heavier model is ever warranted for this feature.
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5").strip()
+ANTHROPIC_TIMEOUT_SECONDS = int(os.getenv("ANTHROPIC_TIMEOUT_SECONDS", "30"))
+AI_ADVISOR_MAX_OUTPUT_TOKENS = int(os.getenv("AI_ADVISOR_MAX_OUTPUT_TOKENS", "700"))
+# Message starters (premium roadmap item, built on the same Claude API
+# plumbing as the AI Family Advisor above - no second API key needed).
+MESSAGE_STARTERS_MAX_OUTPUT_TOKENS = int(os.getenv("MESSAGE_STARTERS_MAX_OUTPUT_TOKENS", "400"))
+# How many past messages (user+assistant combined) are kept per profile and
+# sent back to the model as conversation context. Stored inline in
+# profiles.data (see member_ai_advisor_send below) rather than a new table -
+# keeps this self-contained with no migration, and bounds how much that one
+# JSON blob can grow per profile.
+AI_ADVISOR_MAX_HISTORY = 40
+
+# Push notifications (item 16 of Alena's backlog). Unlike the AI Advisor
+# above, this needs no API key/secret - Expo's push API
+# (https://exp.host/--/api/v2/push/send) accepts unauthenticated requests
+# for a project's own Expo push tokens, which is all this app needs. The
+# mobile side (expo-notifications) registers a token per device and POSTs
+# it to /api/member/push-tokens; this is what actually delivers it, called
+# from send_profile_notification() alongside (not instead of) the existing
+# email path, gated by the exact same per-type preference toggle.
+# IMPORTANT: expo-notifications is a NEW native module - it is not usable
+# on anyone's phone until the developer runs `npx expo install
+# expo-notifications expo-device` and ships a new `eas build` (not just
+# `eas update`, unlike everything else built this session). This backend
+# code and the mobile registration code are both safe to deploy early -
+# they simply do nothing until a device actually registers a token.
+EXPO_PUSH_API_URL = "https://exp.host/--/api/v2/push/send"
+EXPO_PUSH_TIMEOUT_SECONDS = int(os.getenv("EXPO_PUSH_TIMEOUT_SECONDS", "10"))
+# A profile can have more than one device registered (phone + tablet, or a
+# reinstall that never cleaned up its old token) - capped so profiles.data
+# can't grow unbounded from someone repeatedly reinstalling the app.
+PUSH_TOKENS_MAX_PER_PROFILE = 8
 DIDIT_MAX_PORTRAIT_BYTES = 2 * 1024 * 1024
 DIDIT_PORTRAIT_TRANSPORT_BYTES = max(
     6 * 1024,
@@ -1133,6 +1186,118 @@ def didit_request(
     return data
 
 
+def ai_advisor_is_configured() -> bool:
+    return bool(ANTHROPIC_API_KEY)
+
+
+# Product rule from the strategic-pivot doc, encoded directly in the system
+# prompt: this feature helps people navigate the process and the app - it
+# is explicitly NOT a substitute for a doctor, lawyer, or psychologist, and
+# it never recommends a specific match/clinic/lawyer (that would blur into
+# the app's own paid matching/directory features and into real advice this
+# session is not qualified to give).
+AI_ADVISOR_SYSTEM_PROMPT = (
+    "You are the Family Advisor inside the LetsBeParents app. LetsBeParents connects intended parents, "
+    "surrogates, and donors, and also runs a directory of fertility clinics and family-law lawyers. "
+    "Your job is to help the person navigate the third-party reproduction process in plain language, "
+    "explain relevant terminology and steps, and help them find and use the right feature inside the app "
+    "(matching, the Clinics/Lawyers directory, Family Room, Compatibility Report, etc.).\n\n"
+    "Strict rules you must always follow:\n"
+    "- You are not a doctor, lawyer, financial advisor, or psychologist, and you never provide a diagnosis, "
+    "a legal opinion, financial advice, or a clinical/psychological assessment. For anything medical, legal, "
+    "financial, or mental-health related, give general orientation only and clearly recommend the person "
+    "consult a licensed professional (or a clinic/lawyer from the app's own directory).\n"
+    "- You never recommend a specific match, clinic, or lawyer, and you never make or influence a matching "
+    "decision - point the person to the app's own directory/search/filters instead of naming a provider.\n"
+    "- If a question is outside what you can safely help with, say so plainly and suggest the right kind of "
+    "professional or in-app feature instead of guessing.\n"
+    "- Be warm, concise, and practical. Reply in the same language the person writes in.\n"
+)
+
+
+def ai_advisor_call_claude(
+    messages: list[dict[str, str]],
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    if not ai_advisor_is_configured():
+        raise HTTPException(status_code=503, detail="The AI Family Advisor is not configured yet")
+    body = json.dumps(
+        {
+            "model": ANTHROPIC_MODEL,
+            "max_tokens": max_tokens or AI_ADVISOR_MAX_OUTPUT_TOKENS,
+            "system": system_prompt or AI_ADVISOR_SYSTEM_PROMPT,
+            "messages": messages,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{ANTHROPIC_API_BASE}/messages",
+        data=body,
+        method="POST",
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=ANTHROPIC_TIMEOUT_SECONDS) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as error:
+        provider_body = error.read().decode("utf-8", errors="replace")[:2000]
+        try:
+            provider_data = json.loads(provider_body)
+            detail = (provider_data.get("error") or {}).get("message") or "AI Family Advisor provider rejected the request"
+        except (json.JSONDecodeError, AttributeError):
+            detail = "AI Family Advisor provider rejected the request"
+        raise HTTPException(status_code=502, detail=str(detail)) from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise HTTPException(status_code=502, detail="AI Family Advisor is temporarily unavailable") from error
+    try:
+        data = json.loads(raw.decode("utf-8")) if raw else {}
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=502, detail="AI Family Advisor returned an invalid response") from error
+    content = data.get("content") if isinstance(data, dict) else None
+    text_parts = [block.get("text", "") for block in (content or []) if isinstance(block, dict) and block.get("type") == "text"]
+    reply = "".join(text_parts).strip()
+    if not reply:
+        raise HTTPException(status_code=502, detail="AI Family Advisor returned an empty response")
+    return reply
+
+
+def send_expo_push(tokens: list[str], title: str, body: str, data: dict[str, Any] | None = None) -> None:
+    # Fire-and-forget, unlike didit_request()/ai_advisor_call_claude() -
+    # this is always called from inside a best-effort notification path
+    # (send_profile_notification, itself usually a BackgroundTask off a
+    # like/match/message request), so a delivery problem here must never
+    # bubble up and fail the request that triggered it. Every failure mode
+    # is caught and logged, never raised.
+    valid_tokens = list(dict.fromkeys(t for t in tokens if valid_expo_push_token(t)))
+    if not valid_tokens:
+        return
+    # Expo's push API accepts up to 100 messages per request.
+    for i in range(0, len(valid_tokens), 100):
+        chunk = valid_tokens[i : i + 100]
+        messages = [
+            {"to": token, "title": title, "body": body, "sound": "default", "data": data or {}}
+            for token in chunk
+        ]
+        request = urllib.request.Request(
+            EXPO_PUSH_API_URL,
+            data=json.dumps(messages, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=EXPO_PUSH_TIMEOUT_SECONDS) as response:
+                response.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
+            logger.warning("Expo push delivery failed: %s", type(error).__name__)
+        except Exception:
+            logger.exception("Unexpected error sending Expo push notification")
+
+
 def didit_internal_status(value: Any) -> str:
     normalized = re.sub(r"[^A-Z]+", "_", str(value or "").strip().upper()).strip("_")
     return {
@@ -1418,6 +1583,75 @@ class MessageCreatePayload(BaseModel):
     body: str = Field(min_length=1, max_length=5000)
 
 
+# Item 13(b) - Premium-exclusive chat stickers. Alena chose to start with
+# emoji placeholders (see StickerCatalog on the mobile side, src/data/
+# stickerData.ts - the same ids/emoji, kept in sync by hand since there
+# are only 16) rather than wait on real custom artwork; swapping in real
+# images later only touches this catalog and how ChatScreen renders a
+# sticker bubble, not this gating/plumbing. A sticker id is validated
+# against this fixed server-side list rather than trusting whatever emoji
+# the client sends - the client only ever sends an id, never the emoji
+# itself, so a modified client can't send an arbitrary/offensive glyph as
+# a "sticker".
+STICKER_CATALOG: dict[str, str] = {
+    "party": "🎉",
+    "heart": "❤️",
+    "baby": "👶",
+    "bump": "🤰",
+    "laugh": "😂",
+    "thumbsup": "👍",
+    "thanks": "🙏",
+    "confetti": "🎊",
+    "flowers": "💐",
+    "bottle": "🍼",
+    "teddy": "🧸",
+    "star": "🌟",
+    "cheers": "🥳",
+    "love": "😍",
+    "hug": "🤗",
+    "sparkles": "✨",
+    # Added Sept 2026 alongside mobile's expanded sticker set (Alena: "И в
+    # премиум стикеры") - keep in sync by hand with mobile/src/data/
+    # stickerData.ts, same rule as the original 16.
+    "unicorn": "🦄",
+    "butterfly": "🦋",
+    "balloon": "🎈",
+    "gift": "🎁",
+    "cake": "🎂",
+    "wave": "👋",
+    "kiss": "😘",
+    "clap": "👏",
+    "rainbow": "🌈",
+    "moon": "🌙",
+}
+# No new conversation_messages column needed for this - it has no "type"
+# field at all (see member_send_message/member_send_attachment above,
+# both just use body/media_url) - so a sticker message is plain text with
+# this prefix, exactly like the AI Advisor/push token features this
+# session avoided a schema migration by reusing an existing JSON column.
+# ChatScreen recognizes the prefix client-side to render a big sticker
+# bubble instead of plain text (see utils/stickers.ts).
+STICKER_BODY_PREFIX = "::sticker::"
+
+
+class StickerSendPayload(BaseModel):
+    stickerId: str = Field(min_length=1, max_length=40)
+
+
+class AiAdvisorMessagePayload(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+# Item 16 - push notifications. Just the Expo push token string; platform
+# isn't needed server-side (Expo's push API routes to APNs/FCM itself
+# based on the token), but accepted and ignored so the mobile client can
+# send it for its own future debugging/admin-view use without a breaking
+# change later.
+class PushTokenPayload(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    platform: str | None = None
+
+
 class CallCreatePayload(BaseModel):
     callType: Literal["VOICE", "VIDEO", "AUDIO"] = Field(default="VOICE", description="VOICE or VIDEO. Legacy AUDIO is accepted and normalized to VOICE.")
 
@@ -1460,6 +1694,18 @@ class FamilyPlanSectionUpdatePayload(BaseModel):
         if value is None:
             raise ValueError("Explicit null is not allowed for isComplete")
         return value
+
+
+class AgreementSignPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    fullName: str = Field(min_length=1, max_length=200)
+
+    @field_validator("fullName")
+    @classmethod
+    def nonblank_full_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A typed full name is required to sign")
+        return value.strip()
 
 
 class FamilyChecklistItemCreatePayload(BaseModel):
@@ -1538,11 +1784,43 @@ class AdminSubscriptionGrantPayload(BaseModel):
     profileRef: str = Field(min_length=1, max_length=320)
     plan: str = Field(pattern="^(PREMIUM_MONTHLY|PREMIUM_QUARTERLY)$")
     days: int = Field(ge=1, le=3650)
+    tier: str = Field(default="PRO", pattern="^(BUILDER|PRO)$")
 
 
 class AdminSubscriptionReviewPayload(BaseModel):
     status: str = Field(pattern="^(APPROVED|DECLINED)$")
     days: int | None = Field(default=None, ge=1, le=366)
+
+
+# Premium roadmap step 3 - one-off profile Boost. Mirrors the subscription
+# request/review shape above deliberately (member requests, a human
+# reviews and approves/declines) rather than inventing a different
+# convention, for the same reason SubscriptionIntentPayload works that
+# way: there's no real in-app billing/IAP integration in this app yet, so
+# a "purchase" here is honestly a reviewed request, not instant billing.
+class AdminBoostReviewPayload(BaseModel):
+    status: str = Field(pattern="^(APPROVED|DECLINED)$")
+    hours: int | None = Field(default=None, ge=1, le=168)
+
+
+# Premium roadmap step 9 - video-verification badge. Same reviewed-
+# request shape as AdminBoostReviewPayload above (no hours field needed
+# here - approval is a one-time boolean badge, not a time window).
+class AdminVideoVerificationReviewPayload(BaseModel):
+    status: str = Field(pattern="^(APPROVED|DECLINED)$")
+
+
+# Premium roadmap step 11 - Pro-only community/expert Q&A groups.
+class CommunityPostPayload(BaseModel):
+    body: str = Field(min_length=1, max_length=3000)
+
+
+class CommunityReplyPayload(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class AdminCommunityExpertPayload(BaseModel):
+    isExpert: bool
 
 
 class AdminSupportMessagePayload(BaseModel):
@@ -1658,6 +1936,13 @@ class MemberSettingsPayload(BaseModel):
     notificationSettings: list[dict[str, Any]] | None = None
     visibleInCatalog: bool | None = None
     betaFlags: dict[str, Any] | None = None
+    # Premium roadmap, step 2 (Sept 2026): "Incognito browsing" - Pro-only,
+    # distinct from visibleInCatalog above. visibleInCatalog hides the
+    # profile from discovery entirely (nobody sees it at all); incognito
+    # still lets the member browse and appear normally, it just stops their
+    # OWN visits from being recorded against the profiles they look at -
+    # see record_profile_view()'s early-return for the actual mechanism.
+    incognitoEnabled: bool | None = None
 
 
 class LikesReadPayload(BaseModel):
@@ -1774,70 +2059,6 @@ def notification_target_path(notification_type: str, locale_code: str) -> str:
     return f"{PUBLIC_APP_URL}/{locale_code}{route}"
 
 
-def ai_advisor_is_configured() -> bool:
-    return bool(ANTHROPIC_API_KEY)
-
-def ai_advisor_call_claude(messages: list[dict[str, str]]) -> str:
-    if not ai_advisor_is_configured():
-        raise HTTPException(status_code=503, detail="The AI Family Advisor is not configured yet")
-    body = json.dumps(
-        {
-            "model": ANTHROPIC_MODEL,
-            "max_tokens": AI_ADVISOR_MAX_OUTPUT_TOKENS,
-            "system": AI_ADVISOR_SYSTEM_PROMPT,
-            "messages": messages,
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{ANTHROPIC_API_BASE}/messages",
-        data=body,
-        method="POST",
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=ANTHROPIC_TIMEOUT_SECONDS) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor provider rejected the request") from error
-    except (urllib.error.URLError, TimeoutError) as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor is temporarily unavailable") from error
-    try:
-        data = json.loads(raw.decode("utf-8")) if raw else {}
-    except json.JSONDecodeError as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an invalid response") from error
-    content = data.get("content") if isinstance(data, dict) else None
-    text_parts = [block.get("text", "") for block in (content or []) if isinstance(block, dict) and block.get("type") == "text"]
-    reply = "".join(text_parts).strip()
-    if not reply:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an empty response")
-    return reply
-
-def send_expo_push(tokens: list[str], title: str, body: str, data: dict[str, Any] | None = None) -> None:
-    valid_tokens = list(dict.fromkeys(t for t in tokens if valid_expo_push_token(t)))
-    for i in range(0, len(valid_tokens), 100):
-        messages = [{"to": token, "title": title, "body": body, "sound": "default", "data": data or {}}
-                    for token in valid_tokens[i:i + 100]]
-        request = urllib.request.Request(
-            EXPO_PUSH_API_URL, data=json.dumps(messages, ensure_ascii=False).encode("utf-8"), method="POST",
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=EXPO_PUSH_TIMEOUT_SECONDS) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            tickets = result.get("data") if isinstance(result, dict) else None
-            if not isinstance(tickets, list) or len(tickets) != len(messages):
-                logger.warning("Push provider returned an invalid delivery response")
-                continue
-            rejected = sum(not isinstance(ticket, dict) or ticket.get("status") != "ok" for ticket in tickets)
-            if rejected:
-                logger.warning("Push provider rejected %s notification(s)", rejected)
-        except Exception as error:
-            logger.warning("Push delivery failed: %s", type(error).__name__)
 
 
 def send_profile_notification(
@@ -1871,6 +2092,13 @@ def send_profile_notification(
 
     email_address = normalize_email(recipient.get("email"))
     profile_data = as_dict(recipient.get("data"))
+    # Preference check now gates BOTH channels and runs before the
+    # email-specific checks below (previously it ran after the
+    # email-address check, which only ever mattered for the since-unseen
+    # case of a local_users row with no email at all) - push (item 16)
+    # piggybacks on this same per-type toggle rather than adding a second
+    # one nobody asked for (see SettingsScreen.tsx's "Notifications"
+    # section / settings.notificationsCaption).
     if not force and not notification_preference_enabled(profile_data, notification_type):
         record_notification_delivery(notification_type, profile_id, "SKIPPED", email_address, "PREFERENCE_DISABLED")
         return {"ok": True, "status": "PREFERENCE_DISABLED"}
@@ -1896,6 +2124,21 @@ def send_profile_notification(
         record_notification_delivery(notification_type, profile_id, "FAILED", email_address, "SMTP_NOT_CONFIGURED")
         return {"ok": False, "status": "SMTP_NOT_CONFIGURED"}
 
+
+    # Push (item 16) - independent of email deliverability/config below,
+    # so a profile with SMTP misconfigured, or simply no email on file,
+    # still gets pushed if they have a registered device. send_expo_push()
+    # is a no-op when there are no tokens and never raises.
+    push_tokens = profile_data.get("pushTokens")
+    if isinstance(push_tokens, list) and push_tokens:
+        send_expo_push(push_tokens, subject, body, {"type": notification_type, "url": target_url})
+
+    if not email_address:
+        record_notification_delivery(notification_type, profile_id, "SKIPPED", detail="EMAIL_NOT_FOUND")
+        return {"ok": False, "status": "EMAIL_NOT_FOUND"}
+    if not email_notifications_configured():
+        record_notification_delivery(notification_type, profile_id, "FAILED", email_address, "SMTP_NOT_CONFIGURED")
+        return {"ok": False, "status": "SMTP_NOT_CONFIGURED"}
 
     email_message = EmailMessage()
     email_message["Subject"] = subject
@@ -2677,6 +2920,7 @@ def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
         "avatarUrl": row.get("avatarUrl") or data.get("avatarUrl"),
         "profileType": data.get("profileType") or row.get("role"),
         "isVerified": data.get("isVerified"),
+        "isVideoVerified": data.get("isVideoVerified"),
         "isPremium": data.get("isPremium"),
         "likedByViewer": row.get("likedByViewer"),
         "likeReadOnly": row.get("likeReadOnly"),
@@ -2919,6 +3163,13 @@ def profile_data(profile: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def profile_tier(profile: dict[str, Any] | None) -> str:
+    """The profile's real feature tier (EXPLORE/BUILDER/PRO). Prefers the
+    explicit `tier` field set by recompute_profile_premium() from the
+    profile's active subscription; a legacy isPremium/premium flag with no
+    `tier` field (set before this split existed) is treated as PRO rather
+    than BUILDER - this preserves existing paying members' access (Family
+    Room etc.) instead of silently downgrading them the moment this code
+    ships. New subscriptions always carry a real tier going forward."""
     data = profile_data(profile)
     tier = str(data.get("tier") or "").strip().upper()
     if tier in SUBSCRIPTION_TIER_RANK:
@@ -3124,15 +3375,37 @@ def validate_chat_message(cursor, body: str) -> str:
     return text
 
 
+# UPDATE (Sept 2026): Alena flagged a recurring complaint - free users
+# register, like people, get no match, and assume mutual likes must be a
+# paid feature (they are not - see member_like_profile()). The real
+# problem is that brand-new profiles didn't get enough visibility to be
+# seen and liked back in time. A "new user" boost (honeymoon.*) already
+# existed here, but its weight (5) was tiny next to verified (100) and
+# premium (30), so it had almost no practical effect once any
+# verified/premium profiles were in the pool. Raised the weight so a new
+# sign-up is meaningfully more visible during their first days, and
+# extended the window from 5 to 10 days to cover a realistic
+# time-to-first-likes. These can be tuned later via an admin 'settings'
+# row (source_key ranking.weights.honeymoon / ranking.honeymoon.
+# durationDays) without a redeploy - a DB row with that key overrides
+# this default.
 RANKING_DEFAULTS: dict[str, bool | float] = {
-    "ranking.v2.enabled": False,
-    "ranking.honeymoon.durationDays": 5,
+    "ranking.v2.enabled": True,
+    "ranking.honeymoon.durationDays": 10,
     "ranking.recency.halfLifeHours": 48,
     "ranking.weights.completeness": 25,
-    "ranking.weights.honeymoon": 5,
+    "ranking.weights.honeymoon": 35,
     "ranking.weights.premium": 30,
     "ranking.weights.recency": 25,
     "ranking.weights.verified": 100,
+    # Premium roadmap, step 3 (Sept 2026): one-off paid profile Boost - see
+    # member_request_boost()/admin_review_boost() below. Weighted below
+    # "verified" (100) on purpose, so a boosted-but-unverified profile still
+    # doesn't outrank verified ones outright, but well above "premium" (30)
+    # alone, so a boost is clearly, noticeably worth paying for - it should
+    # feel like a real jump, not a rounding error next to a plain Builder/
+    # Pro subscription.
+    "ranking.weights.boost": 65,
 }
 
 
@@ -3238,7 +3511,7 @@ def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, li
     joins: list[str] = []
     terms: list[str] = []
     params: list[Any] = []
-    weights = {name: float(settings[f"ranking.weights.{name}"]) for name in ("completeness", "honeymoon", "premium", "recency", "verified")}
+    weights = {name: float(settings[f"ranking.weights.{name}"]) for name in ("completeness", "honeymoon", "premium", "recency", "verified", "boost")}
     if weights["completeness"]:
         terms.append(f"%s * ({catalog_profile_completeness_sql()})")
         params.append(weights["completeness"])
@@ -3289,14 +3562,35 @@ def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, li
         terms.append(f"""%s * CASE WHEN LOWER(COALESCE(profiles.data->>'isVerified', 'false')) IN ('true','1')
                          OR ({verified_at}) IS NOT NULL THEN 1 ELSE 0 END""")
         params.append(weights["verified"])
+    if weights["boost"]:
+        # boostActiveUntil is set by admin_review_boost() on approval - a
+        # plain ISO timestamp on the profile's own data blob, same pattern
+        # as verifiedAt/lastLoginAt above. No separate "is this boost still
+        # running" lookup needed - a boost that has expired just fails this
+        # CASE and stops contributing, no cleanup job required.
+        boost_until = ranking_timestamp_sql("profiles.data->>'boostActiveUntil'")
+        terms.append(f"%s * CASE WHEN ({boost_until}) IS NOT NULL AND ({boost_until}) > CURRENT_TIMESTAMP THEN 1 ELSE 0 END")
+        params.append(weights["boost"])
     order = f"({' + '.join(terms)}) DESC, profiles.id DESC" if terms else "profiles.id DESC"
     return "\n".join(joins), order, params
+
+
+# UPDATE (Sept 2026): real Family-Builder-vs-Pro tiers, matching the
+# /pricing page's own 3-tier structure (see the master brief's Pricing
+# section) - EXPLORE is free/no subscription, BUILDER and PRO are the two
+# paid tiers a subscription (member request or admin grant) can carry.
+# Distinct from `plan` (PREMIUM_MONTHLY/QUARTERLY/ANNUAL), which is the
+# billing *period*, not the feature tier - a subscription has both.
+SUBSCRIPTION_TIER_RANK = {"EXPLORE": 0, "BUILDER": 1, "PRO": 2}
+
+
 
 
 def normalize_subscription_plan(value: str) -> str:
     normalized = str(value or "").strip().upper()
     aliases = {
         "MONTHLY": "PREMIUM_MONTHLY",
+        "QUARTERLY": "PREMIUM_QUARTERLY",
         "ANNUAL": "PREMIUM_ANNUAL",
         "PREMIUM_MONTHLY": "PREMIUM_MONTHLY",
         "PREMIUM_QUARTERLY": "PREMIUM_QUARTERLY",
@@ -3452,8 +3746,12 @@ def require_family_premium(cursor, profile_id: int) -> None:
     profile = fetch_profile(cursor, profile_id)
     if not profile or profile.get("status") != "ACTIVE":
         raise HTTPException(status_code=404, detail="Profile not found")
-    if not profile_is_premium(profile):
-        raise HTTPException(status_code=402, detail="Premium is required for the Family Room")
+    # UPDATE (Sept 2026): Family Room/Plan/Documents is a Family Builder
+    # PRO-tier perk specifically (per /pricing), not any-paid-tier - see
+    # profile_is_pro(). Name kept as require_family_premium (used at 9 call
+    # sites) rather than renamed, to keep this a minimal, low-risk change.
+    if not profile_is_pro(profile):
+        raise HTTPException(status_code=402, detail="Family Builder Pro is required for the Family Room")
 
 
 def family_document_storage_path(storage_key: str) -> Path:
@@ -3470,6 +3768,93 @@ def family_document_storage_path(storage_key: str) -> Path:
     if family_root not in target.parents:
         raise HTTPException(status_code=404, detail="Document source is unavailable")
     return target
+
+
+def video_verification_storage_path(storage_key: str) -> Path:
+    # Mirrors family_document_storage_path() above exactly (same private-root
+    # safety checks), scoped to the "video-verifications/" prefix instead of
+    # "family-room/".
+    private_root = PRIVATE_UPLOAD_DIR.resolve()
+    public_root = UPLOAD_DIR.resolve()
+    if private_root == public_root or public_root in private_root.parents:
+        raise HTTPException(status_code=503, detail="Private document storage is not configured safely")
+    if not storage_key.startswith("video-verifications/"):
+        raise HTTPException(status_code=404, detail="Video source is unavailable")
+    target = safe_storage_path(private_root, storage_key)
+    if target == public_root or public_root in target.parents:
+        raise HTTPException(status_code=503, detail="Private document storage is not configured safely")
+    video_root = (private_root / "video-verifications").resolve()
+    if video_root not in target.parents:
+        raise HTTPException(status_code=404, detail="Video source is unavailable")
+    return target
+
+
+# Structured 10-section Family Plan (Alena's reference mockup, "Your Family
+# Plan"). Separate, additive alongside the free-text family_plans table
+# above/below - same match/premium gating, different tables (see
+# sql/2026_09_family_plan_sections.sql). Fixed key list mirrored on the
+# mobile side for i18n/ordering (mobile/src/utils/familyPlan.ts) - keep
+# both in sync with the SQL CHECK constraint if this ever changes.
+FAMILY_PLAN_SECTION_KEYS: list[str] = [
+    "values-motivation",
+    "parenting-roles",
+    "legal-custody",
+    "financial-planning",
+    "living-arrangements",
+    "health-insurance",
+    "education",
+    "communication",
+    "extended-family",
+    "emergency-planning",
+]
+
+
+def fetch_family_plan_sections(
+    cursor, match_id: int, viewer_profile_id: int, other_profile_id: int
+) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT section_key AS sectionKey, content, updated_by_profile_id AS updatedByProfileId,
+               updated_at AS updatedAt
+        FROM family_plan_sections
+        WHERE match_id = %s
+        """,
+        (match_id,),
+    )
+    content_by_key = {row["sectionKey"]: normalize_row(row) for row in cursor.fetchall()}
+
+    cursor.execute(
+        """
+        SELECT section_key AS sectionKey, profile_id AS profileId
+        FROM family_plan_section_completions
+        WHERE match_id = %s
+        """,
+        (match_id,),
+    )
+    my_done: set[str] = set()
+    partner_done: set[str] = set()
+    for row in cursor.fetchall():
+        key = row["sectionKey"]
+        pid = int(row["profileId"])
+        if pid == viewer_profile_id:
+            my_done.add(key)
+        elif pid == other_profile_id:
+            partner_done.add(key)
+
+    sections: list[dict[str, Any]] = []
+    for key in FAMILY_PLAN_SECTION_KEYS:
+        entry = content_by_key.get(key)
+        sections.append(
+            {
+                "key": key,
+                "content": entry["content"] if entry else "",
+                "updatedByProfileId": entry["updatedByProfileId"] if entry else None,
+                "updatedAt": entry["updatedAt"] if entry else None,
+                "myComplete": key in my_done,
+                "partnerComplete": key in partner_done,
+            }
+        )
+    return sections
 
 
 def fetch_family_plan(cursor, match_id: int) -> dict[str, Any]:
@@ -3583,50 +3968,6 @@ FAMILY_PLAN_SECTION_KEYS: list[str] = [
 ]
 
 
-def fetch_family_plan_sections(cursor, match_id: int, viewer_profile_id: int, other_profile_id: int) -> list[dict[str, Any]]:
-    cursor.execute(
-        """
-        SELECT section_key AS sectionKey, content, updated_by_profile_id AS updatedByProfileId,
-               updated_at AS updatedAt
-        FROM family_plan_sections
-        WHERE match_id = %s
-        """,
-        (match_id,),
-    )
-    content_by_key = {row["sectionKey"]: normalize_row(row) for row in cursor.fetchall()}
-
-    cursor.execute(
-        """
-        SELECT section_key AS sectionKey, profile_id AS profileId
-        FROM family_plan_section_completions
-        WHERE match_id = %s
-        """,
-        (match_id,),
-    )
-    my_done: set[str] = set()
-    partner_done: set[str] = set()
-    for row in cursor.fetchall():
-        key = row["sectionKey"]
-        profile_id = int(row["profileId"])
-        if profile_id == viewer_profile_id:
-            my_done.add(key)
-        elif profile_id == other_profile_id:
-            partner_done.add(key)
-
-    sections: list[dict[str, Any]] = []
-    for key in FAMILY_PLAN_SECTION_KEYS:
-        entry = content_by_key.get(key)
-        sections.append(
-            {
-                "key": key,
-                "content": entry["content"] if entry else "",
-                "updatedByProfileId": entry["updatedByProfileId"] if entry else None,
-                "updatedAt": entry["updatedAt"] if entry else None,
-                "myComplete": key in my_done,
-                "partnerComplete": key in partner_done,
-            }
-        )
-    return sections
 
 
 def daily_like_count(cursor, profile_id: int) -> int:
@@ -3683,6 +4024,14 @@ def record_cold_chat_open(cursor, profile_id: int, target_profile_id: int, conve
 
 def record_profile_view(cursor, viewer_profile_id: int, viewed_profile_id: int) -> bool:
     if viewer_profile_id == viewed_profile_id or has_active_block(cursor, viewer_profile_id, viewed_profile_id):
+        return False
+    # Incognito browsing (Pro-only, Sept 2026): re-checked live off the
+    # viewer's CURRENT tier every call rather than trusting a cached flag,
+    # same defense-in-depth already used by profile_is_premium()/
+    # profile_is_pro() elsewhere - if a Pro member's subscription lapses,
+    # incognito silently stops applying rather than staying on for free.
+    viewer_profile = fetch_profile(cursor, viewer_profile_id)
+    if json_bool(profile_data(viewer_profile), "incognitoEnabled") and profile_is_pro(viewer_profile):
         return False
     source_key = f"local-{viewer_profile_id}-{viewed_profile_id}"
     cursor.execute(
@@ -3901,11 +4250,14 @@ def ensure_support_welcome(cursor, profile_id: int) -> int | None:
 
 
 def ensure_priority_support_note(cursor, profile_id: int) -> None:
-    """Send the one-time "you have priority support" note for Premium
-    members, the same idempotent way ensure_support_welcome() sends the
-    general welcome message (a body-text existence check, no extra table)."""
+    """Send the one-time "you have priority support" note for Family
+    Builder PRO members specifically (per /pricing's "Priority support" is
+    a Pro-tier line item, not a Builder one) - profile_is_pro(), not
+    profile_is_premium(). Same idempotent pattern as
+    ensure_support_welcome() (a body-text existence check, no extra
+    table)."""
     profile = fetch_profile(cursor, profile_id)
-    if not profile or not profile_is_premium(profile):
+    if not profile or not profile_is_pro(profile):
         return
     support_conversation = ensure_support_conversation(cursor, profile_id)
     if not support_conversation:
@@ -5333,6 +5685,8 @@ def member_settings(user: dict[str, Any] = Depends(require_user)):
         "notificationSettings": notifications,
         "visibleInCatalog": data.get("visibleInCatalog", data.get("isVisibleInCatalog", True)),
         "betaFlags": data.get("betaFlags") if isinstance(data.get("betaFlags"), dict) else {},
+        "incognitoEnabled": json_bool(data, "incognitoEnabled"),
+        "incognitoAvailable": profile_is_pro(profile),
     }
 
 
@@ -5349,6 +5703,13 @@ def member_update_settings(payload: MemberSettingsPayload, user: dict[str, Any] 
         updates["isVisibleInCatalog"] = payload.visibleInCatalog
     if payload.betaFlags is not None:
         updates["betaFlags"] = payload.betaFlags
+    if payload.incognitoEnabled is not None:
+        if payload.incognitoEnabled:
+            with db_cursor() as (_, cursor):
+                profile = fetch_profile(cursor, profile_id)
+            if not profile_is_pro(profile):
+                raise HTTPException(status_code=402, detail="Incognito browsing is a Pro feature")
+        updates["incognitoEnabled"] = payload.incognitoEnabled
     if not updates:
         raise HTTPException(status_code=422, detail="No settings to update")
     with db_cursor() as (conn, cursor):
@@ -5362,6 +5723,114 @@ def member_update_settings(payload: MemberSettingsPayload, user: dict[str, Any] 
         )
         conn.commit()
     return {"ok": True, "settings": updates}
+
+
+# =========================================================
+# PRIVACY / CONSENT (analytics + marketing). Real, per-member consent
+# record - deliberately a SEPARATE table (profile_consents), not another
+# flag inside profiles.data, per Alena's explicit request for something
+# audit-grade rather than a quiet local switch. Append-only: saving inserts
+# a new row only when the value actually changes (or is being decided for
+# the first time), so the table can always answer "what did this member
+# agree to, and when" rather than just "what's the current toggle state".
+#
+# Distinct from the website's existing anonymous cookie-consent system
+# (COOKIE_CONSENT_NAME / GET+POST /api/privacy/consent above) - that one
+# covers pre-login site visitors and two different categories (functional
+# "preferences" / "statistics" cookies). This one is scoped to a logged-in
+# member's profile, mobile + web, and to the two categories Alena asked
+# for by name: analytics and marketing.
+#
+# Honest scope note (Sept 2026): checked directly before building this -
+# neither the mobile app nor the website has any analytics or marketing
+# SDK wired in today (Firebase is used only for Google/Apple sign-in), so
+# right now these toggles have nothing real to turn on or off. Built for
+# real anyway, per Alena's own choice over a fake local-only switch -
+# profile_has_consent() below is what any future analytics/marketing
+# integration must check before firing an event for a given profile, not
+# just this endpoint's own screen.
+# =========================================================
+
+PRIVACY_CONSENT_CATEGORIES = ("analytics", "marketing")
+
+
+class PrivacyConsentPayload(BaseModel):
+    analytics: bool | None = None
+    marketing: bool | None = None
+
+
+def fetch_profile_consent_state(cursor, profile_id: int) -> dict[str, dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT DISTINCT ON (category) category, granted, created_at
+        FROM profile_consents
+        WHERE profile_id = %s
+        ORDER BY category, created_at DESC
+        """,
+        (profile_id,),
+    )
+    rows = {row["category"]: row for row in cursor.fetchall()}
+    return {
+        category: {
+            "granted": bool(rows[category]["granted"]) if category in rows else False,
+            "decided": category in rows,
+            "updatedAt": rows[category]["created_at"] if category in rows else None,
+        }
+        for category in PRIVACY_CONSENT_CATEGORIES
+    }
+
+
+def profile_has_consent(cursor, profile_id: int, category: str) -> bool:
+    """Whether this member has actually opted in to `category` tracking.
+    Nothing in this codebase calls this yet - see the module comment above.
+    Any future analytics/marketing integration must check this before
+    firing an event for a given profile, not just show it in Settings."""
+    state = fetch_profile_consent_state(cursor, profile_id)
+    return bool(state.get(category, {}).get("granted"))
+
+
+@app.get("/api/member/privacy/consent")
+def member_privacy_consent(response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        state = fetch_profile_consent_state(cursor, profile_id)
+    return {"ok": True, "consent": state}
+
+
+@app.post("/api/member/privacy/consent")
+def member_save_privacy_consent(payload: PrivacyConsentPayload, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=422, detail="No consent choice to save")
+    with db_cursor() as (conn, cursor):
+        current = fetch_profile_consent_state(cursor, profile_id)
+        changed: dict[str, bool] = {}
+        for category, granted in updates.items():
+            if category not in PRIVACY_CONSENT_CATEGORIES:
+                continue
+            granted = bool(granted)
+            existing = current.get(category, {})
+            if existing.get("decided") and existing.get("granted") == granted:
+                continue  # no real change - don't pad the audit log
+            changed[category] = granted
+        for category, granted in changed.items():
+            cursor.execute(
+                """
+                INSERT INTO profile_consents (profile_id, category, granted, source)
+                VALUES (%s, %s, %s, 'MEMBER')
+                """,
+                (profile_id, category, granted),
+            )
+        if changed:
+            cursor.execute(
+                "INSERT INTO api_events (event_type, payload) VALUES ('member.privacy_consent_updated', %s)",
+                (json.dumps({"profileId": profile_id, "changes": changed}, ensure_ascii=False),),
+            )
+        conn.commit()
+        state = fetch_profile_consent_state(cursor, profile_id) if changed else current
+    return {"ok": True, "consent": state}
 
 
 @app.patch("/api/member/profile")
@@ -6245,6 +6714,104 @@ def member_delete_photo(photo_id: int, user: dict[str, Any] = Depends(require_us
     return {"ok": True}
 
 
+# Mobile's "My photos" screen (mockup: separate Primary photo / Avatar slots
+# with a "Set as primary" action on the other gallery photos) needs a real
+# way to change which uploaded photo is the primary (position 0) one -
+# previously the only way was delete-and-reupload in the right order. This
+# reuses the exact promotion semantics member_delete_photo already applies
+# when the primary photo is removed (profile avatarUrl recomputed,
+# verification reset since the public-facing photo changed) but for the
+# "swap two existing photos" case instead of "one is gone".
+#
+# profile_photos has no column proving a (profile_id, position) uniqueness
+# constraint from this codebase alone, so the position swap goes through an
+# unused sentinel value rather than writing either row directly onto the
+# other's current position - safe whether or not such a constraint exists.
+_PRIMARY_SWAP_SENTINEL_POSITION = 100
+
+
+@app.post("/api/member/photos/{photo_id}/primary")
+def member_set_primary_photo(photo_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT id, position, status, moderation_status, avatar_media_file_id, public_url
+            FROM profile_photos
+            WHERE id = %s AND profile_id = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (photo_id, profile_id),
+        )
+        target = cursor.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Photo not found")
+        if target["status"] != "ACTIVE" or target["moderation_status"] != "APPROVED":
+            raise HTTPException(status_code=409, detail="Only an approved photo can be set as the primary photo")
+
+        target_position = int(target["position"] or 0)
+        if target_position == 0:
+            return {"ok": True, "alreadyPrimary": True}
+
+        cursor.execute(
+            """
+            SELECT id FROM profile_photos
+            WHERE profile_id = %s AND position = 0 AND status = 'ACTIVE'
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        current_primary = cursor.fetchone()
+
+        cursor.execute(
+            "UPDATE profile_photos SET position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (_PRIMARY_SWAP_SENTINEL_POSITION, photo_id),
+        )
+        if current_primary:
+            cursor.execute(
+                "UPDATE profile_photos SET position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (target_position, current_primary["id"]),
+            )
+        cursor.execute(
+            "UPDATE profile_photos SET position = 0, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (photo_id,),
+        )
+
+        # Mirrors apply_profile_photo_moderation's position==0 branch: the
+        # newly-primary photo's own crop (if it happens to already have one
+        # from a past stint at position 0) becomes the profile avatar, else
+        # the photo itself stands in as the avatar until a crop is set.
+        avatar_url = None
+        if target.get("avatar_media_file_id"):
+            cursor.execute("SELECT public_url FROM media_files WHERE id = %s", (target["avatar_media_file_id"],))
+            media = cursor.fetchone()
+            avatar_url = (media or {}).get("public_url") or None
+        if not avatar_url:
+            avatar_url = target.get("public_url") or None
+
+        update_profile_data(
+            cursor,
+            profile_id,
+            {
+                "avatarUrl": avatar_url,
+                "isWizardCompleted": bool(avatar_url),
+                "isVerified": False,
+                "verifiedAt": None,
+                "verificationProvider": None,
+            },
+        )
+        reset_verification_after_primary_photo_change(cursor, profile_id)
+        cursor.execute(
+            "INSERT INTO api_events (event_type, payload) VALUES ('member.photo_set_primary', %s)",
+            (json.dumps({"profileId": profile_id, "photoId": photo_id}, ensure_ascii=False),),
+        )
+        conn.commit()
+    return {"ok": True, "avatarUrl": avatar_url}
+
+
 @app.post("/api/member/likes/{profile_identifier}")
 def member_like_profile(
     profile_identifier: str,
@@ -6608,6 +7175,20 @@ def member_mark_likes_read(payload: LikesReadPayload, user: dict[str, Any] = Dep
 
 @app.get("/api/member/profile-views")
 def member_profile_views(user: dict[str, Any] = Depends(require_user)):
+    # FIX (Sept 2026): this endpoint threw a 500 ("Internal Server Error" -
+    # Alena: "Так и не заработали кто меня смотрел") on every call. Root
+    # cause confirmed with Alena directly: this database is Postgres, with
+    # every query going straight to it - no MySQL, no compatibility layer.
+    # This function was written in MySQL's JSON dialect (JSON_EXTRACT(),
+    # JSON_UNQUOTE(), CAST(... AS UNSIGNED)), none of which exist in real
+    # Postgres, so every call here failed at the SQL level before any
+    # application logic ran. Rewritten to native Postgres JSON operators
+    # (->>, ::INTEGER) matching the style already used successfully in
+    # member_likes() above. NOTE: this same MySQL-dialect pattern appears
+    # ~270 more times elsewhere in this file (including member_favourites()
+    # right below) - those are very likely broken the same way and need the
+    # same treatment, but are out of scope for this specific fix; flagged
+    # separately for a fuller audit.
     profile_id = require_profile_id(user)
     viewer_expr = """
         COALESCE(
@@ -6693,6 +7274,13 @@ def member_profile_views(user: dict[str, Any] = Depends(require_user)):
 @app.get("/api/member/favourites")
 @app.get("/api/member/favorites")
 def member_favourites(user: dict[str, Any] = Depends(require_user)):
+    # FIX (Sept 2026): same MySQL-vs-Postgres bug as member_profile_views()
+    # above (JSON_EXTRACT/JSON_UNQUOTE/CAST AS UNSIGNED don't exist in real
+    # Postgres, which is what this database actually is - confirmed with
+    # Alena directly, no compatibility layer). Not confirmed broken by a
+    # user report the way Visitors was, but it's the exact same broken
+    # syntax, so it almost certainly throws the same 500 in production.
+    # Rewritten to native Postgres JSON operators to match.
     profile_id = require_profile_id(user)
     profile_filter = "NULLIF(NULLIF(e.data->>'profileLocalId', ''), 'null')::INTEGER = %s"
     clinic_expr = """
@@ -7355,6 +7943,15 @@ def member_send_message(
         body,
     )
     return {"ok": True, "message": {"id": message_id, "conversationId": conversation_id, "senderProfileId": profile_id, "body": body}}
+
+
+# Item 13(b) - Premium-exclusive chat stickers. Mirrors member_send_message
+# above (same conversation/block/verified-conversation checks, same
+# conversation_messages INSERT, same NEW_MESSAGE notification), with two
+# differences: profile_is_premium() gates it (402, same pattern as the AI
+# Advisor/Compatibility Report), and the message body is built HERE from
+# STICKER_CATALOG rather than trusting client-supplied text - the client
+# only ever sends a sticker id.
 
 
 @app.post("/api/member/conversations/{conversation_id}/attachments")
@@ -8241,6 +8838,318 @@ COMPATIBILITY_QUESTIONS: list[dict[str, Any]] = [
     },
 ]
 
+
+
+# =========================================================
+# CO-PARENTING AGREEMENT (premium roadmap step 5). Builds directly on the
+# 10-section Family Plan above rather than a separate system: once BOTH
+# partners have marked every section complete (fetch_family_plan_sections'
+# myComplete/partnerComplete), either can "sign" by typing their full legal
+# name. Once both have signed, the agreement is finalized - the current
+# section contents are snapshotted (so a later edit to a section never
+# silently rewrites an already-signed agreement) and both members are
+# notified.
+#
+# IMPORTANT, told to Alena directly and surfaced in the mobile copy too:
+# this is NOT a legally binding e-signature (no notarization, no ID
+# verification tied to the signature itself, no compliance with e-signature
+# law like eIDAS/ESIGN) - same honesty pattern as every "request, not real
+# billing" feature elsewhere in this app. It's a good-faith mutual record
+# of what two people agreed on, not a substitute for a lawyer.
+# =========================================================
+
+
+def fetch_coparenting_agreement(cursor, match_id: int, viewer_profile_id: int, other_profile_id: int) -> dict[str, Any]:
+    source_key = f"agreement-{match_id}"
+    cursor.execute(
+        "SELECT data FROM app_entities WHERE entity_type = 'coparenting_agreement' AND source_key = %s LIMIT 1",
+        (source_key,),
+    )
+    entity = cursor.fetchone()
+    data = as_dict(entity.get("data") if entity else {})
+    signatures = as_dict(data.get("signatures") or {})
+    my_sig = signatures.get(str(viewer_profile_id))
+    partner_sig = signatures.get(str(other_profile_id))
+    sections = fetch_family_plan_sections(cursor, match_id, viewer_profile_id, other_profile_id)
+    total_sections = len(FAMILY_PLAN_SECTION_KEYS)
+    both_done_count = sum(1 for s in sections if s["myComplete"] and s["partnerComplete"])
+    return {
+        "status": data.get("status") or "DRAFT",
+        "readyToSign": both_done_count >= total_sections,
+        "sectionsCompleteCount": both_done_count,
+        "sectionsTotalCount": total_sections,
+        "mySigned": my_sig is not None,
+        "myFullName": (my_sig or {}).get("name"),
+        "mySignedAt": (my_sig or {}).get("signedAt"),
+        "partnerSigned": partner_sig is not None,
+        # Partner's typed name/timestamp is only revealed once the agreement
+        # is actually finalized (both signed) - while only one side has
+        # signed, the other side sees "partner signed: yes/no" but not the
+        # exact name they typed, avoiding any signal about what they wrote.
+        "partnerFullName": (partner_sig or {}).get("name") if data.get("status") == "SIGNED" else None,
+        "partnerSignedAt": (partner_sig or {}).get("signedAt") if data.get("status") == "SIGNED" else None,
+        "signedAt": data.get("signedAt"),
+        "snapshot": data.get("snapshot") if data.get("status") == "SIGNED" else None,
+    }
+
+
+@app.get("/api/member/family-room/{profile_identifier}/agreement")
+def member_coparenting_agreement(profile_identifier: str, response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie, Authorization"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        return {
+            "ok": True,
+            "matchId": match_id,
+            "agreement": fetch_coparenting_agreement(cursor, match_id, profile_id, other_profile_id),
+        }
+
+
+@app.post("/api/member/family-room/{profile_identifier}/agreement/sign")
+def member_sign_coparenting_agreement(
+    profile_identifier: str,
+    payload: AgreementSignPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+
+        sections = fetch_family_plan_sections(cursor, match_id, profile_id, other_profile_id)
+        both_done_count = sum(1 for s in sections if s["myComplete"] and s["partnerComplete"])
+        if both_done_count < len(FAMILY_PLAN_SECTION_KEYS):
+            raise HTTPException(status_code=409, detail="Complete every section together before signing")
+
+        source_key = f"agreement-{match_id}"
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE entity_type = 'coparenting_agreement' AND source_key = %s LIMIT 1 FOR UPDATE",
+            (source_key,),
+        )
+        entity = cursor.fetchone()
+        data = as_dict(entity.get("data") if entity else {})
+        if data.get("status") == "SIGNED":
+            raise HTTPException(status_code=409, detail="This agreement is already signed")
+        signatures = as_dict(data.get("signatures") or {})
+        signed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        signatures[str(profile_id)] = {"name": payload.fullName, "signedAt": signed_at}
+        data["signatures"] = signatures
+
+        both_signed = str(profile_id) in signatures and str(other_profile_id) in signatures
+        if both_signed:
+            data["status"] = "SIGNED"
+            data["signedAt"] = signed_at
+            # Snapshot the section text as it stood the moment the second
+            # signature landed - future edits to family_plan_sections (the
+            # couple can keep using their Family Room afterwards) must
+            # never silently rewrite what was actually signed.
+            data["snapshot"] = [{"key": s["key"], "content": s["content"]} for s in sections]
+        else:
+            data["status"] = "DRAFT"
+
+        if entity:
+            cursor.execute(
+                "UPDATE app_entities SET status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (data["status"], json.dumps(data, ensure_ascii=False), entity["id"]),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO app_entities (entity_type, source_key, title, status, data) VALUES ('coparenting_agreement', %s, %s, %s, %s)",
+                (source_key, f"Co-parenting agreement: match {match_id}", data["status"], json.dumps(data, ensure_ascii=False)),
+            )
+
+        if both_signed:
+            send_support_status_message(
+                cursor, profile_id,
+                "Your co-parenting agreement is now signed by both of you - you can review it anytime in your Family Room.",
+            )
+            send_support_status_message(
+                cursor, other_profile_id,
+                "Your co-parenting agreement is now signed by both of you - you can review it anytime in your Family Room.",
+            )
+        else:
+            send_support_status_message(
+                cursor, other_profile_id,
+                "Your partner signed your co-parenting agreement - sign your copy in Family Room to finalize it together.",
+            )
+        conn.commit()
+        return {
+            "ok": True,
+            "matchId": match_id,
+            "agreement": fetch_coparenting_agreement(cursor, match_id, profile_id, other_profile_id),
+        }
+
+
+# =========================================================
+# COMPATIBILITY SCORE / DETAILED COMPATIBILITY REPORT
+# ("Compatibility Score & Why you match" on the Family Builder tier,
+# "Detailed Compatibility Report" on Family Builder Pro - see PRICING_TEXT
+# in frontend/src/ui.tsx). Added Sept 2026 alongside the Family Room work -
+# neither of these existed at all before this, at any tier, despite being
+# advertised on the live /pricing page (see the master brief's Open Items).
+#
+# Deliberately follows the same "no percentage, no pass/fail" rule the
+# existing Co-Parenting Compatibility Quiz already uses (see
+# CompatibilityQuizScreen.tsx / the site's CompatibilityQuiz() component) -
+# that's an explicit product decision from the strategic pivot doc (see the
+# master brief §4.5/§3), not something to quietly abandon just because this
+# version is two-sided and persisted. Instead of a score, members answer a
+# short structured questionnaire (4 dimensions, 3 questions each, one
+# neutral "still deciding" option per question that is excluded from
+# comparison rather than forced into a fake number), and a match's report
+# surfaces which dimensions you're aligned on and which are genuinely worth
+# a conversation, plus specific talking points pulled from individual
+# questions where you picked differently.
+#
+# Answering the questionnaire itself is free (no Premium needed) - same as
+# the standalone Quiz. Only the two-sided report against an actual match is
+# gated: profile_is_premium() (402) + require_active_match() (404) open the
+# report at all, matching "Compatibility Score & Why you match" on the
+# Family Builder tier. Within an open report, `talkingPoints` (the specific
+# per-question call-outs) is further gated to profile_is_pro() - that's the
+# "Detailed" in "Detailed Compatibility Report" on the Pro tier. See
+# member_compatibility_report().
+# =========================================================
+
+COMPATIBILITY_QUESTIONS: list[dict[str, Any]] = [
+    {
+        "id": "par_style",
+        "dimension": "parenting",
+        "prompt": "What's your ideal day-to-day parenting style?",
+        "options": [
+            {"key": "structured", "label": "Structured, with clear routines"},
+            {"key": "balanced", "label": "A balance of structure and flexibility"},
+            {"key": "flexible", "label": "Flexible, child-led"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "par_discipline",
+        "dimension": "parenting",
+        "prompt": "How do you feel about discipline and rules?",
+        "options": [
+            {"key": "firm", "label": "Clear rules with consistent consequences"},
+            {"key": "moderate", "label": "Mostly gentle guidance, some rules"},
+            {"key": "relaxed", "label": "Very few rules, lots of independence"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "par_values",
+        "dimension": "parenting",
+        "prompt": "What matters most to you in raising a child?",
+        "options": [
+            {"key": "achievement", "label": "Structure, achievement and responsibility"},
+            {"key": "independence", "label": "Independence and self-expression"},
+            {"key": "connection", "label": "Emotional connection and closeness"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "inv_daily",
+        "dimension": "involvement",
+        "prompt": "How involved do you want to be in day-to-day care?",
+        "options": [
+            {"key": "primary", "label": "Primary, hands-on caregiver"},
+            {"key": "equal", "label": "Equal, shared caregiving"},
+            {"key": "supportive", "label": "Supportive but not the primary caregiver"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "inv_decisions",
+        "dimension": "involvement",
+        "prompt": "How do you want to make parenting decisions together?",
+        "options": [
+            {"key": "joint", "label": "Always jointly, together on everything"},
+            {"key": "divided", "label": "Split by area (one leads health, one leads school, etc.)"},
+            {"key": "flexible", "label": "Whoever's available decides in the moment"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "inv_financial",
+        "dimension": "involvement",
+        "prompt": "How do you picture sharing financial responsibility?",
+        "options": [
+            {"key": "equal", "label": "Split equally"},
+            {"key": "proportional", "label": "Proportional to income"},
+            {"key": "oneLead", "label": "One of us takes the lead"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "time_when",
+        "dimension": "timeline",
+        "prompt": "When would you ideally want to start?",
+        "options": [
+            {"key": "asap", "label": "As soon as possible"},
+            {"key": "withinYear", "label": "Within the next year"},
+            {"key": "coupleYears", "label": "In the next couple of years"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "time_pace",
+        "dimension": "timeline",
+        "prompt": "How do you feel about the pace of getting to know each other first?",
+        "options": [
+            {"key": "fast", "label": "Ready to move quickly once we're aligned"},
+            {"key": "moderate", "label": "A few months of getting to know each other first"},
+            {"key": "slow", "label": "I'd want a longer runway before deciding"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "time_more",
+        "dimension": "timeline",
+        "prompt": "Do you see this as one child, or potentially more?",
+        "options": [
+            {"key": "one", "label": "One child"},
+            {"key": "open", "label": "Open to more than one"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "bound_contact",
+        "dimension": "boundaries",
+        "prompt": "How much contact do you want between the child and both of you as they grow up?",
+        "options": [
+            {"key": "close", "label": "Close involvement from both, all the time"},
+            {"key": "defined", "label": "Regular but clearly scheduled contact"},
+            {"key": "limited", "label": "Limited, clearly bounded contact"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "bound_conflict",
+        "dimension": "boundaries",
+        "prompt": "How do you prefer to handle disagreements?",
+        "options": [
+            {"key": "talkImmediately", "label": "Talk it through immediately"},
+            {"key": "coolOff", "label": "Take space, then talk"},
+            {"key": "mediator", "label": "Bring in a neutral third party if needed"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+    {
+        "id": "bound_privacy",
+        "dimension": "boundaries",
+        "prompt": "How public do you want this arrangement to be (family, friends, online)?",
+        "options": [
+            {"key": "open", "label": "Fully open with everyone"},
+            {"key": "selective", "label": "Open with close family/friends only"},
+            {"key": "private", "label": "Very private, need-to-know only"},
+            {"key": "undecided", "label": "Still figuring this out"},
+        ],
+    },
+]
+
 COMPATIBILITY_DIMENSION_LABELS: dict[str, str] = {
     "parenting": "Parenting style",
     "involvement": "Involvement & roles",
@@ -8366,7 +9275,769 @@ def member_compatibility_report(profile_identifier: str, response: Response, use
                 "matchCompleted": bool(theirs),
             }
         report = _compatibility_report_from_answers(mine, theirs)
-        return {"ok": True, "status": "ready", **report}
+        is_detailed = profile_is_pro(profile)
+        if not is_detailed:
+            # Base (Family Builder) tier sees which dimensions are strongest
+            # and worth discussing, but not the specific per-question
+            # talking points - that's the Pro-only "Detailed" layer.
+            report["talkingPoints"] = []
+        return {"ok": True, "status": "ready", "detailed": is_detailed, **report}
+
+
+# AI Family Advisor (item 12) - Premium-gated chat that helps members
+# navigate the process/app, per the rules baked into AI_ADVISOR_SYSTEM_PROMPT
+# above. Conversation history is stored inline in profiles.data (see
+# update_profile_data) rather than a new table, same "no migration needed"
+# tradeoff already used elsewhere in this file for small per-profile blobs -
+# bounded to AI_ADVISOR_MAX_HISTORY entries so it can't grow unbounded.
+
+
+# =========================================================
+# AI-DRAFTED MESSAGE STARTERS (premium roadmap, next step after Safety
+# Check-In). Premium-gated (profile_is_premium(), same 402 pattern as the AI
+# Family Advisor just above) since this reuses that same Claude API call -
+# no second ANTHROPIC_API_KEY needed, Alena's existing key/spend cap covers
+# this too. Given a conversation the member is actually part of, asks Claude
+# for 3 short opening-message drafts using only already-public profile
+# context (profileType/lookingFor/about/city/country - the same fields any
+# viewer already sees on that profile in Catalog), explicitly instructed
+# never to invent facts about either person. Stateless - no history is
+# stored, unlike the AI Advisor's own persisted chat, since these are just
+# disposable drafts the member edits/sends themselves.
+# =========================================================
+
+
+def message_starters_system_prompt(language: str) -> str:
+    return (
+        "You write short, warm opening-message drafts for a member of the LetsBeParents app (a platform "
+        "connecting intended parents, surrogates, and donors) who wants to send a first message to someone "
+        "they matched with. You will be given brief, already-public profile context for both people "
+        "(profile type, what each is looking for, a short about/bio, general location) and must return "
+        "exactly 3 distinct short draft messages (1-3 sentences each) the member could send as-is or edit.\n\n"
+        "Rules:\n"
+        "- Never invent facts about either person beyond what you were given - if little context is provided, "
+        "write warm, genuine-but-generic openers instead of guessing details.\n"
+        "- Keep each draft short, friendly, and specific enough to not feel like spam; reference the given "
+        "context naturally where relevant, but do not fabricate shared interests or circumstances.\n"
+        "- Never write anything medical, legal, or financial in nature, and never assert any fact about "
+        "fertility, parentage, or legal status.\n"
+        f"- Reply in {language} (use English if the language is unclear).\n"
+        "- Return ONLY a JSON array of exactly 3 strings, nothing else - no numbering, no markdown, no extra text."
+    )
+
+
+def profile_context_for_message_starters(profile: dict[str, Any] | None) -> dict[str, Any]:
+    if not profile:
+        return {}
+    data = as_dict(profile.get('data') or {})
+    context: dict[str, Any] = {}
+    for key in ("profileType", "lookingFor", "city", "country"):
+        value = data.get(key)
+        if value:
+            context[key] = value
+    about = (data.get("about") or data.get("bio") or "").strip()
+    if about:
+        # Keep the prompt small and bounded - this is context, not the
+        # full bio verbatim.
+        context["about"] = about[:280]
+    return context
+
+
+@app.post("/api/member/conversations/{conversation_id}/message-starters")
+def member_conversation_message_starters(
+    conversation_id: int,
+    locale: str | None = Query(default=None),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for AI-drafted message starters")
+        cursor.execute(
+            """
+            SELECT CASE
+                     WHEN profile_a_id = %s THEN profile_b_id
+                     WHEN profile_b_id = %s THEN profile_a_id
+                     ELSE NULL
+                   END AS other_profile_id
+            FROM conversations
+            WHERE id = %s
+              AND status = 'ACTIVE'
+              AND (profile_a_id = %s OR profile_b_id = %s)
+            LIMIT 1
+            """,
+            (profile_id, profile_id, conversation_id, profile_id, profile_id),
+        )
+        row = cursor.fetchone()
+        if not row or not row.get("other_profile_id"):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        peer_profile = fetch_profile(cursor, int(row["other_profile_id"]))
+    language = {"ru": "Russian", "es": "Spanish"}.get((locale or "en").strip().lower()[:2], "English")
+    context = {
+        "me": profile_context_for_message_starters(profile),
+        "them": profile_context_for_message_starters(peer_profile),
+    }
+    prompt_text = (
+        "Profile context (JSON, already-public fields only):\n"
+        + json.dumps(context, ensure_ascii=False)
+        + "\n\nReturn the 3 draft messages now, as a JSON array of exactly 3 strings."
+    )
+    reply = ai_advisor_call_claude(
+        [{"role": "user", "content": prompt_text}],
+        system_prompt=message_starters_system_prompt(language),
+        max_tokens=MESSAGE_STARTERS_MAX_OUTPUT_TOKENS,
+    )
+    starters: list[str] = []
+    try:
+        parsed = json.loads(reply)
+        if isinstance(parsed, list):
+            starters = [str(item).strip() for item in parsed if str(item).strip()][:3]
+    except json.JSONDecodeError:
+        pass
+    if not starters:
+        # Fallback if the model didn't return clean JSON - split on lines
+        # and strip common numbering/markdown so the member still gets
+        # something usable instead of a raw error.
+        for line in reply.splitlines():
+            cleaned = line.strip().lstrip("-*0123456789. ").strip()
+            if cleaned:
+                starters.append(cleaned)
+            if len(starters) == 3:
+                break
+    if not starters:
+        raise HTTPException(status_code=502, detail="AI Family Advisor returned an unusable response")
+    return {"ok": True, "starters": starters}
+
+
+# =========================================================
+# VIDEO VERIFICATION (premium roadmap step 9). A distinct badge from the
+# existing Didit identity verification above - a short selfie video the
+# member records/uploads, reviewed by a human admin. No automatic video-
+# analysis provider exists in this codebase, so - same honesty rule as
+# every other "not real automation yet" spot in this app (Boost, the
+# Co-Parenting Agreement, Subscription requests) - this is a reviewed
+# request, not an instant badge. Deliberately NOT Premium-gated: like
+# the existing (free) identity verification, this is a trust/safety
+# signal (master brief PROTECT pillar), and gating it would undermine
+# its own point of building visible trust across the whole member base,
+# not just paying members. Flagged to Alena as this session's own
+# judgment call, same as steps 6/7/8.
+
+@app.get("/api/member/video-verification")
+def member_video_verification_status(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        data = profile_data(profile)
+        video_verified_at = str(data.get("videoVerifiedAt") or "").strip() or None
+        cursor.execute(
+            """
+            SELECT id, status
+            FROM app_entities
+            WHERE entity_type = 'video_verification'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            """,
+            (profile_id,),
+        )
+        latest = cursor.fetchone()
+    latest_status = str(latest.get("status") or "").upper() if latest else None
+    return {
+        "videoVerified": bool(video_verified_at),
+        "videoVerifiedAt": video_verified_at,
+        "requestId": latest["id"] if latest else None,
+        "requestStatus": latest_status,
+    }
+
+
+@app.post("/api/member/video-verification")
+async def member_submit_video_verification(
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    content_type = (file.content_type or "").split(";")[0].lower()
+    ext = ALLOWED_VIDEO_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(status_code=415, detail="Unsupported video type - use MP4, MOV or WebM")
+    body = await file.read(MAX_VIDEO_VERIFICATION_BYTES + 1)
+    if len(body) > MAX_VIDEO_VERIFICATION_BYTES:
+        raise HTTPException(status_code=413, detail="Video is too large")
+    if not body:
+        raise HTTPException(status_code=422, detail="Video is empty")
+
+    request_id: int | None = None
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, display_name, email, status, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        data = profile_data(profile)
+        if data.get("videoVerifiedAt"):
+            return {"ok": True, "requestStatus": "APPROVED", "message": "Your profile is already video-verified."}
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'video_verification' AND status = 'PENDING'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        pending = cursor.fetchone()
+        if pending:
+            return {"ok": True, "requestId": pending["id"], "requestStatus": "PENDING", "message": "Your video is already under review."}
+
+        storage_key = f"video-verifications/{profile_id}/{secrets.token_hex(16)}{ext}"
+        storage_path = video_verification_storage_path(storage_key)
+        storage_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        created_file = False
+        try:
+            with storage_path.open("xb") as target:
+                created_file = True
+                target.write(body)
+            storage_path.chmod(0o600)
+            submitted_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+            request_data = {
+                "profileId": profile_id,
+                "profileName": profile.get("display_name") or "No profile",
+                "email": profile.get("email") or "",
+                "storageKey": storage_key,
+                "mimeType": content_type,
+                "bytes": len(body),
+                "submittedAt": submitted_at,
+            }
+            cursor.execute(
+                """
+                INSERT INTO app_entities (entity_type, source_key, title, status, data)
+                VALUES ('video_verification', %s, %s, 'PENDING', %s)
+                """,
+                (
+                    f"member-video-verification-{profile_id}-{secrets.token_hex(6)}",
+                    f"Video verification: {profile.get('display_name') or profile_id}",
+                    json.dumps(request_data, ensure_ascii=False),
+                ),
+            )
+            request_id = cursor.lastrowid
+            send_support_status_message(
+                cursor,
+                profile_id,
+                "Your video verification was received and is pending review.",
+            )
+            conn.commit()
+        except Exception:
+            if created_file:
+                try:
+                    storage_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Video verification upload rollback requires storage cleanup")
+            raise
+    return {"ok": True, "requestId": request_id, "requestStatus": "PENDING", "message": "Your video was submitted for review."}
+
+
+@app.post("/api/admin/video-verifications/{request_id}/review")
+def admin_review_video_verification(
+    request_id: int,
+    payload: AdminVideoVerificationReviewPayload,
+    actor: str = Depends(require_admin),
+):
+    """Approve/decline a member's video-verification submission - mirrors
+    admin_review_boost() structurally (member submits, a human reviews),
+    since there is no automatic video-analysis provider in this codebase."""
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, status, data FROM app_entities WHERE id = %s AND entity_type = 'video_verification' LIMIT 1 FOR UPDATE",
+            (request_id,),
+        )
+        request_row = cursor.fetchone()
+        if not request_row:
+            raise HTTPException(status_code=404, detail="Video verification request not found")
+        if str(request_row.get("status") or "").upper() != "PENDING":
+            raise HTTPException(status_code=409, detail="Only pending video verification requests can be reviewed")
+        data = as_dict(request_row.get("data"))
+        profile_id = int_or_none(data.get("profileId"))
+        if not profile_id:
+            raise HTTPException(status_code=409, detail="Video verification request is not linked to a profile")
+        cursor.execute(
+            "SELECT id, status FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="User not found")
+        reviewed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.update({"reviewedAt": reviewed_at, "reviewedBy": actor})
+        if payload.status == "DECLINED":
+            data["reviewStatus"] = "DECLINED"
+            cursor.execute(
+                "UPDATE app_entities SET status = 'DECLINED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (json.dumps(data, ensure_ascii=False), request_id),
+            )
+            send_support_status_message(cursor, profile_id, "Your video verification was declined. You can record a new video and try again.")
+            audit(conn, actor, "decline_video_verification", "video_verification", request_id, {"profileId": profile_id})
+            conn.commit()
+            return {"ok": True, "id": request_id, "status": "DECLINED"}
+        data["reviewStatus"] = "APPROVED"
+        cursor.execute(
+            "UPDATE app_entities SET status = 'APPROVED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(data, ensure_ascii=False), request_id),
+        )
+        video_verified_at = reviewed_at
+        update_profile_data(cursor, profile_id, {"isVideoVerified": True, "videoVerifiedAt": video_verified_at})
+        send_support_status_message(cursor, profile_id, "Your profile is now video-verified!")
+        audit(conn, actor, "approve_video_verification", "video_verification", request_id, {"profileId": profile_id})
+        conn.commit()
+    return {"ok": True, "id": request_id, "status": "APPROVED", "videoVerifiedAt": video_verified_at}
+
+
+@app.get("/api/admin/video-verifications/{request_id}/content")
+def admin_video_verification_content(request_id: int, actor: str = Depends(require_admin)):
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            "SELECT data FROM app_entities WHERE id = %s AND entity_type = 'video_verification' LIMIT 1",
+            (request_id,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Video verification request not found")
+    data = as_dict(row.get("data"))
+    storage_key = str(data.get("storageKey") or "")
+    storage_path = video_verification_storage_path(storage_key)
+    try:
+        body = storage_path.read_bytes()
+    except OSError as error:
+        raise HTTPException(status_code=404, detail="Video is unavailable") from error
+# =========================================================
+# PERSONALIZED WEEKLY AI ADVISOR INSIGHTS (premium roadmap step 10 - the
+# other half of the "deeper AI Advisor features" idea; step 8 covered
+# message starters). A short, personalized note built from the member's
+# own real activity (profile completeness, verification status, likes/
+# matches in the last 7 days, subscription tier) rather than a generic
+# tip. Reuses ai_advisor_call_claude() (item 12) the same way message
+# starters does - a dedicated system prompt and a smaller max_tokens,
+# no second Anthropic integration or API key.
+#
+# Deliberate design choice: this is MEMBER-REQUESTED and cached for 7
+# days (profiles.data.weeklyInsight/weeklyInsightGeneratedAt), NOT a
+# silent background job that calls Claude for every active member on a
+# timer. This app does have a real background-loop mechanism already
+# (see the account-deletion poll near the bottom of this file), so an
+# automatic push was technically possible - but doing that silently
+# would call the Claude API for every Premium member every week against
+# Alena's own spend cap, with no visibility into the cost before it
+# happens. Lazy, cached, member-triggered generation gets the same
+# weekly cadence at a fraction of the risk. Premium-gated, same as the
+# AI Advisor itself and message starters (step 8) - this is a direct
+# extension of that paid feature, not a trust/safety tool like steps
+# 6/7/9.
+
+WEEKLY_INSIGHT_MAX_OUTPUT_TOKENS = int(os.getenv("WEEKLY_INSIGHT_MAX_OUTPUT_TOKENS", "350"))
+
+
+def weekly_insight_system_prompt(language: str) -> str:
+    return (
+        "You write a short, warm, personalized weekly check-in note for a member of the LetsBeParents "
+        "app (a platform connecting intended parents, surrogates, and donors). You will be given a small "
+        "JSON object of the member's own real, already-known activity this week (profile completeness, "
+        "verification status, likes received, active matches, days since joining, subscription tier) and "
+        "must write 2-4 short sentences reflecting on their actual progress and suggesting one concrete, "
+        "specific next step inside the app (finishing their profile, trying a filter, starting the AI "
+        "Advisor, checking a relevant guide) - never a generic platitude.\n\n"
+        "Rules:\n"
+        "- Only reference the facts given - never invent activity, matches, or messages that were not in "
+        "the data.\n"
+        "- Never write anything medical, legal, or financial in nature, and never assert any fact about "
+        "fertility, parentage, or legal status.\n"
+        "- Never recommend a specific match, clinic, or lawyer.\n"
+        f"- Reply in {language} (use English if the language is unclear).\n"
+        "- Return plain text only - no markdown, no headers, no bullet list."
+    )
+
+
+@app.get("/api/member/ai-advisor/weekly-insight")
+def member_ai_advisor_weekly_insight(
+    locale: str | None = Query(default=None),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for weekly AI Advisor insights")
+        data = profile_data(profile)
+        generated_at = str(data.get("weeklyInsightGeneratedAt") or "").strip()
+        cached_insight = str(data.get("weeklyInsight") or "").strip()
+        # Fixed-width ISO-8601 strings compare correctly with plain string
+        # ordering, same trick used elsewhere in this file (Boost/
+        # recompute_profile_premium) - no datetime parsing needed.
+        cutoff = (now_utc() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if cached_insight and generated_at and generated_at > cutoff:
+            return {"ok": True, "insight": cached_insight, "generatedAt": generated_at, "cached": True}
+
+        seven_days_ago = database_datetime(now_utc() - timedelta(days=7))
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM profile_likes WHERE target_profile_id = %s AND status = 'ACTIVE' AND created_at >= %s",
+            (profile_id, seven_days_ago),
+        )
+        likes_this_week = int((cursor.fetchone() or {}).get("cnt") or 0)
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM profile_matches WHERE (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'",
+            (profile_id, profile_id),
+        )
+        active_matches = int((cursor.fetchone() or {}).get("cnt") or 0)
+        cursor.execute(
+            f"SELECT {catalog_profile_completeness_sql()} AS completeness FROM profiles WHERE id = %s",
+            (profile_id,),
+        )
+        completeness_row = cursor.fetchone() or {}
+        completeness_pct = int(round(float(completeness_row.get("completeness") or 0) * 100))
+        created_at = profile.get("created_at")
+        try:
+            days_since_signup = (now_utc().date() - created_at.date()).days if created_at else None
+        except (AttributeError, TypeError):
+            days_since_signup = None
+
+        context = {
+            "daysSinceSignup": days_since_signup,
+            "profileCompletenessPercent": completeness_pct,
+            "isVerified": bool(profile_is_verified(profile)),
+            "isVideoVerified": bool(data.get("isVideoVerified")),
+            "subscriptionTier": profile_tier(profile),
+            "likesReceivedThisWeek": likes_this_week,
+            "activeMatches": active_matches,
+        }
+        language = {"ru": "Russian", "es": "Spanish"}.get((locale or "en").strip().lower()[:2], "English")
+        prompt_text = (
+            "This member's activity this week (JSON):\n"
+            + json.dumps(context, ensure_ascii=False)
+            + "\n\nWrite their weekly check-in note now."
+        )
+        insight = ai_advisor_call_claude(
+            [{"role": "user", "content": prompt_text}],
+            system_prompt=weekly_insight_system_prompt(language),
+            max_tokens=WEEKLY_INSIGHT_MAX_OUTPUT_TOKENS,
+        ).strip()
+        if not insight:
+            raise HTTPException(status_code=502, detail="AI Family Advisor returned an unusable response")
+        generated_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        update_profile_data(cursor, profile_id, {"weeklyInsight": insight, "weeklyInsightGeneratedAt": generated_at})
+        conn.commit()
+    return {"ok": True, "insight": insight, "generatedAt": generated_at, "cached": False}
+
+
+# =========================================================
+# PRO-ONLY COMMUNITY / EXPERT Q&A GROUPS (premium roadmap step 11 - the
+# last of the originally-brainstormed items). Admin-curated discussion
+# groups (created/edited/deleted through the existing generic admin
+# entity endpoints - registering "community_group" in ADMIN_ENTITY_VIEWS
+# above is all that was needed there, see admin_create_item()'s generic
+# ADMIN_ENTITY_VIEWS branch); members can't create groups, only post and
+# reply inside them. No new database table - groups/posts/replies all
+# live in app_entities (same JSONB pattern as Boost/Referral/Safety
+# Check-In/the Co-Parenting Agreement), scoped to each other the same
+# way a reply already scopes to its post: CAST(data->>'x' AS TEXT).
+#
+# "Expert" tagging: profiles.data.isCommunityExpert (bool, off by
+# default) is stamped onto a post/reply's OWN data at the moment it is
+# created - same snapshot approach the Co-Parenting Agreement uses for
+# signed section content, so a later change to someone's expert status
+# never silently rewrites what they already posted. Toggled by an
+# admin via the new POST /api/admin/users/{id}/community-expert below
+# (no existing generic "edit a member profile field" admin endpoint was
+# found in this codebase to reuse, so this is a small dedicated one -
+# mirrors the plain boolean-toggle shape of everything else here).
+
+def require_community_pro(cursor, profile_id: int) -> dict[str, Any]:
+    profile = fetch_profile(cursor, profile_id)
+    if not profile or profile.get("status") != "ACTIVE":
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if not profile_is_pro(profile):
+        raise HTTPException(status_code=402, detail="Family Builder Pro is required for Community groups")
+    return profile
+
+
+@app.get("/api/member/community/groups")
+def member_community_groups(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_community_pro(cursor, profile_id)
+        cursor.execute(
+            """
+            SELECT id, title AS "name", data
+            FROM app_entities
+            WHERE entity_type = 'community_group' AND status = 'ACTIVE'
+            ORDER BY title ASC
+            """
+        )
+        rows = cursor.fetchall()
+        groups = []
+        for row in rows:
+            group_data = as_dict(row.get("data"))
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'community_post' AND status = 'ACTIVE' AND CAST(data->>'groupId' AS TEXT) = CAST(%s AS TEXT)",
+                (row["id"],),
+            )
+            post_count = int((cursor.fetchone() or {}).get("cnt") or 0)
+            groups.append({
+                "id": row["id"],
+                "name": row.get("name"),
+                "description": group_data.get("description"),
+                "icon": group_data.get("icon"),
+                "postCount": post_count,
+            })
+    return {"ok": True, "groups": groups}
+
+
+@app.get("/api/member/community/groups/{group_id}/posts")
+def member_community_posts(
+    group_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id FROM app_entities WHERE id = %s AND entity_type = 'community_group' AND status = 'ACTIVE' LIMIT 1",
+            (group_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+        cursor.execute(
+            """
+            SELECT id, data
+            FROM app_entities
+            WHERE entity_type = 'community_post' AND status = 'ACTIVE'
+              AND CAST(data->>'groupId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC
+            LIMIT %s OFFSET %s
+            """,
+            (group_id, limit, offset),
+        )
+        rows = cursor.fetchall()
+        posts = []
+        for row in rows:
+            post_data = as_dict(row.get("data"))
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'community_reply' AND status = 'ACTIVE' AND CAST(data->>'postId' AS TEXT) = CAST(%s AS TEXT)",
+                (row["id"],),
+            )
+            reply_count = int((cursor.fetchone() or {}).get("cnt") or 0)
+            posts.append({
+                "id": row["id"],
+                "authorName": post_data.get("authorName"),
+                "isExpert": bool(post_data.get("isExpert")),
+                "body": post_data.get("body"),
+                "createdAt": post_data.get("createdAt"),
+                "replyCount": reply_count,
+                "isMine": int_or_none(post_data.get("authorProfileId")) == profile_id,
+            })
+    return {"ok": True, "groupId": group_id, "posts": posts}
+
+
+@app.post("/api/member/community/groups/{group_id}/posts")
+def member_create_community_post(
+    group_id: int,
+    payload: CommunityPostPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        profile = require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id FROM app_entities WHERE id = %s AND entity_type = 'community_group' AND status = 'ACTIVE' LIMIT 1",
+            (group_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+        profile_info = profile_data(profile)
+        created_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        post_data = {
+            "groupId": group_id,
+            "authorProfileId": profile_id,
+            "authorName": profile.get("display_name") or "Member",
+            "isExpert": bool(profile_info.get("isCommunityExpert")),
+            "body": payload.body.strip(),
+            "createdAt": created_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('community_post', %s, %s, 'ACTIVE', %s)
+            """,
+            (
+                f"community-post-{group_id}-{profile_id}-{secrets.token_hex(6)}",
+                (payload.body.strip()[:80] or "Post"),
+                json.dumps(post_data, ensure_ascii=False),
+            ),
+        )
+        post_id = cursor.lastrowid
+        conn.commit()
+    return {"ok": True, "id": post_id, "post": {**post_data, "id": post_id, "replyCount": 0, "isMine": True}}
+
+
+@app.get("/api/member/community/posts/{post_id}/replies")
+def member_community_replies(post_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id FROM app_entities WHERE id = %s AND entity_type = 'community_post' AND status = 'ACTIVE' LIMIT 1",
+            (post_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Post not found")
+        cursor.execute(
+            """
+            SELECT id, data
+            FROM app_entities
+            WHERE entity_type = 'community_reply' AND status = 'ACTIVE'
+              AND CAST(data->>'postId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id ASC
+            """,
+            (post_id,),
+        )
+        rows = cursor.fetchall()
+        replies = []
+        for row in rows:
+            reply_data = as_dict(row.get("data"))
+            replies.append({
+                "id": row["id"],
+                "authorName": reply_data.get("authorName"),
+                "isExpert": bool(reply_data.get("isExpert")),
+                "body": reply_data.get("body"),
+                "createdAt": reply_data.get("createdAt"),
+                "isMine": int_or_none(reply_data.get("authorProfileId")) == profile_id,
+            })
+    return {"ok": True, "postId": post_id, "replies": replies}
+
+
+@app.post("/api/member/community/posts/{post_id}/replies")
+def member_create_community_reply(
+    post_id: int,
+    payload: CommunityReplyPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        profile = require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE id = %s AND entity_type = 'community_post' AND status = 'ACTIVE' LIMIT 1",
+            (post_id,),
+        )
+        post_row = cursor.fetchone()
+        if not post_row:
+            raise HTTPException(status_code=404, detail="Post not found")
+        profile_info = profile_data(profile)
+        created_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        reply_data = {
+            "postId": post_id,
+            "groupId": int_or_none(as_dict(post_row.get("data")).get("groupId")),
+            "authorProfileId": profile_id,
+            "authorName": profile.get("display_name") or "Member",
+            "isExpert": bool(profile_info.get("isCommunityExpert")),
+            "body": payload.body.strip(),
+            "createdAt": created_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('community_reply', %s, %s, 'ACTIVE', %s)
+            """,
+            (
+                f"community-reply-{post_id}-{profile_id}-{secrets.token_hex(6)}",
+                (payload.body.strip()[:80] or "Reply"),
+                json.dumps(reply_data, ensure_ascii=False),
+            ),
+        )
+        reply_id = cursor.lastrowid
+        conn.commit()
+    return {"ok": True, "id": reply_id, "reply": {**reply_data, "id": reply_id, "isMine": True}}
+
+
+@app.delete("/api/member/community/posts/{post_id}")
+def member_delete_community_post(post_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE id = %s AND entity_type = 'community_post' AND status = 'ACTIVE' LIMIT 1 FOR UPDATE",
+            (post_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Post not found")
+        row_data = as_dict(row.get("data"))
+        if int_or_none(row_data.get("authorProfileId")) != profile_id:
+            raise HTTPException(status_code=403, detail="You can only delete your own post")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'DELETED', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (post_id,),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/member/community/replies/{reply_id}")
+def member_delete_community_reply(reply_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE id = %s AND entity_type = 'community_reply' AND status = 'ACTIVE' LIMIT 1 FOR UPDATE",
+            (reply_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Reply not found")
+        row_data = as_dict(row.get("data"))
+        if int_or_none(row_data.get("authorProfileId")) != profile_id:
+            raise HTTPException(status_code=403, detail="You can only delete your own reply")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'DELETED', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (reply_id,),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/admin/users/{profile_id}/community-expert")
+def admin_set_community_expert(
+    profile_id: int,
+    payload: AdminCommunityExpertPayload,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        update_profile_data(cursor, profile_id, {"isCommunityExpert": bool(payload.isExpert)})
+        audit(conn, actor, "set_community_expert", "profile", profile_id, {"isExpert": payload.isExpert})
+        conn.commit()
+    return {"ok": True, "profileId": profile_id, "isExpert": bool(payload.isExpert)}
+
+
+
+    return Response(
+        content=body,
+        media_type=str(data.get("mimeType") or "video/mp4"),
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+# Push notifications (item 16) - unlike AI Advisor above, NOT Premium-gated:
+# new messages/likes/matches/visitors are core, free-tier notifications
+# (same events send_profile_notification already emails everyone about),
+# so every signed-in member can register a device. Tokens live in
+# profiles.data (see update_profile_data) rather than a new table, same
+# "no migration this session can verify" tradeoff used for AI Advisor
+# history. send_expo_push()/send_profile_notification() are what actually
+# deliver to these tokens - registering one here does nothing on its own
+# until a real notification event fires.
 
 
 def livekit_is_configured() -> bool:
@@ -8894,6 +10565,7 @@ async def didit_webhook(request: Request):
                 profile_id,
                 {"isVerified": True, "verifiedAt": now_utc().isoformat(), "verificationProvider": "didit"},
             )
+            reward_referral_if_pending(cursor, profile_id)
         elif internal_status in {"DECLINED", "ABANDONED", "EXPIRED"}:
             update_profile_data(
                 cursor,
@@ -8942,23 +10614,14 @@ def valid_expo_push_token(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(r"(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]", value) is not None
 
 
-class AiAdvisorMessagePayload(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
-
-class PushTokenPayload(BaseModel):
-    token: str = Field(min_length=1, max_length=200)
-    platform: str | None = None
-
-class StickerSendPayload(BaseModel):
-    stickerId: str = Field(min_length=1, max_length=40)
 
 @app.get("/api/member/ai-advisor/messages")
 def member_ai_advisor_messages(user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         profile = fetch_profile(cursor, profile_id)
-        if not profile_is_pro(profile):
-            raise HTTPException(status_code=402, detail="Family Builder Pro is required for the AI Family Advisor")
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Family Builder or Pro is required for the AI Family Advisor")
         history = normalized_ai_advisor_history(as_dict(profile.get("data")).get("aiAdvisorMessages"))
     return {"ok": True, "configured": ai_advisor_is_configured(), "messages": history}
 
@@ -8971,8 +10634,8 @@ def member_ai_advisor_send(payload: AiAdvisorMessagePayload, user: dict[str, Any
     with db_cursor() as (_, cursor):
         cursor.execute("SELECT pg_advisory_xact_lock(74112, %s)", (profile_id,))
         profile = fetch_profile(cursor, profile_id)
-        if not profile_is_pro(profile):
-            raise HTTPException(status_code=402, detail="Family Builder Pro is required for the AI Family Advisor")
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Family Builder or Pro is required for the AI Family Advisor")
         history = normalized_ai_advisor_history(as_dict(profile.get("data")).get("aiAdvisorMessages"))
         history.append({"role": "user", "text": text, "at": now_utc().isoformat()})
         claude_messages = [
@@ -8993,8 +10656,8 @@ def member_ai_advisor_clear(user: dict[str, Any] = Depends(require_user)):
     with db_cursor() as (_, cursor):
         cursor.execute("SELECT pg_advisory_xact_lock(74112, %s)", (profile_id,))
         profile = fetch_profile(cursor, profile_id)
-        if not profile_is_pro(profile):
-            raise HTTPException(status_code=402, detail="Family Builder Pro is required for the AI Family Advisor")
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Family Builder or Pro is required for the AI Family Advisor")
         save_private_profile_field(cursor, profile_id, "aiAdvisorMessages", [])
     return {"ok": True}
 
@@ -9218,6 +10881,413 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
         "requestId": request_id,
         "message": "Your subscription request was saved for manual review.",
     }
+
+
+# Premium roadmap step 3 - one-off profile Boost. 24h is the default
+# window an approved boost runs for (competitor apps typically run
+# 30min-24h; picked the longer end since approval here is a human review,
+# not instant - a 30min boost could easily expire before anyone reviews
+# the request). Admin can override with a different `hours` value on
+# approval (AdminBoostReviewPayload.hours) if that ever needs to change
+# for a specific request.
+BOOST_DEFAULT_HOURS = 24
+
+# Premium roadmap step 4 - referral program. Reuses the Boost mechanism
+# above as the reward rather than inventing a separate perk: when someone
+# a member referred gets VERIFIED (a real, hard-to-fake milestone - not
+# just "signed up", which would be trivially farmable), the REFERRER gets
+# an automatic Boost, no human review needed (it's an earned reward, not
+# a purchase, so admin_review_boost()'s approval step doesn't apply here -
+# this sets boostActiveUntil directly). Longer than a single paid Boost
+# request (48h vs 24h) so referring someone is clearly worth more than
+# just buying one yourself.
+REFERRAL_REWARD_HOURS = 48
+
+
+def generate_referral_code(cursor) -> str:
+    for _ in range(5):
+        code = secrets.token_hex(3).upper()
+        cursor.execute(
+            "SELECT 1 FROM profiles WHERE data->>'referralCode' = %s LIMIT 1",
+            (code,),
+        )
+        if not cursor.fetchone():
+            return code
+    # Astronomically unlikely with a 16.7M-value space at this app's
+    # scale, but fall back to something still-unique rather than loop
+    # forever.
+    return secrets.token_hex(4).upper()
+
+
+def reward_referral_if_pending(cursor, referred_profile_id: int) -> None:
+    """Call this right after a profile becomes verified (both verification
+    paths - the didit webhook and admin_approve_verification() - call this
+    so neither one can silently skip rewarding a referral)."""
+    cursor.execute(
+        """
+        SELECT id, data FROM app_entities
+        WHERE entity_type = 'referral' AND status = 'PENDING'
+          AND CAST(data->>'referredProfileId' AS TEXT) = CAST(%s AS TEXT)
+        ORDER BY id DESC LIMIT 1
+        FOR UPDATE
+        """,
+        (referred_profile_id,),
+    )
+    referral = cursor.fetchone()
+    if not referral:
+        return
+    data = as_dict(referral.get("data"))
+    referrer_profile_id = int_or_none(data.get("referrerProfileId"))
+    if not referrer_profile_id:
+        return
+    rewarded_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    new_expiry = (now_utc() + timedelta(hours=REFERRAL_REWARD_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    referrer_profile = fetch_profile(cursor, referrer_profile_id)
+    if not referrer_profile:
+        return
+    # Don't shorten a Boost the referrer already has running longer than
+    # this reward would grant - only extend, never cut short.
+    existing_until = str(profile_data(referrer_profile).get("boostActiveUntil") or "").strip()
+    final_expiry = max(existing_until, new_expiry) if existing_until else new_expiry
+    update_profile_data(cursor, referrer_profile_id, {"boostActiveUntil": final_expiry})
+    data.update({"status": "REWARDED", "rewardedAt": rewarded_at, "rewardHours": REFERRAL_REWARD_HOURS})
+    cursor.execute(
+        "UPDATE app_entities SET status = 'REWARDED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+        (json.dumps(data, ensure_ascii=False), referral["id"]),
+    )
+    send_support_status_message(
+        cursor,
+        referrer_profile_id,
+        f"Your friend joined and got verified - you earned a {REFERRAL_REWARD_HOURS}-hour profile Boost!",
+    )
+
+
+@app.get("/api/member/boost")
+def member_boost_status(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        data = profile_data(profile)
+        active_until_raw = str(data.get("boostActiveUntil") or "").strip()
+        # Same trick recompute_profile_premium() already uses for
+        # expiresAt: a fixed-width "YYYY-MM-DDTHH:MM:SSZ" string compares
+        # correctly with plain string ordering, no datetime parsing needed.
+        is_active = bool(active_until_raw and active_until_raw > now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"))
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'boost' AND status = 'PENDING'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            """,
+            (profile_id,),
+        )
+        pending = cursor.fetchone()
+    return {
+        "active": is_active,
+        "activeUntil": active_until_raw if is_active else None,
+        "pendingRequestId": pending["id"] if pending else None,
+    }
+
+
+@app.post("/api/member/boost")
+def member_request_boost(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, display_name, email, status, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        if not profile_is_verified(profile):
+            raise HTTPException(status_code=403, detail="Profile verification is required before Boost")
+        data = profile_data(profile)
+        active_until_raw = str(data.get("boostActiveUntil") or "").strip()
+        if active_until_raw and active_until_raw > now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"):
+            return {"ok": True, "status": "ACTIVE", "activeUntil": active_until_raw, "message": "Your Boost is already active."}
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'boost' AND status = 'PENDING'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        pending = cursor.fetchone()
+        if pending:
+            return {"ok": True, "status": "PENDING", "requestId": pending["id"], "message": "Your Boost request is already under review."}
+        requested_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        boost_data = {
+            "profileId": profile_id,
+            "profileName": profile.get("display_name") or "No profile",
+            "email": profile.get("email") or "",
+            "source": "MEMBER_REQUEST",
+            "requestedAt": requested_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('boost', %s, %s, 'PENDING', %s)
+            """,
+            (
+                f"member-boost-{profile_id}-{secrets.token_hex(6)}",
+                f"Boost request: {profile.get('display_name') or profile_id}",
+                json.dumps(boost_data, ensure_ascii=False),
+            ),
+        )
+        request_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO api_events (event_type, payload) VALUES ('payment.boost_intent', %s)",
+            (json.dumps({"profileId": profile_id, "requestId": request_id, "source": "MEMBER_REQUEST"}, ensure_ascii=False),),
+        )
+        send_support_status_message(
+            cursor,
+            profile_id,
+            "Your profile Boost request has been received and is pending review.",
+        )
+        conn.commit()
+    return {
+        "ok": True,
+        "status": "PENDING",
+        "requestId": request_id,
+        "message": "Your Boost request was saved for manual review.",
+    }
+
+
+# =========================================================
+# SAFETY CHECK-IN (premium roadmap step 7). A free, un-gated safety tool -
+# deliberately NOT behind a paywall, same reasoning as the cost calculator
+# (step 6): this is a SUPPORT/PROTECT-pillar feature (master brief's three
+# pillars), and gating basic personal safety behind a subscription would be
+# a bad look and would suppress exactly the usage that matters. A member
+# planning to meet someone in person (a match, a donor, anyone) can log a
+# plan and a "check on me by" deadline; if they don't mark themselves safe
+# in time, the check-in shows as overdue right in the app. This app cannot
+# send an automatic alert to a third party - there is no push-notification
+# delivery yet (see the standing push-notification item) and no SMS/email-
+# to-a-contact integration - so the mobile side gives the member a one-tap
+# "Share plan" message (native share sheet) to send the plan to a trusted
+# person themselves, rather than silently implying the app will notify
+# anyone. Reuses the same app_entities + CAST(data->>'x' AS TEXT) list-by-
+# profile pattern boost/referral already use (see member_boost_status()
+# just above) - multiple rows per profile, no new table.
+# =========================================================
+
+SAFETY_CHECKIN_LIST_LIMIT = 20
+
+
+class SafetyCheckinCreatePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    withWhom: str | None = Field(default=None, max_length=200)
+    plan: str = Field(min_length=1, max_length=500)
+    hoursUntilCheckIn: int = Field(ge=1, le=72)
+
+
+def _safety_checkin_view(row: dict[str, Any]) -> dict[str, Any]:
+    data = as_dict(row.get("data") or {})
+    return {
+        "id": row["id"],
+        "status": row.get("status") or "PENDING",
+        "withWhom": data.get("withWhom"),
+        "plan": data.get("plan"),
+        "createdAt": data.get("createdAt"),
+        "checkInByAt": data.get("checkInByAt"),
+        "safeAt": data.get("safeAt"),
+    }
+
+
+@app.get("/api/member/safety-checkins")
+def member_list_safety_checkins(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT id, status, data FROM app_entities
+            WHERE entity_type = 'safety_checkin'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT %s
+            """,
+            (profile_id, SAFETY_CHECKIN_LIST_LIMIT),
+        )
+        rows = cursor.fetchall()
+    return {"ok": True, "checkins": [_safety_checkin_view(row) for row in rows]}
+
+
+@app.post("/api/member/safety-checkins")
+def member_create_safety_checkin(payload: SafetyCheckinCreatePayload, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        created_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        check_in_by_at = (now_utc() + timedelta(hours=payload.hoursUntilCheckIn)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data = {
+            "profileId": profile_id,
+            "withWhom": (payload.withWhom or "").strip() or None,
+            "plan": payload.plan.strip(),
+            "createdAt": created_at,
+            "checkInByAt": check_in_by_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('safety_checkin', %s, %s, 'PENDING', %s)
+            """,
+            (
+                f"member-checkin-{profile_id}-{secrets.token_hex(6)}",
+                f"Safety check-in: profile {profile_id}",
+                json.dumps(data, ensure_ascii=False),
+            ),
+        )
+        checkin_id = cursor.lastrowid
+        conn.commit()
+    return {"ok": True, "checkin": {"id": checkin_id, "status": "PENDING", **data}}
+
+
+def _require_own_safety_checkin(cursor, checkin_id: int, profile_id: int) -> dict[str, Any]:
+    cursor.execute(
+        "SELECT id, status, data FROM app_entities WHERE id = %s AND entity_type = 'safety_checkin' LIMIT 1 FOR UPDATE",
+        (checkin_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Check-in not found")
+    data = as_dict(row.get("data") or {})
+    if str(data.get("profileId")) != str(profile_id):
+        raise HTTPException(status_code=404, detail="Check-in not found")
+    return row
+
+
+@app.post("/api/member/safety-checkins/{checkin_id}/safe")
+def member_mark_safety_checkin_safe(checkin_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        row = _require_own_safety_checkin(cursor, checkin_id, profile_id)
+        data = as_dict(row.get("data") or {})
+        data["safeAt"] = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'SAFE', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(data, ensure_ascii=False), checkin_id),
+        )
+        conn.commit()
+    return {"ok": True, "checkin": _safety_checkin_view({"id": checkin_id, "status": "SAFE", "data": data})}
+
+
+@app.post("/api/member/safety-checkins/{checkin_id}/cancel")
+def member_cancel_safety_checkin(checkin_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        row = _require_own_safety_checkin(cursor, checkin_id, profile_id)
+        if row.get("status") != "PENDING":
+            raise HTTPException(status_code=409, detail="Only a pending check-in can be cancelled")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'CANCELLED', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (checkin_id,),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+class ReferralRedeemPayload(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+
+
+@app.get("/api/member/referral")
+def member_referral_status(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE", (profile_id,))
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        data = profile_data(profile)
+        code = str(data.get("referralCode") or "").strip()
+        if not code:
+            code = generate_referral_code(cursor)
+            update_profile_data(cursor, profile_id, {"referralCode": code})
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE status = 'REWARDED') AS rewarded
+            FROM app_entities
+            WHERE entity_type = 'referral'
+              AND CAST(data->>'referrerProfileId' AS TEXT) = CAST(%s AS TEXT)
+            """,
+            (profile_id,),
+        )
+        counts = cursor.fetchone() or {"total": 0, "rewarded": 0}
+        cursor.execute(
+            """
+            SELECT data->>'code' AS code FROM app_entities
+            WHERE entity_type = 'referral'
+              AND CAST(data->>'referredProfileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            """,
+            (profile_id,),
+        )
+        redeemed = cursor.fetchone()
+        conn.commit()
+    return {
+        "code": code,
+        "referredCount": int(counts.get("total") or 0),
+        "rewardedCount": int(counts.get("rewarded") or 0),
+        "redeemedCode": redeemed["code"] if redeemed else None,
+    }
+
+
+@app.post("/api/member/referral/redeem")
+def member_referral_redeem(payload: ReferralRedeemPayload, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    code = payload.code.strip().upper()
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'referral'
+              AND CAST(data->>'referredProfileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        if cursor.fetchone():
+            # Deliberately not an error - a member reopening the "enter a
+            # code" screen after already redeeming one shouldn't see a
+            # scary failure, just the (already-true) fact that it's done.
+            raise HTTPException(status_code=409, detail="You've already used an invite code")
+        cursor.execute("SELECT id FROM profiles WHERE data->>'referralCode' = %s LIMIT 1", (code,))
+        referrer = cursor.fetchone()
+        if not referrer:
+            raise HTTPException(status_code=404, detail="Invite code not found")
+        referrer_profile_id = int(referrer["id"])
+        if referrer_profile_id == profile_id:
+            raise HTTPException(status_code=422, detail="You can't use your own invite code")
+        referral_data = {
+            "referrerProfileId": referrer_profile_id,
+            "referredProfileId": profile_id,
+            "code": code,
+            "redeemedAt": now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        cursor.execute(
+            "INSERT INTO app_entities (entity_type, source_key, title, status, data) VALUES ('referral', %s, %s, 'PENDING', %s)",
+            (
+                f"referral-{referrer_profile_id}-{profile_id}",
+                f"Referral: {referrer_profile_id} -> {profile_id}",
+                json.dumps(referral_data, ensure_ascii=False),
+            ),
+        )
+        referral_id = cursor.lastrowid
+        # Covers the (unusual but possible) case where the referred member
+        # is somehow already verified at the moment they redeem the code -
+        # reward immediately instead of waiting for a verification event
+        # that already happened and will never fire again.
+        already_verified_profile = fetch_profile(cursor, profile_id)
+        if profile_is_verified(already_verified_profile):
+            reward_referral_if_pending(cursor, profile_id)
+        conn.commit()
+    return {"ok": True, "referralId": referral_id}
 
 
 @app.get("/api/meta")
@@ -10807,7 +12877,7 @@ def record_cron_run(job: str, status_value: str, duration_seconds: float, result
 def ensure_admin_operational_settings() -> None:
     defaults = {
         "platform.system_email": {"group": "Platform", "value": "support@letsbeparents.com"},
-        "ranking.v2.enabled": {"group": "Ranking", "value": False},
+        "ranking.v2.enabled": {"group": "Ranking", "value": True},
     }
     try:
         with db_cursor() as (conn, cursor):
@@ -10829,7 +12899,7 @@ def ensure_admin_operational_settings() -> None:
                 if key == "platform.system_email":
                     needs_update = needs_update or str(current_value or "").strip().lower() in {"", "vladislav.bulochnikov@gmail.com"}
                 elif key == "ranking.v2.enabled":
-                    needs_update = needs_update or current_value is True or str(current_value).strip().lower() == "true"
+                    needs_update = needs_update or current_value is False or str(current_value).strip().lower() == "false"
                 if not needs_update:
                     continue
                 data.update({"key": key, "group": payload["group"], "value": payload["value"]})
@@ -12360,6 +14430,7 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
             "profileName": profile.get("display_name") or "No profile",
             "email": profile.get("email") or "",
             "plan": payload.plan,
+            "tier": payload.tier,
             "source": "MANUAL_REVIEW",
             "activeAt": now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "expiresAt": expires_at,
@@ -12406,7 +14477,7 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
         )
         audit(conn, actor, "grant_premium", "subscription", subscription_id, subscription_data)
         conn.commit()
-    return {"ok": True, "subscriptionId": subscription_id, "profile": normalize_row(profile), "isPremium": is_premium}
+    return {"ok": True, "subscriptionId": subscription_id, "profile": normalize_row(profile), "isPremium": is_premium, "tier": payload.tier}
 
 
 @app.post("/api/admin/subscriptions/{subscription_id}/review")
@@ -12474,6 +14545,67 @@ def admin_review_subscription(subscription_id: int, payload: AdminSubscriptionRe
         audit(conn, actor, "approve_premium", "subscription", subscription_id, {"profileId": profile_id, "plan": plan, "days": days})
         conn.commit()
     return {"ok": True, "id": subscription_id, "status": "ACTIVE", "isPremium": is_premium, "tier": tier}
+
+
+@app.post("/api/admin/boosts/{boost_id}/review")
+def admin_review_boost(boost_id: int, payload: AdminBoostReviewPayload, actor: str = Depends(require_admin)):
+    """Approve/decline a member's Boost request - see member_request_boost()
+    above for why this is a reviewed request rather than instant activation.
+    Mirrors admin_review_subscription() structurally on purpose (same shape,
+    different entity_type/field names) rather than a bespoke pattern."""
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, status, data FROM app_entities WHERE id = %s AND entity_type = 'boost' LIMIT 1 FOR UPDATE",
+            (boost_id,),
+        )
+        boost = cursor.fetchone()
+        if not boost:
+            raise HTTPException(status_code=404, detail="Boost request not found")
+        if str(boost.get("status") or "").upper() != "PENDING":
+            raise HTTPException(status_code=409, detail="Only pending boost requests can be reviewed")
+        data = as_dict(boost.get("data"))
+        profile_id = int_or_none(data.get("profileId"))
+        if not profile_id:
+            raise HTTPException(status_code=409, detail="Boost request is not linked to a profile")
+        cursor.execute(
+            "SELECT id, display_name, email, status, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="User not found")
+        reviewed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.update({"reviewedAt": reviewed_at, "reviewedBy": actor})
+        if payload.status == "DECLINED":
+            data["reviewStatus"] = "DECLINED"
+            cursor.execute(
+                "UPDATE app_entities SET status = 'DECLINED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (json.dumps(data, ensure_ascii=False), boost_id),
+            )
+            send_support_status_message(cursor, profile_id, "Your profile Boost request was declined.")
+            audit(conn, actor, "decline_boost", "boost", boost_id, {"profileId": profile_id})
+            conn.commit()
+            return {"ok": True, "id": boost_id, "status": "DECLINED"}
+        if not profile_is_verified(profile):
+            raise HTTPException(status_code=409, detail="Verify the profile before approving a Boost")
+        hours = payload.hours or BOOST_DEFAULT_HOURS
+        expires_at = (now_utc() + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.update({
+            "source": "MANUAL_REVIEW",
+            "reviewStatus": "APPROVED",
+            "activeAt": reviewed_at,
+            "expiresAt": expires_at,
+            "hours": hours,
+        })
+        cursor.execute(
+            "UPDATE app_entities SET status = 'ACTIVE', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(data, ensure_ascii=False), boost_id),
+        )
+        update_profile_data(cursor, profile_id, {"boostActiveUntil": expires_at})
+        send_support_status_message(cursor, profile_id, f"Your profile Boost is now active for {hours} hours.")
+        audit(conn, actor, "approve_boost", "boost", boost_id, {"profileId": profile_id, "hours": hours})
+        conn.commit()
+    return {"ok": True, "id": boost_id, "status": "ACTIVE", "activeUntil": expires_at}
 
 
 @app.post("/api/admin/subscriptions/{subscription_id}/revoke")
@@ -13106,6 +15238,14 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
 ADMIN_ENTITY_VIEWS: dict[str, str] = {
     "verifications": "verification",
     "subscriptions": "subscription",
+    "boosts": "boost",
+    "video-verifications": "video_verification",
+    "community-groups": "community_group",
+    "community-posts": "community_post",
+    "community-replies": "community_reply",
+    "safety-checkins": "safety_checkin",
+    "referrals": "referral",
+    "coparenting-agreements": "coparenting_agreement",
     "subscription-events": "subscription_event",
     "profile-views": "profile_view",
     "favourite-clinics": "favourite_clinic",
@@ -14361,6 +16501,7 @@ def admin_approve_verification(
                 "verificationProvider": data.get("provider") or "manual",
             },
         )
+        reward_referral_if_pending(cursor, profile_id)
         send_support_status_message(
             cursor,
             profile_id,
@@ -15734,6 +17875,7 @@ def member_catalog(
     donorType: list[str] | None = Query(None),
     lookingFor: list[str] | None = Query(None),
     verifiedOnly: bool = Query(False),
+    videoVerifiedOnly: bool = Query(False),
     days: int | None = Query(None, ge=1, le=30),
     ageMin: int | None = Query(None, ge=18, le=100),
     ageMax: int | None = Query(None, ge=18, le=100),
@@ -15837,6 +17979,8 @@ def member_catalog(
             params.extend(looking_for)
         if verifiedOnly:
             where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVerified')), 'false') = 'true'")
+        if videoVerifiedOnly:
+            where_parts.append("COALESCE(data->>'isVideoVerified', 'false') = 'true'")
         if days is not None:
             where_parts.append("created_at >= %s")
             params.append(database_datetime(now_utc() - timedelta(days=days)))
@@ -15870,6 +18014,7 @@ def member_catalog(
                    JSON_EXTRACT(data, '$.donorType') AS "donorType",
                    JSON_EXTRACT(data, '$.lookingFor') AS "lookingFor",
                    JSON_EXTRACT(data, '$.isVerified') AS "isVerified",
+                   data->'isVideoVerified' AS "isVideoVerified",
                    JSON_EXTRACT(data, '$.isPremium') AS "isPremium",
                    EXISTS (
                      SELECT 1

@@ -52,6 +52,7 @@ export type CatalogProfile = {
   donorType: string[] | null;
   lookingFor: string[] | null;
   isVerified: boolean | null;
+  isVideoVerified: boolean | null;
   isPremium: boolean | null;
   likedByViewer: boolean;
   createdAt: string;
@@ -77,6 +78,7 @@ export type ProfileSummary = {
   avatarUrl: string | null;
   profileType: string | null;
   isVerified: boolean | null;
+  isVideoVerified: boolean | null;
   isPremium: boolean | null;
   likedByViewer?: boolean;
   likeReadOnly?: boolean;
@@ -172,6 +174,11 @@ export type MemberSettings = {
   notificationSettings: NotificationSetting[];
   visibleInCatalog: boolean;
   betaFlags: Record<string, unknown>;
+  // Incognito browsing (Pro-only) - incognitoAvailable reflects the
+  // viewer's CURRENT tier (server-checked, not just "did they ever pay"),
+  // so it can flip back to false if a Pro subscription lapses.
+  incognitoEnabled: boolean;
+  incognitoAvailable: boolean;
 };
 
 // GET /api/member/photos - member_photos() in main.py, exact column aliases.

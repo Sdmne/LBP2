@@ -137,3 +137,38 @@ export async function uploadFamilyDocument(
 export function deleteFamilyDocument(documentId: number) {
   return api.delete<{ ok: true }>(`/api/member/family-room/documents/${documentId}`);
 }
+
+// Co-Parenting Agreement (premium roadmap step 5) - the "sign" layer on
+// top of the 10-section Family Plan above. See backend/main.py's
+// "CO-PARENTING AGREEMENT" section: not a legally binding e-signature,
+// just a good-faith mutual typed-name record once both partners have
+// completed every Family Plan section.
+export type AgreementSnapshotSection = { key: string; content: string };
+
+export type CoParentingAgreement = {
+  status: "DRAFT" | "SIGNED";
+  readyToSign: boolean;
+  sectionsCompleteCount: number;
+  sectionsTotalCount: number;
+  mySigned: boolean;
+  myFullName: string | null;
+  mySignedAt: string | null;
+  partnerSigned: boolean;
+  partnerFullName: string | null;
+  partnerSignedAt: string | null;
+  signedAt: string | null;
+  snapshot: AgreementSnapshotSection[] | null;
+};
+
+export function fetchCoParentingAgreement(profileId: number | string) {
+  return api.get<{ ok: true; matchId: number; agreement: CoParentingAgreement }>(
+    `/api/member/family-room/${profileId}/agreement`,
+  );
+}
+
+export function signCoParentingAgreement(profileId: number | string, fullName: string) {
+  return api.post<{ ok: true; matchId: number; agreement: CoParentingAgreement }>(
+    `/api/member/family-room/${profileId}/agreement/sign`,
+    { fullName },
+  );
+}

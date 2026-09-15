@@ -125,33 +125,19 @@ export default function SubscriptionScreen() {
   const freeLikes = status.limits?.freeLikesPerDay ?? 3;
   const premiumLikes = status.limits?.premiumLikesPerDay ?? 15;
 
-  // Already on the top tier - nothing left to upgrade to.
-  if (status.tier === "PRO") {
-    return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.badge}>{t("subscription.activeTitle")}</Text>
-        <Text style={styles.body}>{t("subscription.activeBody")}</Text>
-        <FeatureList
-          items={[
-            t("subscription.proFeature1"),
-            t("subscription.proFeature2"),
-            t("subscription.proFeature3"),
-            t("subscription.proFeature4"),
-            t("subscription.proFeature5"),
-          ]}
-        />
-      </ScrollView>
-    );
-  }
-
-  // Builder and Explore both land on the same tier-comparison screen -
-  // Builder just starts on the Pro card (its only real upgrade) with its
-  // own card marked "current" instead of tappable. See TierComparison for
-  // why this now matches Alena's reference mockup, and the two spots
-  // where its copy deliberately differs from what the mockup shows.
+  // Builder and Explore land on the same tier-comparison screen with Pro
+  // offered as the upgrade; Pro lands on the SAME screen too now (Alena:
+  // "Показать все тарифы + кнопка Выбрать" - previously this branch was a
+  // dead end with a feature list and no way to change plan at all, see
+  // the pending-tasks note on "Premium active" having no Manage options).
+  // Builder is the one real downgrade action from Pro - the backend has
+  // no requestable "EXPLORE" tier (see RequestableTier in
+  // api/subscription.ts, "EXPLORE isn't requestable, it's just the
+  // unpaid default"), so the Free/Explore card stays informational-only
+  // here exactly as it already was for the other two states.
   return (
     <TierComparison
-      currentTier={status.tier === "BUILDER" ? "BUILDER" : "EXPLORE"}
+      currentTier={status.tier === "BUILDER" ? "BUILDER" : status.tier === "PRO" ? "PRO" : "EXPLORE"}
       freeLikes={freeLikes}
       premiumLikes={premiumLikes}
       period={period}
@@ -203,7 +189,7 @@ function TierComparison({
   t,
   locale,
 }: {
-  currentTier: "EXPLORE" | "BUILDER";
+  currentTier: "EXPLORE" | "BUILDER" | "PRO";
   freeLikes: number;
   premiumLikes: number;
   period: SubscriptionPlan;
@@ -265,7 +251,8 @@ function TierComparison({
 
           <Pressable
             style={[styles.tierCard, styles.tierCardBest, selectedTier === "PRO" && styles.tierCardActive]}
-            onPress={() => setSelectedTier("PRO")}
+            onPress={() => currentTier !== "PRO" && setSelectedTier("PRO")}
+            disabled={currentTier === "PRO"}
           >
             <View style={styles.bestValueBadgeWrap}>
               <Text style={styles.bestValueBadge}>{t("subscription.bestValueBadge")}</Text>
@@ -275,6 +262,11 @@ function TierComparison({
             <Text style={styles.tierCardNote}>{t("subscription.perMonth")}</Text>
             <Text style={styles.tierCardNote}>{t("subscription.proCardExtra")}</Text>
             {selectedTier === "PRO" && proPriceNote(period, t) ? <Text style={styles.tierCardNote}>{proPriceNote(period, t)}</Text> : null}
+            {currentTier === "PRO" ? (
+              <View style={styles.currentBadge}>
+                <Text style={styles.currentBadgeText}>{t("subscription.currentPlanBadge")}</Text>
+              </View>
+            ) : null}
           </Pressable>
         </View>
 
@@ -298,15 +290,18 @@ function TierComparison({
               (builderFeature2/6, proFeature2/4/5 below) - they were
               written for the "already on PRO" FeatureList further up this
               file (see the status.tier === "PRO" branch) but never also
-              added as rows here, in the table a Free/Builder viewer
-              actually sees when deciding whether to upgrade. Deliberately
-              NOT adding a "Video & audio calls" row or a separate
-              "reach-outs/day" row: the former is already covered by
-              connectRowLabel just below ("See who liked you, calls") and
-              the latter is the same underlying per-day cap already shown
-              with its real number in likesPerDayLabel - adding either as
-              a second row would just restate the same feature twice
-              rather than surface something genuinely missing. */}
+              added as rows here, in the table a Free/Builder/Pro viewer
+              actually sees. Deliberately
+              NOT adding a separate "reach-outs/day" row: it's the same
+              underlying per-day cap already shown with its real number in
+              likesPerDayLabel, so a second row would just restate the
+              same feature. "Video & audio calls" (builderFeature4) WAS
+              folded into connectRowLabel ("See who liked you, calls") for
+              the same reason - Alena asked directly "а где в премиум про
+              аудио и видео звонки", i.e. that combined phrasing wasn't
+              actually legible as advertising calls at all - so it's now
+              its own row below, and connectRowLabel was trimmed back to
+              just "See who liked you". */}
           <TableGroup title={t("subscription.groupMatch")}>
             <TableRow label={t("subscription.likesPerDayLabel")} free={String(freeLikes)} builder={String(premiumLikes)} pro={String(premiumLikes)} />
             <TableRow label={t("subscription.builderFeature2")} builder pro />
@@ -320,12 +315,14 @@ function TierComparison({
 
           <TableGroup title={t("subscription.groupConnect")}>
             <TableRow label={t("subscription.connectRowLabel")} builder pro />
+            <TableRow label={t("subscription.builderFeature4")} builder pro />
           </TableGroup>
 
           <TableGroup title={t("subscription.groupFamily")}>
             <TableRow label={t("subscription.proFeature3")} pro />
             <TableRow label={t("subscription.proFeature4")} pro />
             <TableRow label={t("subscription.proFeature5")} pro />
+            <TableRow label={t("subscription.proFeature6")} pro />
           </TableGroup>
         </View>
 
@@ -434,19 +431,6 @@ function PeriodPicker({
             {t(option.labelKey)}
           </Text>
         </Pressable>
-      ))}
-    </View>
-  );
-}
-
-function FeatureList({ items }: { items: string[] }) {
-  return (
-    <View style={styles.featureList}>
-      {items.map((item, index) => (
-        <View key={index} style={styles.featureRow}>
-          <Text style={styles.featureCheck}>✓</Text>
-          <Text style={styles.featureText}>{item}</Text>
-        </View>
       ))}
     </View>
   );

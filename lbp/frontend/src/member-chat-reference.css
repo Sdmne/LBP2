@@ -387,6 +387,13 @@ body[data-member-page="blocked"] .block-row .chat-avatar img { width: 100%; heig
 .chat-bubble.outgoing .chat-file-attachment { border-color: rgba(255, 255, 255, .36); background: rgba(255, 255, 255, .12); }
 .chat-no-messages { margin: auto; padding: 24px; text-align: center; font-size: 14px; line-height: 20px; font-weight: 400; }
 .chat-compose-wrap { position: relative; border-top: 1px solid var(--line); background: #fff; }
+.chat-message-starters { width: 100%; max-width: 768px; margin: 0 auto; padding: 10px 12px 0; }
+.chat-message-starters > button { padding: 7px 12px; border: 1px solid #dbe3ed; border-radius: 999px; color: #334155; background: #fff; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.chat-message-starters > button:hover { border-color: #f31260; color: #f31260; }
+.chat-message-starters ul { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none; }
+.chat-message-starters li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: #f8fafc; color: #334155; font-size: 13px; line-height: 1.4; }
+.chat-message-starters li span { flex: 1; }
+.chat-message-starters li button { padding: 0; border: 0; color: #f31260; background: transparent; font: inherit; font-weight: 700; cursor: pointer; }
 .chat-emoji-panel {
   position: absolute;
   left: 12px;

@@ -21,6 +21,7 @@ export type ProfileDetailData = {
   avatarUrl: string | null;
   photos?: string[];
   isVerified?: boolean;
+  isVideoVerified?: boolean;
   isPremium?: boolean;
   likedByViewer?: boolean;
   profileType?: string | null;

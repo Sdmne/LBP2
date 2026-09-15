@@ -4,7 +4,19 @@ import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
 import { setSessionToken } from "../api/session";
 import type { PublicUser } from "../api/types";
-import { registerForPushNotifications, unregisterCurrentPushToken } from "../utils/pushNotifications";
+// TEMP DISABLED for OTA safety (2026-09-12, item 16): expo-notifications/
+// expo-device are not yet installed and the currently-installed app
+// binaries do not contain that native module - calling the real
+// implementation from an `eas update` (JS-only) push would fail on every
+// launch for already-installed users. Stubbed to no-ops here so this OTA
+// update is safe; the real implementation in utils/pushNotifications.ts is
+// untouched - re-wire these two lines back to it together with the next
+// `eas build` (after `npx expo install expo-notifications expo-device`).
+// See pending-mobile-tasks.md item 16.
+async function registerForPushNotifications(): Promise<string | null> {
+  return null;
+}
+async function unregisterCurrentPushToken(_token: string | null): Promise<void> {}
 
 const TOKEN_STORAGE_KEY = "lbp_session_token";
 
@@ -31,6 +43,17 @@ type AuthContextValue = {
   // person is behind the email-verification gate below (see RootNavigator).
   pendingProfileWizard: boolean;
   clearPendingProfileWizard: () => void;
+  // True right after a signup whose confirmation email failed to actually
+  // send (AuthResponse.emailSent === false - main.py's auth_signup() has
+  // sent this back all along, but nothing on the mobile side ever read it
+  // before: VerifyCodeScreen just showed the code-entry UI with a resend
+  // countdown as if the first email was on its way, so someone whose very
+  // first send failed (SMTP misconfigured, etc.) had no way to know the
+  // "waiting for a code" screen was waiting for something that was never
+  // sent - found from Alena's own report, "не приходит код" on a fresh
+  // signup). VerifyCodeScreen reads this once on mount to show the same
+  // "delivery failed" notice immediately instead of a silent countdown.
+  initialEmailSendFailed: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, displayName: string) => Promise<void>;
   socialLogin: (idToken: string, displayName: string | null, intent: "login" | "register") => Promise<void>;
@@ -55,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingProfileWizard, setPendingProfileWizard] = useState(false);
+  const [initialEmailSendFailed, setInitialEmailSendFailed] = useState(false);
   // Item 16 - the Expo push token this device last registered, so logout()
   // can unregister the exact same one. A ref, not state - nothing on
   // screen ever needs to read it, and it must survive without triggering
@@ -99,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearPendingProfileWizard() {
         setPendingProfileWizard(false);
       },
+      initialEmailSendFailed,
       async login(email, password) {
         const res = await authApi.login(email, password);
         setSessionToken(res.sessionToken);
@@ -113,6 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
         setPendingProfileWizard(true);
+        setInitialEmailSendFailed(res.emailSent === false);
         void syncPushToken();
       },
       async socialLogin(idToken, displayName, intent) {
@@ -162,7 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
       },
     }),
-    [user, isLoading, pendingProfileWizard],
+    [user, isLoading, pendingProfileWizard, initialEmailSendFailed],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

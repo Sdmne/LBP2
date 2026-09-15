@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { deleteConversation, fetchConversationPeerProfile, fetchMessages, sendAttachment, sendMessage, sendSticker } from "../api/messages";
+import { fetchMessageStarters } from "../api/messageStarters";
 import { blockProfile } from "../api/blocks";
 import { ApiError } from "../api/client";
 import type { ConversationMessage } from "../api/types";
@@ -62,7 +63,7 @@ export default function ChatScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { startCall } = useCall();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +78,12 @@ export default function ChatScreen({ route, navigation }: Props) {
   // blocking the whole screen over a menu nobody may even open.
   const [peerProfileId, setPeerProfileId] = useState<number | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
-  const [wallpaperVariant, setWallpaperVariant] = useState<ChatWallpaperVariant>("pattern");
+  // Default is "rainbow", not "pattern" - Alena confirmed the rainbow
+  // image is her actual chosen wallpaper (the grey icon-grid pattern was
+  // her first pick, made before she had real artwork ready; this default
+  // only matters for someone who hasn't opened the picker yet, since a
+  // saved AsyncStorage choice below always wins over this).
+  const [wallpaperVariant, setWallpaperVariant] = useState<ChatWallpaperVariant>("rainbow");
   const [wallpaperPickerVisible, setWallpaperPickerVisible] = useState(false);
 
   useEffect(() => {
@@ -118,6 +124,13 @@ export default function ChatScreen({ route, navigation }: Props) {
   // Tracks which message ids failed to load so a real fallback (icon +
   // message + open-in-browser) renders instead of empty space.
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<number>>(new Set());
+  // Premium roadmap: AI-drafted message starters. Stateless per-open - no
+  // history kept, unlike the AI Advisor's own persisted chat, since these
+  // are disposable drafts the member reviews/edits before sending.
+  const [startersVisible, setStartersVisible] = useState(false);
+  const [startersLoading, setStartersLoading] = useState(false);
+  const [starters, setStarters] = useState<string[]>([]);
+  const [startersError, setStartersError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchConversationPeerProfile(conversationId)
@@ -215,6 +228,41 @@ export default function ChatScreen({ route, navigation }: Props) {
 
   function insertEmoji(emoji: string) {
     setDraft((prev) => prev + emoji);
+  }
+
+  // Premium roadmap - AI-drafted message starters. Reuses the same Claude
+  // API plumbing as the AI Family Advisor (see message_starters_system_prompt
+  // in main.py) with only already-public profile context, explicitly told
+  // never to invent facts. A 402 here means the caller isn't Premium -
+  // shown as a friendly upgrade prompt, same pattern as Rewind/Incognito/
+  // stickers elsewhere in the app, rather than a raw error.
+  async function handleSuggestStarters() {
+    if (startersLoading) return;
+    setStartersError(null);
+    setStarters([]);
+    setStartersLoading(true);
+    setStartersVisible(true);
+    try {
+      const res = await fetchMessageStarters(conversationId, locale);
+      setStarters(res.starters);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) {
+        setStartersVisible(false);
+        Alert.alert(t("chat.messageStartersPremiumTitle"), t("chat.messageStartersPremiumBody"), [
+          { text: t("common.cancel"), style: "cancel" },
+          { text: t("chat.messageStartersSeePremium"), onPress: () => navigation.navigate("Subscription") },
+        ]);
+      } else {
+        setStartersError(err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
+      }
+    } finally {
+      setStartersLoading(false);
+    }
+  }
+
+  function pickStarter(text: string) {
+    setDraft(text);
+    setStartersVisible(false);
   }
 
   // Item 13(b) - unlike insertEmoji above, tapping a sticker sends it
@@ -485,6 +533,14 @@ export default function ChatScreen({ route, navigation }: Props) {
         <Pressable style={styles.inputIconButton} onPress={() => setShowEmoji((v) => !v)} hitSlop={6}>
           <Feather name="smile" size={19} color={showEmoji ? colors.pink : colors.muted} />
         </Pressable>
+        <Pressable
+          style={styles.inputIconButton}
+          onPress={() => void handleSuggestStarters()}
+          hitSlop={6}
+          accessibilityLabel={t("chat.messageStartersButtonLabel")}
+        >
+          <Feather name="zap" size={19} color={colors.muted} />
+        </Pressable>
         <TextInput
           style={styles.input}
           value={draft}
@@ -554,6 +610,32 @@ export default function ChatScreen({ route, navigation }: Props) {
                 {wallpaperVariant === "rainbow" ? <Feather name="check-circle" size={16} color={colors.pink} /> : null}
               </Pressable>
             </View>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Premium roadmap - AI-drafted message starters. Tapping a draft
+          fills the composer (never auto-sends - the member always reviews
+          and sends it themselves, same honesty-first pattern as Share Plan
+          on the Safety Check-In screen). */}
+      <Modal visible={startersVisible} transparent animationType="fade" onRequestClose={() => setStartersVisible(false)}>
+        <Pressable style={styles.menuOverlay} onPress={() => setStartersVisible(false)}>
+          <View style={[styles.menuSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
+            <View style={styles.menuHandle} />
+            <Text style={styles.wallpaperPickerTitle}>{t("chat.messageStartersTitle")}</Text>
+            {startersLoading ? (
+              <ActivityIndicator size="small" color={colors.pink} style={styles.startersLoading} />
+            ) : startersError ? (
+              <Text style={styles.errorBanner}>{startersError}</Text>
+            ) : (
+              <View style={styles.startersList}>
+                {starters.map((item, index) => (
+                  <Pressable key={index} style={styles.starterOption} onPress={() => pickStarter(item)}>
+                    <Text style={styles.starterOptionText}>{item}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -731,6 +813,16 @@ const styles = StyleSheet.create({
   wallpaperThumb: { width: 72, height: 72, borderRadius: 14, backgroundColor: colors.bgSoft },
   wallpaperThumbPattern: { alignItems: "center", justifyContent: "center" },
   wallpaperOptionLabel: { fontSize: 12.5, fontWeight: "600", color: colors.ink },
+  startersLoading: { marginVertical: spacing.lg },
+  startersList: { gap: spacing.sm, marginBottom: spacing.md },
+  starterOption: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    backgroundColor: colors.bgSoft,
+  },
+  starterOptionText: { fontSize: 14, color: colors.ink, lineHeight: 19 },
   sendButton: {
     width: 38,
     height: 38,

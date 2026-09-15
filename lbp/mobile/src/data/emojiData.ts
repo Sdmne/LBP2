@@ -45,9 +45,24 @@ export const EMOJI_CATEGORIES: EmojiCategory[] = [
     labelKey: "chat.emojiCategoryCelebration",
     emojis: ["🎉", "🎊", "🎈", "🎁", "🎀", "🏆", "⚽", "🏀", "🎮", "🎲", "🎵", "🎸", "🎨", "✨", "🔥", "💯"],
   },
+  // Split out of the old catch-all "objects" category (Sept 2026): Alena
+  // asked for more kids/baby-themed emoji ("больше детских надо добавить
+  // смайлов") after noticing how thin this app's one baby-ish category
+  // was (14 items, half of them not even baby-related - a phone, a
+  // lightbulb, a camera, money). Given what this app actually is (donor
+  // conception / co-parenting), a real "Family & Baby" category earns its
+  // own tab rather than being a few items buried in "Objects".
+  {
+    key: "family",
+    labelKey: "chat.emojiCategoryFamily",
+    emojis: [
+      "👶", "🍼", "🧸", "🚼", "🎀", "🧦", "👗", "🩱", "🪁", "🎠", "🦄", "🐣", "🐥",
+      "🦋", "🌈", "☀️", "⭐", "🌙", "💤", "🤰", "🤱", "👼", "🍭", "🍬", "🎂", "🎈",
+    ],
+  },
   {
     key: "objects",
     labelKey: "chat.emojiCategoryObjects",
-    emojis: ["👶", "🍼", "🧸", "🚗", "✈️", "🌈", "☀️", "⭐", "🌙", "💤", "📱", "💡", "📷", "💰"],
+    emojis: ["🚗", "✈️", "📱", "💡", "📷", "💰", "💻", "⌚", "📖", "🔑", "🎬", "🎤"],
   },
 ];

@@ -49,8 +49,7 @@
     },
     "plugins": [
       "@config-plugins/react-native-webrtc",
-      "expo-video",
-      "expo-notifications"
+      "expo-video"
     ],
     "extra": {
       "eas": {

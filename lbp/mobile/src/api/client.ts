@@ -82,12 +82,32 @@ export function resolveMediaUrl<T extends string | null | undefined>(url: T): T 
 // whose name ends in "Url" if its value looks like a relative path -
 // covers avatarUrl, photoUrl, coverImageUrl, logoUrl, contentUrl, and any
 // future one, with no per-endpoint code needed.
-function resolveMediaUrlsDeep<T>(value: T): T {
+// FOLLOW-UP (Sept 2026): the "url"-suffix check above catches an object
+// field like avatarUrl/photoUrl directly, but member_catalog_detail()'s
+// attach_profile_photos() returns a plain array of raw path STRINGS under
+// the key "photos" (["/uploads/x.jpg", ...], no per-item "Url" key at
+// all) - Alena's own profile preview screen ("Preview my profile") showed
+// a blank photo box because of exactly this: the array branch below used
+// to recurse into each string with no idea which key it came from, so a
+// bare relative string inside an array was never eligible for the
+// suffix check and passed through unresolved. Threads the enclosing
+// key down through arrays (and objects, harmlessly unused there) so a
+// string's own "did this come from a media-ish field" context survives
+// one level of [ ] - covers "photos" specifically plus a few likely
+// siblings (images/gallery/avatars) without hardcoding every endpoint.
+function isMediaArrayKey(key: string | undefined): boolean {
+  return !!key && /(photos?|images?|gallery|avatars?)$/i.test(key);
+}
+
+function resolveMediaUrlsDeep<T>(value: T, keyHint?: string): T {
   if (typeof value === "string") {
+    if (isMediaArrayKey(keyHint) && value.startsWith("/") && !value.startsWith("//")) {
+      return resolveMediaUrl(value) as T;
+    }
     return value as T;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => resolveMediaUrlsDeep(item)) as unknown as T;
+    return value.map((item) => resolveMediaUrlsDeep(item, keyHint)) as unknown as T;
   }
   if (value && typeof value === "object") {
     const result: Record<string, unknown> = {};
@@ -99,7 +119,7 @@ function resolveMediaUrlsDeep<T>(value: T): T {
       if (typeof val === "string" && /url$/i.test(key) && val.startsWith("/") && !val.startsWith("//")) {
         result[key] = resolveMediaUrl(val);
       } else {
-        result[key] = resolveMediaUrlsDeep(val);
+        result[key] = resolveMediaUrlsDeep(val, key);
       }
     }
     return result as T;

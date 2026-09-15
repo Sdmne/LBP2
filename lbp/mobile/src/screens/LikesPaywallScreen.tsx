@@ -46,18 +46,54 @@ const SLIDES = [
   { icon: "activity" as const, titleKey: "paywall.compatibilityTitle", bodyKey: "paywall.compatibilityBody" },
 ] as const;
 
-type PlanOption = { tier: RequestableTier; period: SubscriptionPlan; nameKey: string; priceKey: string; badgeKey?: string };
+type PlanOption = { tier: RequestableTier; period: SubscriptionPlan; nameKey: string; priceKey: string; badgeKey?: string; featureKeys: string[] };
+
+// Feature lines reuse the exact same translation keys as
+// SubscriptionScreen.tsx's tier-comparison table and its "already on Pro"
+// summary, rather than writing new copy that could quietly drift out of
+// sync with what the two screens promise. builderFeature5 ("{{count}}
+// likes/day") is left out here since it needs a live limits number this
+// screen doesn't fetch - the other 5 Builder lines and all 6 Pro lines
+// don't need any dynamic value.
+const BUILDER_FEATURE_KEYS = [
+  "subscription.builderFeature1",
+  "subscription.builderFeature2",
+  "subscription.builderFeature3",
+  "subscription.builderFeature4",
+  "subscription.builderFeature6",
+];
+const PRO_FEATURE_KEYS = [
+  "subscription.proFeature1",
+  "subscription.proFeature2",
+  "subscription.proFeature3",
+  "subscription.proFeature4",
+  "subscription.proFeature5",
+  "subscription.proFeature6",
+];
 
 const PLAN_OPTIONS: PlanOption[] = [
-  { tier: "BUILDER", period: "monthly", nameKey: "subscription.tierNameBuilderShort", priceKey: "subscription.priceBuilderMonthly" },
+  {
+    tier: "BUILDER",
+    period: "monthly",
+    nameKey: "subscription.tierNameBuilderShort",
+    priceKey: "subscription.priceBuilderMonthly",
+    featureKeys: BUILDER_FEATURE_KEYS,
+  },
   {
     tier: "BUILDER",
     period: "quarterly",
     nameKey: "subscription.tierNameBuilderShort",
     priceKey: "subscription.priceBuilderQuarterly",
     badgeKey: "paywall.save33Badge",
+    featureKeys: BUILDER_FEATURE_KEYS,
   },
-  { tier: "PRO", period: "monthly", nameKey: "subscription.tierNameProShort", priceKey: "subscription.priceProMonthly" },
+  {
+    tier: "PRO",
+    period: "monthly",
+    nameKey: "subscription.tierNameProShort",
+    priceKey: "subscription.priceProMonthly",
+    featureKeys: PRO_FEATURE_KEYS,
+  },
 ];
 
 export default function LikesPaywallScreen({ navigation }: Props) {
@@ -136,6 +172,14 @@ export default function LikesPaywallScreen({ navigation }: Props) {
         <View style={styles.body}>
           <Text style={styles.sectionTitle}>{t("subscription.compareTitle")}</Text>
 
+          {/* UPDATE (Sept 2026): originally only the selected card showed
+              its feature list, expanding on tap. Alena's follow-up
+              ("Не видно сразу преимущества () как выбрать") was that
+              comparing all three meant tapping through them one at a
+              time - she picked "развернуть все карточки сразу" (show every
+              card's features at once) so the comparison is visible without
+              any tapping; tapping a card still just selects it for the CTA
+              button below. */}
           {PLAN_OPTIONS.map((option, index) => {
             const isSelected = selected === index;
             return (
@@ -144,22 +188,32 @@ export default function LikesPaywallScreen({ navigation }: Props) {
                 style={[styles.planCard, isSelected && styles.planCardSelected]}
                 onPress={() => setSelected(index)}
               >
-                <View style={styles.planCardMain}>
-                  <View style={styles.planCardNameRow}>
-                    <Text style={styles.planCardName}>{t(option.nameKey)}</Text>
-                    {option.badgeKey ? (
-                      <View style={styles.planBadge}>
-                        <Text style={styles.planBadgeText}>{t(option.badgeKey)}</Text>
-                      </View>
-                    ) : null}
+                <View style={styles.planCardTop}>
+                  <View style={styles.planCardMain}>
+                    <View style={styles.planCardNameRow}>
+                      <Text style={styles.planCardName}>{t(option.nameKey)}</Text>
+                      {option.badgeKey ? (
+                        <View style={styles.planBadge}>
+                          <Text style={styles.planBadgeText}>{t(option.badgeKey)}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.planCardPrice}>{t(option.priceKey)}</Text>
                   </View>
-                  <Text style={styles.planCardPrice}>{t(option.priceKey)}</Text>
+                  <Feather
+                    name={isSelected ? "check-circle" : "circle"}
+                    size={22}
+                    color={isSelected ? colors.pink : colors.line}
+                  />
                 </View>
-                <Feather
-                  name={isSelected ? "check-circle" : "circle"}
-                  size={22}
-                  color={isSelected ? colors.pink : colors.line}
-                />
+                <View style={styles.planCardDetails}>
+                  {option.featureKeys.map((key) => (
+                    <View key={key} style={styles.planCardDetailRow}>
+                      <Feather name="check" size={14} color={colors.pink} />
+                      <Text style={styles.planCardDetailText}>{t(key)}</Text>
+                    </View>
+                  ))}
+                </View>
               </Pressable>
             );
           })}
@@ -227,9 +281,6 @@ const styles = StyleSheet.create({
   body: { padding: spacing.lg },
   sectionTitle: { fontSize: 17, fontWeight: "800", color: colors.ink, marginBottom: spacing.md },
   planCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     padding: spacing.md,
     borderRadius: radius.lg,
     borderWidth: 1.5,
@@ -237,7 +288,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   planCardSelected: { borderColor: colors.pink, backgroundColor: colors.tintPink },
+  planCardTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   planCardMain: { flex: 1 },
+  // Feature breakdown revealed only for the selected card - see the
+  // comment above the PLAN_OPTIONS.map() call in the component.
+  planCardDetails: { marginTop: spacing.sm, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: "rgba(243,18,96,0.18)", gap: 6 },
+  planCardDetailRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  planCardDetailText: { fontSize: 12.5, color: colors.ink, flexShrink: 1 },
   planCardNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   planCardName: { fontSize: 15, fontWeight: "800", color: colors.ink },
   planBadge: { backgroundColor: colors.pink, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },

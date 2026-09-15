@@ -1,4 +1,3 @@
-import { PRICING_TEXT } from "./pricing-reference";
 import {
   FormEvent,
   type CSSProperties,
@@ -499,7 +498,7 @@ function CallManager({session}:{session:Session}) { return <MemberChatCalls sess
 
 const SITE_TEXT = {
   en: {
-    knowledge: "Knowledge Hub", match: "Find a match", clinics: "Clinics", lawyers: "Lawyers", resources: "Resources & Tools", safety: "Safety", pricing: "Pricing",
+    knowledge: "Knowledge Hub", match: "Find a match", clinics: "Clinics", lawyers: "Lawyers", resources: "Resources", professionals: "Professionals", safety: "Safety", pricing: "Pricing",
     profile: "Profile", signOut: "Sign out", signIn: "Sign in", signUp: "Sign up",
     likes: "Likes", messages: "Messages", notifications: "Member notifications",
     tagline: "Helping every family find their way.", platform: "Platform", company: "Company",
@@ -507,7 +506,7 @@ const SITE_TEXT = {
     rights: "© 2026 LetsBeParents. All rights reserved.", cookies: "Cookie settings", language: "Language",
   },
   ru: {
-    knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы", resources: "Ресурсы и инструменты", safety: "Безопасность", pricing: "Цены",
+    knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы", resources: "Ресурсы", professionals: "Специалисты", safety: "Безопасность", pricing: "Цены",
     profile: "Мой профиль", signOut: "Выйти", signIn: "Войти", signUp: "Регистрация",
     likes: "Лайки", messages: "Сообщения", notifications: "Уведомления участника",
     tagline: "Помогаем каждой семье найти свой путь.", platform: "Платформа", company: "Компания",
@@ -515,7 +514,7 @@ const SITE_TEXT = {
     rights: "© 2026 LetsBeParents. Все права защищены.", cookies: "Настройки cookies", language: "Язык",
   },
   es: {
-    knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados", resources: "Recursos y herramientas", safety: "Seguridad", pricing: "Precios",
+    knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados", resources: "Recursos", professionals: "Profesionales", safety: "Seguridad", pricing: "Precios",
     profile: "Mi perfil", signOut: "Cerrar sesión", signIn: "Iniciar sesión", signUp: "Registrarse",
     likes: "Me gusta", messages: "Mensajes", notifications: "Notificaciones de miembro",
     tagline: "Ayudamos a cada familia a encontrar su camino.", platform: "Plataforma", company: "Empresa",
@@ -636,6 +635,7 @@ function Shell({
   const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(pathname);
   const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(pathname);
   const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(pathname);
+  const isProfessionals = new RegExp(`^/${locale}/professionals(?:/|$)`).test(pathname);
   const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(pathname);
   const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(pathname);
   const menuItems = () => Array.from(navigationRef.current?.querySelectorAll<HTMLElement>("a, button") || [])
@@ -726,6 +726,9 @@ function Shell({
       <Link role={menuOpen ? "menuitem" : undefined} className={isResources || isFindYourPath ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
         {text.resources}
       </Link>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isProfessionals ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/professionals`}>
+        {text.professionals}
+      </Link>
       <Link role={menuOpen ? "menuitem" : undefined} className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
         {text.safety}
       </Link>
@@ -793,7 +796,7 @@ function Shell({
           )}
         </div>
       </header>
-      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isMemberDetail ? " member-profile-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isStaticPage ? " static-main" : ""}${isAccount ? " account-main" : ""}`}>{children}</main>
+      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isMemberDetail ? " member-profile-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isProfessionals ? " professionals-main" : ""}${isStaticPage ? " static-main" : ""}${isAccount ? " account-main" : ""}`}>{children}</main>
       <footer className="web-footer">
         <div className="web-footer-inner">
           <div className="footer-brand">
@@ -801,15 +804,24 @@ function Shell({
               <img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" />
             </Link>
             <p>{text.tagline}</p>
+            <div className="footer-store-links">
+              <a href="https://letsbeparents.onelink.me/wg1x?pid=website&c=footer" aria-label="Download on the App Store">
+                <img src="/web-static/images/badges/appstore-white-b32c87ae.png" alt="Download on the App Store" />
+              </a>
+              <a href="https://letsbeparents.onelink.me/wg1x?pid=website&c=footer" aria-label="Get it on Google Play">
+                <img src="/web-static/images/badges/googleplay-white-7aebf78f.png" alt="Get it on Google Play" />
+              </a>
+            </div>
           </div>
           <div className="footer-column">
             <h3>{text.platform}</h3>
             <nav>
               <Link to={`/${locale}/knowledge-hub`}>{text.knowledge}</Link>
-              <Link to={`/${locale}/catalog`}>{text.match}</Link>
               <Link to={`/${locale}/clinics`}>{text.clinics}</Link>
               <Link to={`/${locale}/lawyers`}>{text.lawyers}</Link>
               <Link to={`/${locale}/resources`}>{text.resources}</Link>
+              <Link to={`/${locale}/professionals`}>{text.professionals}</Link>
+              <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
               <Link to={`/${locale}/pricing`}>{text.pricing}</Link>
             </nav>
           </div>
@@ -920,6 +932,21 @@ const LANDING_TEXT = {
       { label: "FOR CLINICS & LAWYERS", title: "Grow your practice, reach more families", copy: "Join our professional directory and connect with thousands of potential clients. Get your own partner dashboard to manage appointments, communicate with patients through secure chat and video calls, run promotional campaigns, and build your reputation in the reproductive health community.", points: ["Personal partner dashboard with analytics", "Secure chat and video consultations with clients", "Promotional tools and targeted email campaigns"] },
     ],
     stats: [["15.1K", "Members worldwide"], ["7.3K", "Donors"], ["4.5K", "Partner clinics"], ["369", "Lawyers"]],
+    whatsNew: {
+      label: "NEW ON LETSBEPARENTS", title: "More ways to match, connect and stay safe",
+      intro: "We keep shipping - here's what's new since you last looked.",
+      tiers: { free: "Free", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Profile Boost", copy: "Get more visibility in the catalog for a limited time.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Invite & earn a Boost", copy: "Invite a friend - when they join and verify, you both get a free Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Share your meeting plan with someone you trust before meeting a match in person.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Video Verification badge", copy: "Add an extra layer of trust with a video-verified badge on your profile.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "AI-drafted message starters", copy: "Get 3 tailored opening messages for any match, powered by AI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Weekly AI Advisor insight", copy: "A fresh, personalized tip from your AI Family Advisor every week.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Co-Parenting Agreement sign-off", copy: "Turn your shared Family Plan into a mutual record you both sign.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Community groups & discussions", copy: "Join topic groups and discussions with others on the same path.", href: "/community" },
+      ],
+    },
     ctaTitle: "Ready to start your family?", ctaCopy: "Join thousands of future parents. Create your free account today.",
     ctaButton: "Create free account", appLabel: "Also available as a free mobile app",
   },
@@ -956,6 +983,21 @@ const LANDING_TEXT = {
       { label: "ДЛЯ КЛИНИК И ЮРИСТОВ", title: "Развивайте практику, охватите больше семей", copy: "Присоединяйтесь к нашему профессиональному каталогу и связывайтесь с тысячами потенциальных клиентов. Получите собственный партнёрский кабинет для управления записями, общения с пациентами через безопасный чат и видеосвязь, проведения промо-кампаний и укрепления репутации в сфере репродуктивного здоровья.", points: ["Персональный партнёрский кабинет с аналитикой", "Безопасный чат и видеоконсультации с клиентами", "Инструменты продвижения и целевые email-рассылки"] },
     ],
     stats: [["15.1K", "Участников по всему миру"], ["7.3K", "Доноров"], ["4.5K", "Партнёрских клиник"], ["369", "Юристов"]],
+    whatsNew: {
+      label: "НОВОЕ НА LETSBEPARENTS", title: "Больше возможностей находить пару, общаться и оставаться в безопасности",
+      intro: "Мы продолжаем развивать платформу - вот что появилось нового.",
+      tiers: { free: "Бесплатно", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost профиля", copy: "Больше видимости в каталоге на ограниченное время.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Приглашай и получай Boost", copy: "Пригласите друга - когда он присоединится и пройдёт верификацию, вы оба получите бесплатный Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Поделитесь планом встречи с тем, кому доверяете, прежде чем увидеться с совпадением лично.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Значок Video Verification", copy: "Добавьте профилю дополнительный уровень доверия с помощью видео-верификации.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "AI-подсказки для первого сообщения", copy: "Получите 3 персональных варианта первого сообщения для любого совпадения - их предлагает AI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Еженедельный совет от AI Advisor", copy: "Новый персональный совет от вашего AI Family Advisor каждую неделю.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Подписание Co-Parenting Agreement", copy: "Превратите общий Family Plan в совместную договорённость, которую подписываете вы оба.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Группы и обсуждения Community", copy: "Присоединяйтесь к тематическим группам и обсуждениям с теми, кто на похожем пути.", href: "/community" },
+      ],
+    },
     ctaTitle: "Готовы создать семью?", ctaCopy: "Присоединяйтесь к тысячам будущих родителей. Создайте бесплатный аккаунт сегодня.",
     ctaButton: "Создать бесплатный аккаунт", appLabel: "Также доступно как бесплатное мобильное приложение",
   },
@@ -992,6 +1034,21 @@ const LANDING_TEXT = {
       { label: "PARA CLÍNICAS Y ABOGADOS", title: "Haz crecer tu práctica, llega a más familias", copy: "Únete a nuestro directorio profesional y conecta con miles de potenciales clientes. Accede a tu panel de partner para gestionar citas, comunicarte con pacientes por chat seguro y videollamadas, lanzar campañas y construir tu reputación en la comunidad de salud reproductiva.", points: ["Panel de partner personal con analíticas", "Chat seguro y videoconsultas con clientes", "Herramientas promocionales y campañas de email segmentadas"] },
     ],
     stats: [["15.1K", "Miembros en el mundo"], ["7.3K", "Donantes"], ["4.5K", "Clínicas partner"], ["369", "Abogados"]],
+    whatsNew: {
+      label: "NUEVO EN LETSBEPARENTS", title: "Más formas de encontrar match, conectar y mantenerte seguro",
+      intro: "Seguimos mejorando la plataforma - esto es lo nuevo.",
+      tiers: { free: "Gratis", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost de perfil", copy: "Más visibilidad en el catálogo durante un tiempo limitado.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Invita y gana un Boost", copy: "Invita a alguien - cuando se una y se verifique, ambos recibiréis un Boost gratis.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Comparte tu plan de encuentro con alguien de confianza antes de ver a un match en persona.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Insignia Video Verification", copy: "Añade una capa extra de confianza con una insignia de verificación por vídeo.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Mensajes iniciales sugeridos por IA", copy: "Recibe 3 mensajes de apertura personalizados para cualquier match, generados por IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Consejo semanal del AI Advisor", copy: "Un consejo nuevo y personalizado de tu AI Family Advisor cada semana.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Firma del Co-Parenting Agreement", copy: "Convierte vuestro Family Plan compartido en un acuerdo mutuo que firmáis los dos.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Grupos y debates de Community", copy: "Únete a grupos temáticos y debates con quienes están en un camino parecido.", href: "/community" },
+      ],
+    },
     ctaTitle: "¿Listo para formar tu familia?", ctaCopy: "Únete a miles de futuros padres y madres. Crea tu cuenta gratis hoy.",
     ctaButton: "Crear cuenta gratis", appLabel: "También disponible como app móvil gratuita",
   },
@@ -1039,6 +1096,16 @@ function Home() {
     if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor-bb85903a.jpg";
     if (key === "exploring") return "/web-static/images/landing/path-exploring-607ba1f7.jpg";
     return "/web-static/images/landing/path-coparent-50e0ccf3.png";
+  };
+  const whatsNewIcon = (key: string) => {
+    if (key === "boost") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>;
+    if (key === "referral") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="4" x="3" y="8" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>;
+    if (key === "safety") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>;
+    if (key === "video") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></svg>;
+    if (key === "message") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+    if (key === "insight") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.05V18h6v-1.25c0-.86.38-1.55 1-2.05A7 7 0 0 0 12 2Z"/></svg>;
+    if (key === "agreement") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m3 15 2 2 4-4"/></svg>;
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
   };
   const features = text.features.map((feature, index) => ({ ...feature, image: LANDING_FEATURE_IMAGES[index] }));
   return (
@@ -1120,6 +1187,24 @@ function Home() {
         {text.stats.map(([value, label]) => (
           <div key={label}><strong>{value}</strong><span>{label}</span></div>
         ))}
+      </section>
+
+      <section className="landing-whatsnew">
+        <div className="landing-section-intro">
+          <span>{text.whatsNew.label}</span>
+          <h2>{text.whatsNew.title}</h2>
+          <p className="landing-whatsnew-intro">{text.whatsNew.intro}</p>
+        </div>
+        <div className="landing-whatsnew-grid">
+          {text.whatsNew.items.map((item) => (
+            <Link key={item.title} className="landing-whatsnew-card" to={`/${locale}${item.href}`}>
+              <span className="landing-whatsnew-icon">{whatsNewIcon(item.icon)}</span>
+              <span className={`landing-whatsnew-tier landing-whatsnew-tier-${item.tier}`}>{text.whatsNew.tiers[item.tier as keyof typeof text.whatsNew.tiers]}</span>
+              <h3>{item.title}</h3>
+              <p>{item.copy}</p>
+            </Link>
+          ))}
+        </div>
       </section>
 
       <section className="landing-trust-line">
@@ -2616,6 +2701,7 @@ function CatalogCard({
   const donorTypes = catalogList(item.donorType ?? data.donorType);
   const lookingFor = catalogList(item.lookingFor ?? data.lookingFor ?? item.recipientType ?? data.recipientType);
   const verified = catalogBoolean(item.isVerified ?? data.isVerified);
+  const videoVerified = catalogBoolean(item.isVideoVerified ?? data.isVideoVerified);
   const liked = catalogBoolean(item.likedByViewer ?? data.likedByViewer);
   const id = catalogText(item.id ?? data.id);
   const detailPath = `/${locale}/profile/${encodeURIComponent(id)}`;
@@ -2673,6 +2759,11 @@ function CatalogCard({
           <svg className={`catalog-verified-icon ${verified ? "is-verified" : "is-unverified"}`} viewBox="0 0 24 24" aria-label={verified ? "Verified" : "Not verified"} role="img">
             <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" /><path d="m9 12 2 2 4-4" />
           </svg>
+          {videoVerified && (
+            <span className="catalog-video-verified-badge" title="Video verified" style={{ marginLeft: 4 }}>
+              🎥
+            </span>
+          )}
         </div>
         <p className="catalog-card-location">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>
@@ -3169,6 +3260,15 @@ function Catalog({ session }: { session: Session }) {
   );
 }
 
+// Same reason list mobile's ReportProfileScreen.tsx uses (matches the
+// production reference screenshots) - backend takes free-text `reason`,
+// this fixed list is a product choice. Previously the website's "Report"
+// button skipped straight to a hardcoded generic reason with no picker;
+// audit 2026-09-13 (site-vs-app-audit-2026-09-13.docx, item 3) originally
+// missed that a report flow existed here at all - corrected: it existed,
+// just without the reason list mobile has. This closes that gap.
+const REPORT_REASONS = ["Spam", "Harassment", "Inappropriate Content", "Fake Profile", "Scam", "Other"];
+
 function CatalogProfile({ session }: { session: Session }) {
   return <MemberProfile session={session} locale={localeOf()} />;
 }
@@ -3448,6 +3548,7 @@ function MemberLinks({ locale }: { locale: string }) {
   return (
     <nav className="member-links">
       <Link to={`/${locale}/profile`}>Profile</Link>
+      <Link to={`/${locale}/compatibility`}>Compatibility</Link>
       <Link to={`/${locale}/ai-advisor`}>AI Advisor</Link>
       <Link to={`/${locale}/photos`}>Photos</Link>
       <Link to={`/${locale}/verification`}>Verification</Link>
@@ -3455,6 +3556,12 @@ function MemberLinks({ locale }: { locale: string }) {
       <Link to={`/${locale}/visitors`}>Visitors</Link>
       <Link to={`/${locale}/favourites`}>Saved</Link>
       <Link to={`/${locale}/blocked`}>Blocked</Link>
+      <Link to={`/${locale}/boost`}>Boost</Link>
+      <Link to={`/${locale}/referral`}>Referral</Link>
+      <Link to={`/${locale}/safety-checkin`}>Safety Check-In</Link>
+      <Link to={`/${locale}/cost-calculator`}>Cost Calculator</Link>
+      <Link to={`/${locale}/video-verification`}>Video Verification</Link>
+      <Link to={`/${locale}/community`}>Community</Link>
       <Link to={`/${locale}/settings`}>Settings</Link>
     </nav>
   );
@@ -3688,6 +3795,25 @@ function Settings({ session }: { session: Session }) {
         />
         Visible in catalog
       </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={Boolean(settings.incognitoAvailable && settings.incognitoEnabled)}
+          disabled={!settings.incognitoAvailable}
+          onChange={(event) =>
+            setSettings((current) => ({
+              ...current,
+              incognitoEnabled: event.target.checked,
+            }))
+          }
+        />
+        Incognito browsing{settings.incognitoAvailable ? "" : " (Pro feature)"}
+      </label>
+      {!settings.incognitoAvailable && (
+        <p className="notice">
+          Browse profiles without appearing in their Visitors list - available with a Pro subscription.
+        </p>
+      )}
       <fieldset className="notification-settings">
         <legend>Email notifications</legend>
         {notifications.map((item) => (
@@ -4108,6 +4234,16 @@ function Subscription({ session }: { session: Session }) {
   );
 }
 
+// "Family Plan & Shared Family Room" + "Document & checklist tools" -
+// Family Builder Pro pricing-page features (see PRICING_TEXT below).
+// Mirrors mobile/src/screens/FamilyRoomScreen.tsx: same endpoints
+// (backend/main.py's "FAMILY ROOM" section), same 402 (needs Premium) /
+// 404 (no active match with this profile) gating rendered as dedicated
+// states rather than guessed at client-side. Reached from the Messages
+// page (a "Family Room" link next to the call buttons, using the active
+// conversation's other_profile_id - see conversation_scope_sql()) since
+// this site doesn't have a general "view this member's profile" page the
+// way the mobile app's ProfileDetailScreen does.
 const FAMILY_ROOM_SECTIONS: Array<"parenting" | "finances" | "legal" | "general"> = [
   "parenting",
   "finances",
@@ -4152,20 +4288,41 @@ function FamilyRoom({ session }: { session: Session }) {
   const [addingSection, setAddingSection] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pregnancyEntries, setPregnancyEntries] = useState<Row[]>([]);
-  const [pregnancyCategory, setPregnancyCategory] = useState<
-    "lab_test" | "ultrasound" | "prescription"
-  >("lab_test");
+  const [pregnancyCategory, setPregnancyCategory] = useState<"lab_test" | "ultrasound" | "prescription">("lab_test");
   const [pregnancyNote, setPregnancyNote] = useState("");
   const [pregnancyUploading, setPregnancyUploading] = useState(false);
+  const [agreement, setAgreement] = useState<Row | null>(null);
+  const [agreementStatus, setAgreementStatus] = useState<"idle" | "ok" | "needsPremium" | "error">("idle");
+  const [agreementFullName, setAgreementFullName] = useState("");
+  const [agreementSigning, setAgreementSigning] = useState(false);
+  const [agreementNotice, setAgreementNotice] = useState("");
+
+  const loadAgreement = () => {
+    if (!session || !profileId) return;
+    api
+      .get<{ ok: true; agreement: Row }>(`/member/family-room/${encodeURIComponent(profileId)}/agreement`)
+      .then((data) => {
+        setAgreement(data.agreement);
+        setAgreementStatus("ok");
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setAgreementStatus("needsPremium");
+        else setAgreementStatus("error");
+      });
+  };
 
   const loadPregnancy = () => {
     if (!session || !profileId) return;
     api
-      .get<{ ok: true; entries: Row[] }>(
-        `/member/family-room/${encodeURIComponent(profileId)}/pregnancy`,
-      )
+      .get<{ ok: true; entries: Row[] }>(`/member/family-room/${encodeURIComponent(profileId)}/pregnancy`)
       .then((data) => setPregnancyEntries(data.entries || []))
-      .catch(() => undefined);
+      .catch(() => {
+        // Silent - Pregnancy Room is a free add-on to Family Room (no
+        // Premium gate, see backend/main.py's member_pregnancy_room()); if
+        // this fails it's almost always the same "no active match" 404
+        // already surfaced by the main Family Room load above, so no need
+        // to show a second error for it.
+      });
   };
 
   const load = () => {
@@ -4176,9 +4333,9 @@ function FamilyRoom({ session }: { session: Session }) {
       .then((data) => {
         setRoom(data);
         const plan = (data.plan as Row) || {};
-        setParenting(String(plan.parentingNotes ?? ""));
-        setFinances(String(plan.financesNotes ?? ""));
-        setLegal(String(plan.legalNotes ?? ""));
+        setParenting(asText(plan.parentingNotes));
+        setFinances(asText(plan.financesNotes));
+        setLegal(asText(plan.legalNotes));
         setPlanDirty(false);
         setStatus("ok");
       })
@@ -4190,26 +4347,19 @@ function FamilyRoom({ session }: { session: Session }) {
   };
   useEffect(load, [session, profileId]);
   useEffect(loadPregnancy, [session, profileId]);
+  useEffect(loadAgreement, [session, profileId]);
 
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
 
   const savePlan = async () => {
-    if (savingPlan || !room) return;
     setSavingPlan(true);
     setNotice("");
     try {
-      const baseline = (room.plan as Row) || {};
-      const updates = Object.fromEntries(Object.entries({ parentingNotes: parenting, financesNotes: finances, legalNotes: legal })
-        .filter(([key, value]) => value !== String(baseline[key] ?? "")));
       const response = await api.patch<Row>(
         `/member/family-room/${encodeURIComponent(profileId)}/plan`,
-        updates,
+        { parentingNotes: parenting, financesNotes: finances, legalNotes: legal },
       );
       setRoom((prev) => (prev ? { ...prev, plan: response.plan } : prev));
-      const savedPlan = response.plan as Row;
-      setParenting(String(savedPlan.parentingNotes ?? ""));
-      setFinances(String(savedPlan.financesNotes ?? ""));
-      setLegal(String(savedPlan.legalNotes ?? ""));
       setPlanDirty(false);
     } catch {
       setNotice("Could not save the Family Plan. Please try again.");
@@ -4302,6 +4452,29 @@ function FamilyRoom({ session }: { session: Session }) {
     }
   };
 
+  const signAgreement = async () => {
+    if (!agreementFullName.trim()) return;
+    setAgreementSigning(true);
+    setAgreementNotice("");
+    try {
+      const data = await api.post<{ ok: true; agreement: Row }>(
+        `/member/family-room/${encodeURIComponent(profileId)}/agreement/sign`,
+        { fullName: agreementFullName.trim() },
+      );
+      setAgreement(data.agreement);
+      setAgreementFullName("");
+      setAgreementNotice("Signed.");
+    } catch (err) {
+      setAgreementNotice(
+        err instanceof ApiError && err.status === 409
+          ? "Complete every Family Plan section together before signing."
+          : "Could not sign the agreement.",
+      );
+    } finally {
+      setAgreementSigning(false);
+    }
+  };
+
   const uploadDocument = async (file: File | undefined) => {
     if (!file) return;
     setUploading(true);
@@ -4356,7 +4529,7 @@ function FamilyRoom({ session }: { session: Session }) {
         `/member/family-room/${encodeURIComponent(profileId)}/pregnancy`,
         data,
       );
-      setPregnancyEntries((previous) => [response.entry, ...previous]);
+      setPregnancyEntries((prev) => [response.entry, ...prev]);
       setPregnancyNote("");
     } catch {
       setNotice("Could not upload that file to the Pregnancy Room.");
@@ -4367,13 +4540,9 @@ function FamilyRoom({ session }: { session: Session }) {
 
   const deletePregnancyEntry = async (entry: Row) => {
     const entryId = entry.id;
-    setPregnancyEntries((previous) =>
-      previous.filter((item) => item.id !== entryId),
-    );
+    setPregnancyEntries((prev) => prev.filter((e) => e.id !== entryId));
     try {
-      await api.delete(
-        `/member/family-room/pregnancy/${encodeURIComponent(asText(entryId))}`,
-      );
+      await api.delete(`/member/family-room/pregnancy/${encodeURIComponent(asText(entryId))}`);
     } catch {
       setNotice("Could not remove that entry.");
       loadPregnancy();
@@ -4384,7 +4553,7 @@ function FamilyRoom({ session }: { session: Session }) {
     return (
       <section className="access-card">
         <h1>Family Room</h1>
-        <LoadingIndicator />
+        <p>Loading…</p>
       </section>
     );
   }
@@ -4413,7 +4582,7 @@ function FamilyRoom({ session }: { session: Session }) {
           You don't have an active match with this profile, so there's no
           shared Family Room here yet.
         </p>
-        <Link className="secondary" to={`/${locale}/chat`}>
+        <Link className="secondary" to={`/${locale}/messages`}>
           Back to Messages
         </Link>
       </section>
@@ -4447,8 +4616,6 @@ function FamilyRoom({ session }: { session: Session }) {
           <textarea
             rows={4}
             value={parenting}
-            disabled={savingPlan}
-            maxLength={20000}
             placeholder="How do you both picture day-to-day parenting?"
             onChange={(event) => {
               setParenting(event.target.value);
@@ -4461,8 +4628,6 @@ function FamilyRoom({ session }: { session: Session }) {
           <textarea
             rows={4}
             value={finances}
-            disabled={savingPlan}
-            maxLength={20000}
             placeholder="How will costs be shared and planned for?"
             onChange={(event) => {
               setFinances(event.target.value);
@@ -4475,8 +4640,6 @@ function FamilyRoom({ session }: { session: Session }) {
           <textarea
             rows={4}
             value={legal}
-            disabled={savingPlan}
-            maxLength={20000}
             placeholder="What legal steps or agreements do you need to look into?"
             onChange={(event) => {
               setLegal(event.target.value);
@@ -4534,14 +4697,12 @@ function FamilyRoom({ session }: { session: Session }) {
             >
               <input
                 value={newItemText[section] || ""}
-                maxLength={500}
-                disabled={addingSection !== null}
                 placeholder="Add an item…"
                 onChange={(event) =>
                   setNewItemText((prev) => ({ ...prev, [section]: event.target.value }))
                 }
               />
-              <button className="secondary" disabled={addingSection !== null}>
+              <button className="secondary" disabled={addingSection === section}>
                 Add
               </button>
             </form>
@@ -4596,8 +4757,7 @@ function FamilyRoom({ session }: { session: Session }) {
             {pregnancyEntries.map((entry) => (
               <li key={asText(entry.id)}>
                 <a href={asText(entry.contentUrl)} target="_blank" rel="noreferrer">
-                  {PREGNANCY_CATEGORY_LABELS[asText(entry.category)] ||
-                    asText(entry.category)}
+                  {PREGNANCY_CATEGORY_LABELS[asText(entry.category)] || asText(entry.category)}
                   {entry.note ? ` - ${asText(entry.note)}` : ""}
                 </a>
                 <span>{formatFamilyRoomBytes(Number(entry.bytes) || 0)}</span>
@@ -4616,16 +4776,13 @@ function FamilyRoom({ session }: { session: Session }) {
           <select
             aria-label="Category"
             value={pregnancyCategory}
-            onChange={(event) =>
-              setPregnancyCategory(event.target.value as typeof pregnancyCategory)
-            }
+            onChange={(event) => setPregnancyCategory(event.target.value as typeof pregnancyCategory)}
           >
             <option value="lab_test">Lab result</option>
             <option value="ultrasound">Ultrasound</option>
             <option value="prescription">Prescription</option>
           </select>
           <input
-            type="text"
             value={pregnancyNote}
             placeholder="Note (optional)"
             onChange={(event) => setPregnancyNote(event.target.value)}
@@ -4636,53 +4793,144 @@ function FamilyRoom({ session }: { session: Session }) {
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
               disabled={pregnancyUploading}
-              onChange={(event) =>
-                void uploadPregnancyEntry(event.target.files?.[0])
-              }
+              onChange={(event) => void uploadPregnancyEntry(event.target.files?.[0])}
             />
           </label>
         </div>
+      </div>
+
+      <div className="list-card family-room-card">
+        <h2>Co-Parenting Agreement</h2>
+        <p>
+          Once you've completed every Family Plan section together, either
+          of you can sign - a good-faith mutual record of what you agreed
+          on, not a legally binding e-signature.
+        </p>
+        {agreementStatus === "needsPremium" && (
+          <p className="notice">
+            The Co-Parenting Agreement is part of Family Builder Pro.{" "}
+            <Link to={`/${locale}/subscription`}>View Premium</Link>
+          </p>
+        )}
+        {agreementStatus === "error" && (
+          <p className="error">Could not load your agreement.</p>
+        )}
+        {agreementStatus === "ok" && agreement && (
+          <>
+            {agreement.status === "SIGNED" ? (
+              <div className="notice">
+                <p>Signed by both of you on {asText(agreement.signedAt)}.</p>
+                <p>
+                  You: {asText(agreement.myFullName)} - Partner:{" "}
+                  {asText(agreement.partnerFullName)}
+                </p>
+              </div>
+            ) : (
+              <>
+                <p>
+                  {asText(agreement.sectionsCompleteCount)} of{" "}
+                  {asText(agreement.sectionsTotalCount)} sections complete by
+                  both of you.
+                </p>
+                {agreement.mySigned ? (
+                  <p className="notice">
+                    You signed this agreement. Waiting for your partner to
+                    sign their copy.
+                  </p>
+                ) : agreement.readyToSign ? (
+                  <div className="member-form">
+                    <label>
+                      Type your full legal name to sign
+                      <input
+                        value={agreementFullName}
+                        onChange={(event) => setAgreementFullName(event.target.value)}
+                        placeholder="Full legal name"
+                      />
+                    </label>
+                    <button
+                      className="primary"
+                      disabled={!agreementFullName.trim() || agreementSigning}
+                      onClick={() => void signAgreement()}
+                    >
+                      {agreementSigning ? "Signing…" : "Sign agreement"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="notice">
+                    Complete every Family Plan section together before you
+                    can sign.
+                  </p>
+                )}
+                {agreement.partnerSigned && (
+                  <p className="notice">Your partner has already signed their copy.</p>
+                )}
+              </>
+            )}
+            {agreementNotice && (
+              <p className={agreementNotice === "Signed." ? "notice" : "error"}>
+                {agreementNotice}
+              </p>
+            )}
+          </>
+        )}
       </div>
     </section>
   );
 }
 
-type AiAdvisorMessage = {
-  role: "user" | "assistant";
-  text: string;
-  at: string;
-};
+type AiAdvisorMessage = { role: "user" | "assistant"; text: string; at: string };
 
+// AI Family Advisor ("ИИ консультант", backlog item 12) - mirrors
+// mobile/src/screens/AiAdvisorScreen.tsx exactly: same endpoints
+// (backend/main.py's member_ai_advisor_*()), same 402 ("needs Premium") /
+// configured:false (ANTHROPIC_API_KEY not set on the server yet) states.
+// The pricing page already lists "AI Family Advisor" as a Pro-tier
+// feature (see PRICING_TEXT below) - this is the actual feature behind
+// that checkmark, which did not exist on the website before (audit
+// 2026-09-13: site-vs-app-audit-2026-09-13.docx, item 1).
 function AiAdvisor({ session }: { session: Session }) {
   const locale = localeOf();
-  const [status, setStatus] = useState<
-    "loading" | "ok" | "needsPremium" | "error"
-  >("loading");
+  const [status, setStatus] = useState<"loading" | "ok" | "needsPremium" | "error">("loading");
   const [configured, setConfigured] = useState(true);
   const [messages, setMessages] = useState<AiAdvisorMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
+  const [weeklyInsight, setWeeklyInsight] = useState("");
+  const [weeklyInsightStatus, setWeeklyInsightStatus] = useState<"idle" | "loading" | "ok" | "needsPremium" | "error">("idle");
 
   const load = () => {
     if (!session) return;
     setStatus("loading");
     api
-      .get<{ ok: true; configured: boolean; messages: AiAdvisorMessage[] }>(
-        "/member/ai-advisor/messages",
-      )
+      .get<{ ok: true; configured: boolean; messages: AiAdvisorMessage[] }>("/member/ai-advisor/messages")
       .then((data) => {
         setMessages(data.messages);
         setConfigured(data.configured);
         setStatus("ok");
       })
-      .catch((error) => {
-        if (error instanceof ApiError && error.status === 402)
-          setStatus("needsPremium");
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
         else setStatus("error");
       });
   };
   useEffect(load, [session]);
+
+  const loadWeeklyInsight = () => {
+    if (!session) return;
+    setWeeklyInsightStatus("loading");
+    api
+      .get<{ ok: true; insight: string }>(`/member/ai-advisor/weekly-insight?locale=${encodeURIComponent(locale)}`)
+      .then((data) => {
+        setWeeklyInsight(data.insight);
+        setWeeklyInsightStatus("ok");
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setWeeklyInsightStatus("needsPremium");
+        else setWeeklyInsightStatus("error");
+      });
+  };
+  useEffect(loadWeeklyInsight, [session]);
 
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
 
@@ -4693,24 +4941,18 @@ function AiAdvisor({ session }: { session: Session }) {
     setDraft("");
     setSending(true);
     setNotice("");
-    const optimistic: AiAdvisorMessage = {
-      role: "user",
-      text,
-      at: new Date().toISOString(),
-    };
-    setMessages((previous) => [...previous, optimistic]);
+    const optimistic: AiAdvisorMessage = { role: "user", text, at: new Date().toISOString() };
+    setMessages((prev) => [...prev, optimistic]);
     try {
-      const response = await api.post<{
-        ok: true;
-        reply: string;
-        messages: AiAdvisorMessage[];
-      }>("/member/ai-advisor/messages", { text });
-      setMessages(response.messages);
-    } catch (error) {
-      setMessages((previous) => previous.filter((item) => item !== optimistic));
+      const res = await api.post<{ ok: true; reply: string; messages: AiAdvisorMessage[] }>(
+        "/member/ai-advisor/messages",
+        { text },
+      );
+      setMessages(res.messages);
+    } catch (err) {
+      setMessages((prev) => prev.filter((m) => m !== optimistic));
       setDraft(text);
-      if (error instanceof ApiError && error.status === 402)
-        setStatus("needsPremium");
+      if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
       else setNotice("Could not send that message. Please try again.");
     } finally {
       setSending(false);
@@ -4722,7 +4964,7 @@ function AiAdvisor({ session }: { session: Session }) {
       await api.delete("/member/ai-advisor/messages");
       setMessages([]);
     } catch {
-      setNotice("Could not clear the conversation. Please try again.");
+      // Silent - same as mobile: worst case the old history just stays visible.
     }
   };
 
@@ -4730,7 +4972,7 @@ function AiAdvisor({ session }: { session: Session }) {
     return (
       <section className="access-card">
         <h1>AI Family Advisor</h1>
-        <LoadingIndicator />
+        <p>Loading…</p>
       </section>
     );
   }
@@ -4740,7 +4982,7 @@ function AiAdvisor({ session }: { session: Session }) {
       <section className="access-card">
         <h1>AI Family Advisor</h1>
         <p>
-          The AI Family Advisor is part of Family Builder Pro. Upgrade to ask
+          The AI Family Advisor is available with Family Builder or Pro. Upgrade to ask
           questions about the process, terminology, or how to use
           LetsBeParents at any time.
         </p>
@@ -4755,15 +4997,23 @@ function AiAdvisor({ session }: { session: Session }) {
     return (
       <section className="access-card">
         <h1>AI Family Advisor</h1>
-        <p className="error">
-          Could not load the AI Family Advisor. Please try again.
-        </p>
+        <p className="error">Could not load the AI Family Advisor. Please try again.</p>
       </section>
     );
   }
 
   return (
     <section className="advisor-page">
+      {weeklyInsightStatus !== "idle" && weeklyInsightStatus !== "needsPremium" && (
+        <div className="list-card advisor-card weekly-insight-card">
+          <h2>Your weekly check-in</h2>
+          {weeklyInsightStatus === "loading" && <p className="notice">Loading…</p>}
+          {weeklyInsightStatus === "error" && (
+            <p className="error">Could not load your weekly check-in.</p>
+          )}
+          {weeklyInsightStatus === "ok" && <p>{weeklyInsight}</p>}
+        </div>
+      )}
       <div className="list-card advisor-card">
         <div className="message-title">
           <h1>AI Family Advisor</h1>
@@ -4773,13 +5023,11 @@ function AiAdvisor({ session }: { session: Session }) {
         </div>
         <p>
           Ask about the process, terminology, or how to use LetsBeParents -
-          I'll help you find the right next step. This isn't medical, legal or
-          financial advice.
+          I'll help you find the right next step. This isn't medical, legal
+          or financial advice.
         </p>
         {!configured && (
-          <p className="error">
-            The AI Family Advisor isn't set up yet - please check back soon.
-          </p>
+          <p className="error">The AI Family Advisor isn't set up yet - please check back soon.</p>
         )}
         {notice && <p className="error">{notice}</p>}
         <div className="message-list advisor-list">
@@ -4789,11 +5037,7 @@ function AiAdvisor({ session }: { session: Session }) {
             messages.map((message, index) => (
               <div
                 key={`${message.role}-${message.at}-${index}`}
-                className={`message-bubble ${
-                  message.role === "user"
-                    ? "advisor-bubble-user"
-                    : "advisor-bubble-assistant"
-                }`}
+                className={`message-bubble ${message.role === "user" ? "advisor-bubble-user" : "advisor-bubble-assistant"}`}
               >
                 <span>{message.text}</span>
               </div>
@@ -4801,17 +5045,14 @@ function AiAdvisor({ session }: { session: Session }) {
           )}
           {sending && <p className="notice">Typing…</p>}
         </div>
-        <form className="advisor-form" onSubmit={(event) => void send(event)}>
+        <form onSubmit={(event) => void send(event)}>
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Ask the Family Advisor…"
             disabled={!configured}
           />
-          <button
-            className="primary"
-            disabled={!draft.trim() || sending || !configured}
-          >
+          <button className="primary" disabled={!draft.trim() || sending || !configured}>
             Send
           </button>
         </form>
@@ -4820,7 +5061,474 @@ function AiAdvisor({ session }: { session: Session }) {
   );
 }
 
+// "Compatibility Score & Why you match" (Family Builder) / "Detailed
+// Compatibility Report" (Family Builder Pro) - see backend/main.py's
+// COMPATIBILITY SCORE section. Mirrors mobile's CompatibilityAnswersScreen:
+// free for everyone to fill in (the Premium gate is only on viewing a
+// two-sided report with a match, see CompatibilityReport below). Reached
+// from the account nav (MemberLinks) since it does not need a match.
+function CompatibilityAnswers({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [questions, setQuestions] = useState<Row[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
 
+  useEffect(() => {
+    if (!session) return;
+    Promise.all([
+      api.get<Row>("/member/compatibility/questions"),
+      api.get<Row>("/member/compatibility/answers"),
+    ])
+      .then(([q, a]) => {
+        setQuestions((q.items as Row[]) || []);
+        setAnswers((a.answers as Record<string, string>) || {});
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  }, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const answeredCount = Object.keys(answers).length;
+
+  const save = async () => {
+    setSaving(true);
+    setNotice("");
+    try {
+      await api.post<Row>("/member/compatibility/answers", { answers });
+      setNotice("saved");
+    } catch {
+      setNotice("error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (status === "loading") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility profile</h1>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility profile</h1>
+        <p className="error">Could not load the compatibility questions. Please try again.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="compatibility-answers">
+      <h1>Compatibility profile</h1>
+      <p>
+        Answer a few questions about parenting, involvement, timeline and
+        boundaries. When you match with someone, you will both see where you
+        align and what is worth discussing - no percentage, no pass or fail.
+      </p>
+      <p className="compatibility-progress">
+        {answeredCount} of {questions.length} answered
+      </p>
+      {notice === "saved" && <p className="notice">Saved.</p>}
+      {notice === "error" && <p className="error">Could not save your answers. Please try again.</p>}
+
+      {questions.map((question) => {
+        const qid = asText(question.id);
+        const options = (question.options as Row[]) || [];
+        return (
+          <div className="list-card compatibility-question-card" key={qid}>
+            <h3>{asText(question.prompt)}</h3>
+            {options.map((option) => {
+              const key = asText(option.key);
+              const selected = answers[qid] === key;
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  className={`compatibility-option${selected ? " compatibility-option-selected" : ""}`}
+                  onClick={() => setAnswers((prev) => ({ ...prev, [qid]: key }))}
+                >
+                  <span className="compatibility-radio" />
+                  {asText(option.label)}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      <div className="plan-actions">
+        <button className="primary" onClick={() => void save()} disabled={saving}>
+          {saving ? "Saving..." : "Save answers"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// Two-sided "Compatibility Score & Why you match" / "Detailed
+// Compatibility Report" - mirrors mobile's CompatibilityReportScreen.
+// Gating mirrors FamilyRoom exactly: Premium (402) and an active match
+// (404) are both server-checked and rendered here, not guessed
+// client-side. Reached from the Messages page next to the Family Room
+// link, using the same conversation other_profile_id.
+function CompatibilityReport({ session }: { session: Session }) {
+  const locale = localeOf();
+  const { profileId = "" } = useParams();
+  const [status, setStatus] = useState<
+    "loading" | "ok" | "needsPremium" | "noMatch" | "error"
+  >("loading");
+  const [report, setReport] = useState<Row | null>(null);
+
+  useEffect(() => {
+    if (!session || !profileId) return;
+    setStatus("loading");
+    api
+      .get<Row>(`/member/compatibility-report/${encodeURIComponent(profileId)}`)
+      .then((data) => {
+        setReport(data);
+        setStatus("ok");
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
+        else if (err instanceof ApiError && err.status === 404) setStatus("noMatch");
+        else setStatus("error");
+      });
+  }, [session, profileId]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  if (status === "loading") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (status === "needsPremium") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>
+          The Compatibility Report is part of Family Builder Pro. Upgrade to
+          see where you and your match align.
+        </p>
+        <Link className="primary" to={`/${locale}/subscription`}>
+          View Premium
+        </Link>
+      </section>
+    );
+  }
+
+  if (status === "noMatch") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>
+          You do not have an active match with this profile, so there is no
+          shared report here yet.
+        </p>
+        <Link className="secondary" to={`/${locale}/messages`}>
+          Back to Messages
+        </Link>
+      </section>
+    );
+  }
+
+  if (status === "error" || !report) {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p className="error">Could not load the Compatibility Report. Please try again.</p>
+      </section>
+    );
+  }
+
+  if (report.status === "incomplete") {
+    const youCompleted = Boolean(report.youCompleted);
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>
+          {youCompleted
+            ? "Your match has not filled in their compatibility profile yet. Check back once they have."
+            : "Fill in your compatibility profile first, then check back once your match has too."}
+        </p>
+        {!youCompleted && (
+          <Link className="primary" to={`/${locale}/compatibility`}>
+            Fill in your compatibility profile
+          </Link>
+        )}
+      </section>
+    );
+  }
+
+  const strongest = (report.strongest as string[]) || [];
+  const worthDiscussing = (report.worthDiscussing as string[]) || [];
+  const talkingPoints = (report.talkingPoints as string[]) || [];
+
+  return (
+    <section className="compatibility-report">
+      <h1>Compatibility Report</h1>
+
+      <div className="list-card compatibility-report-card">
+        <h2>Your strongest areas</h2>
+        {strongest.length === 0 ? (
+          <p className="notice">Not enough matching answers yet to call out a strongest area.</p>
+        ) : (
+          <div className="compatibility-pill-row">
+            {strongest.map((label) => (
+              <span className="compatibility-pill" key={label}>
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="list-card compatibility-report-card">
+        <h2>Worth discussing</h2>
+        {worthDiscussing.length === 0 ? (
+          <p className="notice">Nothing stands out here - you are aligned everywhere you have both answered.</p>
+        ) : (
+          <div className="compatibility-pill-row">
+            {worthDiscussing.map((label) => (
+              <span className="compatibility-pill compatibility-pill-muted" key={label}>
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {talkingPoints.length > 0 && (
+        <div className="list-card compatibility-report-card">
+          <h2>Questions to talk through together</h2>
+          <ul className="compatibility-talking-points">
+            {talkingPoints.map((point, index) => (
+              <li key={index}>{point}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const PRICING_TEXT = {
+  en: {
+    eyebrow: "PRICING",
+    title: "Find the right person to build a family with.",
+    intro: "Better matches. Deeper compatibility. More confidence. Start free, upgrade when you're ready to go deeper.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Free forever", altNote: "",
+        tagline: "Create your profile and start discovering.",
+        features: ["Full profile & basic discovery", "3 likes per day", "Basic matching"],
+        cta: "Get started free", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "per month, billed monthly",
+        altNote: "or €49.99 for 3 months - €16.66/month, save 33%",
+        tagline: "For members ready to match with intention.",
+        features: ["Compatibility Score & Why you match", "AI Family Advisor", "Advanced family filters", "See who liked you", "Video & audio calls", "15 likes/day, 5 reach-outs/day", "Priority in discovery"],
+        cta: "Start Family Builder", badge: "Best value",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "per month", altNote: "",
+        tagline: "Everything in Family Builder, plus deeper guidance.",
+        features: ["Everything in Family Builder", "AI Family Advisor", "Detailed Compatibility Report", "Family Plan & Shared Family Room", "Document & checklist tools", "Priority support"],
+        cta: "Go Pro", badge: "",
+      },
+    ],
+    footnote: "Prices shown in EUR and may vary by region. Cancel anytime. Premium requires profile verification.",
+    faqLinkLabel: "See how we verify members",
+    compareTitle: "Compare all features",
+    compareSub: "See exactly what's included in each plan.",
+    matrixGroups: [
+      { name: "Match better", rows: [
+        { label: "Daily likes", values: ["3", "15", "Unlimited"] },
+        { label: "Reach out first", values: ["", "5/day", "Unlimited"] },
+        { label: "Advanced family filters", values: ["", "check", "check"] },
+        { label: "Priority in catalog", values: ["", "check", "check"] },
+        { label: "See who liked you", values: ["", "check", "check"] },
+        { label: "See profile visitors", values: ["", "check", "check"] },
+      ] },
+      { name: "Understand compatibility", rows: [
+        { label: "Compatibility Score", values: ["", "check", "check"] },
+        { label: "Why you match", values: ["", "check", "check"] },
+        { label: "Expanded profile info", values: ["", "check", "check"] },
+        { label: "Verification info", values: ["", "check", "check"] },
+      ] },
+      { name: "Stand out & stay safe", rows: [
+        { label: "Profile Boost", values: ["check", "check", "check"] },
+        { label: "Invite & earn a Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Video Verification badge", values: ["check", "check", "check"] },
+      ] },
+      { name: "Connect & communicate", rows: [
+        { label: "Video & audio calls", values: ["", "check", "check"] },
+        { label: "Private photos", values: ["", "check", "check"] },
+        { label: "Incognito mode", values: ["", "check", "check"] },
+        { label: "AI-drafted message starters", values: ["", "check", "check"] },
+      ] },
+      { name: "Build your family", rows: [
+        { label: "Family Plan (shared)", values: ["", "Limited", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Weekly AI Advisor insight", values: ["", "check", "check"] },
+        { label: "Co-Parenting Agreement sign-off", values: ["", "", "check"] },
+        { label: "Community groups & discussions", values: ["", "", "check"] },
+        { label: "Detailed Compatibility Report", values: ["", "", "check"] },
+        { label: "Document & checklist tools", values: ["", "", "check"] },
+        { label: "Priority support", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  ru: {
+    eyebrow: "ЦЕНЫ",
+    title: "Найдите того, с кем строить семью.",
+    intro: "Более точные совпадения. Глубже совместимость. Больше уверенности. Начните бесплатно, обновитесь, когда будете готовы к большему.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Бесплатно навсегда", altNote: "",
+        tagline: "Создайте профиль и начните знакомиться.",
+        features: ["Полный профиль и базовый поиск", "3 лайка в день", "Базовый подбор пар"],
+        cta: "Начать бесплатно", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "в месяц, ежемесячная оплата",
+        altNote: "или €49.99 за 3 месяца - €16.66/мес, экономия 33%",
+        tagline: "Для тех, кто готов искать пару осознанно.",
+        features: ["Оценка совместимости и «почему вы подходите»", "AI Family Advisor", "Расширенные семейные фильтры", "Кто лайкнул вас", "Видео- и аудиозвонки", "15 лайков/день, 5 обращений/день", "Приоритет в поиске"],
+        cta: "Начать Family Builder", badge: "Лучшая цена",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "в месяц", altNote: "",
+        tagline: "Всё из Family Builder плюс более глубокое сопровождение.",
+        features: ["Всё из Family Builder", "AI Family Advisor", "Подробный отчёт о совместимости", "Family Plan и общая комната семьи", "Документы и чек-листы", "Приоритетная поддержка"],
+        cta: "Перейти на Pro", badge: "",
+      },
+    ],
+    footnote: "Цены указаны в евро и могут отличаться в зависимости от региона. Отмена в любой момент. Premium доступен после верификации профиля.",
+    faqLinkLabel: "Как мы проверяем участников",
+    compareTitle: "Сравните все возможности",
+    compareSub: "Точный список того, что включено в каждый тариф.",
+    matrixGroups: [
+      { name: "Больше совпадений", rows: [
+        { label: "Лайки в день", values: ["3", "15", "Без ограничений"] },
+        { label: "Первым написать", values: ["", "5 в день", "Без ограничений"] },
+        { label: "Расширенные семейные фильтры", values: ["", "check", "check"] },
+        { label: "Приоритет в каталоге", values: ["", "check", "check"] },
+        { label: "Кто лайкнул вас", values: ["", "check", "check"] },
+        { label: "Кто смотрел профиль", values: ["", "check", "check"] },
+      ] },
+      { name: "Понимание совместимости", rows: [
+        { label: "Оценка совместимости", values: ["", "check", "check"] },
+        { label: "Почему вы подходите", values: ["", "check", "check"] },
+        { label: "Расширенная информация профиля", values: ["", "check", "check"] },
+        { label: "Информация о верификации", values: ["", "check", "check"] },
+      ] },
+      { name: "Заметность и безопасность", rows: [
+        { label: "Boost профиля", values: ["check", "check", "check"] },
+        { label: "Приглашай и получай Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Значок Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Связь и общение", rows: [
+        { label: "Видео- и аудиозвонки", values: ["", "check", "check"] },
+        { label: "Приватные фото", values: ["", "check", "check"] },
+        { label: "Режим инкогнито", values: ["", "check", "check"] },
+        { label: "AI-подсказки для первого сообщения", values: ["", "check", "check"] },
+      ] },
+      { name: "Постройте свою семью", rows: [
+        { label: "Семейный план (общий)", values: ["", "Ограниченно", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Еженедельный совет от AI Advisor", values: ["", "check", "check"] },
+        { label: "Подписание Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Группы и обсуждения Community", values: ["", "", "check"] },
+        { label: "Подробный отчёт о совместимости", values: ["", "", "check"] },
+        { label: "Документы и чек-листы", values: ["", "", "check"] },
+        { label: "Приоритетная поддержка", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  es: {
+    eyebrow: "PRECIOS",
+    title: "Encuentra a la persona adecuada para formar una familia.",
+    intro: "Mejores matches. Mayor compatibilidad. Más confianza. Empieza gratis y mejora cuando quieras ir más allá.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Gratis para siempre", altNote: "",
+        tagline: "Crea tu perfil y empieza a descubrir.",
+        features: ["Perfil completo y descubrimiento básico", "3 likes al día", "Emparejamiento básico"],
+        cta: "Empieza gratis", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "al mes, facturación mensual",
+        altNote: "o €49.99 por 3 meses - €16.66/mes, ahorra 33%",
+        tagline: "Para quienes buscan match con intención.",
+        features: ["Puntuación de compatibilidad y «por qué haces match»", "AI Family Advisor", "Filtros familiares avanzados", "Ver quién te dio like", "Videollamadas y llamadas de audio", "15 likes/día, 5 contactos/día", "Prioridad en el descubrimiento"],
+        cta: "Empezar Family Builder", badge: "Mejor precio",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "al mes", altNote: "",
+        tagline: "Todo lo de Family Builder, con acompañamiento más profundo.",
+        features: ["Todo lo de Family Builder", "AI Family Advisor", "Informe de compatibilidad detallado", "Family Plan y Sala Familiar Compartida", "Documentos y listas de verificación", "Soporte prioritario"],
+        cta: "Pasar a Pro", badge: "",
+      },
+    ],
+    footnote: "Los precios se muestran en EUR y pueden variar según la región. Cancela cuando quieras. Premium requiere verificación de perfil.",
+    faqLinkLabel: "Cómo verificamos a los miembros",
+    compareTitle: "Compara todas las funciones",
+    compareSub: "Mira exactamente qué incluye cada plan.",
+    matrixGroups: [
+      { name: "Mejores coincidencias", rows: [
+        { label: "Me gusta diarios", values: ["3", "15", "Ilimitado"] },
+        { label: "Escribir primero", values: ["", "5/día", "Ilimitado"] },
+        { label: "Filtros familiares avanzados", values: ["", "check", "check"] },
+        { label: "Prioridad en el catálogo", values: ["", "check", "check"] },
+        { label: "Ver quién te dio like", values: ["", "check", "check"] },
+        { label: "Ver visitantes del perfil", values: ["", "check", "check"] },
+      ] },
+      { name: "Entender la compatibilidad", rows: [
+        { label: "Puntuación de compatibilidad", values: ["", "check", "check"] },
+        { label: "Por qué coincidís", values: ["", "check", "check"] },
+        { label: "Información ampliada del perfil", values: ["", "check", "check"] },
+        { label: "Información de verificación", values: ["", "check", "check"] },
+      ] },
+      { name: "Destaca y mantente seguro", rows: [
+        { label: "Boost de perfil", values: ["check", "check", "check"] },
+        { label: "Invita y gana un Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Insignia Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Conectar y comunicarse", rows: [
+        { label: "Videollamadas y llamadas de audio", values: ["", "check", "check"] },
+        { label: "Fotos privadas", values: ["", "check", "check"] },
+        { label: "Modo incógnito", values: ["", "check", "check"] },
+        { label: "Mensajes iniciales sugeridos por IA", values: ["", "check", "check"] },
+      ] },
+      { name: "Construye tu familia", rows: [
+        { label: "Plan familiar (compartido)", values: ["", "Limitado", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Consejo semanal del AI Advisor", values: ["", "check", "check"] },
+        { label: "Firma del Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Grupos y debates de Community", values: ["", "", "check"] },
+        { label: "Informe de compatibilidad detallado", values: ["", "", "check"] },
+        { label: "Documentos y listas de verificación", values: ["", "", "check"] },
+        { label: "Soporte prioritario", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+} satisfies Record<CookieLocale, Record<string, unknown>>;
 
 function Pricing({ session }: { session: Session }) {
   const locale = localeOf();
@@ -5690,7 +6398,7 @@ function ResourcesIndex() {
           <h2>Looking for professional guidance?</h2>
           <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
         </div>
-        <Link className="resources-pro-button" to={`/${locale}/contact`}>Learn about professional support {resourceArrow()}</Link>
+        <Link className="resources-pro-button" to={`/${locale}/professionals`}>Learn about professional support {resourceArrow()}</Link>
       </section>
 
       <section className="landing-cta">
@@ -6447,7 +7155,220 @@ function FindYourPath() {
           <h2>Looking for professional guidance?</h2>
           <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
         </div>
-        <Link className="resources-pro-button" to={`/${locale}/contact`}>Learn about professional support {resourceArrow()}</Link>
+        <Link className="resources-pro-button" to={`/${locale}/professionals`}>Learn about professional support {resourceArrow()}</Link>
+      </section>
+    </div>
+  );
+}
+
+function professionalIcon(key: string) {
+  if (key === "scale") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18" /><path d="m19 8 3 8a5 5 0 0 1-6 0zV7" /><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1" /><path d="m5 8 3 8a5 5 0 0 1-6 0zV7" /><path d="M7 21h10" /></svg>;
+  if (key === "wallet") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4" /><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /><path d="M18 12a2 2 0 0 0 0 4h4v-4Z" /></svg>;
+  if (key === "support") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><path d="m4.93 4.93 4.24 4.24" /><path d="m14.83 9.17 4.24-4.24" /><path d="m14.83 14.83 4.24 4.24" /><path d="m9.17 14.83-4.24 4.24" /></svg>;
+  return resourceCategoryIcon("fertility");
+}
+
+function professionalStepIcon(icon: string) {
+  if (icon === "profile") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14" /><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /></svg>;
+  if (icon === "match") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.414 14.414C21 12.828 22 11.5 22 9.5a5.5 5.5 0 0 0-9.591-3.676.6.6 0 0 1-.818.001A5.5 5.5 0 0 0 2 9.5c0 2.3 1.5 4 3 5.5l5.535 5.362a2 2 0 0 0 2.879.052 2.12 2.12 0 0 0-.004-3 2.124 2.124 0 1 0 3-3 2.124 2.124 0 0 0 3.004 0 2 2 0 0 0 0-2.828l-1.881-1.882a2.41 2.41 0 0 0-3.409 0l-1.71 1.71a2 2 0 0 1-2.828 0 2 2 0 0 1 0-2.828l2.823-2.762" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2v2" /><path d="M5 2v2" /><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1" /><path d="M8 15a6 6 0 0 0 12 0v-3" /><circle cx="20" cy="10" r="2" /></svg>;
+}
+
+// Public directory of vetted professionals, per the /professionals TZ (Sept 2026).
+// Clinics & lawyers reuse the existing catalog directories once signed in; therapists and
+// financial advisors are marked available:false until real profiles are onboarded - flip
+// those two flags (and swap in real copy) once that's true.
+const PROFESSIONALS_TEXT: Record<CookieLocale, {
+  eyebrow: string;
+  heroTitle: string;
+  heroSubtitle: string;
+  heroCtaPrimary: string;
+  heroCtaSecondary: string;
+  categoriesEyebrow: string;
+  categoriesTitle: string;
+  categoriesSubtitle: string;
+  categories: Array<{ key: string; icon: string; title: string; description: string; statSuffix: string | null; available: boolean }>;
+  comingSoonLabel: string;
+  stepsEyebrow: string;
+  stepsTitle: string;
+  steps: Array<[string, string, string, string]>;
+  trustTitle: string;
+  trustDescription: string;
+  trustCta: string;
+  closingTitle: string;
+  closingSubtitle: string;
+  closingCta: string;
+}> = {
+  en: {
+    eyebrow: "Professional support",
+    heroTitle: "Trusted experts for every step of your journey",
+    heroSubtitle: "Fertility clinics, family lawyers, therapists and financial advisors - vetted, verified, and available when you're ready to talk.",
+    heroCtaPrimary: "Sign up free",
+    heroCtaSecondary: "See how verification works",
+    categoriesEyebrow: "Who's on the platform",
+    categoriesTitle: "Support for every part of building a family",
+    categoriesSubtitle: "Browse categories publicly - full profiles and booking unlock once you create a free account.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Fertility clinics", description: "Compare verified fertility clinics worldwide. Book video consultations once you're signed in.", statSuffix: "partner clinics", available: true },
+      { key: "lawyers", icon: "scale", title: "Family lawyers", description: "Reproductive law specialists for contracts, parentage and co-parenting agreements.", statSuffix: "lawyers", available: true },
+      { key: "therapists", icon: "support", title: "Therapists & counselors", description: "Talk through the emotional side of building a family - before, during and after you find your match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Financial advisors", description: "Understand the real cost of donor conception, surrogacy or adoption before you commit.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Coming soon",
+    stepsEyebrow: "How it works",
+    stepsTitle: "From browsing to booking, in three steps",
+    steps: [
+      ["01", "Browse categories", "See who's available in your country, across all four categories.", "clinic"],
+      ["02", "Sign up free", "Create your account to unlock full profiles and details.", "profile"],
+      ["03", "Book a consultation", "Chat or video call, right inside LetsBeParents.", "match"],
+    ],
+    trustTitle: "Every professional is verified before they're listed",
+    trustDescription: "Licenses and credentials are checked before a clinic or lawyer appears on LetsBeParents. See exactly what we check and what's still on you to confirm yourself.",
+    trustCta: "See what we check",
+    closingTitle: "Ready to connect with the right expert?",
+    closingSubtitle: "Create your free account to unlock full profiles and book your first consultation.",
+    closingCta: "Create free account",
+  },
+  ru: {
+    eyebrow: "Профессиональная поддержка",
+    heroTitle: "Проверенные специалисты на каждом этапе вашего пути",
+    heroSubtitle: "Клиники репродукции, семейные юристы, психологи и финансовые консультанты - проверены, верифицированы и готовы поговорить, когда вы будете готовы.",
+    heroCtaPrimary: "Зарегистрироваться бесплатно",
+    heroCtaSecondary: "Как работает проверка",
+    categoriesEyebrow: "Кто есть на платформе",
+    categoriesTitle: "Поддержка на каждом этапе создания семьи",
+    categoriesSubtitle: "Категории можно посмотреть без регистрации - полные профили и бронирование открываются после создания бесплатного аккаунта.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Клиники репродукции", description: "Сравнивайте проверенные клиники репродукции по всему миру. Бронируйте видеоконсультации после входа в аккаунт.", statSuffix: "партнёрских клиник", available: true },
+      { key: "lawyers", icon: "scale", title: "Семейные юристы", description: "Специалисты по репродуктивному праву - контракты, установление родительства, соглашения о совместном родительстве.", statSuffix: "юристов", available: true },
+      { key: "therapists", icon: "support", title: "Психологи и консультанты", description: "Обсудите эмоциональную сторону создания семьи - до, во время и после того, как найдёте пару.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Финансовые консультанты", description: "Разберитесь в реальной стоимости донорского зачатия, суррогатного материнства или усыновления, прежде чем принимать решение.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Скоро",
+    stepsEyebrow: "Как это работает",
+    stepsTitle: "От просмотра до бронирования - три шага",
+    steps: [
+      ["01", "Просмотрите категории", "Смотрите, кто доступен в вашей стране, по всем четырём категориям.", "clinic"],
+      ["02", "Зарегистрируйтесь бесплатно", "Создайте аккаунт, чтобы открыть полные профили и подробности.", "profile"],
+      ["03", "Забронируйте консультацию", "Чат или видеозвонок - прямо внутри LetsBeParents.", "match"],
+    ],
+    trustTitle: "Каждый специалист проходит проверку перед публикацией",
+    trustDescription: "Лицензии и квалификация проверяются прежде, чем клиника или юрист появятся на LetsBeParents. Посмотрите, что именно мы проверяем, а что стоит уточнить самостоятельно.",
+    trustCta: "Что мы проверяем",
+    closingTitle: "Готовы связаться с нужным специалистом?",
+    closingSubtitle: "Создайте бесплатный аккаунт, чтобы открыть полные профили и забронировать первую консультацию.",
+    closingCta: "Создать бесплатный аккаунт",
+  },
+  es: {
+    eyebrow: "Apoyo profesional",
+    heroTitle: "Expertos de confianza en cada paso de tu camino",
+    heroSubtitle: "Clínicas de fertilidad, abogados de familia, terapeutas y asesores financieros - verificados y disponibles cuando estés listo para hablar.",
+    heroCtaPrimary: "Regístrate gratis",
+    heroCtaSecondary: "Cómo funciona la verificación",
+    categoriesEyebrow: "Quién está en la plataforma",
+    categoriesTitle: "Apoyo para cada parte de formar una familia",
+    categoriesSubtitle: "Explora las categorías sin registrarte - los perfiles completos y la reserva se desbloquean al crear una cuenta gratuita.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Clínicas de fertilidad", description: "Compara clínicas de fertilidad verificadas en todo el mundo. Reserva videoconsultas una vez que hayas iniciado sesión.", statSuffix: "clínicas partner", available: true },
+      { key: "lawyers", icon: "scale", title: "Abogados de familia", description: "Especialistas en derecho reproductivo para contratos, filiación y acuerdos de coparentalidad.", statSuffix: "abogados", available: true },
+      { key: "therapists", icon: "support", title: "Terapeutas y consejeros", description: "Habla sobre el lado emocional de formar una familia - antes, durante y después de encontrar tu match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Asesores financieros", description: "Entiende el coste real de la donación, la gestación subrogada o la adopción antes de decidir.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Próximamente",
+    stepsEyebrow: "Cómo funciona",
+    stepsTitle: "De explorar a reservar, en tres pasos",
+    steps: [
+      ["01", "Explora las categorías", "Mira quién está disponible en tu país, en las cuatro categorías.", "clinic"],
+      ["02", "Regístrate gratis", "Crea tu cuenta para desbloquear perfiles completos y detalles.", "profile"],
+      ["03", "Reserva una consulta", "Chat o videollamada, directamente en LetsBeParents.", "match"],
+    ],
+    trustTitle: "Cada profesional se verifica antes de aparecer en la lista",
+    trustDescription: "Las licencias y credenciales se comprueban antes de que una clínica o un abogado aparezca en LetsBeParents. Descubre exactamente qué comprobamos nosotros y qué te corresponde confirmar a ti.",
+    trustCta: "Ver qué comprobamos",
+    closingTitle: "¿Listo para conectar con el experto adecuado?",
+    closingSubtitle: "Crea tu cuenta gratuita para desbloquear perfiles completos y reservar tu primera consulta.",
+    closingCta: "Crear cuenta gratuita",
+  },
+};
+
+function Professionals() {
+  const locale = localeOf();
+  const t = PROFESSIONALS_TEXT[locale];
+  const stats = LANDING_TEXT[locale].stats;
+  const clinicsCount = stats[2][0];
+  const lawyersCount = stats[3][0];
+  const statFor = (key: string, suffix: string | null) => {
+    if (!suffix) return null;
+    if (key === "clinics") return `${clinicsCount}+ ${suffix}`;
+    if (key === "lawyers") return `${lawyersCount}+ ${suffix}`;
+    return null;
+  };
+  return (
+    <div className="professionals-page">
+      <section className="professionals-hero">
+        <span className="landing-pill"><i /><span>{t.eyebrow}</span></span>
+        <h1>{t.heroTitle}</h1>
+        <p>{t.heroSubtitle}</p>
+        <div className="professionals-hero-actions">
+          <Link className="landing-gradient-button" to={`/${locale}/auth/register`}>{t.heroCtaPrimary} {resourceArrow()}</Link>
+          <Link className="professionals-secondary-link" to={`/${locale}/trust-safety`}>{t.heroCtaSecondary}</Link>
+        </div>
+      </section>
+
+      <section className="professionals-categories">
+        <div className="landing-section-intro">
+          <span>{t.categoriesEyebrow}</span>
+          <h2>{t.categoriesTitle}</h2>
+          <p className="resources-section-sub">{t.categoriesSubtitle}</p>
+        </div>
+        <div className="professionals-cat-grid">
+          {t.categories.map((cat) => {
+            const stat = statFor(cat.key, cat.statSuffix);
+            return (
+              <div key={cat.key} className={`professionals-card${cat.available ? "" : " is-soon"}`}>
+                {!cat.available && <span className="resources-tool-tag soon professionals-soon-tag">{t.comingSoonLabel}</span>}
+                <span className="resources-category-icon">{professionalIcon(cat.icon)}</span>
+                <h3>{cat.title}</h3>
+                <p>{cat.description}</p>
+                {stat && <div className="professionals-card-stat">{stat}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="professionals-steps-section">
+        <div className="landing-section-intro">
+          <span>{t.stepsEyebrow}</span>
+          <h2>{t.stepsTitle}</h2>
+        </div>
+        <div className="professionals-steps-row">
+          {t.steps.map(([number, title, description, icon]) => (
+            <article key={number} className="professionals-step-card">
+              <div className="landing-step-icon">{professionalStepIcon(icon)}</div>
+              <div className="landing-step-number">{number}</div>
+              <h3>{title}</h3>
+              <p>{description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="resources-pro">
+        <span className="resources-pro-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>
+        </span>
+        <div className="resources-pro-copy">
+          <h2>{t.trustTitle}</h2>
+          <p>{t.trustDescription}</p>
+        </div>
+        <Link className="resources-pro-button" to={`/${locale}/trust-safety`}>{t.trustCta} {resourceArrow()}</Link>
+      </section>
+
+      <section className="landing-cta">
+        <h2>{t.closingTitle}</h2>
+        <p>{t.closingSubtitle}</p>
+        <Link to={`/${locale}/auth/register`}>{t.closingCta} <span>{"→"}</span></Link>
       </section>
     </div>
   );
@@ -7123,6 +8044,1004 @@ function PartnerClinic() {
   );
 }
 
+function Boost({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [active, setActive] = useState(false);
+  const [activeUntil, setActiveUntil] = useState<string | null>(null);
+  const [pendingRequestId, setPendingRequestId] = useState<unknown>(null);
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [requesting, setRequesting] = useState(false);
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{ active: boolean; activeUntil: string | null; pendingRequestId: unknown }>("/member/boost")
+      .then((data) => {
+        setActive(data.active);
+        setActiveUntil(data.activeUntil);
+        setPendingRequestId(data.pendingRequestId);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const requestBoost = async () => {
+    setRequesting(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      const data = await api.post<{
+        ok: true;
+        status: string;
+        activeUntil?: string;
+        requestId?: number;
+        message?: string;
+      }>("/member/boost", {});
+      setNotice(data.message || "Boost requested.");
+      load();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof ApiError && err.status === 403
+          ? "You need to be verified before requesting a Boost."
+          : "Could not request a Boost right now.",
+      );
+    } finally {
+      setRequesting(false);
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Boost</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Boost puts your profile near the top of Catalog results for a
+        limited time, so more people see you first.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your Boost status.</p>
+      )}
+      {status === "ok" && (
+        <>
+          {active ? (
+            <p className="notice">
+              Your Boost is active until {asText(activeUntil)}.
+            </p>
+          ) : pendingRequestId ? (
+            <p className="notice">Your Boost request is under review.</p>
+          ) : (
+            <button
+              className="primary"
+              onClick={() => void requestBoost()}
+              disabled={requesting}
+            >
+              {requesting ? "Requesting…" : "Request a Boost"}
+            </button>
+          )}
+        </>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+    </section>
+  );
+}
+
+function Referral({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [code, setCode] = useState("");
+  const [referredCount, setReferredCount] = useState(0);
+  const [rewardedCount, setRewardedCount] = useState(0);
+  const [redeemedCode, setRedeemedCode] = useState<string | null>(null);
+  const [inputCode, setInputCode] = useState("");
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{
+        code: string;
+        referredCount: number;
+        rewardedCount: number;
+        redeemedCode: string | null;
+      }>("/member/referral")
+      .then((data) => {
+        setCode(data.code);
+        setReferredCount(data.referredCount);
+        setRewardedCount(data.rewardedCount);
+        setRedeemedCode(data.redeemedCode);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const redeem = async () => {
+    const value = inputCode.trim();
+    if (!value) return;
+    setRedeeming(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      await api.post("/member/referral/redeem", { code: value });
+      setNotice("Invite code redeemed.");
+      setInputCode("");
+      load();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409)
+        setErrorMsg("You've already used an invite code.");
+      else if (err instanceof ApiError && err.status === 404)
+        setErrorMsg("That invite code was not found.");
+      else if (err instanceof ApiError && err.status === 422)
+        setErrorMsg("You can't use your own invite code.");
+      else setErrorMsg("Could not redeem that code.");
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Referral</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Invite friends to LetsBeParents - when they join and get verified,
+        you earn a profile Boost.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your referral info.</p>
+      )}
+      {status === "ok" && (
+        <>
+          <div className="list-card">
+            <p>Your invite code</p>
+            <p>
+              <strong>{code}</strong>
+            </p>
+            <p>
+              {referredCount} friend(s) invited - {rewardedCount} rewarded
+            </p>
+          </div>
+          {!redeemedCode ? (
+            <>
+              <label>
+                Have an invite code?
+                <input
+                  value={inputCode}
+                  onChange={(event) => setInputCode(event.target.value)}
+                  placeholder="Enter invite code"
+                />
+              </label>
+              <button
+                className="primary"
+                onClick={() => void redeem()}
+                disabled={!inputCode.trim() || redeeming}
+              >
+                {redeeming ? "Redeeming…" : "Redeem code"}
+              </button>
+            </>
+          ) : (
+            <p className="notice">
+              You've already redeemed an invite code ({redeemedCode}).
+            </p>
+          )}
+        </>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+    </section>
+  );
+}
+
+function SafetyCheckIn({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [checkins, setCheckins] = useState<Row[]>([]);
+  const [withWhom, setWithWhom] = useState("");
+  const [plan, setPlan] = useState("");
+  const [hours, setHours] = useState(3);
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; checkins: Row[] }>("/member/safety-checkins")
+      .then((data) => {
+        setCheckins(data.checkins || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const create = async () => {
+    if (!plan.trim()) return;
+    setCreating(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      await api.post("/member/safety-checkins", {
+        withWhom: withWhom.trim() || undefined,
+        plan: plan.trim(),
+        hoursUntilCheckIn: hours,
+      });
+      setPlan("");
+      setWithWhom("");
+      setNotice("Check-in scheduled.");
+      load();
+    } catch {
+      setErrorMsg("Could not schedule that check-in.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const markSafe = async (item: Row) => {
+    try {
+      await api.post(
+        `/member/safety-checkins/${encodeURIComponent(asText(item.id))}/safe`,
+        {},
+      );
+      load();
+    } catch {
+      setErrorMsg("Could not mark that check-in as safe.");
+    }
+  };
+
+  const cancelCheckin = async (item: Row) => {
+    try {
+      await api.post(
+        `/member/safety-checkins/${encodeURIComponent(asText(item.id))}/cancel`,
+        {},
+      );
+      load();
+    } catch {
+      setErrorMsg("Could not cancel that check-in.");
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Safety Check-In</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Meeting someone in person for the first time? Set a check-in - it
+        stays on your record here as a reminder to follow up with yourself
+        by the deadline.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your check-ins.</p>
+      )}
+      <label>
+        Meeting with (optional)
+        <input
+          value={withWhom}
+          onChange={(event) => setWithWhom(event.target.value)}
+          placeholder="Who are you meeting?"
+        />
+      </label>
+      <label>
+        Plan
+        <textarea
+          rows={3}
+          value={plan}
+          onChange={(event) => setPlan(event.target.value)}
+          placeholder="Where and when, in case someone needs to check on you"
+        />
+      </label>
+      <label>
+        Check in with yourself after
+        <select
+          value={hours}
+          onChange={(event) => setHours(Number(event.target.value))}
+        >
+          <option value={1}>1 hour</option>
+          <option value={2}>2 hours</option>
+          <option value={3}>3 hours</option>
+          <option value={6}>6 hours</option>
+          <option value={12}>12 hours</option>
+          <option value={24}>24 hours</option>
+          <option value={48}>48 hours</option>
+          <option value={72}>72 hours</option>
+        </select>
+      </label>
+      <button
+        className="primary"
+        onClick={() => void create()}
+        disabled={!plan.trim() || creating}
+      >
+        {creating ? "Scheduling…" : "Schedule check-in"}
+      </button>
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+      <div className="list-card">
+        <h2>Your check-ins</h2>
+        {checkins.length === 0 ? (
+          <p className="notice">No check-ins yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {checkins.map((item) => (
+              <li key={asText(item.id)}>
+                <span>
+                  {asText(item.plan)}
+                  {item.withWhom ? ` - with ${asText(item.withWhom)}` : ""}
+                  {" - "}
+                  {asText(item.status)}
+                </span>
+                {item.status === "PENDING" && (
+                  <>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void markSafe(item)}
+                    >
+                      I'm safe
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void cancelCheckin(item)}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function VideoVerification({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [videoVerified, setVideoVerified] = useState(false);
+  const [requestStatus, setRequestStatus] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{
+        videoVerified: boolean;
+        videoVerifiedAt: string | null;
+        requestId: unknown;
+        requestStatus: string | null;
+      }>("/member/video-verification")
+      .then((data) => {
+        setVideoVerified(data.videoVerified);
+        setRequestStatus(data.requestStatus);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      const res = await api.upload<{
+        ok: true;
+        requestStatus?: string;
+        message?: string;
+      }>("/member/video-verification", data);
+      setNotice(res.message || "Video submitted for review.");
+      load();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof ApiError && err.status === 415
+          ? "Unsupported video type - use MP4, MOV or WebM."
+          : err instanceof ApiError && err.status === 413
+          ? "That video is too large."
+          : "Could not submit your video.",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Video Verification</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Record a short video of yourself to earn the video-verified badge
+        on your profile - a human reviews every submission.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your video verification status.</p>
+      )}
+      {status === "ok" && (
+        <>
+          {videoVerified ? (
+            <p className="notice">Your profile is video-verified.</p>
+          ) : requestStatus === "PENDING" ? (
+            <p className="notice">Your video is under review.</p>
+          ) : (
+            <>
+              {requestStatus === "DECLINED" && (
+                <p className="error">
+                  Your last submission was declined - you can record a new
+                  video and try again.
+                </p>
+              )}
+              <label className="upload-control">
+                {uploading ? "Uploading…" : "Upload a video (MP4, MOV or WebM)"}
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/webm"
+                  disabled={uploading}
+                  onChange={(event) => void upload(event.target.files?.[0])}
+                />
+              </label>
+            </>
+          )}
+        </>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+    </section>
+  );
+}
+
+type ParenthoodCostItem = { key: string; low: number; high: number };
+type ParenthoodCostPathDef = {
+  key: string;
+  perCycle: boolean;
+  defaultUnits: number;
+  minUnits: number;
+  maxUnits: number;
+  title: string;
+  desc: string;
+  tip: string;
+  items: ParenthoodCostItem[];
+};
+
+const PARENTHOOD_COST_ITEM_LABELS: Record<string, string> = {
+  legalFees: "Legal fees",
+  agencyFees: "Agency / program fees",
+  programFees: "Program & country fees",
+  medicalFees: "Medical & clinic fees",
+  medications: "Medications",
+  screening: "Screening & testing",
+  donorCompensation: "Donor compensation",
+  surrogateCompensation: "Surrogate compensation",
+  travel: "Travel",
+  insurance: "Insurance & contingency",
+  homeStudy: "Home study & training",
+  postPlacement: "Post-placement / finalization",
+  monitoring: "Monitoring & procedure fee",
+};
+
+const PARENTHOOD_COST_PATHS: ParenthoodCostPathDef[] = [
+  {
+    key: "knownDonor",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Known donor (home insemination)",
+    desc: "Conceiving with a donor you already know, without a fertility clinic.",
+    tip: "A known-donor legal agreement, even between friends, protects everyone's parental rights later - don't skip it.",
+    items: [
+      { key: "screening", low: 300, high: 600 },
+      { key: "legalFees", low: 500, high: 1500 },
+    ],
+  },
+  {
+    key: "cryobankIui",
+    perCycle: true,
+    defaultUnits: 3,
+    minUnits: 1,
+    maxUnits: 8,
+    title: "Sperm bank + IUI",
+    desc: "A donor vial from a licensed bank, inseminated at a clinic.",
+    tip: "Many people need 3-6 cycles before a pregnancy - budgeting for several attempts up front avoids surprises.",
+    items: [
+      { key: "medicalFees", low: 900, high: 1300 },
+      { key: "monitoring", low: 300, high: 800 },
+    ],
+  },
+  {
+    key: "ivfOwnEggs",
+    perCycle: true,
+    defaultUnits: 2,
+    minUnits: 1,
+    maxUnits: 6,
+    title: "IVF (your own eggs)",
+    desc: "In-vitro fertilization using your own eggs and sperm or a donor's.",
+    tip: "Ask every clinic for an itemized quote - a flat 'IVF package' price often excludes medications and genetic testing.",
+    items: [
+      { key: "medicalFees", low: 12000, high: 20000 },
+      { key: "medications", low: 3000, high: 7000 },
+    ],
+  },
+  {
+    key: "ivfDonorEggs",
+    perCycle: true,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 3,
+    title: "IVF with donor eggs",
+    desc: "In-vitro fertilization using eggs from a donor.",
+    tip: "Frozen (bank) donor eggs are typically cheaper than a fresh cycle matched specifically to you - worth asking both prices.",
+    items: [
+      { key: "donorCompensation", low: 10000, high: 20000 },
+      { key: "medicalFees", low: 15000, high: 25000 },
+      { key: "legalFees", low: 1500, high: 3000 },
+    ],
+  },
+  {
+    key: "surrogacy",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Gestational surrogacy",
+    desc: "A surrogate carries a pregnancy created with your embryo.",
+    tip: "Get separate legal counsel for yourself and the surrogate - nearly every country/state requires it, and it protects both sides.",
+    items: [
+      { key: "surrogateCompensation", low: 40000, high: 60000 },
+      { key: "agencyFees", low: 20000, high: 30000 },
+      { key: "legalFees", low: 10000, high: 15000 },
+      { key: "medicalFees", low: 20000, high: 30000 },
+      { key: "insurance", low: 5000, high: 10000 },
+    ],
+  },
+  {
+    key: "domesticAdoption",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Domestic adoption",
+    desc: "Adopting a child born in your own country.",
+    tip: "Costs vary hugely by agency - get a full written fee schedule before committing to one.",
+    items: [
+      { key: "agencyFees", low: 20000, high: 40000 },
+      { key: "legalFees", low: 3000, high: 10000 },
+      { key: "postPlacement", low: 1000, high: 3000 },
+    ],
+  },
+  {
+    key: "internationalAdoption",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "International adoption",
+    desc: "Adopting a child from another country.",
+    tip: "Timelines can run 1-3 years - factor in multiple trips and possible extended stays abroad.",
+    items: [
+      { key: "agencyFees", low: 15000, high: 30000 },
+      { key: "programFees", low: 5000, high: 15000 },
+      { key: "travel", low: 5000, high: 10000 },
+      { key: "homeStudy", low: 3000, high: 6000 },
+    ],
+  },
+  {
+    key: "fosterAdopt",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Foster-to-adopt",
+    desc: "Fostering a child through the state system, with adoption as the goal.",
+    tip: "In many countries this path is state-subsidized and dramatically cheaper than private paths - worth exploring if cost is the main barrier.",
+    items: [
+      { key: "homeStudy", low: 0, high: 1000 },
+      { key: "legalFees", low: 500, high: 2000 },
+    ],
+  },
+];
+
+function parenthoodCostSum(items: ParenthoodCostItem[], field: "low" | "high"): number {
+  return items.reduce((total, item) => total + item[field], 0);
+}
+
+function formatUsdRange(low: number, high: number): string {
+  const fmt = (value: number) => `$${Math.round(value).toLocaleString("en-US")}`;
+  return `${fmt(low)} - ${fmt(high)}`;
+}
+
+function CostCalculator() {
+  const locale = localeOf();
+  const [selectedKey, setSelectedKey] = useState(PARENTHOOD_COST_PATHS[0].key);
+  const [units, setUnits] = useState<Record<string, number>>(() =>
+    Object.fromEntries(PARENTHOOD_COST_PATHS.map((path) => [path.key, path.defaultUnits])),
+  );
+  const selected =
+    PARENTHOOD_COST_PATHS.find((path) => path.key === selectedKey) || PARENTHOOD_COST_PATHS[0];
+  const selectedUnits = units[selected.key] ?? selected.defaultUnits;
+  const perUnitLow = parenthoodCostSum(selected.items, "low");
+  const perUnitHigh = parenthoodCostSum(selected.items, "high");
+  const factor = selected.perCycle ? Math.max(1, selectedUnits) : 1;
+  const totalLow = perUnitLow * factor;
+  const totalHigh = perUnitHigh * factor;
+  const adjustUnits = (delta: number) => {
+    setUnits((prev) => {
+      const current = prev[selected.key] ?? selected.defaultUnits;
+      const next = Math.min(selected.maxUnits, Math.max(selected.minUnits, current + delta));
+      return { ...prev, [selected.key]: next };
+    });
+  };
+  return (
+    <section className="member-form">
+      <h1>Cost of Parenthood Calculator</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Rough reference ranges for the most common paths to parenthood, so
+        you can start budgeting with realistic numbers.
+      </p>
+      <p className="notice">
+        These are rough US-market reference ranges only, not quotes. Real
+        costs vary enormously by country, provider and individual
+        circumstances - always get a written quote before committing to
+        anything.
+      </p>
+      <div className="list-card">
+        <h2>Choose a path</h2>
+        <ul className="family-room-documents">
+          {PARENTHOOD_COST_PATHS.map((path) => (
+            <li key={path.key}>
+              <button
+                type="button"
+                className={`link-button${path.key === selectedKey ? " active" : ""}`}
+                onClick={() => setSelectedKey(path.key)}
+              >
+                {path.title}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="list-card">
+        <h2>{selected.title}</h2>
+        <p>{selected.desc}</p>
+        {selected.perCycle && (
+          <p>
+            How many cycles to plan for?{" "}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => adjustUnits(-1)}
+              disabled={selectedUnits <= selected.minUnits}
+            >
+              -
+            </button>{" "}
+            {selectedUnits}{" "}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => adjustUnits(1)}
+              disabled={selectedUnits >= selected.maxUnits}
+            >
+              +
+            </button>
+          </p>
+        )}
+        <p>
+          <strong>Estimated total: {formatUsdRange(totalLow, totalHigh)}</strong>{" "}
+          {selected.perCycle ? `for ${selectedUnits} cycles` : "one-time total for this path"}
+        </p>
+        <h3>Cost breakdown</h3>
+        <ul className="family-room-documents">
+          {selected.items.map((item) => (
+            <li key={item.key}>
+              <span>{PARENTHOOD_COST_ITEM_LABELS[item.key] || item.key}</span>
+              <span>
+                {formatUsdRange(item.low, item.high)}
+                {selected.perCycle ? " / cycle" : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="notice">{selected.tip}</p>
+      </div>
+      <Link className="link-button" to={`/${locale}/resources/parenthood-planning/financial-planning`}>
+        Full worksheet: Financial Planning for Future Parents
+      </Link>
+      <Link className="link-button" to={`/${locale}/ai-advisor`}>
+        Ask the AI Family Advisor about your situation
+      </Link>
+      <p className="notice">
+        Not financial, legal or medical advice. For planning and discussion
+        purposes only.
+      </p>
+    </section>
+  );
+}
+
+function CommunityGroups({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [groups, setGroups] = useState<Row[]>([]);
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  useEffect(() => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; groups: Row[] }>("/member/community/groups")
+      .then((data) => {
+        setGroups(data.groups || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  }, [session]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  return (
+    <section>
+      <h1>Community</h1>
+      <MemberLinks locale={locale} />
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && <p className="error">Could not load community groups.</p>}
+      <div className="list-card">
+        {status === "ok" && groups.length === 0 ? (
+          <p className="notice">No groups yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {groups.map((group) => (
+              <li key={asText(group.id)}>
+                <Link to={`/${locale}/community/${encodeURIComponent(asText(group.id))}`}>
+                  {asText(group.name)}
+                </Link>
+                <span>{asText(group.description)}</span>
+                <span>{asText(group.postCount)} posts</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CommunityGroupPosts({ session }: { session: Session }) {
+  const locale = localeOf();
+  const { groupId = "" } = useParams();
+  const [posts, setPosts] = useState<Row[]>([]);
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const load = () => {
+    if (!session || !groupId) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; posts: Row[] }>(
+        `/member/community/groups/${encodeURIComponent(groupId)}/posts`,
+      )
+      .then((data) => {
+        setPosts(data.posts || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session, groupId]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  const submitPost = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    setPosting(true);
+    setNotice("");
+    try {
+      await api.post(
+        `/member/community/groups/${encodeURIComponent(groupId)}/posts`,
+        { body },
+      );
+      setDraft("");
+      load();
+    } catch {
+      setNotice("Could not post that message.");
+    } finally {
+      setPosting(false);
+    }
+  };
+  const removePost = async (item: Row) => {
+    try {
+      await api.delete(
+        `/member/community/posts/${encodeURIComponent(asText(item.id))}`,
+      );
+      load();
+    } catch {
+      setNotice("Could not delete that post.");
+    }
+  };
+  return (
+    <section>
+      <h1>Community</h1>
+      <MemberLinks locale={locale} />
+      <Link to={`/${locale}/community`}>Back to groups</Link>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load this group's posts.</p>
+      )}
+      {notice && <p className="error">{notice}</p>}
+      <div className="member-form">
+        <label>
+          New post
+          <textarea
+            rows={3}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Share something with the group…"
+          />
+        </label>
+        <button
+          className="primary"
+          onClick={() => void submitPost()}
+          disabled={!draft.trim() || posting}
+        >
+          {posting ? "Posting…" : "Post"}
+        </button>
+      </div>
+      <div className="list-card">
+        {status === "ok" && posts.length === 0 ? (
+          <p className="notice">No posts yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {posts.map((item) => (
+              <li key={asText(item.id)}>
+                <Link to={`/${locale}/community/post/${encodeURIComponent(asText(item.id))}`}>
+                  {asText(item.authorName)}
+                  {item.isExpert ? " (Expert)" : ""}: {asText(item.body)}
+                </Link>
+                <span>{asText(item.replyCount)} replies</span>
+                {Boolean(item.isMine) && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => void removePost(item)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CommunityPostDetail({ session }: { session: Session }) {
+  const locale = localeOf();
+  const { postId = "" } = useParams();
+  const [replies, setReplies] = useState<Row[]>([]);
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const load = () => {
+    if (!session || !postId) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; replies: Row[] }>(
+        `/member/community/posts/${encodeURIComponent(postId)}/replies`,
+      )
+      .then((data) => {
+        setReplies(data.replies || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session, postId]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  const submitReply = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    setPosting(true);
+    setNotice("");
+    try {
+      await api.post(
+        `/member/community/posts/${encodeURIComponent(postId)}/replies`,
+        { body },
+      );
+      setDraft("");
+      load();
+    } catch {
+      setNotice("Could not post that reply.");
+    } finally {
+      setPosting(false);
+    }
+  };
+  const removeReply = async (item: Row) => {
+    try {
+      await api.delete(
+        `/member/community/replies/${encodeURIComponent(asText(item.id))}`,
+      );
+      load();
+    } catch {
+      setNotice("Could not delete that reply.");
+    }
+  };
+  return (
+    <section>
+      <h1>Community post</h1>
+      <MemberLinks locale={locale} />
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && <p className="error">Could not load replies.</p>}
+      {notice && <p className="error">{notice}</p>}
+      <div className="member-form">
+        <label>
+          Reply
+          <textarea
+            rows={3}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Write a reply…"
+          />
+        </label>
+        <button
+          className="primary"
+          onClick={() => void submitReply()}
+          disabled={!draft.trim() || posting}
+        >
+          {posting ? "Replying…" : "Reply"}
+        </button>
+      </div>
+      <div className="list-card">
+        {status === "ok" && replies.length === 0 ? (
+          <p className="notice">No replies yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {replies.map((item) => (
+              <li key={asText(item.id)}>
+                <span>
+                  {asText(item.authorName)}
+                  {item.isExpert ? " (Expert)" : ""}: {asText(item.body)}
+                </span>
+                {Boolean(item.isMine) && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => void removeReply(item)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function WebApp() {
   const locale = localeOf();
   const location = useLocation();
@@ -7271,6 +9190,7 @@ export function WebApp() {
       <Route path="/:locale/resources/:category" element={content(<ResourceCategory />)} />
       <Route path="/:locale/resources/:category/:tool" element={content(<ResourceTool />)} />
       <Route path="/:locale/find-your-path/:slug" element={content(<FindYourPath />)} />
+      <Route path="/:locale/professionals" element={content(<Professionals />)} />
       <Route path="/:locale/pages/:slug" element={content(<ContentPage />)} />
       <Route
         path="/:locale/likes"
@@ -7336,6 +9256,46 @@ export function WebApp() {
       <Route
         path="/:locale/subscription"
         element={content(<Subscription session={session} />)}
+      />
+      <Route
+        path="/:locale/compatibility"
+        element={content(<CompatibilityAnswers session={session} />)}
+      />
+      <Route
+        path="/:locale/compatibility-report/:profileId"
+        element={content(<CompatibilityReport session={session} />)}
+      />
+      <Route
+        path="/:locale/boost"
+        element={content(<Boost session={session} />)}
+      />
+      <Route
+        path="/:locale/referral"
+        element={content(<Referral session={session} />)}
+      />
+      <Route
+        path="/:locale/safety-checkin"
+        element={content(<SafetyCheckIn session={session} />)}
+      />
+      <Route
+        path="/:locale/cost-calculator"
+        element={content(<CostCalculator />)}
+      />
+      <Route
+        path="/:locale/video-verification"
+        element={content(<VideoVerification session={session} />)}
+      />
+      <Route
+        path="/:locale/community"
+        element={content(<CommunityGroups session={session} />)}
+      />
+      <Route
+        path="/:locale/community/:groupId"
+        element={content(<CommunityGroupPosts session={session} />)}
+      />
+      <Route
+        path="/:locale/community/post/:postId"
+        element={content(<CommunityPostDetail session={session} />)}
       />
       <Route path="*" element={content(<NotFoundPage locale={locale} />)} />
       </Routes>

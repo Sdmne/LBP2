@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Image, ScrollView, Pressable, StyleSheet, Text, View } from "react-native";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -15,10 +15,23 @@ import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { openFamilyPlan, openPregnancyRoom } from "../utils/familyPlan";
 import { fetchSubscriptionStatus } from "../api/subscription";
+import { fetchBoostStatus, requestBoost, type BoostStatus } from "../api/boost";
 import { fetchMe } from "../api/profile";
+import { ApiError } from "../api/client";
 import type { SubscriptionTier } from "../api/types";
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Me">;
+
+// Plain client-side formatting of the ISO "YYYY-MM-DDTHH:MM:SSZ" string
+// admin_review_boost() sets - just the local time, since a Boost only
+// ever runs a few hours (BOOST_DEFAULT_HOURS = 24 server-side), so the
+// date itself is rarely useful information here.
+function formatBoostTime(iso: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 // UPDATE (Sept 2026): this is the real equivalent of the prototype's
 // #scr-profile-settings (same 5th/last tab-bar position) - it was showing
@@ -70,6 +83,11 @@ export default function MeProfileScreen(_props: Props) {
   // re-fetching on every focus, makes the two screens structurally unable
   // to disagree.
   const [tier, setTier] = useState<SubscriptionTier | null>(null);
+  // Premium roadmap step 3 - one-off Boost. Refetched on every focus, same
+  // reasoning as tier above: coming back here right after a Boost request
+  // (or after it's approved elsewhere) should never show a stale state.
+  const [boostStatus, setBoostStatus] = useState<BoostStatus | null>(null);
+  const [boostRequesting, setBoostRequesting] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -90,11 +108,43 @@ export default function MeProfileScreen(_props: Props) {
           // Leave the previous value in place rather than showing an
           // error on what's a secondary bit of chrome.
         });
+      fetchBoostStatus()
+        .then((status) => {
+          if (!cancelled) setBoostStatus(status);
+        })
+        .catch(() => {
+          // Same as above - a secondary card, fail quiet.
+        });
       return () => {
         cancelled = true;
       };
     }, []),
   );
+
+  function handleBoost() {
+    if (!boostStatus || boostStatus.active || boostStatus.pendingRequestId) return;
+    Alert.alert(t("me.boostConfirmTitle"), t("me.boostConfirmBody", { hours: 24 }), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("me.boostConfirmCta"),
+        onPress: () => {
+          setBoostRequesting(true);
+          requestBoost()
+            .then((res) => {
+              setBoostStatus((prev) => ({
+                active: res.status === "ACTIVE",
+                activeUntil: res.status === "ACTIVE" ? res.activeUntil ?? null : prev?.activeUntil ?? null,
+                pendingRequestId: res.status === "PENDING" ? res.requestId ?? null : null,
+              }));
+            })
+            .catch((err) => {
+              Alert.alert(t("common.somethingWrong"), err instanceof ApiError ? err.message : undefined);
+            })
+            .finally(() => setBoostRequesting(false));
+        },
+      },
+    ]);
+  }
 
   const planName =
     tier === "PRO"
@@ -155,7 +205,11 @@ export default function MeProfileScreen(_props: Props) {
     // standalone pill on OTHER people's profiles was removed in item 10).
     // Same match-required flow as Family Room (see openPregnancyRoom()).
     { icon: "activity", label: t("nav.pregnancyRoomTitle"), onPress: () => openPregnancyRoom(rootNav, t) },
+    // Premium roadmap step 11 - Pro-only community/expert Q&A groups.
+    { icon: "users", label: t("community.title"), onPress: () => rootNav.navigate("Community") },
     { icon: "heart", label: t("me.saved"), onPress: () => rootNav.navigate("Favourites") },
+    // Premium roadmap step 4 - "Invite friends" (referral program).
+    { icon: "gift", label: t("me.inviteFriends"), onPress: () => rootNav.navigate("Referral") },
     { icon: "tool", label: t("me.resources"), onPress: () => rootNav.navigate("Resources") },
     { icon: "settings", label: t("me.settings"), onPress: () => rootNav.navigate("Settings") },
   ];
@@ -260,6 +314,41 @@ export default function MeProfileScreen(_props: Props) {
           </View>
         )}
       </Pressable>
+
+      {/* Premium roadmap step 3 - one-off profile Boost. Placed right
+          below the plan card since it's the same "pay to be seen more"
+          family of feature, distinct from a recurring subscription.
+          Skipped entirely while boostStatus hasn't loaded yet (same
+          "don't flash the wrong state" approach as the profile-strength
+          bar above), rather than showing a placeholder that would jump. */}
+      {boostStatus ? (
+        <Pressable
+          onPress={boostStatus.active || boostStatus.pendingRequestId ? undefined : handleBoost}
+          disabled={boostRequesting}
+          style={[styles.boostCard, boostStatus.active && styles.boostCardActive]}
+        >
+          <View style={styles.boostIconWrap}>
+            <Feather name="zap" size={18} color={boostStatus.active ? "#fff" : colors.pink} />
+          </View>
+          <View style={styles.boostTextWrap}>
+            <Text style={[styles.boostTitle, boostStatus.active && styles.boostTitleActive]}>{t("me.boostTitle")}</Text>
+            <Text style={[styles.boostSubtitle, boostStatus.active && styles.boostSubtitleActive]}>
+              {boostStatus.active
+                ? t("me.boostSubtitleActive", { time: formatBoostTime(boostStatus.activeUntil) })
+                : boostStatus.pendingRequestId
+                  ? t("me.boostSubtitlePending")
+                  : t("me.boostSubtitleInactive")}
+            </Text>
+          </View>
+          {!boostStatus.active && !boostStatus.pendingRequestId ? (
+            boostRequesting ? (
+              <ActivityIndicator size="small" color={colors.pink} />
+            ) : (
+              <Text style={styles.boostCta}>{t("me.boostCta")}</Text>
+            )
+          ) : null}
+        </Pressable>
+      ) : null}
 
       <View style={styles.card}>
         {rows.map((row, i) => (
@@ -371,6 +460,36 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   planCtaPillText: { fontSize: 12.5, color: "#fff", fontWeight: "700" },
+  // Boost card - light/pink while inactive (a suggestion, tappable),
+  // switches to a solid gold/amber fill once active (matches the "this is
+  // a live, running perk" treatment the paid plan card above uses its own
+  // dark gradient for, but a distinct color so the two don't read as the
+  // same thing at a glance).
+  boostCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    marginBottom: spacing.md,
+    backgroundColor: colors.tintPink,
+    gap: spacing.sm,
+  },
+  boostCardActive: { backgroundColor: "#c9a227" },
+  boostIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  boostTextWrap: { flex: 1 },
+  boostTitle: { fontSize: 14, color: colors.ink, fontWeight: "700" },
+  boostTitleActive: { color: "#fff" },
+  boostSubtitle: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  boostSubtitleActive: { color: "rgba(255,255,255,0.85)" },
+  boostCta: { fontSize: 13, color: colors.pink, fontWeight: "700" },
   card: {
     backgroundColor: colors.card,
     borderWidth: 1,

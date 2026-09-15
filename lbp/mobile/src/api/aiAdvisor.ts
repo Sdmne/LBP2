@@ -20,3 +20,13 @@ export function sendAiAdvisorMessage(text: string) {
 export function clearAiAdvisorMessages() {
   return api.delete<{ ok: true }>("/api/member/ai-advisor/messages");
 }
+
+// Premium roadmap step 10 - personalized weekly insight, cached
+// server-side for 7 days (see member_ai_advisor_weekly_insight() in
+// main.py) - a repeated call within the same week returns the same
+// cached text ("cached": true), no extra Claude API cost.
+export type WeeklyInsight = { ok: true; insight: string; generatedAt: string; cached: boolean };
+
+export function fetchWeeklyInsight(locale: string) {
+  return api.get<WeeklyInsight>(`/api/member/ai-advisor/weekly-insight?locale=${encodeURIComponent(locale)}`);
+}

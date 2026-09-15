@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -20,14 +19,15 @@ import { Feather } from "@expo/vector-icons";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { fetchCatalog, fetchCatalogProfileDetail, likeProfile } from "../api/catalog";
+import { fetchCatalog, fetchCatalogProfileDetail, likeProfile, unlikeProfile } from "../api/catalog";
 import type { ProfileDetailData } from "../utils/profileFields";
 import ProfileDetailSections from "../components/ProfileDetailSections";
 import { emptyCatalogFilters, type CatalogFilters } from "../api/catalogFilters";
 import { createConversation } from "../api/messages";
 import { fetchPhotos } from "../api/photos";
 import { ApiError } from "../api/client";
-import type { CatalogProfile } from "../api/types";
+import type { CatalogProfile, SubscriptionTier } from "../api/types";
+import { fetchSubscriptionStatus } from "../api/subscription";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing, tabBarClearance } from "../theme";
@@ -44,11 +44,10 @@ const REFILL_THRESHOLD = 5;
 const SWIPE_OUT_DISTANCE = 500;
 const SWIPE_THRESHOLD = 120;
 // Alena: swipe left/right had no explanation anywhere on this screen -
-// "уже просила подсказку" (already asked for a hint before). Shown until
-// the person dismisses it or has swiped a couple of times, then
-// remembered via AsyncStorage so it never nags again after that.
-const SWIPE_HINT_STORAGE_KEY = "catalogSwipeHintDismissedV1";
-const SWIPE_HINT_AUTO_DISMISS_AFTER = 2;
+// "уже просила подсказку" (already asked for a hint before). Originally a
+// static text pill shown until dismissed/a couple of swipes (see the
+// removal note above the component's state); now it's the drag-triggered
+// like/pass icon stamps below, which double as that same explanation.
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Catalog">;
 
@@ -91,6 +90,28 @@ export default function CatalogScreen({ navigation, route }: Props) {
   const [matchModal, setMatchModal] = useState<{ profile: CatalogProfile; conversationId: number | null } | null>(null);
   const [myPhotoUrl, setMyPhotoUrl] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
+  // Rewind ("undo last swipe") - Builder/Pro perk, first item of the
+  // premium-feature roadmap (Alena: "давай придумываем что еще можем
+  // внедрить в приложение, чтобы люди захотели покупать премиум"). Picked
+  // as the first one to build because it needs no backend/developer
+  // handoff at all: passes were already purely local (see the comment on
+  // this component - "no backend concept of pass/skip"), and profiles
+  // already stay in the `profiles` array after a swipe (only `index`
+  // advances), so undoing a swipe is just moving `index` back - the same
+  // card is still sitting right there. Only the immediately preceding
+  // swipe can be undone (matches every competitor's "Rewind" button, not
+  // a full history), and a swipe that resulted in an immediate match is
+  // deliberately excluded (see advance() below) - unliking afterwards
+  // wouldn't retract a match that's already been created server-side, so
+  // rewinding it would be misleading.
+  const [tier, setTier] = useState<SubscriptionTier | null>(null);
+  const [lastSwipe, setLastSwipe] = useState<{ profile: CatalogProfile; direction: "like" | "pass" } | null>(null);
+
+  useEffect(() => {
+    fetchSubscriptionStatus()
+      .then((status) => setTier(status.tier))
+      .catch(() => undefined);
+  }, []);
   // Catalog filters (#scr-filters) - FiltersScreen navigates back into this
   // tab with fresh params (see MainTabsParamList.Catalog) rather than a
   // callback, since functions aren't serializable route params.
@@ -165,29 +186,17 @@ export default function CatalogScreen({ navigation, route }: Props) {
   // separate screen). Only ever one card expanded at a time, and it
   // collapses automatically once the deck moves past it.
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [showSwipeHint, setShowSwipeHint] = useState(false);
-  const swipeCountRef = useRef(0);
-
-  useEffect(() => {
-    let alive = true;
-    AsyncStorage.getItem(SWIPE_HINT_STORAGE_KEY)
-      .then((value) => {
-        if (alive && value !== "1") setShowSwipeHint(true);
-      })
-      .catch(() => {
-        // If storage can't be read for some reason, default to NOT
-        // showing it - better to under-show a one-time hint than risk it
-        // reappearing every launch.
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  function dismissSwipeHint() {
-    setShowSwipeHint(false);
-    AsyncStorage.setItem(SWIPE_HINT_STORAGE_KEY, "1").catch(() => {});
-  }
+  // UPDATE (Sept 2026): the one-time "Swipe left to pass - swipe right to
+  // like" static text pill (dismissed after 2 real swipes) is gone -
+  // Alena: "Подсказка должна же быть в виде иконок. Когда ты начинаешь
+  // двигаться анкету" (the hint should be icons, appearing once you
+  // actually start dragging the card). The card already had exactly that
+  // - likeStampStyle/passStampStyle below fade in a stamp as translateX
+  // moves - it just showed the words "LIKE"/"NOPE" instead of icons, and
+  // this separate static pill sat on top of it doing the same job twice
+  // (and overlapping the "Single Man" badge in her screenshot). Removed
+  // the redundant pill; the drag stamps now use the same icons as the
+  // buttons below them instead of text (see the SwipeCard render below).
   const [expandedDetail, setExpandedDetail] = useState<ProfileDetailData | null>(null);
   const [expandedLoading, setExpandedLoading] = useState(false);
   const [expandedError, setExpandedError] = useState<string | null>(null);
@@ -222,28 +231,57 @@ export default function CatalogScreen({ navigation, route }: Props) {
   async function advance(direction: "like" | "pass", profile: CatalogProfile) {
     setActionError(null);
     setIndex((i) => i + 1);
-    if (showSwipeHint) {
-      swipeCountRef.current += 1;
-      if (swipeCountRef.current >= SWIPE_HINT_AUTO_DISMISS_AFTER) dismissSwipeHint();
+    if (direction === "pass") {
+      setLastSwipe({ profile, direction: "pass" });
+      return;
     }
-    if (direction === "like") {
-      try {
-        const res = await likeProfile(profile.id);
-        if (res.matched) setMatchModal({ profile, conversationId: res.conversationId });
-      } catch (err) {
-        // The card has already moved on visually (no "undo" gesture in this
-        // design), but the like itself may not have been recorded - most
-        // commonly because the viewer isn't verified yet (403) or hit the
-        // daily like limit (429). Surface that instead of failing silently,
-        // otherwise liking looks broken with zero feedback.
-        if (err instanceof ApiError && err.status === 403) {
-          setActionError(t("catalog.messageNeedsVerification"));
-        } else if (err instanceof ApiError && err.status === 429) {
-          setActionError(err.message || t("common.somethingWrong"));
-        } else if (err instanceof ApiError) {
-          setActionError(err.message || t("common.somethingWrong"));
-        }
+    try {
+      const res = await likeProfile(profile.id);
+      if (res.matched) {
+        setMatchModal({ profile, conversationId: res.conversationId });
+        // Deliberately not set as the rewindable swipe - see the comment
+        // on the `lastSwipe` state above.
+        setLastSwipe(null);
+      } else {
+        setLastSwipe({ profile, direction: "like" });
       }
+    } catch (err) {
+      // The card has already moved on visually, but the like itself may
+      // not have been recorded - most commonly because the viewer isn't
+      // verified yet (403) or hit the daily like limit (429). Surface that
+      // instead of failing silently, otherwise liking looks broken with
+      // zero feedback.
+      setLastSwipe(null);
+      if (err instanceof ApiError && err.status === 403) {
+        setActionError(t("catalog.messageNeedsVerification"));
+      } else if (err instanceof ApiError && err.status === 429) {
+        setActionError(err.message || t("common.somethingWrong"));
+      } else if (err instanceof ApiError) {
+        setActionError(err.message || t("common.somethingWrong"));
+      }
+    }
+  }
+
+  function handleRewind() {
+    if (!lastSwipe) return;
+    if (tier === "EXPLORE" || tier === null) {
+      Alert.alert(t("catalog.rewindLockedTitle"), t("catalog.rewindLockedBody"), [
+        { text: t("filters.premiumLockedCancel"), style: "cancel" },
+        { text: t("filters.premiumLockedUpgrade"), onPress: () => rootNav.navigate("Subscription") },
+      ]);
+      return;
+    }
+    const { profile, direction } = lastSwipe;
+    setLastSwipe(null);
+    setActionError(null);
+    setIndex((i) => Math.max(0, i - 1));
+    if (direction === "like") {
+      // Best-effort - even if this fails, the profile is already back in
+      // front of the viewer locally, which is the part that actually
+      // matters to them; a like that stays recorded server-side despite a
+      // failed retraction is harmless (same "don't block the UI on a
+      // background failure" approach used elsewhere on this screen).
+      unlikeProfile(profile.id).catch(() => undefined);
     }
   }
 
@@ -338,12 +376,6 @@ export default function CatalogScreen({ navigation, route }: Props) {
         ) : (
           <>
             <View style={styles.cardArea}>
-              {showSwipeHint ? (
-                <Pressable style={styles.swipeHintPill} onPress={dismissSwipeHint} hitSlop={8}>
-                  <Text style={styles.swipeHintText}>{t("catalog.swipeHint")}</Text>
-                  <Feather name="x" size={13} color={colors.white} />
-                </Pressable>
-              ) : null}
               {next ? <SwipeCard key={`under-${next.id}`} profile={next} isTop={false} /> : null}
               {expandedId === current.id ? (
                 <ExpandedProfileCard
@@ -374,19 +406,35 @@ export default function CatalogScreen({ navigation, route }: Props) {
                 once the info panel grew. Now cardArea is a normal flex:1
                 box and this row is a normal flex sibling below it, in
                 actual layout flow - structurally can't overlap. */}
-            <View style={styles.actionsRow}>
-              <Pressable style={styles.actionBtn} onPress={() => advance("pass", current)}>
-                <Feather name="x" size={22} color={colors.ink} />
+            <View style={styles.actionsRowWrap}>
+              {/* Rewind - kept OUTSIDE the 4-button group below so that
+                  group still matches Alena's "her" reference exactly
+                  (space-evenly, all 4 equal size). Dimmed + disabled when
+                  there's nothing to undo; tapping it while on the free
+                  tier shows the same upgrade-Alert pattern FiltersScreen
+                  already uses for its own premium-locked fields, rather
+                  than a new paywall UI just for this one button. */}
+              <Pressable
+                style={[styles.rewindBtn, !lastSwipe && styles.rewindBtnDisabled]}
+                onPress={handleRewind}
+                disabled={!lastSwipe}
+              >
+                <Feather name="rotate-ccw" size={17} color={lastSwipe && tier && tier !== "EXPLORE" ? "#c9a227" : colors.muted} />
               </Pressable>
-              <Pressable style={styles.actionBtn} onPress={() => rootNav.navigate("ProfileDetail", { profileId: current.id })}>
-                <Feather name="user" size={20} color={colors.ink} />
-              </Pressable>
-              <Pressable style={styles.actionBtn} onPress={() => handleMessage(current)}>
-                <Feather name="message-circle" size={20} color={colors.ink} />
-              </Pressable>
-              <Pressable style={[styles.actionBtn, styles.actionBtnFilled]} onPress={() => advance("like", current)}>
-                <Feather name="thumbs-up" size={20} color={colors.pink} />
-              </Pressable>
+              <View style={styles.actionsRow}>
+                <Pressable style={styles.actionBtn} onPress={() => advance("pass", current)}>
+                  <Feather name="x" size={22} color={colors.ink} />
+                </Pressable>
+                <Pressable style={styles.actionBtn} onPress={() => rootNav.navigate("ProfileDetail", { profileId: current.id })}>
+                  <Feather name="user" size={20} color={colors.ink} />
+                </Pressable>
+                <Pressable style={styles.actionBtn} onPress={() => handleMessage(current)}>
+                  <Feather name="message-circle" size={20} color={colors.ink} />
+                </Pressable>
+                <Pressable style={[styles.actionBtn, styles.actionBtnFilled]} onPress={() => advance("like", current)}>
+                  <Feather name="thumbs-up" size={20} color={colors.pink} />
+                </Pressable>
+              </View>
             </View>
           </>
         )}
@@ -571,10 +619,10 @@ function SwipeCard({
         {isTop ? (
           <>
             <Animated.View style={[styles.stamp, styles.stampLike, likeStampStyle]}>
-              <Text style={styles.stampLikeText}>{t("catalog.stampLike")}</Text>
+              <Feather name="heart" size={44} color="#fff" />
             </Animated.View>
             <Animated.View style={[styles.stamp, styles.stampPass, passStampStyle]}>
-              <Text style={styles.stampPassText}>{t("catalog.stampPass")}</Text>
+              <Feather name="x" size={44} color="#fff" />
             </Animated.View>
           </>
         ) : null}
@@ -618,6 +666,11 @@ function SwipeCard({
             {profile.isVerified ? (
               <View style={styles.verifiedBadge}>
                 <Feather name="check" size={11} color="#fff" />
+              </View>
+            ) : null}
+            {profile.isVideoVerified ? (
+              <View style={styles.videoVerifiedBadge}>
+                <Feather name="video" size={10} color="#fff" />
               </View>
             ) : null}
           </View>
@@ -706,6 +759,15 @@ function ExpandedProfileCard({
   return (
     <View style={styles.card}>
       <ScrollView style={styles.expandedScroll} contentContainerStyle={styles.expandedScrollContent} showsVerticalScrollIndicator={false}>
+        {/* Was a fixed-height photo box followed by a separate solid-color
+            infoPanel below it - exactly the flat black bar Alena reported
+            again ("\u043f\u043e\u0447\u0435\u043c\u0443 \u043d\u0430 \u0447\u0451\u0440\u043d\u043e\u043c \u043e\u043f\u044f\u0442\u044c"), the same complaint the top
+            swipe card (SwipeCard, above) already fixed by putting name/
+            location/looking-for directly over the photo on a dark gradient
+            scrim instead of a panel underneath. This expanded card had
+            never received that same treatment. Ported it here so both
+            states - collapsed swipe card and expanded in-place card - look
+            like the same design. */}
         <View style={styles.expandedPhotoWrap}>
           {photoUrl ? (
             <Image source={{ uri: photoUrl }} style={styles.cardPhoto} />
@@ -721,29 +783,41 @@ function ExpandedProfileCard({
               </View>
             </View>
           ) : null}
-        </View>
 
-        <View style={styles.infoPanel}>
-          <View style={styles.nameRow}>
-            <Text style={styles.cardName} numberOfLines={1}>{profile.displayName}</Text>
-            {profile.isVerified ? (
-              <View style={styles.verifiedBadge}>
-                <Feather name="check" size={11} color="#fff" />
+          <LinearGradient
+            colors={["transparent", "rgba(10,4,10,0.55)", "rgba(10,4,10,0.92)"]}
+            locations={[0, 0.55, 1]}
+            style={styles.photoScrim}
+            pointerEvents="none"
+          />
+
+          <View style={styles.overlayInfo}>
+            <View style={styles.nameRow}>
+              <Text style={styles.cardName} numberOfLines={1}>{profile.displayName}</Text>
+              {profile.isVerified ? (
+                <View style={styles.verifiedBadge}>
+                  <Feather name="check" size={11} color="#fff" />
+                </View>
+              ) : null}
+              {profile.isVideoVerified ? (
+                <View style={styles.videoVerifiedBadge}>
+                  <Feather name="video" size={10} color="#fff" />
+                </View>
+              ) : null}
+            </View>
+            {location ? <Text style={styles.cardLoc} numberOfLines={1}>{"\ud83d\udccd " + location}</Text> : null}
+
+            {profile.lookingFor?.length ? (
+              <View style={styles.lookingForBlock}>
+                <Text style={styles.cardLookingForLabel}>{t("catalog.lookingForLabel")}</Text>
+                <View style={styles.lookingForChip}>
+                  <Text style={styles.lookingForChipText} numberOfLines={1}>
+                    {profile.lookingFor.map((value) => catalogOptionLabel("lookingFor", value)).join(", ")}
+                  </Text>
+                </View>
               </View>
             ) : null}
           </View>
-          {location ? <Text style={styles.cardLoc} numberOfLines={1}>{"\ud83d\udccd " + location}</Text> : null}
-
-          {profile.lookingFor?.length ? (
-            <View style={styles.lookingForBlock}>
-              <Text style={styles.cardLookingForLabel}>{t("catalog.lookingForLabel")}</Text>
-              <View style={styles.lookingForChip}>
-                <Text style={styles.lookingForChipText} numberOfLines={1}>
-                  {profile.lookingFor.map((value) => catalogOptionLabel("lookingFor", value)).join(", ")}
-                </Text>
-              </View>
-            </View>
-          ) : null}
         </View>
 
         <Pressable style={styles.collapseBtn} onPress={onCollapse} hitSlop={8}>
@@ -816,21 +890,6 @@ const styles = StyleSheet.create({
   // exactly this area and nothing else, with the button row sized to its
   // own content right underneath in normal layout flow.
   cardArea: { flex: 1, position: "relative", marginBottom: spacing.sm },
-  swipeHintPill: {
-    position: "absolute",
-    top: spacing.sm,
-    alignSelf: "center",
-    zIndex: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: radius.pill,
-    maxWidth: "88%",
-  },
-  swipeHintText: { color: colors.white, fontSize: 12.5, fontWeight: "600", flexShrink: 1 },
   card: {
     position: "absolute",
     top: 0,
@@ -868,20 +927,32 @@ const styles = StyleSheet.create({
   // a swipe rather than the opacity animation itself being broken. A
   // translucent dark backing box guarantees contrast for both stamps
   // regardless of what's behind them.
+  // UPDATE (Sept 2026): Alena's next round of feedback on the plain-icon
+  // version was "вот более заметные иконки сделать" (make the icons more
+  // noticeable), with a screen recording of the original design prototype
+  // as the reference - that recording shows a solid filled circular badge
+  // behind the icon (not a bare glyph floating over the photo), which reads
+  // much more clearly against a busy/light photo than a thin icon alone.
+  // Switched to a solid color circle (pink for like, dark ink for pass -
+  // mirrors the app's own actionsRow: pink fill = like, ink-on-white = pass)
+  // with a white icon on top, sized to be unmistakable at a glance.
   stamp: {
     position: "absolute",
-    top: 28,
-    borderWidth: 3,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    backgroundColor: "rgba(15,15,20,0.45)",
+    top: 40,
     zIndex: 5,
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#020817",
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
-  stampLike: { right: 20, borderColor: colors.blue, transform: [{ rotate: "12deg" }] },
-  stampLikeText: { color: colors.blue, fontSize: 22, fontWeight: "800" },
-  stampPass: { left: 20, borderColor: "#fff", transform: [{ rotate: "-12deg" }] },
-  stampPassText: { color: "#fff", fontSize: 22, fontWeight: "800" },
+  stampLike: { left: 28, backgroundColor: colors.pink },
+  stampPass: { right: 28, backgroundColor: colors.ink },
   // Dark gradient fading up from the photo's bottom edge, so the
   // overlaid name/location/looking-for text stays readable without a
   // separate solid-color panel underneath (Alena's "почему чёрная
@@ -910,7 +981,26 @@ const styles = StyleSheet.create({
   // with dark icons (pink for the "like" thumbs-up) floating directly on
   // the screen's own gradient background, per Alena's reference screenshot
   // - not on a white sheet, and not small circles pinned to the photo.
-  actionsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-evenly" },
+  actionsRowWrap: { flexDirection: "row", alignItems: "center" },
+  // Smaller than the 4 main actionBtn circles (40 vs 52) and off to the
+  // side - reads as a secondary/utility control, not a 5th equal choice
+  // alongside pass/profile/message/like.
+  rewindBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: spacing.sm,
+    shadowColor: "#020817",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  rewindBtnDisabled: { opacity: 0.4 },
+  actionsRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-evenly" },
   actionBtn: {
     width: 52,
     height: 52,
@@ -956,22 +1046,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  // The info panel that replaced the old photo-overlay scrim - real flex
-  // flow below photoWrap, sized to its own content instead of floating.
-  infoPanel: {
-    backgroundColor: colors.ink,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.md,
-  },
-  infoTopRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  infoNameCol: { flex: 1 },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   verifiedBadge: {
     width: 18,
     height: 18,
     borderRadius: 9,
     backgroundColor: colors.blue,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  videoVerifiedBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.pink,
     alignItems: "center",
     justifyContent: "center",
   },

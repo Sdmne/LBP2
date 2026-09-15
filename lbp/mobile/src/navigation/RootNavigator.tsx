@@ -21,6 +21,10 @@ import ProfileDetailScreen from "../screens/ProfileDetailScreen";
 import SettingsScreen from "../screens/SettingsScreen";
 import PhotosScreen from "../screens/PhotosScreen";
 import VerificationScreen from "../screens/VerificationScreen";
+import VideoVerificationScreen from "../screens/VideoVerificationScreen";
+import CommunityScreen from "../screens/CommunityScreen";
+import CommunityGroupScreen from "../screens/CommunityGroupScreen";
+import CommunityPostScreen from "../screens/CommunityPostScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
 import LikesPaywallScreen from "../screens/LikesPaywallScreen";
 import AiAdvisorScreen from "../screens/AiAdvisorScreen";
@@ -38,17 +42,23 @@ import KnowledgeArticleScreen from "../screens/KnowledgeArticleScreen";
 import CompatibilityQuizScreen from "../screens/CompatibilityQuizScreen";
 import FamilyRoomScreen from "../screens/FamilyRoomScreen";
 import PregnancyRoomScreen from "../screens/PregnancyRoomScreen";
+import CoParentingAgreementScreen from "../screens/CoParentingAgreementScreen";
+import CostCalculatorScreen from "../screens/CostCalculatorScreen";
+import SafetyCheckInScreen from "../screens/SafetyCheckInScreen";
 import FamilyPlanPickerScreen from "../screens/FamilyPlanPickerScreen";
 import CompatibilityAnswersScreen from "../screens/CompatibilityAnswersScreen";
 import CompatibilityReportScreen from "../screens/CompatibilityReportScreen";
 import TermsScreen from "../screens/TermsScreen";
+import TrustSafetyScreen from "../screens/TrustSafetyScreen";
 import FiltersScreen from "../screens/FiltersScreen";
 import EditProfileScreen from "../screens/EditProfileScreen";
 import VerifyCodeScreen from "../screens/VerifyCodeScreen";
 import DeleteAccountScreen from "../screens/DeleteAccountScreen";
 import ProfileWizardScreen from "../screens/ProfileWizardScreen";
+import ReferralScreen from "../screens/ReferralScreen";
 import MainTabs, { type MainTabsParamList } from "./MainTabs";
 import type { CatalogFilters } from "../api/catalogFilters";
+import type { CommunityPost } from "../api/community";
 
 export type RootStackParamList = {
   Welcome: undefined;
@@ -66,6 +76,10 @@ export type RootStackParamList = {
   Settings: undefined;
   Photos: undefined;
   Verification: undefined;
+  VideoVerification: undefined;
+  Community: undefined;
+  CommunityGroup: { groupId: number; groupName: string };
+  CommunityPost: { post: CommunityPost; groupId: number };
   Subscription: undefined;
   LikesPaywall: undefined;
   AiAdvisor: undefined;
@@ -96,6 +110,13 @@ export type RootStackParamList = {
   // same matched partner, opened from a card inside FamilyRoomScreen.
   // Same params shape and same server-side gate (Premium + active match).
   PregnancyRoom: { profileId: number; displayName?: string | null };
+  // Co-Parenting Agreement (premium roadmap step 5) - the "sign" layer on
+  // top of the 10-section Family Plan, opened from a card inside
+  // FamilyRoomScreen. Same params shape and same server-side gate
+  // (Family Builder Pro + active match) as FamilyRoom/PregnancyRoom.
+  CoParentingAgreement: { profileId: number; displayName?: string | null };
+  CostCalculator: undefined;
+  SafetyCheckIn: undefined;
   // Picker shown when Explore's "Family Plan" tile has 2+ real matches to
   // choose from (0 matches -> Alert + Browse CTA, 1 match -> straight to
   // FamilyRoom, both handled in ExploreScreen.tsx without ever routing
@@ -117,6 +138,7 @@ export type RootStackParamList = {
   // Settings (post-login) and Welcome (pre-login), so it's registered in
   // both the authenticated and unauthenticated stack branches below.
   Terms: undefined;
+  TrustSafety: undefined;
   // Catalog filters (#scr-filters) - pushed from CatalogScreen's header
   // button, seeded with the tab's current filters; applying navigates back
   // into MainTabs/Catalog with fresh params rather than returning a value.
@@ -141,6 +163,9 @@ export type RootStackParamList = {
   // No params - internally step-managed, reads the signed-in user's
   // displayName from AuthContext to prefill the name field.
   ProfileWizard: undefined;
+  // Premium roadmap step 4 - "Invite friends" (MeProfileScreen's new row).
+  // No params - reads/writes GET/POST /api/member/referral(/redeem).
+  Referral: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -225,6 +250,26 @@ export default function RootNavigator() {
               options={{ headerShown: true, title: t("nav.verificationTitle") }}
             />
             <Stack.Screen
+              name="VideoVerification"
+              component={VideoVerificationScreen}
+              options={{ headerShown: true, title: t("nav.videoVerificationTitle") }}
+            />
+            <Stack.Screen
+              name="Community"
+              component={CommunityScreen}
+              options={{ headerShown: true, title: t("community.title") }}
+            />
+            <Stack.Screen
+              name="CommunityGroup"
+              component={CommunityGroupScreen}
+              options={({ route }) => ({ headerShown: true, title: route.params.groupName })}
+            />
+            <Stack.Screen
+              name="CommunityPost"
+              component={CommunityPostScreen}
+              options={{ headerShown: true, title: t("community.postTitle") }}
+            />
+            <Stack.Screen
               name="Subscription"
               component={SubscriptionScreen}
               options={({ navigation }) => ({
@@ -275,6 +320,7 @@ export default function RootNavigator() {
               options={({ route }) => ({ headerShown: true, title: route.params.name || t("nav.detailsFallback") })}
             />
             <Stack.Screen name="Favourites" component={FavouritesScreen} options={{ headerShown: true, title: t("nav.savedTitle") }} />
+            <Stack.Screen name="Referral" component={ReferralScreen} options={{ headerShown: true, title: t("nav.referralTitle") }} />
             <Stack.Screen name="Resources" component={ResourcesScreen} options={{ headerShown: true, title: t("nav.resourcesTitle") }} />
             <Stack.Screen
               name="ResourceCategory"
@@ -324,6 +370,21 @@ export default function RootNavigator() {
               options={{ headerShown: true, title: t("nav.pregnancyRoomTitle") }}
             />
             <Stack.Screen
+              name="CoParentingAgreement"
+              component={CoParentingAgreementScreen}
+              options={{ headerShown: true, title: t("nav.agreementTitle") }}
+            />
+            <Stack.Screen
+              name="CostCalculator"
+              component={CostCalculatorScreen}
+              options={{ headerShown: true, title: t("nav.costCalculatorTitle") }}
+            />
+            <Stack.Screen
+              name="SafetyCheckIn"
+              component={SafetyCheckInScreen}
+              options={{ headerShown: true, title: t("nav.safetyCheckInTitle") }}
+            />
+            <Stack.Screen
               name="FamilyPlanPicker"
               component={FamilyPlanPickerScreen}
               options={{ headerShown: true, title: t("nav.familyRoomTitle") }}
@@ -339,6 +400,7 @@ export default function RootNavigator() {
               options={{ headerShown: true, title: t("nav.compatibilityReportTitle") }}
             />
             <Stack.Screen name="Terms" component={TermsScreen} options={{ headerShown: true, title: t("nav.termsTitle") }} />
+            <Stack.Screen name="TrustSafety" component={TrustSafetyScreen} options={{ headerShown: true, title: t("nav.trustSafetyTitle") }} />
             <Stack.Screen name="Filters" component={FiltersScreen} options={{ headerShown: true, title: t("nav.filtersTitle") }} />
             <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: true, title: t("nav.editProfileTitle") }} />
             <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} options={{ headerShown: true, title: t("nav.deleteAccountTitle") }} />
