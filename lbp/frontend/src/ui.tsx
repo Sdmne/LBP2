@@ -1095,7 +1095,7 @@ function Home() {
     if (key === "partner") return "/web-static/images/landing/path-partner-1df6d179.jpg";
     if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor-bb85903a.jpg";
     if (key === "exploring") return "/web-static/images/landing/path-exploring-607ba1f7.jpg";
-    return "/web-static/images/landing/path-coparent-50e0ccf3.png";
+    return "/web-static/images/landing/path-coparent-b940550d.jpg";
   };
   const whatsNewIcon = (key: string) => {
     if (key === "boost") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>;
@@ -1131,6 +1131,24 @@ function Home() {
             {text.start}
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
           </a>
+        </div>
+      </section>
+
+      <section className="landing-whatsnew">
+        <div className="landing-section-intro">
+          <span>{text.whatsNew.label}</span>
+          <h2>{text.whatsNew.title}</h2>
+          <p className="landing-whatsnew-intro">{text.whatsNew.intro}</p>
+        </div>
+        <div className="landing-whatsnew-grid">
+          {text.whatsNew.items.map((item) => (
+            <Link key={item.title} className="landing-whatsnew-card" to={`/${locale}${item.href}`}>
+              <span className="landing-whatsnew-icon">{whatsNewIcon(item.icon)}</span>
+              <span className={`landing-whatsnew-tier landing-whatsnew-tier-${item.tier}`}>{text.whatsNew.tiers[item.tier as keyof typeof text.whatsNew.tiers]}</span>
+              <h3>{item.title}</h3>
+              <p>{item.copy}</p>
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -1187,24 +1205,6 @@ function Home() {
         {text.stats.map(([value, label]) => (
           <div key={label}><strong>{value}</strong><span>{label}</span></div>
         ))}
-      </section>
-
-      <section className="landing-whatsnew">
-        <div className="landing-section-intro">
-          <span>{text.whatsNew.label}</span>
-          <h2>{text.whatsNew.title}</h2>
-          <p className="landing-whatsnew-intro">{text.whatsNew.intro}</p>
-        </div>
-        <div className="landing-whatsnew-grid">
-          {text.whatsNew.items.map((item) => (
-            <Link key={item.title} className="landing-whatsnew-card" to={`/${locale}${item.href}`}>
-              <span className="landing-whatsnew-icon">{whatsNewIcon(item.icon)}</span>
-              <span className={`landing-whatsnew-tier landing-whatsnew-tier-${item.tier}`}>{text.whatsNew.tiers[item.tier as keyof typeof text.whatsNew.tiers]}</span>
-              <h3>{item.title}</h3>
-              <p>{item.copy}</p>
-            </Link>
-          ))}
-        </div>
       </section>
 
       <section className="landing-trust-line">

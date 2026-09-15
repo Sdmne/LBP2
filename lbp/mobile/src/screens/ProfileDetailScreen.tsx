@@ -222,7 +222,7 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
 
           <View style={styles.overlayInfo}>
             <View style={styles.nameRow}>
-              <Text style={styles.name}>{profile.displayName}</Text>
+              <Text style={styles.name} numberOfLines={1}>{profile.displayName}</Text>
               {profile.isVerified ? (
                 <View style={styles.verifiedBadge}>
                   <Feather name="check" size={11} color="#fff" />
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  name: { fontSize: 22, fontWeight: "800", color: colors.white },
+  name: { fontSize: 22, fontWeight: "800", color: colors.white, flexShrink: 1 },
   subtitle: { fontSize: 14, color: colors.white },
   badge: {
     alignSelf: "flex-start",

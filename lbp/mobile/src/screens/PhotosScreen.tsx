@@ -269,7 +269,7 @@ export default function PhotosScreen() {
             </View>
 
             <View style={styles.additionalHeader}>
-              <Text style={styles.additionalTitle}>{t("photos.additionalTitle")}</Text>
+              <Text style={styles.additionalTitle} numberOfLines={1}>{t("photos.additionalTitle")}</Text>
               <Pressable style={styles.addMoreButton} onPress={handleAddAdditional} disabled={uploading}>
                 <Text style={styles.addMoreButtonText}>{t("photos.addPhoto")}</Text>
               </Pressable>
@@ -370,7 +370,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
     paddingHorizontal: spacing.xs,
   },
-  additionalTitle: { fontSize: 13.5, fontWeight: "700", color: colors.ink },
+  additionalTitle: { fontSize: 13.5, fontWeight: "700", color: colors.ink, flexShrink: 1, marginRight: spacing.xs },
   addMoreButton: { paddingVertical: 4, paddingHorizontal: 8 },
   addMoreButtonText: { color: colors.pink, fontWeight: "700", fontSize: 13 },
   cell: { flex: 1 / 3, aspectRatio: 1, margin: spacing.xs, position: "relative" },

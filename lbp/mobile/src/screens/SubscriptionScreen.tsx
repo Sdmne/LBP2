@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { Feather } from "@expo/vector-icons";
 import { fetchSubscriptionStatus, requestSubscription } from "../api/subscription";
@@ -221,7 +221,14 @@ function TierComparison({
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <View style={styles.tierRow}>
-          <View style={[styles.tierCard, styles.tierCardFree]}>
+          <Pressable
+            style={[styles.tierCard, styles.tierCardFree]}
+            onPress={() =>
+              currentTier !== "EXPLORE"
+                ? Alert.alert(t("subscription.freeCardInfoTitle"), t("subscription.freeCardInfoBody"))
+                : undefined
+            }
+          >
             <Text style={styles.tierCardLabel}>{t("subscription.tierNameExploreShort")}</Text>
             <Text style={styles.tierCardPrice}>{t("subscription.priceZero")}</Text>
             <Text style={styles.tierCardNote}>{t("subscription.forever")}</Text>
@@ -231,7 +238,7 @@ function TierComparison({
                 <Text style={styles.currentBadgeText}>{t("subscription.currentPlanBadge")}</Text>
               </View>
             ) : null}
-          </View>
+          </Pressable>
 
           <Pressable
             style={[styles.tierCard, selectedTier === "BUILDER" && styles.tierCardActive]}
@@ -313,16 +320,36 @@ function TierComparison({
             <TableRow label={t("subscription.proFeature2")} pro />
           </TableGroup>
 
+          {/* FIX (Sept 2026): Alena compared this screen against today's
+              website pricing-matrix update (HANDOFF-homepage-pricing-
+              2026-09-14.md) and found this table hadn't been kept in sync
+              - missing the new "Stand out & stay safe" group entirely, the
+              new message-starters/weekly-insight/agreement/community rows,
+              and still showing AI Family Advisor as Pro-only (the site
+              moved it to Builder+, matching what member_ai_advisor_*
+              already gates on in main.py - profile_is_premium(), not
+              profile_is_pro()). This block mirrors that update exactly. */}
+          <TableGroup title={t("subscription.groupStandOut")}>
+            <TableRow label={t("subscription.standOutFeature1")} free builder pro />
+            <TableRow label={t("subscription.standOutFeature2")} free builder pro />
+            <TableRow label={t("subscription.standOutFeature3")} free builder pro />
+            <TableRow label={t("subscription.standOutFeature4")} free builder pro />
+          </TableGroup>
+
           <TableGroup title={t("subscription.groupConnect")}>
             <TableRow label={t("subscription.connectRowLabel")} builder pro />
             <TableRow label={t("subscription.builderFeature4")} builder pro />
+            <TableRow label={t("subscription.messageStartersFeature")} builder pro />
           </TableGroup>
 
           <TableGroup title={t("subscription.groupFamily")}>
             <TableRow label={t("subscription.proFeature3")} pro />
             <TableRow label={t("subscription.proFeature4")} pro />
             <TableRow label={t("subscription.proFeature5")} pro />
-            <TableRow label={t("subscription.proFeature6")} pro />
+            <TableRow label={t("subscription.proFeature6")} builder pro />
+            <TableRow label={t("subscription.weeklyInsightFeature")} builder pro />
+            <TableRow label={t("subscription.coParentingAgreementFeature")} pro />
+            <TableRow label={t("subscription.communityFeature")} pro />
           </TableGroup>
         </View>
 

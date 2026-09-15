@@ -250,7 +250,7 @@ export default function MeProfileScreen(_props: Props) {
           </View>
         </Pressable>
         <View style={styles.nameRow}>
-          <Text style={styles.name}>{user?.displayName}</Text>
+          <Text style={styles.name} numberOfLines={1}>{user?.displayName}</Text>
           {user?.profileVerified ? <Text style={styles.verifiedBadge}>✓</Text> : null}
         </View>
         <Text style={styles.email}>{user?.email}</Text>
@@ -408,7 +408,7 @@ const styles = StyleSheet.create({
   },
   avatarEditIcon: { fontSize: 13, color: colors.white },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  name: { fontSize: 19, fontWeight: "600", color: colors.ink },
+  name: { fontSize: 19, fontWeight: "600", color: colors.ink, flexShrink: 1 },
   verifiedBadge: {
     fontSize: 11,
     color: colors.white,

@@ -111,7 +111,7 @@ export default function SignupScreen({ navigation }: Props) {
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Pressable style={styles.primaryButton} onPress={handleSubmit} disabled={submitting}>
-            {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{t("signup.submit")}</Text>}
+            {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText} numberOfLines={1}>{t("signup.submit")}</Text>}
           </Pressable>
 
           <Pressable onPress={() => navigation.navigate("Login")} style={styles.secondaryLink}>

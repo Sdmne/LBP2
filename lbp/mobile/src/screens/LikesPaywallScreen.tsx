@@ -191,7 +191,7 @@ export default function LikesPaywallScreen({ navigation }: Props) {
                 <View style={styles.planCardTop}>
                   <View style={styles.planCardMain}>
                     <View style={styles.planCardNameRow}>
-                      <Text style={styles.planCardName}>{t(option.nameKey)}</Text>
+                      <Text style={styles.planCardName} numberOfLines={1}>{t(option.nameKey)}</Text>
                       {option.badgeKey ? (
                         <View style={styles.planBadge}>
                           <Text style={styles.planBadgeText}>{t(option.badgeKey)}</Text>
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
   planCardDetailRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   planCardDetailText: { fontSize: 12.5, color: colors.ink, flexShrink: 1 },
   planCardNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  planCardName: { fontSize: 15, fontWeight: "800", color: colors.ink },
+  planCardName: { fontSize: 15, fontWeight: "800", color: colors.ink, flexShrink: 1 },
   planBadge: { backgroundColor: colors.pink, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
   planBadgeText: { fontSize: 10.5, fontWeight: "800", color: colors.white },
   planCardPrice: { fontSize: 13.5, color: colors.muted, marginTop: 2 },

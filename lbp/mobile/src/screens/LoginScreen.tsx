@@ -109,11 +109,11 @@ export default function LoginScreen({ navigation }: Props) {
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Pressable style={styles.primaryButton} onPress={handleSubmit} disabled={submitting}>
-            {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{t("login.submit")}</Text>}
+            {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText} numberOfLines={1}>{t("login.submit")}</Text>}
           </Pressable>
 
           <Pressable onPress={() => navigation.navigate("ForgotPassword")} style={styles.outlineButton}>
-            <Text style={styles.outlineButtonText}>{t("login.forgotPassword")}</Text>
+            <Text style={styles.outlineButtonText} numberOfLines={1}>{t("login.forgotPassword")}</Text>
           </Pressable>
 
           <Pressable onPress={() => navigation.navigate("Signup")} style={styles.secondaryLink}>

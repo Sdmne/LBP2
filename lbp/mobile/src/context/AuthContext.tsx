@@ -84,12 +84,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // screen ever needs to read it, and it must survive without triggering
   // re-renders.
   const pushTokenRef = useRef<string | null>(null);
-  const pushSyncRef = useRef<Promise<void>>(Promise.resolve());
-  function syncPushToken() {
-    pushSyncRef.current = (async () => {
-      pushTokenRef.current = await registerForPushNotifications();
-    })();
-    return pushSyncRef.current;
+  async function syncPushToken() {
+    pushTokenRef.current = await registerForPushNotifications();
   }
 
   // On app start: if we have a saved token, verify it's still valid against
@@ -164,16 +160,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return res.status;
       },
       async deleteAccount(reason, details = "") {
-        await pushSyncRef.current;
-        await unregisterCurrentPushToken(pushTokenRef.current);
-        pushTokenRef.current = null;
         await authApi.requestAccountDeletion(reason, details);
         setSessionToken(null);
         await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
         setUser(null);
       },
       async logout() {
-        await pushSyncRef.current;
         await unregisterCurrentPushToken(pushTokenRef.current);
         pushTokenRef.current = null;
         try {

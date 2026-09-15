@@ -539,11 +539,11 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         <Text style={styles.recapHint}>{t("editProfile.matchingHint")}</Text>
         <View style={styles.recapRow}>
           <Text style={styles.recapKey}>{t("editProfile.youAre")}</Text>
-          <Text style={styles.recapValue}>{catalogOptionLabel("profileTypes", role)}</Text>
+          <Text style={styles.recapValue} numberOfLines={1}>{catalogOptionLabel("profileTypes", role)}</Text>
         </View>
         <View style={styles.recapRow}>
           <Text style={styles.recapKey}>{t("filters.lookingFor")}</Text>
-          <Text style={styles.recapValue}>{lookingForLabel}</Text>
+          <Text style={styles.recapValue} numberOfLines={1}>{lookingForLabel}</Text>
         </View>
         <Pressable onPress={() => setStep(0)}>
           <Text style={styles.recapEdit}>{"✏️ "}{t("wizard.editAnswers")}</Text>
@@ -1071,9 +1071,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   recapHint: { fontSize: 12, color: colors.muted, marginBottom: 10, lineHeight: 17 },
-  recapRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
-  recapKey: { fontSize: 13.5, color: colors.muted },
-  recapValue: { fontSize: 13.5, color: colors.ink, fontWeight: "600" },
+  recapRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, gap: 8 },
+  recapKey: { fontSize: 13.5, color: colors.muted, flexShrink: 0 },
+  recapValue: { fontSize: 13.5, color: colors.ink, fontWeight: "600", flex: 1, textAlign: "right" },
   recapEdit: { fontSize: 12.5, fontWeight: "700", color: colors.pink, marginTop: 6 },
   label: { fontSize: 14, fontWeight: "700", color: colors.ink, marginTop: 13, marginBottom: 7 },
   labelFirst: { marginTop: 0 },

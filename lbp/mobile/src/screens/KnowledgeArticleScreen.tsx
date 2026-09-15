@@ -118,7 +118,7 @@ export default function KnowledgeArticleScreen({ route, navigation }: Props) {
       {article.cover_url ? <Image source={{ uri: `${SITE_BASE_URL}${article.cover_url}` }} style={styles.cover} /> : null}
       <View style={styles.body}>
         <View style={styles.metaRow}>
-          <Text style={styles.categoryPill}>{categoryLabel(t, article.category)}</Text>
+          <Text style={styles.categoryPill} numberOfLines={1}>{categoryLabel(t, article.category)}</Text>
           {publishedDate ? <Text style={styles.meta}>{publishedDate}</Text> : null}
         </View>
         <Text style={styles.title}>{article.title}</Text>
@@ -185,6 +185,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
     overflow: "hidden",
+    flexShrink: 1,
   },
   title: { fontSize: 21, fontWeight: "800", color: colors.ink, lineHeight: 27, marginBottom: 14 },
   meta: { fontSize: 12, color: colors.muted },

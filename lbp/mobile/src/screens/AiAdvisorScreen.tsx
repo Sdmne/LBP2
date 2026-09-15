@@ -215,24 +215,40 @@ export default function AiAdvisorScreen({}: Props) {
             <Text style={styles.typingText}>{t("aiAdvisor.typing")}</Text>
           </View>
         ) : null}
-        <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
-          <Pressable onPress={handleClear} hitSlop={8} style={styles.clearButton}>
-            <Feather name="refresh-ccw" size={18} color={colors.muted} />
-          </Pressable>
-          <TextInput
-            style={styles.input}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={t("aiAdvisor.placeholder")}
-            placeholderTextColor={colors.muted}
-            multiline
-            editable={configured}
-          />
-          <Pressable onPress={() => void send()} disabled={!draft.trim() || sending || !configured} hitSlop={8}>
-            <Feather name="send" size={20} color={draft.trim() && configured ? colors.pink : colors.muted} />
-          </Pressable>
-        </View>
       </GradientBackground>
+      {/* BUG FIX (Sep 2026, round 3): composer was still vanishing on
+          Android specifically while Gboard's own top strip toggled
+          between word-suggestion and icon-toolbar height (each toggle
+          fires another native keyboard-frame-change event). Root cause
+          this time: the composer sat INSIDE <GradientBackground>, i.e.
+          inside an expo-linear-gradient native view that was also the
+          child KeyboardAvoidingView resizes on every one of those events.
+          LinearGradient on Android doesn't reliably repaint its own
+          bounds on rapid Animated height changes, so its last-painted
+          frame could visually cover the composer even once the actual
+          layout had room for it again. inputBar already has its own
+          opaque backgroundColor (colors.bgSoft), so moving it OUTSIDE
+          GradientBackground - as a plain, non-gradient sibling still
+          inside KeyboardAvoidingView - changes nothing visually but
+          takes the gradient out of the animated-height hierarchy
+          entirely. */}
+      <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+        <Pressable onPress={handleClear} hitSlop={8} style={styles.clearButton}>
+          <Feather name="refresh-ccw" size={18} color={colors.muted} />
+        </Pressable>
+        <TextInput
+          style={styles.input}
+          value={draft}
+          onChangeText={setDraft}
+          placeholder={t("aiAdvisor.placeholder")}
+          placeholderTextColor={colors.muted}
+          multiline
+          editable={configured}
+        />
+        <Pressable onPress={() => void send()} disabled={!draft.trim() || sending || !configured} hitSlop={8}>
+          <Feather name="send" size={20} color={draft.trim() && configured ? colors.pink : colors.muted} />
+        </Pressable>
+      </View>
     </KeyboardAvoidingView>
   );
 }

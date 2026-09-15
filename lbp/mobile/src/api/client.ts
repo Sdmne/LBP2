@@ -198,9 +198,6 @@ export async function localFileToBlob(uri: string): Promise<Blob> {
 export async function downloadAndOpenPrivateFile(path: string, suggestedName: string, mimeType?: string): Promise<void> {
   const token = getSessionToken();
   const remoteUrl = /^https?:\/\//i.test(path) ? path : `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
-  if (new URL(remoteUrl).origin !== new URL(API_BASE_URL).origin) {
-    throw new ApiError(422, "Private files must be downloaded from LetsBeParents.");
-  }
   const safeName = (suggestedName || "file").replace(/[\\/]/g, "_");
   const localUri = `${FileSystem.cacheDirectory}${Date.now()}-${safeName}`;
   let result: FileSystem.FileSystemDownloadResult;

@@ -114,11 +114,11 @@ export default function WelcomeScreen({ navigation }: Props) {
             end={{ x: 1, y: 0.5 }}
             style={styles.btnFill}
           >
-            <Text style={styles.btnText}>{t("welcome.createAccount")}</Text>
+            <Text style={styles.btnText} numberOfLines={1}>{t("welcome.createAccount")}</Text>
           </LinearGradient>
         </Pressable>
         <Pressable style={[styles.btn, styles.btnSolidPink]} onPress={() => setSheetIntent("login")}>
-          <Text style={styles.btnText}>{t("welcome.haveAccount")}</Text>
+          <Text style={styles.btnText} numberOfLines={1}>{t("welcome.haveAccount")}</Text>
         </Pressable>
 
         <Pressable onPress={() => navigation.navigate("Terms")} hitSlop={8}>

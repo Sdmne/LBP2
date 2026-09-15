@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
 import {
   NavigationContainer,
@@ -56,7 +56,9 @@ import VerifyCodeScreen from "../screens/VerifyCodeScreen";
 import DeleteAccountScreen from "../screens/DeleteAccountScreen";
 import ProfileWizardScreen from "../screens/ProfileWizardScreen";
 import ReferralScreen from "../screens/ReferralScreen";
+import WhatsNewScreen from "../screens/WhatsNewScreen";
 import MainTabs, { type MainTabsParamList } from "./MainTabs";
+import { hasSeenWhatsNew } from "../utils/whatsNew";
 import type { CatalogFilters } from "../api/catalogFilters";
 import type { CommunityPost } from "../api/community";
 
@@ -166,6 +168,10 @@ export type RootStackParamList = {
   // Premium roadmap step 4 - "Invite friends" (MeProfileScreen's new row).
   // No params - reads/writes GET/POST /api/member/referral(/redeem).
   Referral: undefined;
+  // One-shot "what's new" screen (see screens/WhatsNewScreen.tsx) - pushed
+  // automatically once per device, right after ProfileWizard/VerifyCode
+  // clear, by the effect below. No params.
+  WhatsNew: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -194,6 +200,25 @@ export default function RootNavigator() {
     navigationRef.navigate("ProfileWizard");
     clearPendingProfileWizard();
   }, [isAuthenticated, pendingProfileWizard, user, navigationRef, clearPendingProfileWizard]);
+
+  // One-shot "what's new" push (Alena: "в приложении надо какой-то экран
+  // создать при входе первый раз что появилось на сайте") - shown once per
+  // device to every signed-in, verified user (existing or new), same
+  // AsyncStorage-flag mechanism as ChatScreen's wallpaper choice. Waits on
+  // !pendingProfileWizard so it never races the post-signup wizard push
+  // above; whatsNewChecked guards against firing twice while the async
+  // AsyncStorage read is in flight.
+  const whatsNewChecked = useRef(false);
+  useEffect(() => {
+    if (!isAuthenticated || pendingProfileWizard) return;
+    if (user && !user.emailVerified) return;
+    if (!navigationRef.isReady()) return;
+    if (whatsNewChecked.current) return;
+    whatsNewChecked.current = true;
+    hasSeenWhatsNew().then((seen) => {
+      if (!seen) navigationRef.navigate("WhatsNew");
+    });
+  }, [isAuthenticated, pendingProfileWizard, user, navigationRef]);
 
   if (isLoading) {
     return (
@@ -321,6 +346,7 @@ export default function RootNavigator() {
             />
             <Stack.Screen name="Favourites" component={FavouritesScreen} options={{ headerShown: true, title: t("nav.savedTitle") }} />
             <Stack.Screen name="Referral" component={ReferralScreen} options={{ headerShown: true, title: t("nav.referralTitle") }} />
+            <Stack.Screen name="WhatsNew" component={WhatsNewScreen} options={{ headerShown: false }} />
             <Stack.Screen name="Resources" component={ResourcesScreen} options={{ headerShown: true, title: t("nav.resourcesTitle") }} />
             <Stack.Screen
               name="ResourceCategory"

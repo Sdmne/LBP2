@@ -1,13 +1,12 @@
 import { api } from "./client";
 import type { AuthResponse, PublicUser } from "./types";
-import { currentDeviceInfo } from "../utils/deviceInfo";
 
 export function login(email: string, password: string) {
-  return api.post<AuthResponse>("/api/auth/login", { email, password, deviceInfo: currentDeviceInfo() });
+  return api.post<AuthResponse>("/api/auth/login", { email, password });
 }
 
 export function signup(email: string, password: string, displayName: string, locale = "en") {
-  return api.post<AuthResponse>("/api/auth/signup", { email, password, displayName, locale, deviceInfo: currentDeviceInfo() });
+  return api.post<AuthResponse>("/api/auth/signup", { email, password, displayName, locale });
 }
 
 // POST /api/auth/firebase - auth_firebase() in main.py, FirebaseAuthPayload.
@@ -24,7 +23,7 @@ export function signup(email: string, password: string, displayName: string, loc
 // 409 "SOCIAL_ACCOUNT_CONFLICT" (that email already has a password-based
 // account, or is already linked to a different social identity).
 export function authenticateWithFirebase(idToken: string, displayName: string | null, intent: "login" | "register") {
-  return api.post<AuthResponse>("/api/auth/firebase", { idToken, displayName, intent, deviceInfo: currentDeviceInfo() });
+  return api.post<AuthResponse>("/api/auth/firebase", { idToken, displayName, intent });
 }
 
 // POST /api/auth/forgot-password - auth_forgot_password() in main.py, takes

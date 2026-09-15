@@ -203,6 +203,26 @@ DIDIT_ENABLED = os.getenv("DIDIT_ENABLED", "0").strip().lower() in {"1", "true",
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").rstrip("/")
 DIDIT_TIMEOUT_SECONDS = int(os.getenv("DIDIT_TIMEOUT_SECONDS", "20"))
 
+# RevenueCat one-time ("consumable") purchases. Alena, 2026-09-14:
+# "revenue cat у нас есть и подключен к старому сайту. и эти пакеты мы
+# тоже будем продавать через него" - this is the SAME RevenueCat project
+# already wired up on the current/live production site, reused here for
+# the new consumable packages (Boost/Superlike/Rewind/likes-unlock/
+# compat-report-unlock/extra-likes-pack), not a new RevenueCat account.
+# REVENUECAT_WEBHOOK_SECRET is the plain string configured on the
+# RevenueCat dashboard's Project settings -> Integrations -> Webhooks page
+# (RevenueCat echoes it back verbatim in the Authorization header on every
+# webhook call - this is NOT an HMAC signing key like DIDIT_WEBHOOK_SECRET
+# above, RevenueCat's webhook auth is a plain shared secret). Must be set
+# directly on the server as an env var and never committed here, same rule
+# as DIDIT_WEBHOOK_SECRET/ANTHROPIC_API_KEY. The mobile app's own
+# RevenueCat *public* SDK keys (one per platform - not secrets, safe to
+# ship in the app bundle) live in app.json's `extra.revenueCat` - see
+# mobile/src/utils/purchases.ts.
+REVENUECAT_WEBHOOK_SECRET = os.getenv("REVENUECAT_WEBHOOK_SECRET", "").strip()
+REVENUECAT_ENABLED = os.getenv("REVENUECAT_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+REVENUECAT_ENVIRONMENT = os.getenv("REVENUECAT_ENVIRONMENT", "SANDBOX").strip().upper()
+
 # AI Family Advisor (item 12 of Alena's backlog - "ИИ консультант", decision
 # made Sept 2026 to use Anthropic's Claude API). Same env-var-driven
 # is-it-configured pattern as the Didit block above. ANTHROPIC_API_KEY must
@@ -3406,6 +3426,16 @@ RANKING_DEFAULTS: dict[str, bool | float] = {
     # feel like a real jump, not a rounding error next to a plain Builder/
     # Pro subscription.
     "ranking.weights.boost": 65,
+    # Alena, 2026-09-14: "показывать людям в первую очередь людей которые им
+    # подходят по географии по тому кого ищут" - two new personalized
+    # signals, only applied when the request has a signed-in viewer to
+    # personalize for (member_catalog; public_catalog's logged-out path
+    # passes no viewer and these simply contribute 0 - see
+    # catalog_ranking_sql()). Modest weights on purpose, well under
+    # "verified" (100) - a same-country/compatible-seeker match nudges the
+    # order, it doesn't override trust signals.
+    "ranking.weights.geography": 20,
+    "ranking.weights.lookingForMatch": 30,
 }
 
 
@@ -3502,8 +3532,14 @@ def catalog_profile_completeness_sql(table_name: str = "profiles") -> str:
     return "(" + " + ".join(f"CASE WHEN {factor} THEN 1.0 ELSE 0.0 END" for factor in factors) + ") / 7.0"
 
 
-def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, list[Any]]:
-    """Shared joins/order for public and member catalogs; apply before pagination."""
+def catalog_ranking_sql(settings: dict[str, bool | float], viewer: dict[str, Any] | None = None) -> tuple[str, str, list[Any]]:
+    """Shared joins/order for public and member catalogs; apply before pagination.
+
+    `viewer` (optional): the signed-in viewer's own profile row, used only
+    for the two personalized signals below (geography/lookingFor match) -
+    every other term is viewer-independent. Pass None (public_catalog's
+    logged-out path) to skip both; they simply contribute 0 to the order.
+    """
     if not settings["ranking.v2.enabled"]:
         return "", """CASE WHEN LOWER(COALESCE(profiles.data->>'isPremium',
             profiles.data->>'premium', 'false')) = 'true' THEN 0 ELSE 1 END,
@@ -3511,7 +3547,7 @@ def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, li
     joins: list[str] = []
     terms: list[str] = []
     params: list[Any] = []
-    weights = {name: float(settings[f"ranking.weights.{name}"]) for name in ("completeness", "honeymoon", "premium", "recency", "verified", "boost")}
+    weights = {name: float(settings[f"ranking.weights.{name}"]) for name in ("completeness", "honeymoon", "premium", "recency", "verified", "boost", "geography", "lookingForMatch")}
     if weights["completeness"]:
         terms.append(f"%s * ({catalog_profile_completeness_sql()})")
         params.append(weights["completeness"])
@@ -3571,6 +3607,26 @@ def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, li
         boost_until = ranking_timestamp_sql("profiles.data->>'boostActiveUntil'")
         terms.append(f"%s * CASE WHEN ({boost_until}) IS NOT NULL AND ({boost_until}) > CURRENT_TIMESTAMP THEN 1 ELSE 0 END")
         params.append(weights["boost"])
+    viewer_data = as_dict(viewer.get("data")) if viewer else {}
+    if weights["geography"] and viewer_data.get("country"):
+        terms.append("%s * CASE WHEN UPPER(profiles.data->>'country') = %s THEN 1 ELSE 0 END")
+        params.extend([weights["geography"], str(viewer_data["country"]).strip().upper()])
+    if weights["lookingForMatch"] and viewer_data:
+        # "By whom [the candidate] is looking for": boost candidates whose
+        # OWN lookingFor list includes what the viewer is - every profile
+        # can offer CO_PARENTING_PARTNER (that's what a non-donor profile
+        # IS), plus SPERM_DONOR/EGG_DONOR for each of the viewer's own
+        # donorType entries - same tokens member_catalog's own donorType/
+        # lookingFor filters already use (CATALOG_DONOR_TYPES/
+        # CATALOG_LOOKING_FOR above). Deliberately directional, not a mutual
+        # check - the reverse (does the VIEWER'S OWN lookingFor match this
+        # candidate) is already covered by the existing explicit lookingFor
+        # catalog filter, so doubling it here would just double-count it.
+        viewer_donor_types = [str(v).strip().upper() for v in (viewer_data.get("donorType") or []) if str(v or "").strip()]
+        viewer_offers = ["CO_PARENTING_PARTNER"] + [f"{d}_DONOR" for d in viewer_donor_types if d in CATALOG_DONOR_TYPES]
+        if viewer_offers:
+            terms.append("%s * CASE WHEN profiles.data->'lookingFor' ?| %s::text[] THEN 1 ELSE 0 END")
+            params.extend([weights["lookingForMatch"], viewer_offers])
     order = f"({' + '.join(terms)}) DESC, profiles.id DESC" if terms else "profiles.id DESC"
     return "\n".join(joins), order, params
 
@@ -3979,6 +4035,13 @@ def daily_like_count(cursor, profile_id: int) -> int:
           AND status = 'ACTIVE'
           AND created_at >= UTC_DATE()
           AND created_at < UTC_DATE() + INTERVAL 1 DAY
+          AND NOT EXISTS (
+            SELECT 1 FROM app_entities superlike_marker
+            WHERE superlike_marker.entity_type = 'superlike'
+              AND superlike_marker.status = 'ACTIVE'
+              AND superlike_marker.source_key = CONCAT('superlike-', profile_likes.actor_profile_id, '-', profile_likes.target_profile_id)
+              AND (superlike_marker.data->>'createdAt')::timestamptz >= profile_likes.created_at
+          )
         """,
         (profile_id,),
     )
@@ -6848,6 +6911,14 @@ def member_like_profile(
         if is_new_like:
             settings = runtime_settings(cursor)
             daily_limit = int(settings["limits.premium_likes_per_day" if profile_is_premium(actor_profile) else "limits.free_likes_per_day"])
+            # One-time "extra likes today" pack (RevenueCat product
+            # lbp_extra_likes_pack_10 -> revenuecat_grant_extra_likes_pack())
+            # adds a same-day-only allowance on top of the normal
+            # daily_limit - bonusLikesToday only counts if bonusLikesDate is
+            # actually today, so an unused pack never silently carries over.
+            actor_data = profile_data(actor_profile)
+            if str(actor_data.get("bonusLikesDate") or "") == now_utc().strftime("%Y-%m-%d"):
+                daily_limit += int_or_none(actor_data.get("bonusLikesToday")) or 0
             used_today = daily_like_count(cursor, actor_profile_id)
             if used_today >= daily_limit:
                 raise HTTPException(
@@ -7025,7 +7096,12 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         current_profile = fetch_profile(cursor, profile_id)
-        is_premium = profile_is_premium(current_profile)
+        # One-time 48h "who liked me" unlock (RevenueCat product
+        # lbp_likes_unlock_48h -> revenuecat_grant_likes_unlock()) - grants
+        # the same full-identity view a Builder+/Pro subscription gets, for
+        # as long as the window is still open.
+        likes_unlocked_until = str(profile_data(current_profile).get("likesUnlockedUntil") or "").strip()
+        is_premium = profile_is_premium(current_profile) or (likes_unlocked_until > now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"))
         block_filter = """
             AND NOT EXISTS (
               SELECT 1
@@ -9256,9 +9332,14 @@ def member_compatibility_report(profile_identifier: str, response: Response, use
     profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         profile = fetch_profile(cursor, profile_id)
-        if not profile_is_premium(profile):
-            raise HTTPException(status_code=402, detail="Premium is required for the Compatibility Report")
         other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        # One-time per-match unlock (RevenueCat product
+        # lbp_compat_report_unlock_1x - see member_spend_compat_report_unlock()
+        # above) bypasses the subscription gate for this ONE match only.
+        unlocked_for = [v for v in (int_or_none(x) for x in (profile_data(profile).get("compatReportUnlockedFor") or [])) if v is not None]
+        report_is_unlocked_for_match = other_profile_id in unlocked_for
+        if not profile_is_premium(profile) and not report_is_unlocked_for_match:
+            raise HTTPException(status_code=402, detail="Premium is required for the Compatibility Report")
         require_active_match(cursor, profile_id, other_profile_id)
         other_profile = fetch_profile(cursor, other_profile_id)
         mine = compatibility_answers_of(profile)
@@ -9275,7 +9356,7 @@ def member_compatibility_report(profile_identifier: str, response: Response, use
                 "matchCompleted": bool(theirs),
             }
         report = _compatibility_report_from_answers(mine, theirs)
-        is_detailed = profile_is_pro(profile)
+        is_detailed = profile_is_pro(profile) or report_is_unlocked_for_match
         if not is_detailed:
             # Base (Family Builder) tier sees which dimensions are strongest
             # and worth discussing, but not the specific per-question
@@ -10751,6 +10832,359 @@ def member_send_sticker(
         emoji,
     )
     return {"ok": True, "message": {"id": message_id, "conversationId": conversation_id, "senderProfileId": profile_id, "body": body}}
+
+
+# =========================================================
+# REVENUECAT - one-time consumable purchases (Alena, 2026-09-14: full
+# package list confirmed - "Разовый буст... Суперлайк... Отмена случайного
+# свайпа... Разовая разблокировка 'кто меня лайкнул'... Разовая
+# разблокировка полного отчёта о совместимости... Пакет дополнительных
+# лайков на сегодня"). Every effect below stores its state directly in the
+# existing profiles.data JSONB column via update_profile_data() - zero
+# schema migrations, same tradeoff used everywhere else in this file for
+# small per-profile state (see e.g. boostActiveUntil above,
+# aiAdvisorMessages below). profile_likes has no JSONB column of its own,
+# which is why "Superlike" is a separate credit counter + a normal like,
+# not a flag on the like row itself - see member_superlike_profile() below.
+#
+# NOTE for the developer: the exact RevenueCat product identifiers below
+# (REVENUECAT_PRODUCT_EFFECTS keys) are placeholders - they must be
+# replaced with the real "Product identifier" strings configured for these
+# products in the RevenueCat dashboard / App Store Connect / Google Play
+# Console once those are created. The webhook payload shape and event-type
+# names used below (event.id/type/app_user_id/product_id, event types
+# INITIAL_PURCHASE/NON_RENEWING_PURCHASE) are written from RevenueCat's
+# publicly documented webhook format - verify against RevenueCat's current
+# docs before going live, since this session has no live RevenueCat account
+# to test against.
+
+BOOST_PURCHASE_HOURS = 24  # matches BOOST_DEFAULT_HOURS below - kept as its own constant since this block sits well before BOOST_DEFAULT_HOURS is defined and both should stay independently readable.
+LIKES_UNLOCK_HOURS = 48
+EXTRA_LIKES_PACK_SIZE = 10
+
+
+def revenuecat_grant_boost(cursor, profile_id: int, event: dict[str, Any]) -> dict[str, Any]:
+    data = profile_data(fetch_profile(cursor, profile_id))
+    now_stamp = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    existing_until = str(data.get("boostActiveUntil") or "").strip()
+    new_expiry = (now_utc() + timedelta(hours=BOOST_PURCHASE_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    final_expiry = max(existing_until, new_expiry) if existing_until > now_stamp else new_expiry
+    update_profile_data(cursor, profile_id, {"boostActiveUntil": final_expiry})
+    return {"boostActiveUntil": final_expiry}
+
+
+def revenuecat_grant_superlike(cursor, profile_id: int, event: dict[str, Any]) -> dict[str, Any]:
+    data = profile_data(fetch_profile(cursor, profile_id))
+    credits = (int_or_none(data.get("superLikeCredits")) or 0) + 1
+    update_profile_data(cursor, profile_id, {"superLikeCredits": credits})
+    return {"superLikeCredits": credits}
+
+
+def revenuecat_grant_rewind(cursor, profile_id: int, event: dict[str, Any]) -> dict[str, Any]:
+    data = profile_data(fetch_profile(cursor, profile_id))
+    credits = (int_or_none(data.get("rewindCredits")) or 0) + 1
+    update_profile_data(cursor, profile_id, {"rewindCredits": credits})
+    return {"rewindCredits": credits}
+
+
+def revenuecat_grant_likes_unlock(cursor, profile_id: int, event: dict[str, Any]) -> dict[str, Any]:
+    data = profile_data(fetch_profile(cursor, profile_id))
+    now_stamp = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    existing_until = str(data.get("likesUnlockedUntil") or "").strip()
+    new_expiry = (now_utc() + timedelta(hours=LIKES_UNLOCK_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    final_expiry = max(existing_until, new_expiry) if existing_until > now_stamp else new_expiry
+    update_profile_data(cursor, profile_id, {"likesUnlockedUntil": final_expiry})
+    return {"likesUnlockedUntil": final_expiry}
+
+
+def revenuecat_grant_compat_report_unlock(cursor, profile_id: int, event: dict[str, Any]) -> dict[str, Any]:
+    data = profile_data(fetch_profile(cursor, profile_id))
+    credits = (int_or_none(data.get("compatReportUnlockCredits")) or 0) + 1
+    update_profile_data(cursor, profile_id, {"compatReportUnlockCredits": credits})
+    return {"compatReportUnlockCredits": credits}
+
+
+def revenuecat_grant_extra_likes_pack(cursor, profile_id: int, event: dict[str, Any]) -> dict[str, Any]:
+    data = profile_data(fetch_profile(cursor, profile_id))
+    today = now_utc().strftime("%Y-%m-%d")
+    previous_bonus = int_or_none(data.get("bonusLikesToday")) or 0
+    bonus = previous_bonus + EXTRA_LIKES_PACK_SIZE if str(data.get("bonusLikesDate") or "") == today else EXTRA_LIKES_PACK_SIZE
+    update_profile_data(cursor, profile_id, {"bonusLikesToday": bonus, "bonusLikesDate": today})
+    return {"bonusLikesToday": bonus, "bonusLikesDate": today}
+
+
+# Placeholder product identifiers - see the NOTE above. Keys are exactly
+# what RevenueCat sends as event.product_id.
+REVENUECAT_PRODUCT_EFFECTS = {
+    "lbp_boost_1x": revenuecat_grant_boost,
+    "lbp_superlike_1x": revenuecat_grant_superlike,
+    "lbp_rewind_1x": revenuecat_grant_rewind,
+    "lbp_likes_unlock_48h": revenuecat_grant_likes_unlock,
+    "lbp_compat_report_unlock_1x": revenuecat_grant_compat_report_unlock,
+    "lbp_extra_likes_pack_10": revenuecat_grant_extra_likes_pack,
+}
+
+
+@app.post("/api/webhooks/revenuecat")
+async def revenuecat_webhook(request: Request):
+    if not REVENUECAT_ENABLED or not REVENUECAT_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="RevenueCat webhook is not configured")
+    authorization = request.headers.get("authorization", "")
+    presented = authorization[7:] if authorization.lower().startswith("bearer ") else authorization
+    if not presented or not hmac.compare_digest(presented, REVENUECAT_WEBHOOK_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=400, detail="Invalid webhook payload") from error
+    event = payload.get("event") if isinstance(payload, dict) else None
+    if not isinstance(event, dict):
+        raise HTTPException(status_code=422, detail="Missing event payload")
+    event_id = str(event.get("id") or "").strip()
+    event_type = str(event.get("type") or "").strip().upper()
+    app_user_id = str(event.get("app_user_id") or "").strip()
+    product_id = str(event.get("product_id") or "").strip()
+    if not event_id:
+        raise HTTPException(status_code=422, detail="Missing event id")
+    applicable_event_types = {"NON_RENEWING_PURCHASE"}
+    purchase_event = event_type in applicable_event_types and product_id in REVENUECAT_PRODUCT_EFFECTS
+    ledger_key = f"rc-{event_id}"
+    if purchase_event:
+        environment = str(event.get("environment") or "").strip().upper()
+        if environment != REVENUECAT_ENVIRONMENT:
+            return {"ok": True, "ignored": True, "reason": "ENVIRONMENT_MISMATCH"}
+        transaction_id = str(event.get("transaction_id") or "").strip()
+        if not transaction_id:
+            raise HTTPException(status_code=422, detail="Missing purchase transaction id")
+        transaction_key = json.dumps([environment, str(event.get("store") or ""), product_id, transaction_id])
+        ledger_key = "rc-tx-" + hashlib.sha256(transaction_key.encode()).hexdigest()
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (ledger_key,))
+        # Idempotency - RevenueCat retries on any non-2xx and can also
+        # redeliver after a 200; same app_entities-as-dedup-ledger approach
+        # used elsewhere in this file for once-only side effects.
+        cursor.execute(
+            "SELECT id FROM app_entities WHERE entity_type = 'revenuecat_event' AND source_key = %s LIMIT 1 FOR UPDATE",
+            (ledger_key,),
+        )
+        if cursor.fetchone():
+            return {"ok": True, "ignored": True, "reason": "DUPLICATE_EVENT"}
+        # Only these event types represent a completed one-time purchase of
+        # a non-subscription product - RevenueCat sends subscription
+        # lifecycle events (RENEWAL/CANCELLATION/EXPIRATION/...) through
+        # this same webhook too; they don't match anything in
+        # REVENUECAT_PRODUCT_EFFECTS and are intentionally ignored below.
+        result: dict[str, Any] = {}
+        status = "IGNORED"
+        if event_type in applicable_event_types and app_user_id and product_id in REVENUECAT_PRODUCT_EFFECTS:
+            profile_id = int_or_none(app_user_id)
+            if profile_id is None:
+                # Mobile configures Purchases with appUserID = String(profileId)
+                # (see mobile/src/utils/purchases.ts) - anything else here means
+                # the SDK was configured with a different app_user_id scheme.
+                status = "UNKNOWN_APP_USER_ID"
+            else:
+                cursor.execute("SELECT id FROM profiles WHERE id = %s FOR NO KEY UPDATE", (profile_id,))
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=503, detail="Purchase profile is not available yet")
+                result = REVENUECAT_PRODUCT_EFFECTS[product_id](cursor, profile_id, event)
+                status = "APPLIED"
+                cursor.execute(
+                    "INSERT INTO api_events (event_type, payload) VALUES ('payment.revenuecat_purchase', %s)",
+                    (json.dumps({"profileId": profile_id, "productId": product_id, "eventType": event_type, "revenueCatEventId": event_id, "effect": result}, ensure_ascii=False),),
+                )
+                send_support_status_message(cursor, profile_id, "Thanks for your purchase! It's already active on your profile.")
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('revenuecat_event', %s, %s, %s, %s)
+            """,
+            (
+                ledger_key,
+                f"RevenueCat {event_type or 'event'}: {product_id or 'unknown product'}",
+                status,
+                json.dumps({"eventType": event_type, "appUserId": app_user_id, "productId": product_id, "effect": result}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    return {"ok": True, "status": status}
+
+
+@app.get("/api/member/purchases/status")
+def member_purchases_status(user: dict[str, Any] = Depends(require_user)):
+    """Current balances for every RevenueCat consumable - mobile's
+    PurchasesScreen reads this to show "you have N Superlikes" etc.
+    alongside the buy buttons."""
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        data = profile_data(fetch_profile(cursor, profile_id))
+    now_stamp = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    boost_until = str(data.get("boostActiveUntil") or "").strip()
+    likes_unlocked_until = str(data.get("likesUnlockedUntil") or "").strip()
+    today = now_utc().strftime("%Y-%m-%d")
+    bonus_likes_today = int_or_none(data.get("bonusLikesToday")) or 0 if str(data.get("bonusLikesDate") or "") == today else 0
+    return {
+        "boostActive": bool(boost_until and boost_until > now_stamp),
+        "boostActiveUntil": boost_until or None,
+        "superLikeCredits": int_or_none(data.get("superLikeCredits")) or 0,
+        "rewindCredits": int_or_none(data.get("rewindCredits")) or 0,
+        "likesUnlocked": bool(likes_unlocked_until and likes_unlocked_until > now_stamp),
+        "likesUnlockedUntil": likes_unlocked_until or None,
+        "compatReportUnlockCredits": int_or_none(data.get("compatReportUnlockCredits")) or 0,
+        "bonusLikesToday": bonus_likes_today,
+    }
+
+
+@app.post("/api/member/likes/{profile_identifier}/superlike")
+def member_superlike_profile(
+    profile_identifier: str,
+    background_tasks: BackgroundTasks,
+    user: dict[str, Any] = Depends(require_user),
+):
+    """One-time Superlike (RevenueCat product lbp_superlike_1x, granted by
+    revenuecat_grant_superlike() above). Spends one superLikeCredits credit
+    and otherwise behaves like member_like_profile() - same verification/
+    block/target checks, same profile_likes insert, same match/notification
+    handling - except it bypasses the daily like limit entirely (that's the
+    point of paying for it) and never touches daily_like_count's counter.
+    The app_entities marker row it leaves (entity_type='superlike') is for a
+    future UI change to visually flag "Super liked you".
+    """
+    actor_profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id FROM profiles WHERE id = %s LIMIT 1 FOR NO KEY UPDATE", (actor_profile_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Profile not found")
+        actor_profile = fetch_profile(cursor, actor_profile_id)
+        if not profile_is_verified(actor_profile):
+            raise HTTPException(status_code=403, detail="Verify your profile before sending likes")
+        actor_data = profile_data(actor_profile)
+        credits = int_or_none(actor_data.get("superLikeCredits")) or 0
+        if credits <= 0:
+            raise HTTPException(status_code=402, detail="No Superlikes available - purchase one to continue")
+        target_profile_id = resolve_profile_id(cursor, profile_identifier)
+        if target_profile_id == actor_profile_id:
+            raise HTTPException(status_code=422, detail="You cannot like your own profile")
+        target_profile = fetch_profile(cursor, target_profile_id)
+        if not profile_is_visible_to_member(cursor, actor_profile_id, target_profile):
+            raise HTTPException(status_code=404, detail="Profile not found")
+        if has_active_block(cursor, actor_profile_id, target_profile_id):
+            raise HTTPException(status_code=403, detail="This profile is not available")
+        cursor.execute(
+            "SELECT id, status FROM profile_likes WHERE actor_profile_id = %s AND target_profile_id = %s LIMIT 1",
+            (actor_profile_id, target_profile_id),
+        )
+        existing_like = cursor.fetchone()
+        is_new_like = not existing_like or existing_like.get("status") != "ACTIVE"
+        cursor.execute(
+            """
+            INSERT INTO profile_likes (actor_profile_id, target_profile_id, status, created_at, updated_at)
+            VALUES (%s, %s, 'ACTIVE', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (actor_profile_id, target_profile_id) DO UPDATE SET
+              created_at = CASE WHEN profile_likes.status = 'ACTIVE' THEN profile_likes.created_at ELSE CURRENT_TIMESTAMP END,
+              status = 'ACTIVE',
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (actor_profile_id, target_profile_id),
+        )
+        update_profile_data(cursor, actor_profile_id, {"superLikeCredits": credits - 1})
+        marker_key = f"superlike-{actor_profile_id}-{target_profile_id}"
+        marker_payload = json.dumps({"actorProfileId": actor_profile_id, "targetProfileId": target_profile_id, "createdAt": now_utc().isoformat()}, ensure_ascii=False)
+        cursor.execute("SELECT id FROM app_entities WHERE entity_type = 'superlike' AND source_key = %s LIMIT 1 FOR UPDATE", (marker_key,))
+        marker = cursor.fetchone()
+        if marker:
+            cursor.execute("UPDATE app_entities SET status = 'ACTIVE', data = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (marker_payload, marker["id"]))
+        else:
+            cursor.execute(
+                "INSERT INTO app_entities (entity_type, source_key, title, status, data) VALUES ('superlike', %s, %s, 'ACTIVE', %s)",
+                (marker_key, f"Superlike: {actor_profile.get('display_name') or actor_profile_id} -> {target_profile.get('display_name') or target_profile_id}", marker_payload),
+            )
+        cursor.execute(
+            "SELECT id FROM profile_likes WHERE actor_profile_id = %s AND target_profile_id = %s AND status = 'ACTIVE' LIMIT 1",
+            (target_profile_id, actor_profile_id),
+        )
+        reverse = cursor.fetchone()
+        match_id = None
+        conversation_id = None
+        if reverse:
+            match_id = ensure_match(cursor, actor_profile_id, target_profile_id)
+            conversation_id = ensure_conversation(cursor, actor_profile_id, target_profile_id, match_id)
+        conn.commit()
+    actor_name = str(actor_profile.get("display_name") or user.get("display_name") or "").strip()
+    target_name = str(target_profile.get("display_name") or "").strip()
+    if is_new_like:
+        background_tasks.add_task(send_profile_notification, target_profile_id, "NEW_LIKE", actor_name)
+    if is_new_like and reverse:
+        background_tasks.add_task(send_profile_notification, target_profile_id, "NEW_MATCH", actor_name)
+        background_tasks.add_task(send_profile_notification, actor_profile_id, "NEW_MATCH", target_name)
+    return {
+        "ok": True,
+        "liked": True,
+        "superLiked": True,
+        "created": is_new_like,
+        "matched": bool(reverse),
+        "matchId": match_id,
+        "conversationId": conversation_id,
+        "remainingSuperLikeCredits": credits - 1,
+    }
+
+
+@app.post("/api/member/rewind-credits/spend")
+def member_spend_rewind_credit(user: dict[str, Any] = Depends(require_user)):
+    """One-time Rewind credit (RevenueCat product lbp_rewind_1x, granted by
+    revenuecat_grant_rewind() above) for EXPLORE-tier members - Builder+/Pro
+    already get unlimited Rewind free (CatalogScreen.tsx's handleRewind(),
+    unchanged). Mobile calls this right before performing the local undo; if
+    this 402s, it must not go through with the rewind."""
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id FROM profiles WHERE id = %s LIMIT 1 FOR NO KEY UPDATE", (profile_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Profile not found")
+        data = profile_data(fetch_profile(cursor, profile_id))
+        credits = int_or_none(data.get("rewindCredits")) or 0
+        if credits <= 0:
+            raise HTTPException(status_code=402, detail="No Rewind credits available - purchase one to continue")
+        update_profile_data(cursor, profile_id, {"rewindCredits": credits - 1})
+        conn.commit()
+    return {"ok": True, "remainingRewindCredits": credits - 1}
+
+
+@app.post("/api/member/compatibility-report/{profile_identifier}/unlock")
+def member_spend_compat_report_unlock(profile_identifier: str, user: dict[str, Any] = Depends(require_user)):
+    """Spend one compatReportUnlockCredits credit (RevenueCat product
+    lbp_compat_report_unlock_1x, granted by
+    revenuecat_grant_compat_report_unlock() above) to unlock the full,
+    detailed Compatibility Report for ONE specific match without a
+    Builder/Pro subscription. Two-step by design: the webhook above can't
+    know which match a purchase is for (RevenueCat doesn't carry that as
+    metadata on a plain one-time product), so it only grants a spendable
+    credit; this endpoint is what the member calls, already looking at a
+    specific match's paywall, to spend one credit against that match.
+    member_compatibility_report() below checks
+    profileData.compatReportUnlockedFor (a list of the other side's profile
+    ids) alongside the existing profile_is_premium()/profile_is_pro() gates.
+    """
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id FROM profiles WHERE id = %s LIMIT 1 FOR NO KEY UPDATE", (profile_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Profile not found")
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        require_active_match(cursor, profile_id, other_profile_id)
+        data = profile_data(fetch_profile(cursor, profile_id))
+        unlocked_for = [v for v in (int_or_none(x) for x in (data.get("compatReportUnlockedFor") or [])) if v is not None]
+        credits = int_or_none(data.get("compatReportUnlockCredits")) or 0
+        if other_profile_id in unlocked_for:
+            conn.commit()
+            return {"ok": True, "alreadyUnlocked": True, "remainingCompatReportUnlockCredits": credits}
+        if credits <= 0:
+            raise HTTPException(status_code=402, detail="No Compatibility Report unlocks available - purchase one to continue")
+        unlocked_for.append(other_profile_id)
+        update_profile_data(cursor, profile_id, {"compatReportUnlockCredits": credits - 1, "compatReportUnlockedFor": unlocked_for})
+        conn.commit()
+    return {"ok": True, "alreadyUnlocked": False, "remainingCompatReportUnlockCredits": credits - 1}
 
 
 @app.get("/api/member/subscription")
@@ -17997,7 +18431,7 @@ def member_catalog(
         where = "WHERE " + " AND ".join(where_parts)
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM profiles {where}", params)
         total = int(cursor.fetchone()["cnt"])
-        ranking_joins, ranking_order, ranking_params = catalog_ranking_sql(catalog_ranking_settings(cursor))
+        ranking_joins, ranking_order, ranking_params = catalog_ranking_sql(catalog_ranking_settings(cursor), viewer=viewer_profile)
         cursor.execute(
             f"""
             SELECT id,
