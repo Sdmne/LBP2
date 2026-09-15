@@ -12725,6 +12725,8 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')",
             "pending_photo_moderation": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_photo' AND status = 'PENDING'",
             "pending_reports": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_report' AND status = 'PENDING'",
+            "pending_boosts": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'boost' AND status = 'PENDING'",
+            "pending_video_verifications": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'video_verification' AND status = 'PENDING'",
             "active_subscriptions": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND status = 'ACTIVE'",
             "manual_subscriptions": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND status = 'ACTIVE' AND UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), '')) IN ('MANUAL', 'MANUAL_REVIEW')",
             "manual_subscriptions_30d": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), '')) IN ('MANUAL', 'MANUAL_REVIEW') AND created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",

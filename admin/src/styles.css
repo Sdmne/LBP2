@@ -8145,6 +8145,58 @@ body {
   border-color: #f54545;
 }
 
+/* Boost Requests / Video Verifications queues (mirrors .moderation-photo-grid
+   article's card look, but as a single-column list since there's no image
+   grid to lay out here). */
+.generic-request-list {
+  display: grid;
+  gap: 12px;
+}
+.generic-request-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  border: 1px solid #e1e7f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 16px 18px;
+}
+.generic-request-row p {
+  margin: 3px 0;
+  color: #63758e;
+  font-size: 14px;
+}
+.generic-request-row .row-actions {
+  align-items: center;
+}
+.boost-hours-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #63758e;
+}
+.boost-hours-field input {
+  width: 88px;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font: inherit;
+}
+.video-verification-row {
+  align-items: flex-start;
+}
+.video-verification-row video {
+  width: 220px;
+  max-width: 100%;
+  border-radius: 10px;
+  background: #0a0a0a;
+  flex: 0 0 auto;
+}
+
 @media (min-width: 761px) and (max-height: 800px) {
   .brand {
     padding: 12px 16px;

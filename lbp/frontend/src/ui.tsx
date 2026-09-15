@@ -8,8 +8,10 @@ import {
   useState,
 } from "react";
 import { MemberChatCalls } from "./member-chat-calls";
+import type { ChatLocale } from "./member-chat-model";
 import {
   Link,
+  NavLink,
   Navigate,
   Route,
   Routes,
@@ -47,7 +49,13 @@ type Page<T> = {
 };
 const asText = (value: unknown) =>
   value === null || value === undefined || value === "" ? "—" : String(value);
-type CookieLocale = "en" | "ru" | "es";
+type CookieLocale = "en" | "ru" | "es" | "pt" | "fr" | "de" | "it" | "pl";
+const legacyLocaleOf = (locale: CookieLocale): ChatLocale => (locale === "ru" || locale === "es" ? locale : "en");
+// 2026-09-15: extended from en/ru/es to add pt/fr/de/it/pl (machine-translated,
+// same batch as mobile/src/i18n/translations.ts) - kept as one shared array so
+// localeOf()/switchLocale() below can't silently drift out of sync with
+// CookieLocale again the way the original 3-locale version did.
+const SUPPORTED_SITE_LOCALES: CookieLocale[] = ["en", "ru", "es", "pt", "fr", "de", "it", "pl"];
 
 function ScrollToTopOnNavigation() {
   const { pathname, search } = useLocation();
@@ -66,7 +74,7 @@ type CookieDefinition = { name: string; duration: string; description: string };
 
 const localeOf = (): CookieLocale => {
   const locale = window.location.pathname.split("/").filter(Boolean)[0] || "en";
-  return (["en", "ru", "es"] as string[]).includes(locale) ? (locale as CookieLocale) : "en";
+  return (SUPPORTED_SITE_LOCALES as string[]).includes(locale) ? (locale as CookieLocale) : "en";
 };
 const refreshSession = async (fallback: Session): Promise<Session> => {
   try {
@@ -244,6 +252,196 @@ const COOKIE_TEXT = {
     customize: "Personalizar",
     allowSelection: "Permitir selección",
     acceptAll: "Aceptar todo",
+  },
+  pt: {
+    heading: "Este site utiliza cookies",
+    tabs: { consent: "Consentimento", details: "Detalhes", about: "Sobre" },
+    consent: "Utilizamos cookies para manter a aplicação a funcionar, personalizar a sua experiência e analisar o nosso tráfego. Também partilhamos informações sobre a sua utilização do site com os nossos parceiros de análise, que podem combiná-las com outras informações que lhes tenha fornecido ou que tenham recolhido através da sua utilização dos respetivos serviços.",
+    privacyPolicy: "Política de Privacidade",
+    categories: { necessary: "Necessários", preferences: "Preferências", statistics: "Estatísticas" },
+    descriptions: {
+      necessary: "Os cookies necessários ajudam a tornar o site utilizável, permitindo funções básicas como a gestão de sessão e início de sessão, segurança e a memorização da escolha de consentimento que faz aqui. O site não pode funcionar corretamente sem estes cookies.",
+      preferences: "Os cookies de preferências permitem ao site memorizar informações que alteram o seu comportamento ou aspeto, como o seu idioma preferido.",
+      statistics: "Os cookies estatísticos ajudam-nos a compreender como os visitantes interagem com a aplicação, recolhendo e comunicando informações.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 dias", description: "Guarda a sua escolha de consentimento de cookies." },
+        { name: "authjs.session-token", duration: "Sessão / 7 dias", description: "Mantém a sua sessão iniciada (sessão e proteção CSRF). Com o prefixo __Secure- em HTTPS." },
+        { name: "lbp_attr_first", duration: "90 dias", description: "Recorda como nos encontrou pela primeira vez (primeiro contacto), usado para perceber de onde vêm os novos membros." },
+        { name: "lbp_attr_last", duration: "90 dias", description: "Recorda como nos encontrou mais recentemente (último contacto), usado para perceber de onde vêm os novos membros." },
+        { name: "lbp_consent_id", duration: "180 dias", description: "Identificador de consentimento anónimo, guardado como prova da escolha de consentimento que fez aqui (RGPD art. 7.º(1))." },
+        { name: "NEXT_LOCALE", duration: "1 ano", description: "Recorda o idioma da interface do site localizado." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Até 1 ano", description: "Análise de produto — mede a utilização para melhorar o produto." },
+        { name: "AMP_MKTG_*", duration: "Até 1 ano", description: "Análise de produto — mede como os visitantes chegaram pela primeira vez à aplicação." },
+      ],
+    },
+    about: [
+      "Os cookies são pequenos ficheiros de texto que os sites utilizam para tornar a experiência do utilizador mais eficiente.",
+      "A lei permite-nos guardar cookies estritamente necessários para o funcionamento deste site; para tudo o resto precisamos da sua autorização. Os cookies necessários são utilizados com base no art. 6.º(1)(f) do RGPD; todas as outras categorias são utilizadas apenas com o seu consentimento (art. 6.º(1)(a) do RGPD).",
+      "Este site utiliza diferentes tipos de cookies; alguns são definidos por serviços de terceiros presentes nas nossas páginas.",
+      "Pode alterar ou retirar o seu consentimento a qualquer momento através da ligação «Definições de cookies» no rodapé da página.",
+    ],
+    learnMore: "Saiba mais sobre como tratamos os dados pessoais na nossa Política de Privacidade.",
+    rejectAll: "Rejeitar tudo",
+    customize: "Personalizar",
+    allowSelection: "Permitir seleção",
+    acceptAll: "Aceitar tudo",
+  },
+  fr: {
+    heading: "Ce site utilise des cookies",
+    tabs: { consent: "Consentement", details: "Détails", about: "À propos" },
+    consent: "Nous utilisons des cookies pour faire fonctionner l'application, personnaliser votre expérience et analyser notre trafic. Nous partageons également des informations sur votre utilisation du site avec nos partenaires d'analyse, qui peuvent les combiner avec d'autres informations que vous leur avez fournies ou qu'ils ont collectées lors de votre utilisation de leurs services.",
+    privacyPolicy: "Politique de confidentialité",
+    categories: { necessary: "Nécessaires", preferences: "Préférences", statistics: "Statistiques" },
+    descriptions: {
+      necessary: "Les cookies nécessaires contribuent à rendre le site utilisable en activant des fonctions de base telles que la gestion de session et de connexion, la sécurité et la mémorisation du choix de consentement que vous faites ici. Le site ne peut pas fonctionner correctement sans ces cookies.",
+      preferences: "Les cookies de préférences permettent au site de mémoriser des informations qui modifient son comportement ou son apparence, comme votre langue préférée.",
+      statistics: "Les cookies statistiques nous aident à comprendre comment les visiteurs interagissent avec l'application, en collectant et en communiquant des informations.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 jours", description: "Enregistre votre choix de consentement aux cookies." },
+        { name: "authjs.session-token", duration: "Session / 7 jours", description: "Vous maintient connecté (session et protection CSRF). Préfixé par __Secure- en HTTPS." },
+        { name: "lbp_attr_first", duration: "90 jours", description: "Mémorise comment vous nous avez trouvés pour la première fois (premier contact), utilisé pour comprendre d'où viennent les nouveaux membres." },
+        { name: "lbp_attr_last", duration: "90 jours", description: "Mémorise comment vous nous avez trouvés le plus récemment (dernier contact), utilisé pour comprendre d'où viennent les nouveaux membres." },
+        { name: "lbp_consent_id", duration: "180 jours", description: "Identifiant de consentement anonyme, conservé comme preuve du choix de consentement que vous avez fait ici (RGPD art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 an", description: "Mémorise la langue de l'interface pour le site localisé." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Jusqu'à 1 an", description: "Analyse produit — mesure l'utilisation pour améliorer le produit." },
+        { name: "AMP_MKTG_*", duration: "Jusqu'à 1 an", description: "Analyse produit — mesure comment les visiteurs ont découvert l'application pour la première fois." },
+      ],
+    },
+    about: [
+      "Les cookies sont de petits fichiers texte que les sites web utilisent pour rendre l'expérience utilisateur plus efficace.",
+      "La loi nous permet de stocker les cookies strictement nécessaires au fonctionnement de ce site ; pour tout le reste, nous avons besoin de votre autorisation. Les cookies nécessaires sont utilisés sur la base de l'art. 6(1)(f) du RGPD ; toutes les autres catégories ne sont utilisées qu'avec votre consentement (art. 6(1)(a) du RGPD).",
+      "Ce site utilise différents types de cookies ; certains sont définis par des services tiers présents sur nos pages.",
+      "Vous pouvez modifier ou retirer votre consentement à tout moment via le lien « Paramètres des cookies » dans le pied de page.",
+    ],
+    learnMore: "En savoir plus sur la façon dont nous traitons les données personnelles dans notre Politique de confidentialité.",
+    rejectAll: "Tout refuser",
+    customize: "Personnaliser",
+    allowSelection: "Autoriser la sélection",
+    acceptAll: "Tout accepter",
+  },
+  de: {
+    heading: "Diese Website verwendet Cookies",
+    tabs: { consent: "Zustimmung", details: "Details", about: "Über Cookies" },
+    consent: "Wir verwenden Cookies, damit die App funktioniert, um Ihr Erlebnis zu personalisieren und unseren Traffic zu analysieren. Wir teilen außerdem Informationen über Ihre Nutzung der Website mit unseren Analysepartnern, die diese mit anderen Informationen kombinieren können, die Sie ihnen zur Verfügung gestellt haben oder die sie durch Ihre Nutzung ihrer Dienste gesammelt haben.",
+    privacyPolicy: "Datenschutzrichtlinie",
+    categories: { necessary: "Notwendig", preferences: "Präferenzen", statistics: "Statistik" },
+    descriptions: {
+      necessary: "Notwendige Cookies tragen dazu bei, die Website nutzbar zu machen, indem sie grundlegende Funktionen wie Sitzungs- und Anmeldeverwaltung, Sicherheit und das Speichern Ihrer hier getroffenen Zustimmungsentscheidung ermöglichen. Ohne diese Cookies kann die Website nicht ordnungsgemäß funktionieren.",
+      preferences: "Präferenz-Cookies ermöglichen es der Website, Informationen zu speichern, die ihr Verhalten oder Erscheinungsbild verändern, wie z. B. Ihre bevorzugte Sprache.",
+      statistics: "Statistik-Cookies helfen uns zu verstehen, wie Besucher mit der App interagieren, indem sie Informationen sammeln und melden.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 Tage", description: "Speichert Ihre Cookie-Zustimmungsentscheidung." },
+        { name: "authjs.session-token", duration: "Sitzung / 7 Tage", description: "Hält Sie angemeldet (Sitzung und CSRF-Schutz). Bei HTTPS mit dem Präfix __Secure- versehen." },
+        { name: "lbp_attr_first", duration: "90 Tage", description: "Merkt sich, wie Sie uns zum ersten Mal gefunden haben (First Touch), um zu verstehen, woher neue Mitglieder kommen." },
+        { name: "lbp_attr_last", duration: "90 Tage", description: "Merkt sich, wie Sie uns zuletzt gefunden haben (Last Touch), um zu verstehen, woher neue Mitglieder kommen." },
+        { name: "lbp_consent_id", duration: "180 Tage", description: "Anonyme Zustimmungs-Kennung, aufbewahrt als Nachweis Ihrer hier getroffenen Zustimmungsentscheidung (DSGVO Art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 Jahr", description: "Merkt sich die Interfacesprache für die lokalisierte Website." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Bis zu 1 Jahr", description: "Produktanalyse — misst die Nutzung zur Verbesserung des Produkts." },
+        { name: "AMP_MKTG_*", duration: "Bis zu 1 Jahr", description: "Produktanalyse — misst, wie Besucher die App zum ersten Mal gefunden haben." },
+      ],
+    },
+    about: [
+      "Cookies sind kleine Textdateien, die Websites verwenden, um die Nutzererfahrung effizienter zu gestalten.",
+      "Das Gesetz erlaubt uns, Cookies zu speichern, die für den Betrieb dieser Website unbedingt erforderlich sind; für alles andere benötigen wir Ihre Erlaubnis. Notwendige Cookies werden auf Grundlage von Art. 6(1)(f) DSGVO verwendet; alle anderen Kategorien nur mit Ihrer Zustimmung (Art. 6(1)(a) DSGVO).",
+      "Diese Website verwendet verschiedene Arten von Cookies; einige werden von Drittanbieter-Diensten gesetzt, die auf unseren Seiten erscheinen.",
+      "Sie können Ihre Zustimmung jederzeit über den Link „Cookie-Einstellungen“ in der Fußzeile der Seite ändern oder widerrufen.",
+    ],
+    learnMore: "Erfahren Sie mehr darüber, wie wir personenbezogene Daten verarbeiten, in unserer Datenschutzrichtlinie.",
+    rejectAll: "Alle ablehnen",
+    customize: "Anpassen",
+    allowSelection: "Auswahl erlauben",
+    acceptAll: "Alle akzeptieren",
+  },
+  it: {
+    heading: "Questo sito utilizza i cookie",
+    tabs: { consent: "Consenso", details: "Dettagli", about: "Informazioni" },
+    consent: "Utilizziamo i cookie per far funzionare l'app, personalizzare la tua esperienza e analizzare il nostro traffico. Condividiamo inoltre informazioni sul tuo utilizzo del sito con i nostri partner di analisi, che potrebbero combinarle con altre informazioni che hai fornito loro o che hanno raccolto attraverso il tuo utilizzo dei loro servizi.",
+    privacyPolicy: "Informativa sulla privacy",
+    categories: { necessary: "Necessari", preferences: "Preferenze", statistics: "Statistiche" },
+    descriptions: {
+      necessary: "I cookie necessari contribuiscono a rendere il sito utilizzabile abilitando funzioni di base come la gestione della sessione e dell'accesso, la sicurezza e la memorizzazione della scelta di consenso effettuata qui. Il sito non può funzionare correttamente senza questi cookie.",
+      preferences: "I cookie di preferenza consentono al sito di ricordare informazioni che ne modificano il comportamento o l'aspetto, come la lingua preferita.",
+      statistics: "I cookie statistici ci aiutano a capire come i visitatori interagiscono con l'app, raccogliendo e segnalando informazioni.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 giorni", description: "Memorizza la tua scelta di consenso ai cookie." },
+        { name: "authjs.session-token", duration: "Sessione / 7 giorni", description: "Mantiene l'accesso effettuato (sessione e protezione CSRF). Con prefisso __Secure- su HTTPS." },
+        { name: "lbp_attr_first", duration: "90 giorni", description: "Ricorda come ci hai trovato per la prima volta (primo contatto), usato per capire da dove arrivano i nuovi membri." },
+        { name: "lbp_attr_last", duration: "90 giorni", description: "Ricorda come ci hai trovato più di recente (ultimo contatto), usato per capire da dove arrivano i nuovi membri." },
+        { name: "lbp_consent_id", duration: "180 giorni", description: "Identificativo di consenso anonimo, conservato come prova della scelta di consenso effettuata qui (GDPR art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 anno", description: "Ricorda la lingua dell'interfaccia per il sito localizzato." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Fino a 1 anno", description: "Analisi di prodotto — misura l'utilizzo per migliorare il prodotto." },
+        { name: "AMP_MKTG_*", duration: "Fino a 1 anno", description: "Analisi di prodotto — misura come i visitatori hanno raggiunto l'app per la prima volta." },
+      ],
+    },
+    about: [
+      "I cookie sono piccoli file di testo che i siti web utilizzano per rendere l'esperienza dell'utente più efficiente.",
+      "La legge ci consente di memorizzare i cookie strettamente necessari al funzionamento di questo sito; per tutto il resto abbiamo bisogno del tuo permesso. I cookie necessari sono utilizzati sulla base dell'art. 6(1)(f) del GDPR; tutte le altre categorie sono utilizzate solo con il tuo consenso (art. 6(1)(a) del GDPR).",
+      "Questo sito utilizza diversi tipi di cookie; alcuni sono impostati da servizi di terze parti presenti nelle nostre pagine.",
+      "Puoi modificare o revocare il tuo consenso in qualsiasi momento tramite il link «Impostazioni cookie» nel piè di pagina.",
+    ],
+    learnMore: "Scopri di più su come trattiamo i dati personali nella nostra Informativa sulla privacy.",
+    rejectAll: "Rifiuta tutto",
+    customize: "Personalizza",
+    allowSelection: "Consenti selezione",
+    acceptAll: "Accetta tutto",
+  },
+  pl: {
+    heading: "Ta strona korzysta z plików cookie",
+    tabs: { consent: "Zgoda", details: "Szczegóły", about: "O plikach cookie" },
+    consent: "Używamy plików cookie, aby aplikacja działała, personalizować Twoje doświadczenia i analizować nasz ruch. Udostępniamy również informacje o korzystaniu przez Ciebie z witryny naszym partnerom analitycznym, którzy mogą łączyć je z innymi informacjami, które im przekazałeś/aś lub które zebrali podczas korzystania z ich usług.",
+    privacyPolicy: "Polityka prywatności",
+    categories: { necessary: "Niezbędne", preferences: "Preferencje", statistics: "Statystyczne" },
+    descriptions: {
+      necessary: "Niezbędne pliki cookie pomagają uczynić stronę użyteczną, umożliwiając podstawowe funkcje, takie jak obsługa sesji i logowania, bezpieczeństwo oraz zapamiętywanie dokonanego tutaj wyboru zgody. Bez tych plików cookie strona nie może działać prawidłowo.",
+      preferences: "Pliki cookie preferencji umożliwiają stronie zapamiętywanie informacji zmieniających jej działanie lub wygląd, np. preferowanego języka.",
+      statistics: "Statystyczne pliki cookie pomagają nam zrozumieć, w jaki sposób odwiedzający korzystają z aplikacji, zbierając i raportując informacje.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 dni", description: "Przechowuje Twój wybór dotyczący zgody na pliki cookie." },
+        { name: "authjs.session-token", duration: "Sesja / 7 dni", description: "Utrzymuje Twoje zalogowanie (sesja i ochrona CSRF). Z prefiksem __Secure- w HTTPS." },
+        { name: "lbp_attr_first", duration: "90 dni", description: "Zapamiętuje, w jaki sposób trafiłeś/aś do nas po raz pierwszy (pierwsze odwiedziny), używane do zrozumienia, skąd pochodzą nowi członkowie." },
+        { name: "lbp_attr_last", duration: "90 dni", description: "Zapamiętuje, w jaki sposób trafiłeś/aś do nas ostatnio (ostatnie odwiedziny), używane do zrozumienia, skąd pochodzą nowi członkowie." },
+        { name: "lbp_consent_id", duration: "180 dni", description: "Anonimowy identyfikator zgody, przechowywany jako dowód dokonanego tutaj wyboru zgody (RODO art. 7 ust. 1)." },
+        { name: "NEXT_LOCALE", duration: "1 rok", description: "Zapamiętuje język interfejsu dla zlokalizowanej wersji strony." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Do 1 roku", description: "Analiza produktu — mierzy sposób użytkowania w celu ulepszenia produktu." },
+        { name: "AMP_MKTG_*", duration: "Do 1 roku", description: "Analiza produktu — mierzy, w jaki sposób odwiedzający po raz pierwszy trafili do aplikacji." },
+      ],
+    },
+    about: [
+      "Pliki cookie to małe pliki tekstowe, których strony internetowe używają, aby zwiększyć efektywność korzystania z nich przez użytkownika.",
+      "Prawo pozwala nam przechowywać pliki cookie ściśle niezbędne do działania tej strony; na wszystko inne potrzebujemy Twojej zgody. Niezbędne pliki cookie są wykorzystywane na podstawie art. 6 ust. 1 lit. f) RODO; wszystkie pozostałe kategorie są wykorzystywane wyłącznie za Twoją zgodą (art. 6 ust. 1 lit. a) RODO).",
+      "Ta strona wykorzystuje różne rodzaje plików cookie; niektóre z nich są ustawiane przez usługi stron trzecich obecne na naszych stronach.",
+      "Możesz w każdej chwili zmienić lub wycofać swoją zgodę za pomocą linku „Ustawienia plików cookie” w stopce strony.",
+    ],
+    learnMore: "Dowiedz się więcej o tym, jak przetwarzamy dane osobowe, w naszej Polityce prywatności.",
+    rejectAll: "Odrzuć wszystkie",
+    customize: "Dostosuj",
+    allowSelection: "Zezwól na wybrane",
+    acceptAll: "Zaakceptuj wszystkie",
   },
 } satisfies Record<CookieLocale, {
   heading: string;
@@ -494,7 +692,7 @@ function CookieConsent() {
   );
 }
 
-function CallManager({session}:{session:Session}) { return <MemberChatCalls session={session} locale={localeOf()} />; }
+function CallManager({session}:{session:Session}) { return <MemberChatCalls session={session} locale={legacyLocaleOf(localeOf())} />; }
 
 const SITE_TEXT = {
   en: {
@@ -504,6 +702,7 @@ const SITE_TEXT = {
     tagline: "Helping every family find their way.", platform: "Platform", company: "Company",
     contact: "Contact us", terms: "Terms of Use", privacy: "Privacy Policy",
     rights: "© 2026 LetsBeParents. All rights reserved.", cookies: "Cookie settings", language: "Language",
+    aiAdvisorFabLabel: "AI Family Advisor",
   },
   ru: {
     knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы", resources: "Ресурсы", professionals: "Специалисты", safety: "Безопасность", pricing: "Цены",
@@ -512,6 +711,7 @@ const SITE_TEXT = {
     tagline: "Помогаем каждой семье найти свой путь.", platform: "Платформа", company: "Компания",
     contact: "Связаться с нами", terms: "Условия использования", privacy: "Политика конфиденциальности",
     rights: "© 2026 LetsBeParents. Все права защищены.", cookies: "Настройки cookies", language: "Язык",
+    aiAdvisorFabLabel: "AI-советник по семье",
   },
   es: {
     knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados", resources: "Recursos", professionals: "Profesionales", safety: "Seguridad", pricing: "Precios",
@@ -520,6 +720,52 @@ const SITE_TEXT = {
     tagline: "Ayudamos a cada familia a encontrar su camino.", platform: "Plataforma", company: "Empresa",
     contact: "Contáctanos", terms: "Términos de uso", privacy: "Política de privacidad",
     rights: "© 2026 LetsBeParents. Todos los derechos reservados.", cookies: "Preferencias de cookies", language: "Idioma",
+    aiAdvisorFabLabel: "Asesor familiar con IA",
+  },
+  pt: {
+    knowledge: "Centro de Conhecimento", match: "Encontrar um match", clinics: "Clínicas", lawyers: "Advogados", resources: "Recursos", professionals: "Profissionais", safety: "Segurança", pricing: "Preços",
+    profile: "Perfil", signOut: "Sair", signIn: "Entrar", signUp: "Registar",
+    likes: "Gostos", messages: "Mensagens", notifications: "Notificações de membro",
+    tagline: "Ajudamos cada família a encontrar o seu caminho.", platform: "Plataforma", company: "Empresa",
+    contact: "Contacte-nos", terms: "Termos de Utilização", privacy: "Política de Privacidade",
+    rights: "© 2026 LetsBeParents. Todos os direitos reservados.", cookies: "Definições de cookies", language: "Idioma",
+    aiAdvisorFabLabel: "Consultor familiar com IA",
+  },
+  fr: {
+    knowledge: "Centre de connaissances", match: "Trouver un match", clinics: "Cliniques", lawyers: "Avocats", resources: "Ressources", professionals: "Professionnels", safety: "Sécurité", pricing: "Tarifs",
+    profile: "Profil", signOut: "Se déconnecter", signIn: "Se connecter", signUp: "S'inscrire",
+    likes: "J'aime", messages: "Messages", notifications: "Notifications des membres",
+    tagline: "Nous aidons chaque famille à trouver sa voie.", platform: "Plateforme", company: "Entreprise",
+    contact: "Nous contacter", terms: "Conditions d'utilisation", privacy: "Politique de confidentialité",
+    rights: "© 2026 LetsBeParents. Tous droits réservés.", cookies: "Paramètres des cookies", language: "Langue",
+    aiAdvisorFabLabel: "Conseiller familial IA",
+  },
+  de: {
+    knowledge: "Wissenszentrum", match: "Match finden", clinics: "Kliniken", lawyers: "Anwälte", resources: "Ressourcen", professionals: "Fachleute", safety: "Sicherheit", pricing: "Preise",
+    profile: "Profil", signOut: "Abmelden", signIn: "Anmelden", signUp: "Registrieren",
+    likes: "Likes", messages: "Nachrichten", notifications: "Mitgliederbenachrichtigungen",
+    tagline: "Wir helfen jeder Familie, ihren Weg zu finden.", platform: "Plattform", company: "Unternehmen",
+    contact: "Kontaktieren Sie uns", terms: "Nutzungsbedingungen", privacy: "Datenschutzrichtlinie",
+    rights: "© 2026 LetsBeParents. Alle Rechte vorbehalten.", cookies: "Cookie-Einstellungen", language: "Sprache",
+    aiAdvisorFabLabel: "KI-Familienberater",
+  },
+  it: {
+    knowledge: "Centro di conoscenza", match: "Trova un match", clinics: "Cliniche", lawyers: "Avvocati", resources: "Risorse", professionals: "Professionisti", safety: "Sicurezza", pricing: "Prezzi",
+    profile: "Profilo", signOut: "Esci", signIn: "Accedi", signUp: "Registrati",
+    likes: "Mi piace", messages: "Messaggi", notifications: "Notifiche membro",
+    tagline: "Aiutiamo ogni famiglia a trovare la propria strada.", platform: "Piattaforma", company: "Azienda",
+    contact: "Contattaci", terms: "Termini di utilizzo", privacy: "Informativa sulla privacy",
+    rights: "© 2026 LetsBeParents. Tutti i diritti riservati.", cookies: "Impostazioni cookie", language: "Lingua",
+    aiAdvisorFabLabel: "Consulente familiare IA",
+  },
+  pl: {
+    knowledge: "Centrum wiedzy", match: "Znajdź dopasowanie", clinics: "Kliniki", lawyers: "Prawnicy", resources: "Zasoby", professionals: "Specjaliści", safety: "Bezpieczeństwo", pricing: "Cennik",
+    profile: "Profil", signOut: "Wyloguj się", signIn: "Zaloguj się", signUp: "Zarejestruj się",
+    likes: "Polubienia", messages: "Wiadomości", notifications: "Powiadomienia dla członków",
+    tagline: "Pomagamy każdej rodzinie znaleźć swoją drogę.", platform: "Platforma", company: "Firma",
+    contact: "Skontaktuj się z nami", terms: "Warunki korzystania", privacy: "Polityka prywatności",
+    rights: "© 2026 LetsBeParents. Wszelkie prawa zastrzeżone.", cookies: "Ustawienia plików cookie", language: "Język",
+    aiAdvisorFabLabel: "Doradca rodzinny AI",
   },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
@@ -636,6 +882,7 @@ function Shell({
   const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(pathname);
   const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(pathname);
   const isProfessionals = new RegExp(`^/${locale}/professionals(?:/|$)`).test(pathname);
+  const isAiAdvisor = new RegExp(`^/${locale}/ai-advisor(?:/|$)`).test(pathname);
   const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(pathname);
   const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(pathname);
   const menuItems = () => Array.from(navigationRef.current?.querySelectorAll<HTMLElement>("a, button") || [])
@@ -695,7 +942,7 @@ function Shell({
   }, []);
   const switchLocale = (nextLocale: string) => {
     const parts = window.location.pathname.split("/").filter(Boolean);
-    if (["en", "ru", "es"].includes(parts[0] || "")) parts[0] = nextLocale;
+    if ((SUPPORTED_SITE_LOCALES as string[]).includes(parts[0] || "")) parts[0] = nextLocale;
     else parts.unshift(nextLocale);
     window.location.assign(`/${parts.join("/")}${window.location.search}${window.location.hash}`);
   };
@@ -844,6 +1091,11 @@ function Shell({
                   <option value="en">English</option>
                   <option value="ru">Русский</option>
                   <option value="es">Español</option>
+                  <option value="pt">Português</option>
+                  <option value="fr">Français</option>
+                  <option value="de">Deutsch</option>
+                  <option value="it">Italiano</option>
+                  <option value="pl">Polski</option>
                 </select>
               </label>
               <a className="social-link" href="https://www.instagram.com/letsbeparents.app/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
@@ -862,6 +1114,18 @@ function Shell({
           </div>
         </div>
       </footer>
+      {session && !isAiAdvisor ? (
+        <Link
+          to={`/${locale}/ai-advisor`}
+          className="ai-advisor-fab"
+          aria-label={text.aiAdvisorFabLabel}
+          title={text.aiAdvisorFabLabel}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+          </svg>
+        </Link>
+      ) : null}
       <CallManager session={session} />
       <CookieConsent />
     </div>
@@ -1051,6 +1315,261 @@ const LANDING_TEXT = {
     },
     ctaTitle: "¿Listo para formar tu familia?", ctaCopy: "Únete a miles de futuros padres y madres. Crea tu cuenta gratis hoy.",
     ctaButton: "Crear cuenta gratis", appLabel: "También disponible como app móvil gratuita",
+  },
+  pt: {
+    pill: "Plataforma de formação de família",
+    title: "Seu caminho para a parentalidade começa aqui",
+    intro: "Encontre um doador, co-pai/co-mãe ou parceiro para formar uma família - depois dê os próximos passos com clínicas de confiança, especialistas jurídicos e orientação prática.",
+    start: "Encontre seu caminho", how: "COMO FUNCIONA", stepsTitle: "Cinco passos para sua família",
+    trustLine: "Cada perfil tem a identidade verificada - veja o que verificamos.",
+    steps: [
+      ["01", "Crie seu perfil", "Conte-nos sobre você, suas preferências e que tipo de família você sonha em construir.", "profile"],
+      ["02", "Encontre seu match", "Veja perfis de doadores, co-pais e parceiros para formar uma família. Filtre por valores e conecte-se.", "match"],
+      ["03", "Entenda sua compatibilidade", "Veja sua pontuação de compatibilidade e o que vale a pena conversar antes de decidir.", "compatibility"],
+      ["04", "Planeje sua família juntos", "Crie um Family Plan compartilhado - criação dos filhos, finanças, etapas legais - tudo em um só lugar.", "plan"],
+      ["05", "Conte com apoio especializado", "Conecte-se com clínicas de fertilidade e especialistas em direito reprodutivo verificados sempre que precisar.", "support"],
+    ],
+    pathSelector: {
+      label: "ENCONTRE SEU CAMINHO", title: "O que te trouxe até aqui?",
+      intro: "Cada família começa de um jeito diferente. Escolha o caminho que mais combina com você - você sempre pode explorar outras opções depois.",
+      options: [
+        ["coparent", "Estou procurando um co-pai ou co-mãe"],
+        ["donor", "Estou procurando um doador"],
+        ["partner", "Estou procurando um parceiro para formar uma família"],
+        ["couple-donor", "Somos um casal procurando um doador"],
+        ["exploring", "Estou explorando minhas opções"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Encontre seu doador, co-pai ou parceiro", copy: "Nosso sistema de compatibilização cuidadoso ajuda você a se conectar com a pessoa certa. Filtre por localização, valores e preferências. Curta perfis, faça matches e depois converse por chat e videochamada - tudo em um espaço seguro e privado.", points: ["Filtros avançados por localização, tipo e preferências", "Mensagens integradas e videochamadas em HD", "Privacidade em primeiro lugar: controle quem vê seu perfil"] },
+      { label: "CLÍNICAS", title: "Clínicas de fertilidade de padrão mundial, a um clique de distância", copy: "Veja clínicas verificadas em mais de 20 países. Leia perfis detalhados, compare serviços e inicie uma videoconsulta - tudo sem sair de casa. Cada clínica é avaliada quanto à qualidade e à inclusão.", points: ["Videoconsultas com os melhores especialistas", "Clínicas verificadas quanto à inclusão de casais LGBTQ+ e pais solo", "Preços transparentes e avaliações reais de pacientes"] },
+      { label: "ADVOGADOS", title: "Orientação jurídica em quem você pode confiar", copy: "Acordos com doadores, direitos parentais - o direito reprodutivo é complexo. Nosso diretório com mais de 350 advogados verificados em mais de 20 países garante o suporte jurídico especializado que se adapta à sua estrutura familiar.", points: ["Especialistas em direito de doadores e direito de família", "Filtre por país, idioma e área de atuação", "Salve favoritos e compare profissionais jurídicos"] },
+      { label: "PLANEJAMENTO FAMILIAR", title: "Planeje sua família, juntos", copy: "Depois de dar match, continuem construindo juntos. Veja seu Relatório de Compatibilidade, conversem sobre o que importa e criem um Family Plan compartilhado cobrindo criação dos filhos, finanças e etapas legais - tudo em um só lugar.", points: ["Relatório de Compatibilidade com pontos reais para conversar, não apenas uma nota de aprovado/reprovado", "Family Plan compartilhado para criação dos filhos, finanças e etapas legais", "Um só lugar para continuar planejando depois do match, não apenas um chat"] },
+      { label: "TORNE-SE DOADOR", title: "Dê o presente da parentalidade", copy: "Você tem o poder de mudar a vida de alguém para sempre. Se você está pensando em doar óvulos ou esperma - nossa plataforma conecta você com pessoas que sonham em formar uma família. Crie seu perfil, defina suas condições e ajude a tornar a parentalidade possível.", points: ["Compatibilização segura e verificada com pais pretendidos", "Controle total sobre seu perfil, condições e privacidade", "Chat e videochamadas integrados para se conhecerem"] },
+      { label: "PARA CLÍNICAS E ADVOGADOS", title: "Faça sua prática crescer, alcance mais famílias", copy: "Junte-se ao nosso diretório profissional e conecte-se com milhares de clientes em potencial. Tenha seu próprio painel de parceiro para gerenciar consultas, se comunicar com pacientes por chat seguro e videochamadas, realizar campanhas promocionais e construir sua reputação na comunidade de saúde reprodutiva.", points: ["Painel de parceiro pessoal com análises", "Chat seguro e videoconsultas com clientes", "Ferramentas promocionais e campanhas de e-mail segmentadas"] },
+    ],
+    stats: [["15.1K", "Membros no mundo todo"], ["7.3K", "Doadores"], ["4.5K", "Clínicas parceiras"], ["369", "Advogados"]],
+    whatsNew: {
+      label: "NOVIDADES NO LETSBEPARENTS", title: "Mais formas de encontrar matches, se conectar e ficar seguro",
+      intro: "Continuamos evoluindo a plataforma - veja o que há de novo desde sua última visita.",
+      tiers: { free: "Grátis", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost de perfil", copy: "Ganhe mais visibilidade no catálogo por tempo limitado.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Indique e ganhe um Boost", copy: "Convide um amigo - quando ele entrar e verificar a conta, vocês dois ganham um Boost gratuito.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Compartilhe seu plano de encontro com alguém de confiança antes de conhecer um match pessoalmente.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Selo de Verificação em Vídeo", copy: "Adicione uma camada extra de confiança com um selo de verificação em vídeo no seu perfil.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Mensagens iniciais geradas por IA", copy: "Receba 3 mensagens de abertura personalizadas para qualquer match, geradas por IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Dica semanal do AI Advisor", copy: "Uma dica nova e personalizada do seu AI Family Advisor toda semana.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Assinatura do Co-Parenting Agreement", copy: "Transforme seu Family Plan compartilhado em um registro mútuo que vocês dois assinam.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Grupos e discussões da Community", copy: "Participe de grupos temáticos e discussões com outras pessoas no mesmo caminho.", href: "/community" },
+      ],
+    },
+    ctaTitle: "Pronto para começar sua família?", ctaCopy: "Junte-se a milhares de futuros pais. Crie sua conta gratuita hoje.",
+    ctaButton: "Criar conta gratuita", appLabel: "Também disponível como aplicativo móvel gratuito",
+  },
+  fr: {
+    pill: "Plateforme de fondation familiale",
+    title: "Votre chemin vers la parentalité commence ici",
+    intro: "Trouvez un donneur, un co-parent ou un partenaire de fondation familiale - puis passez à l'étape suivante avec des cliniques de confiance, des experts juridiques et des conseils pratiques.",
+    start: "Trouvez votre voie", how: "COMMENT ÇA MARCHE", stepsTitle: "Cinq étapes vers votre famille",
+    trustLine: "Chaque profil fait l'objet d'une vérification d'identité - découvrez ce que nous vérifions.",
+    steps: [
+      ["01", "Créez votre profil", "Parlez-nous de vous, de vos préférences et du type de famille que vous rêvez de fonder.", "profile"],
+      ["02", "Trouvez votre match", "Parcourez les profils de donneurs, co-parents et partenaires de fondation familiale. Filtrez selon vos valeurs et entrez en contact.", "match"],
+      ["03", "Comprenez votre compatibilité", "Découvrez votre score de compatibilité et les sujets à aborder avant de vous décider.", "compatibility"],
+      ["04", "Planifiez votre famille ensemble", "Construisez un Family Plan partagé - éducation, finances, démarches juridiques - en un seul endroit.", "plan"],
+      ["05", "Bénéficiez d'un accompagnement expert", "Contactez des cliniques de fertilité et des spécialistes du droit de la reproduction vérifiés, dès que vous en avez besoin.", "support"],
+    ],
+    pathSelector: {
+      label: "TROUVEZ VOTRE VOIE", title: "Qu'est-ce qui vous amène ici ?",
+      intro: "Chaque famille commence différemment. Choisissez le chemin qui vous correspond le mieux - vous pourrez toujours explorer d'autres options plus tard.",
+      options: [
+        ["coparent", "Je cherche un co-parent"],
+        ["donor", "Je cherche un donneur"],
+        ["partner", "Je cherche un partenaire de fondation familiale"],
+        ["couple-donor", "Nous sommes un couple à la recherche d'un donneur"],
+        ["exploring", "J'explore mes options"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Trouvez votre donneur, co-parent ou partenaire", copy: "Notre système de mise en relation attentif vous aide à trouver la bonne personne. Filtrez par lieu, valeurs et préférences. Aimez des profils, obtenez un match, puis discutez par chat et appel vidéo - le tout dans un espace sûr et privé.", points: ["Filtres avancés par lieu, type et préférences", "Messagerie intégrée et appels vidéo HD", "La confidentialité avant tout : contrôlez qui voit votre profil"] },
+      { label: "CLINIQUES", title: "Des cliniques de fertilité de renommée mondiale, à portée de clic", copy: "Parcourez des cliniques vérifiées dans plus de 20 pays. Consultez des profils détaillés, comparez les services et démarrez une consultation vidéo - le tout depuis votre salon. Chaque clinique est contrôlée pour sa qualité et son inclusivité.", points: ["Consultations vidéo avec des spécialistes de premier plan", "Cliniques vérifiées pour leur inclusivité envers les personnes LGBTQ+ et les parents solos", "Tarifs transparents et avis de patients authentiques"] },
+      { label: "AVOCATS", title: "Un accompagnement juridique en qui vous pouvez avoir confiance", copy: "Accords avec les donneurs, droits parentaux - le droit de la reproduction est complexe. Notre annuaire de plus de 350 avocats vérifiés dans plus de 20 pays vous garantit un accompagnement juridique expert adapté à votre structure familiale.", points: ["Spécialistes du droit des donneurs et du droit de la famille", "Filtrez par pays, langue et domaine de pratique", "Enregistrez vos favoris et comparez les professionnels du droit"] },
+      { label: "PLANIFICATION FAMILIALE", title: "Planifiez votre famille, ensemble", copy: "Une fois le match établi, continuez à construire ensemble. Consultez votre Rapport de compatibilité, discutez de ce qui compte vraiment et créez un Family Plan partagé couvrant l'éducation, les finances et les démarches juridiques - le tout en un seul endroit.", points: ["Un Rapport de compatibilité avec de vrais sujets de discussion, pas seulement un score réussite/échec", "Un Family Plan partagé pour l'éducation, les finances et les démarches juridiques", "Un seul endroit pour continuer à planifier après le match, pas seulement un chat"] },
+      { label: "DEVENIR DONNEUR", title: "Offrez le cadeau de la parentalité", copy: "Vous avez le pouvoir de changer la vie de quelqu'un pour toujours. Que vous envisagiez un don d'ovocytes ou de sperme - notre plateforme vous met en relation avec des personnes qui rêvent de fonder une famille. Créez votre profil, fixez vos conditions et aidez à rendre la parentalité possible.", points: ["Mise en relation sûre et vérifiée avec des parents d'intention", "Contrôle total sur votre profil, vos conditions et votre confidentialité", "Chat et appels vidéo intégrés pour apprendre à vous connaître"] },
+      { label: "POUR LES CLINIQUES ET LES AVOCATS", title: "Développez votre activité, touchez plus de familles", copy: "Rejoignez notre annuaire professionnel et entrez en contact avec des milliers de clients potentiels. Bénéficiez de votre propre tableau de bord partenaire pour gérer les rendez-vous, communiquer avec les patients par chat sécurisé et appels vidéo, lancer des campagnes promotionnelles et bâtir votre réputation dans la communauté de la santé reproductive.", points: ["Tableau de bord partenaire personnel avec statistiques", "Chat sécurisé et consultations vidéo avec les clients", "Outils promotionnels et campagnes email ciblées"] },
+    ],
+    stats: [["15.1K", "Membres dans le monde"], ["7.3K", "Donneurs"], ["4.5K", "Cliniques partenaires"], ["369", "Avocats"]],
+    whatsNew: {
+      label: "NOUVEAU SUR LETSBEPARENTS", title: "Encore plus de façons de matcher, échanger et rester en sécurité",
+      intro: "Nous continuons à faire évoluer la plateforme - voici les nouveautés depuis votre dernière visite.",
+      tiers: { free: "Gratuit", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost de profil", copy: "Gagnez en visibilité dans le catalogue pendant une durée limitée.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Parrainez et gagnez un Boost", copy: "Invitez un ami - quand il rejoint la plateforme et se vérifie, vous obtenez tous les deux un Boost gratuit.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Partagez votre plan de rencontre avec une personne de confiance avant de rencontrer un match en personne.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Badge de vérification vidéo", copy: "Ajoutez une couche de confiance supplémentaire grâce à un badge de vérification vidéo sur votre profil.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Messages d'accroche rédigés par l'IA", copy: "Recevez 3 messages d'ouverture personnalisés pour chaque match, générés par l'IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Conseil hebdomadaire de l'AI Advisor", copy: "Un conseil personnalisé de votre AI Family Advisor chaque semaine.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Signature du Co-Parenting Agreement", copy: "Transformez votre Family Plan partagé en un accord mutuel que vous signez tous les deux.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Groupes et discussions de la Community", copy: "Rejoignez des groupes thématiques et des discussions avec d'autres personnes sur un chemin similaire.", href: "/community" },
+      ],
+    },
+    ctaTitle: "Prêt à fonder votre famille ?", ctaCopy: "Rejoignez des milliers de futurs parents. Créez votre compte gratuit dès aujourd'hui.",
+    ctaButton: "Créer un compte gratuit", appLabel: "Également disponible sous forme d'application mobile gratuite",
+  },
+  de: {
+    pill: "Plattform für Familiengründung",
+    title: "Ihr Weg zur Elternschaft beginnt hier",
+    intro: "Finden Sie eine Spenderin oder einen Spender, eine Co-Elternschaft oder einen Partner für die Familiengründung - und gehen Sie dann die nächsten Schritte mit vertrauenswürdigen Kliniken, Rechtsexperten und praktischer Beratung.",
+    start: "Finden Sie Ihren Weg", how: "SO FUNKTIONIERT ES", stepsTitle: "Fünf Schritte zu Ihrer Familie",
+    trustLine: "Jedes Profil ist identitätsgeprüft - erfahren Sie, was wir prüfen.",
+    steps: [
+      ["01", "Erstellen Sie Ihr Profil", "Erzählen Sie uns von sich, Ihren Vorlieben und von der Familie, die Sie sich erträumen.", "profile"],
+      ["02", "Finden Sie Ihr Match", "Durchsuchen Sie Profile von Spendern, Co-Eltern und Partnern für die Familiengründung. Filtern Sie nach Werten und nehmen Sie Kontakt auf.", "match"],
+      ["03", "Verstehen Sie Ihre Kompatibilität", "Sehen Sie Ihren Kompatibilitäts-Score und worüber Sie vor einer Entscheidung sprechen sollten.", "compatibility"],
+      ["04", "Planen Sie Ihre Familie gemeinsam", "Erstellen Sie einen gemeinsamen Family Plan - Erziehung, Finanzen, rechtliche Schritte - alles an einem Ort.", "plan"],
+      ["05", "Holen Sie sich fachkundige Unterstützung", "Nehmen Sie jederzeit Kontakt zu geprüften Kinderwunschkliniken und Spezialisten für Fortpflanzungsrecht auf.", "support"],
+    ],
+    pathSelector: {
+      label: "FINDEN SIE IHREN WEG", title: "Was führt Sie hierher?",
+      intro: "Jede Familie beginnt anders. Wählen Sie den Weg, der am besten zu Ihnen passt - Sie können später jederzeit weitere Optionen erkunden.",
+      options: [
+        ["coparent", "Ich suche eine Co-Elternschaft"],
+        ["donor", "Ich suche eine Spenderin oder einen Spender"],
+        ["partner", "Ich suche einen Partner für die Familiengründung"],
+        ["couple-donor", "Wir sind ein Paar und suchen eine Spenderin oder einen Spender"],
+        ["exploring", "Ich informiere mich über meine Möglichkeiten"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Finden Sie Ihre Spenderin, Ihren Spender, Ihre Co-Elternschaft oder Ihren Partner", copy: "Unser durchdachtes Matching-System hilft Ihnen, die richtige Person zu finden. Filtern Sie nach Standort, Werten und Vorlieben. Liken Sie Profile, erhalten Sie Matches und chatten oder telefonieren Sie dann per Video - alles in einem sicheren, privaten Raum.", points: ["Erweiterte Filter nach Standort, Typ und Vorlieben", "Integrierte Nachrichten und HD-Videoanrufe", "Datenschutz an erster Stelle: Bestimmen Sie, wer Ihr Profil sieht"] },
+      { label: "KLINIKEN", title: "Erstklassige Kinderwunschkliniken, nur einen Klick entfernt", copy: "Durchsuchen Sie geprüfte Kliniken in über 20 Ländern. Lesen Sie ausführliche Profile, vergleichen Sie Leistungen und starten Sie eine Videoberatung - ganz bequem von zu Hause aus. Jede Klinik wird auf Qualität und Inklusivität geprüft.", points: ["Videoberatungen mit Top-Spezialisten", "Kliniken geprüft auf Inklusivität für LGBTQ+ und Alleinerziehende", "Transparente Preise und echte Patientenbewertungen"] },
+      { label: "ANWÄLTE", title: "Rechtsberatung, der Sie vertrauen können", copy: "Spendervereinbarungen, Elternrechte - das Fortpflanzungsrecht ist komplex. Unser Verzeichnis mit über 350 geprüften Anwälten in über 20 Ländern sichert Ihnen fachkundige rechtliche Unterstützung, zugeschnitten auf Ihre Familienstruktur.", points: ["Spezialisten für Spender- und Familienrecht", "Filtern Sie nach Land, Sprache und Praxisgebiet", "Favoriten speichern und Rechtsexperten vergleichen"] },
+      { label: "FAMILIENPLANUNG", title: "Planen Sie Ihre Familie gemeinsam", copy: "Sobald Sie ein Match gefunden haben, bauen Sie gemeinsam weiter auf. Sehen Sie sich Ihren Kompatibilitätsbericht an, sprechen Sie über das Wesentliche und erstellen Sie einen gemeinsamen Family Plan für Erziehung, Finanzen und rechtliche Schritte - alles an einem Ort.", points: ["Kompatibilitätsbericht mit echten Gesprächspunkten statt einer Bestehen/Nicht-bestehen-Bewertung", "Gemeinsamer Family Plan für Erziehung, Finanzen und rechtliche Schritte", "Ein zentraler Ort zum Weiterplanen nach dem Match - nicht nur ein Chat"] },
+      { label: "SPENDER WERDEN", title: "Schenken Sie das Geschenk der Elternschaft", copy: "Sie haben die Möglichkeit, das Leben eines anderen Menschen für immer zu verändern. Ob Sie eine Eizell- oder Samenspende in Betracht ziehen - unsere Plattform verbindet Sie mit Menschen, die von einer eigenen Familie träumen. Erstellen Sie Ihr Profil, legen Sie Ihre Bedingungen fest und helfen Sie, Elternschaft möglich zu machen.", points: ["Sichere, geprüfte Vermittlung mit Wunscheltern", "Volle Kontrolle über Ihr Profil, Ihre Bedingungen und Ihre Privatsphäre", "Integrierter Chat und Videoanrufe zum Kennenlernen"] },
+      { label: "FÜR KLINIKEN & ANWÄLTE", title: "Erweitern Sie Ihre Praxis, erreichen Sie mehr Familien", copy: "Treten Sie unserem Fachverzeichnis bei und vernetzen Sie sich mit Tausenden potenziellen Klienten. Nutzen Sie Ihr eigenes Partner-Dashboard, um Termine zu verwalten, mit Patienten per sicherem Chat und Videoanruf zu kommunizieren, Werbekampagnen durchzuführen und Ihren Ruf in der Reproduktionsmedizin-Community aufzubauen.", points: ["Persönliches Partner-Dashboard mit Analysen", "Sicherer Chat und Videoberatungen mit Klienten", "Werbetools und gezielte E-Mail-Kampagnen"] },
+    ],
+    stats: [["15.1K", "Mitglieder weltweit"], ["7.3K", "Spender"], ["4.5K", "Partnerkliniken"], ["369", "Anwälte"]],
+    whatsNew: {
+      label: "NEU BEI LETSBEPARENTS", title: "Mehr Möglichkeiten zum Matchen, Vernetzen und Sicherbleiben",
+      intro: "Wir entwickeln die Plattform stetig weiter - das ist neu seit Ihrem letzten Besuch.",
+      tiers: { free: "Kostenlos", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Profil-Boost", copy: "Erhalten Sie für begrenzte Zeit mehr Sichtbarkeit im Katalog.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Einladen & einen Boost verdienen", copy: "Laden Sie einen Freund ein - sobald er beitritt und sich verifiziert, erhalten Sie beide einen kostenlosen Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Teilen Sie Ihren Treffplan mit jemandem, dem Sie vertrauen, bevor Sie ein Match persönlich treffen.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Video-Verifizierungs-Abzeichen", copy: "Verleihen Sie Ihrem Profil mit einem videoverifizierten Abzeichen zusätzliche Vertrauenswürdigkeit.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "KI-generierte Gesprächseinstiege", copy: "Erhalten Sie 3 passende Eröffnungsnachrichten für jedes Match, erstellt von KI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Wöchentlicher Tipp vom AI Advisor", copy: "Jede Woche ein frischer, persönlicher Tipp von Ihrem AI Family Advisor.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Unterzeichnung der Co-Parenting Agreement", copy: "Verwandeln Sie Ihren gemeinsamen Family Plan in eine verbindliche Vereinbarung, die Sie beide unterschreiben.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Community-Gruppen & Diskussionen", copy: "Treten Sie Themengruppen und Diskussionen mit anderen auf demselben Weg bei.", href: "/community" },
+      ],
+    },
+    ctaTitle: "Bereit, Ihre Familie zu gründen?", ctaCopy: "Schließen Sie sich Tausenden zukünftiger Eltern an. Erstellen Sie noch heute Ihr kostenloses Konto.",
+    ctaButton: "Kostenloses Konto erstellen", appLabel: "Auch als kostenlose mobile App verfügbar",
+  },
+  it: {
+    pill: "Piattaforma per la formazione della famiglia",
+    title: "Il tuo percorso verso la genitorialità inizia qui",
+    intro: "Trova un donatore, un co-genitore o un partner per formare una famiglia - poi compi i prossimi passi con cliniche di fiducia, esperti legali e indicazioni pratiche.",
+    start: "Trova il tuo percorso", how: "COME FUNZIONA", stepsTitle: "Cinque passi verso la tua famiglia",
+    trustLine: "Ogni profilo ha l'identità verificata - scopri cosa controlliamo.",
+    steps: [
+      ["01", "Crea il tuo profilo", "Raccontaci di te, delle tue preferenze e del tipo di famiglia che sogni di costruire.", "profile"],
+      ["02", "Trova il tuo match", "Sfoglia i profili di donatori, co-genitori e partner per formare una famiglia. Filtra per valori e mettiti in contatto.", "match"],
+      ["03", "Scopri la tua compatibilità", "Guarda il tuo punteggio di compatibilità e ciò di cui vale la pena parlare prima di decidere.", "compatibility"],
+      ["04", "Pianifica la tua famiglia insieme", "Crea un Family Plan condiviso - crescita dei figli, finanze, passaggi legali - tutto in un unico posto.", "plan"],
+      ["05", "Ricevi supporto da esperti", "Mettiti in contatto con cliniche della fertilità e specialisti di diritto riproduttivo verificati ogni volta che ne hai bisogno.", "support"],
+    ],
+    pathSelector: {
+      label: "TROVA IL TUO PERCORSO", title: "Cosa ti porta qui?",
+      intro: "Ogni famiglia nasce in modo diverso. Scegli il percorso più adatto a te - potrai sempre esplorare altre opzioni più avanti.",
+      options: [
+        ["coparent", "Sto cercando un co-genitore"],
+        ["donor", "Sto cercando un donatore"],
+        ["partner", "Sto cercando un partner per formare una famiglia"],
+        ["couple-donor", "Siamo una coppia in cerca di un donatore"],
+        ["exploring", "Sto esplorando le mie opzioni"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Trova il tuo donatore, co-genitore o partner", copy: "Il nostro attento sistema di abbinamento ti aiuta a entrare in contatto con la persona giusta. Filtra per posizione, valori e preferenze. Metti mi piace ai profili, ottieni match, poi chatta e fai videochiamate - tutto in uno spazio sicuro e privato.", points: ["Filtri avanzati per posizione, tipo e preferenze", "Messaggistica integrata e videochiamate HD", "Privacy al primo posto: controlla chi vede il tuo profilo"] },
+      { label: "CLINICHE", title: "Cliniche della fertilità di livello mondiale, a un clic di distanza", copy: "Sfoglia cliniche verificate in oltre 20 paesi. Leggi profili dettagliati, confronta i servizi e avvia una videoconsulenza - tutto dal tuo salotto. Ogni clinica è verificata per qualità e inclusività.", points: ["Videoconsulenze con i migliori specialisti", "Cliniche verificate per l'inclusività verso persone LGBTQ+ e genitori single", "Prezzi trasparenti e recensioni reali dei pazienti"] },
+      { label: "AVVOCATI", title: "Assistenza legale di cui puoi fidarti", copy: "Accordi con i donatori, diritti genitoriali - il diritto riproduttivo è complesso. Il nostro elenco di oltre 350 avvocati verificati in oltre 20 paesi ti garantisce un supporto legale esperto su misura per la tua struttura familiare.", points: ["Specialisti in diritto dei donatori e diritto di famiglia", "Filtra per paese, lingua e area di pratica", "Salva i preferiti e confronta i professionisti legali"] },
+      { label: "PIANIFICAZIONE FAMILIARE", title: "Pianifica la tua famiglia, insieme", copy: "Una volta trovato il match, continuate a costruire insieme. Consulta il tuo Report di Compatibilità, parlate di ciò che conta davvero e create un Family Plan condiviso che copra crescita dei figli, finanze e passaggi legali - tutto in un unico posto.", points: ["Report di Compatibilità con veri spunti di conversazione, non un punteggio promosso/bocciato", "Family Plan condiviso per crescita dei figli, finanze e passaggi legali", "Un unico posto per continuare a pianificare dopo il match, non solo una chat"] },
+      { label: "DIVENTA DONATORE", title: "Fai il dono della genitorialità", copy: "Hai il potere di cambiare per sempre la vita di qualcuno. Che tu stia considerando la donazione di ovociti o di seme - la nostra piattaforma ti mette in contatto con persone che sognano di formare una famiglia. Crea il tuo profilo, stabilisci le tue condizioni e aiuta a rendere possibile la genitorialità.", points: ["Abbinamento sicuro e verificato con genitori intenzionali", "Pieno controllo sul tuo profilo, sulle tue condizioni e sulla tua privacy", "Chat e videochiamate integrate per conoscervi"] },
+      { label: "PER CLINICHE E AVVOCATI", title: "Fai crescere la tua attività, raggiungi più famiglie", copy: "Unisciti al nostro elenco professionale e mettiti in contatto con migliaia di potenziali clienti. Ottieni la tua dashboard partner personale per gestire gli appuntamenti, comunicare con i pazienti tramite chat sicura e videochiamate, lanciare campagne promozionali e costruire la tua reputazione nella comunità della salute riproduttiva.", points: ["Dashboard partner personale con analisi", "Chat sicura e videoconsulenze con i clienti", "Strumenti promozionali e campagne email mirate"] },
+    ],
+    stats: [["15.1K", "Membri nel mondo"], ["7.3K", "Donatori"], ["4.5K", "Cliniche partner"], ["369", "Avvocati"]],
+    whatsNew: {
+      label: "NOVITÀ SU LETSBEPARENTS", title: "Più modi per trovare match, connettersi e restare al sicuro",
+      intro: "Continuiamo a migliorare la piattaforma - ecco le novità dall'ultima volta che sei stato/a qui.",
+      tiers: { free: "Gratis", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost del profilo", copy: "Ottieni più visibilità nel catalogo per un periodo di tempo limitato.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Invita e guadagna un Boost", copy: "Invita un amico - quando si iscrive e verifica il profilo, ricevete entrambi un Boost gratuito.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Condividi il tuo piano d'incontro con qualcuno di fiducia prima di vedere un match di persona.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Badge di Verifica Video", copy: "Aggiungi un ulteriore livello di fiducia con un badge di verifica video sul tuo profilo.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Messaggi d'apertura generati dall'IA", copy: "Ricevi 3 messaggi d'apertura su misura per ogni match, generati dall'IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Consiglio settimanale dell'AI Advisor", copy: "Un consiglio nuovo e personalizzato dal tuo AI Family Advisor ogni settimana.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Firma del Co-Parenting Agreement", copy: "Trasforma il tuo Family Plan condiviso in un accordo reciproco che firmate entrambi.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Gruppi e discussioni della Community", copy: "Unisciti a gruppi tematici e discussioni con altre persone sul tuo stesso percorso.", href: "/community" },
+      ],
+    },
+    ctaTitle: "Pronto/a a formare la tua famiglia?", ctaCopy: "Unisciti a migliaia di futuri genitori. Crea oggi il tuo account gratuito.",
+    ctaButton: "Crea account gratuito", appLabel: "Disponibile anche come app mobile gratuita",
+  },
+  pl: {
+    pill: "Platforma budowania rodziny",
+    title: "Twoja droga do rodzicielstwa zaczyna się tutaj",
+    intro: "Znajdź dawcę, współrodzica lub partnera do budowania rodziny - a potem zrób kolejne kroki z zaufanymi klinikami, ekspertami prawnymi i praktycznymi wskazówkami.",
+    start: "Znajdź swoją drogę", how: "JAK TO DZIAŁA", stepsTitle: "Pięć kroków do twojej rodziny",
+    trustLine: "Każdy profil ma zweryfikowaną tożsamość - sprawdź, co weryfikujemy.",
+    steps: [
+      ["01", "Stwórz swój profil", "Opowiedz nam o sobie, swoich preferencjach i o tym, o jakiej rodzinie marzysz.", "profile"],
+      ["02", "Znajdź swoje dopasowanie", "Przeglądaj profile dawców, współrodziców i partnerów do budowania rodziny. Filtruj według wartości i nawiązuj kontakt.", "match"],
+      ["03", "Poznaj swoją kompatybilność", "Zobacz swój wynik kompatybilności i to, o czym warto porozmawiać, zanim podejmiesz decyzję.", "compatibility"],
+      ["04", "Zaplanujcie rodzinę razem", "Stwórzcie wspólny Family Plan - wychowanie, finanse, kroki prawne - wszystko w jednym miejscu.", "plan"],
+      ["05", "Skorzystaj ze wsparcia ekspertów", "Skontaktuj się ze zweryfikowanymi klinikami leczenia niepłodności i specjalistami prawa reprodukcyjnego, kiedy tylko będziesz tego potrzebować.", "support"],
+    ],
+    pathSelector: {
+      label: "ZNAJDŹ SWOJĄ DROGĘ", title: "Co cię tu sprowadza?",
+      intro: "Każda rodzina zaczyna się inaczej. Wybierz drogę, która pasuje do ciebie najbardziej - później zawsze możesz poznać inne opcje.",
+      options: [
+        ["coparent", "Szukam współrodzica"],
+        ["donor", "Szukam dawcy"],
+        ["partner", "Szukam partnera do budowania rodziny"],
+        ["couple-donor", "Jesteśmy parą szukającą dawcy"],
+        ["exploring", "Poznaję swoje możliwości"],
+      ],
+    },
+    features: [
+      { label: "DOPASOWANIE", title: "Znajdź swojego dawcę, współrodzica lub partnera", copy: "Nasz przemyślany system dopasowywania pomaga ci połączyć się z odpowiednią osobą. Filtruj według lokalizacji, wartości i preferencji. Polub profile, uzyskaj dopasowanie, a potem rozmawiaj na czacie i przez wideorozmowę - wszystko w bezpiecznej, prywatnej przestrzeni.", points: ["Zaawansowane filtry według lokalizacji, typu i preferencji", "Wbudowane wiadomości i wideorozmowy HD", "Prywatność przede wszystkim: sam decydujesz, kto widzi twój profil"] },
+      { label: "KLINIKI", title: "Światowej klasy kliniki leczenia niepłodności, o jedno kliknięcie", copy: "Przeglądaj zweryfikowane kliniki w ponad 20 krajach. Czytaj szczegółowe profile, porównuj usługi i rozpocznij konsultację wideo - wszystko z domu. Każda klinika jest weryfikowana pod kątem jakości i otwartości na różnorodność.", points: ["Konsultacje wideo z czołowymi specjalistami", "Kliniki zweryfikowane pod kątem otwartości na osoby LGBTQ+ i samotnych rodziców", "Przejrzyste ceny i prawdziwe opinie pacjentów"] },
+      { label: "PRAWNICY", title: "Pomoc prawna, której możesz zaufać", copy: "Umowy z dawcami, prawa rodzicielskie - prawo reprodukcyjne jest złożone. Nasz katalog ponad 350 zweryfikowanych prawników w ponad 20 krajach zapewnia ci fachowe wsparcie prawne dopasowane do struktury twojej rodziny.", points: ["Specjaliści od prawa dawców i prawa rodzinnego", "Filtruj według kraju, języka i obszaru praktyki", "Zapisuj ulubionych i porównuj prawników"] },
+      { label: "PLANOWANIE RODZINY", title: "Zaplanujcie rodzinę razem", copy: "Gdy już się dopasujecie, budujcie dalej razem. Zobacz swój Raport Kompatybilności, porozmawiajcie o tym, co ważne, i stwórzcie wspólny Family Plan obejmujący wychowanie, finanse i kroki prawne - wszystko w jednym miejscu.", points: ["Raport Kompatybilności z prawdziwymi tematami do rozmowy, a nie oceną zdał/nie zdał", "Wspólny Family Plan na wychowanie, finanse i kroki prawne", "Jedno miejsce do dalszego planowania po dopasowaniu, a nie tylko czat"] },
+      { label: "ZOSTAŃ DAWCĄ", title: "Podaruj dar rodzicielstwa", copy: "Masz moc, by na zawsze zmienić czyjeś życie. Niezależnie od tego, czy rozważasz oddanie komórek jajowych czy nasienia - nasza platforma łączy cię z osobami, które marzą o założeniu rodziny. Stwórz profil, ustal swoje warunki i pomóż uczynić rodzicielstwo możliwym.", points: ["Bezpieczne, zweryfikowane dopasowanie z przyszłymi rodzicami", "Pełna kontrola nad profilem, warunkami i prywatnością", "Wbudowany czat i wideorozmowy, by się poznać"] },
+      { label: "DLA KLINIK I PRAWNIKÓW", title: "Rozwijaj swoją praktykę, docieraj do większej liczby rodzin", copy: "Dołącz do naszego katalogu profesjonalistów i połącz się z tysiącami potencjalnych klientów. Otrzymaj własny panel partnera do zarządzania wizytami, komunikacji z pacjentami przez bezpieczny czat i wideorozmowy, prowadzenia kampanii promocyjnych i budowania reputacji w społeczności zdrowia reprodukcyjnego.", points: ["Osobisty panel partnera z analizami", "Bezpieczny czat i konsultacje wideo z klientami", "Narzędzia promocyjne i ukierunkowane kampanie e-mail"] },
+    ],
+    stats: [["15.1K", "Członków na całym świecie"], ["7.3K", "Dawców"], ["4.5K", "Klinik partnerskich"], ["369", "Prawników"]],
+    whatsNew: {
+      label: "NOWOŚCI NA LETSBEPARENTS", title: "Więcej sposobów na dopasowanie, kontakt i bezpieczeństwo",
+      intro: "Wciąż rozwijamy platformę - oto co nowego od twojej ostatniej wizyty.",
+      tiers: { free: "Za darmo", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost profilu", copy: "Zyskaj większą widoczność w katalogu przez ograniczony czas.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Zaproś i zdobądź Boost", copy: "Zaproś znajomego - gdy dołączy i zweryfikuje konto, oboje otrzymacie darmowy Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Podziel się planem spotkania z kimś, komu ufasz, zanim spotkasz się z dopasowaną osobą osobiście.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Odznaka weryfikacji wideo", copy: "Dodaj dodatkową warstwę zaufania dzięki odznace weryfikacji wideo na swoim profilu.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Wiadomości na początek rozmowy tworzone przez AI", copy: "Otrzymuj 3 dopasowane wiadomości powitalne dla każdego dopasowania, tworzone przez AI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Cotygodniowa wskazówka od AI Advisor", copy: "Świeża, spersonalizowana wskazówka od twojego AI Family Advisor co tydzień.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Podpisanie Co-Parenting Agreement", copy: "Zamień wspólny Family Plan we wzajemne porozumienie, które oboje podpisujecie.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Grupy i dyskusje Community", copy: "Dołącz do grup tematycznych i dyskusji z innymi osobami na podobnej drodze.", href: "/community" },
+      ],
+    },
+    ctaTitle: "Gotowy, by założyć rodzinę?", ctaCopy: "Dołącz do tysięcy przyszłych rodziców. Załóż darmowe konto już dziś.",
+    ctaButton: "Załóż darmowe konto", appLabel: "Dostępne również jako darmowa aplikacja mobilna",
   },
 } as const;
 
@@ -1323,6 +1842,86 @@ const authPageCopy: Record<CookieLocale, {
     resetSent: "Si existe una cuenta activa con este correo, hemos enviado un enlace para restablecer la contraseña.",
     resetError: "No se pudo enviar la solicitud. Inténtalo de nuevo.",
   },
+  pt: {
+    loginTitle: "Bem-vindo de volta", loginLead: "Sentimos sua falta! Faça login na sua conta.",
+    email: "Email", password: "Senha", emailPlaceholder: "Digite seu email", passwordPlaceholder: "Digite sua senha",
+    showPassword: "Mostrar senha", hidePassword: "Ocultar senha", forgot: "Esqueceu a senha?", signIn: "Entrar",
+    signingIn: "Entrando…", signInError: "Falha ao entrar. Verifique seu email e senha.", loginDivider: "Ou continue com",
+    noAccount: "Não tem uma conta?", createAccountLink: "Criar conta", registerTitle: "Criar conta",
+    registerLead: "Junte-se à nossa comunidade e comece sua jornada", confirmPassword: "Confirmar senha",
+    confirmPlaceholder: "Confirme sua senha", acceptPrefix: "Eu aceito os", terms: "Termos de Uso", and: "e a",
+    privacy: "Política de Privacidade", createAccount: "Criar conta", creatingAccount: "Criando conta…",
+    registerDivider: "Ou continue com", alreadyAccount: "Já tem uma conta?", signInLink: "Entrar",
+    mismatch: "As senhas não coincidem.", createError: "Não foi possível criar a conta. Use um email exclusivo e uma senha com pelo menos 8 caracteres.",
+    forgotTitle: "Esqueceu a senha", forgotLead: "Digite seu email e enviaremos um link para redefinir sua senha.",
+    forgotPlaceholder: "Digite seu email", sendLink: "Enviar link", sending: "Enviando…", backToSignIn: "Voltar ao login",
+    resetSent: "Se existir uma conta ativa para este email, enviamos um link de redefinição de senha.",
+    resetError: "Não foi possível enviar a solicitação. Tente novamente.",
+  },
+  fr: {
+    loginTitle: "Bon retour", loginLead: "Vous nous avez manqué ! Connectez-vous à votre compte.",
+    email: "Email", password: "Mot de passe", emailPlaceholder: "Entrez votre email", passwordPlaceholder: "Entrez votre mot de passe",
+    showPassword: "Afficher le mot de passe", hidePassword: "Masquer le mot de passe", forgot: "Mot de passe oublié ?", signIn: "Se connecter",
+    signingIn: "Connexion…", signInError: "Échec de la connexion. Vérifiez votre email et votre mot de passe.", loginDivider: "Ou continuer avec",
+    noAccount: "Vous n'avez pas de compte ?", createAccountLink: "Créer un compte", registerTitle: "Créer un compte",
+    registerLead: "Rejoignez notre communauté et commencez votre parcours", confirmPassword: "Confirmer le mot de passe",
+    confirmPlaceholder: "Confirmez votre mot de passe", acceptPrefix: "J'accepte les", terms: "Conditions d'utilisation", and: "et la",
+    privacy: "Politique de confidentialité", createAccount: "Créer un compte", creatingAccount: "Création du compte…",
+    registerDivider: "Ou continuer avec", alreadyAccount: "Vous avez déjà un compte ?", signInLink: "Se connecter",
+    mismatch: "Les mots de passe ne correspondent pas.", createError: "Impossible de créer le compte. Utilisez un email unique et un mot de passe d'au moins 8 caractères.",
+    forgotTitle: "Mot de passe oublié", forgotLead: "Entrez votre email et nous vous enverrons un lien pour réinitialiser votre mot de passe.",
+    forgotPlaceholder: "Entrez votre email", sendLink: "Envoyer le lien", sending: "Envoi…", backToSignIn: "Retour à la connexion",
+    resetSent: "Si un compte actif existe pour cet email, nous avons envoyé un lien de réinitialisation du mot de passe.",
+    resetError: "Impossible d'envoyer la demande. Veuillez réessayer.",
+  },
+  de: {
+    loginTitle: "Willkommen zurück", loginLead: "Wir haben Sie vermisst! Bitte melden Sie sich bei Ihrem Konto an.",
+    email: "E-Mail", password: "Passwort", emailPlaceholder: "Geben Sie Ihre E-Mail ein", passwordPlaceholder: "Geben Sie Ihr Passwort ein",
+    showPassword: "Passwort anzeigen", hidePassword: "Passwort verbergen", forgot: "Passwort vergessen?", signIn: "Anmelden",
+    signingIn: "Anmeldung läuft…", signInError: "Anmeldung fehlgeschlagen. Überprüfen Sie Ihre E-Mail und Ihr Passwort.", loginDivider: "Oder fortfahren mit",
+    noAccount: "Noch kein Konto?", createAccountLink: "Konto erstellen", registerTitle: "Konto erstellen",
+    registerLead: "Treten Sie unserer Community bei und beginnen Sie Ihre Reise", confirmPassword: "Passwort bestätigen",
+    confirmPlaceholder: "Bestätigen Sie Ihr Passwort", acceptPrefix: "Ich akzeptiere die", terms: "Nutzungsbedingungen", and: "und die",
+    privacy: "Datenschutzrichtlinie", createAccount: "Konto erstellen", creatingAccount: "Konto wird erstellt…",
+    registerDivider: "Oder fortfahren mit", alreadyAccount: "Sie haben bereits ein Konto?", signInLink: "Anmelden",
+    mismatch: "Die Passwörter stimmen nicht überein.", createError: "Das Konto konnte nicht erstellt werden. Verwenden Sie eine eindeutige E-Mail-Adresse und ein Passwort mit mindestens 8 Zeichen.",
+    forgotTitle: "Passwort vergessen", forgotLead: "Geben Sie Ihre E-Mail ein und wir senden Ihnen einen Link zum Zurücksetzen Ihres Passworts.",
+    forgotPlaceholder: "Geben Sie Ihre E-Mail ein", sendLink: "Link senden", sending: "Senden…", backToSignIn: "Zurück zur Anmeldung",
+    resetSent: "Falls ein aktives Konto für diese E-Mail existiert, haben wir einen Link zum Zurücksetzen des Passworts gesendet.",
+    resetError: "Die Anfrage konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+  },
+  it: {
+    loginTitle: "Bentornato", loginLead: "Ci sei mancato! Accedi al tuo account.",
+    email: "Email", password: "Password", emailPlaceholder: "Inserisci la tua email", passwordPlaceholder: "Inserisci la tua password",
+    showPassword: "Mostra password", hidePassword: "Nascondi password", forgot: "Password dimenticata?", signIn: "Accedi",
+    signingIn: "Accesso in corso…", signInError: "Accesso non riuscito. Controlla email e password.", loginDivider: "Oppure continua con",
+    noAccount: "Non hai un account?", createAccountLink: "Crea account", registerTitle: "Crea account",
+    registerLead: "Unisciti alla nostra community e inizia il tuo percorso", confirmPassword: "Conferma password",
+    confirmPlaceholder: "Conferma la tua password", acceptPrefix: "Accetto i", terms: "Termini di utilizzo", and: "e la",
+    privacy: "Informativa sulla privacy", createAccount: "Crea account", creatingAccount: "Creazione account…",
+    registerDivider: "Oppure continua con", alreadyAccount: "Hai già un account?", signInLink: "Accedi",
+    mismatch: "Le password non coincidono.", createError: "Impossibile creare l'account. Usa un'email univoca e una password di almeno 8 caratteri.",
+    forgotTitle: "Password dimenticata", forgotLead: "Inserisci la tua email e ti invieremo un link per reimpostare la password.",
+    forgotPlaceholder: "Inserisci la tua email", sendLink: "Invia link", sending: "Invio…", backToSignIn: "Torna all'accesso",
+    resetSent: "Se esiste un account attivo per questa email, abbiamo inviato un link per reimpostare la password.",
+    resetError: "Non è stato possibile inviare la richiesta. Riprova.",
+  },
+  pl: {
+    loginTitle: "Witaj ponownie", loginLead: "Tęskniliśmy za Tobą! Zaloguj się do swojego konta.",
+    email: "Email", password: "Hasło", emailPlaceholder: "Wpisz swój email", passwordPlaceholder: "Wpisz swoje hasło",
+    showPassword: "Pokaż hasło", hidePassword: "Ukryj hasło", forgot: "Nie pamiętasz hasła?", signIn: "Zaloguj się",
+    signingIn: "Logowanie…", signInError: "Logowanie nie powiodło się. Sprawdź email i hasło.", loginDivider: "Lub kontynuuj z",
+    noAccount: "Nie masz konta?", createAccountLink: "Utwórz konto", registerTitle: "Utwórz konto",
+    registerLead: "Dołącz do naszej społeczności i rozpocznij swoją podróż", confirmPassword: "Potwierdź hasło",
+    confirmPlaceholder: "Potwierdź swoje hasło", acceptPrefix: "Akceptuję", terms: "Warunki korzystania", and: "oraz",
+    privacy: "Politykę prywatności", createAccount: "Utwórz konto", creatingAccount: "Tworzenie konta…",
+    registerDivider: "Lub kontynuuj z", alreadyAccount: "Masz już konto?", signInLink: "Zaloguj się",
+    mismatch: "Hasła nie są zgodne.", createError: "Nie udało się utworzyć konta. Użyj unikalnego adresu email i hasła zawierającego co najmniej 8 znaków.",
+    forgotTitle: "Nie pamiętasz hasła", forgotLead: "Wpisz swój email, a wyślemy Ci link do zresetowania hasła.",
+    forgotPlaceholder: "Wpisz swój email", sendLink: "Wyślij link", sending: "Wysyłanie…", backToSignIn: "Powrót do logowania",
+    resetSent: "Jeśli dla tego adresu email istnieje aktywne konto, wysłaliśmy link do zresetowania hasła.",
+    resetError: "Nie udało się wysłać żądania. Spróbuj ponownie.",
+  },
 };
 
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
@@ -1422,6 +2021,16 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
   const locale = localeOf();
   const copy = authPageCopy[locale];
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Referral link support (Alena: "а почему нельзя прислать ссылку просто
+  // для регистрации") - Referral's "Copy link" button builds a
+  // /auth/register?invite=CODE link. Redeeming still requires an
+  // authenticated member (see /member/referral/redeem in main.py), so this
+  // can only happen right after signup, not at signup time itself - kept
+  // best-effort/silent (same pattern as AiAdvisor's clear()) so a redeem
+  // hiccup never blocks the new member from reaching their account; worst
+  // case they paste the code by hand on the Referral page afterwards.
+  const inviteCode = (searchParams.get("invite") || "").trim();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -1446,6 +2055,13 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
         locale,
       });
       onLogin(await refreshSession({ user: response.user }));
+      if (inviteCode) {
+        try {
+          await api.post("/member/referral/redeem", { code: inviteCode });
+        } catch {
+          // Silent - worst case they enter the code by hand later.
+        }
+      }
       navigate(`/${locale}/auth/verify-email`);
     } catch {
       setError(
@@ -1674,6 +2290,136 @@ const standaloneAuthCopy = {
     generic: "No se pudo completar la solicitud. Inténtalo de nuevo.",
     continue: "Continuar",
   },
+  pt: {
+    resetTitle: "Escolha uma nova senha",
+    resetLead: "O link de uso único só pode ser usado uma vez.",
+    password: "Nova senha",
+    confirmPassword: "Confirmar senha",
+    savePassword: "Salvar nova senha",
+    back: "Voltar ao login",
+    mismatch: "As senhas não coincidem.",
+    invalid: "Este link é inválido, expirou ou já foi usado.",
+    resetDone: "Senha atualizada. Agora você pode entrar.",
+    wait: "Aguarde...",
+    verifyTitle: "Confirme seu email",
+    verifyLead: "Digite o código de 6 dígitos do seu email. O link de confirmação na mesma mensagem também funciona.",
+    resend: "Reenviar email",
+    verifySent: "Enviamos um link de confirmação para o seu email.",
+    verifyDone: "Email confirmado. Você já pode continuar no LetsBeParents.",
+    verifyCode: "Código de 6 dígitos",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verificar email",
+    invalidCode: "O código é inválido ou expirou.",
+    alreadyVerified: "Seu email já está confirmado.",
+    recentlySent: "Um email de confirmação foi enviado recentemente. Verifique sua caixa de entrada.",
+    deliveryFailed: "Não foi possível entregar o email. Tente novamente mais tarde.",
+    generic: "Algo deu errado. Tente novamente.",
+    continue: "Continuar",
+  },
+  fr: {
+    resetTitle: "Choisissez un nouveau mot de passe",
+    resetLead: "Le lien à usage unique ne peut être utilisé qu'une seule fois.",
+    password: "Nouveau mot de passe",
+    confirmPassword: "Confirmer le mot de passe",
+    savePassword: "Enregistrer le nouveau mot de passe",
+    back: "Retour à la connexion",
+    mismatch: "Les mots de passe ne correspondent pas.",
+    invalid: "Ce lien est invalide, expiré ou a déjà été utilisé.",
+    resetDone: "Mot de passe mis à jour. Vous pouvez maintenant vous connecter.",
+    wait: "Veuillez patienter...",
+    verifyTitle: "Confirmez votre email",
+    verifyLead: "Entrez le code à 6 chiffres reçu par email. Le lien de confirmation dans le même message fonctionne aussi.",
+    resend: "Renvoyer l'email",
+    verifySent: "Nous avons envoyé un lien de confirmation à votre email.",
+    verifyDone: "Email confirmé. Vous pouvez maintenant continuer sur LetsBeParents.",
+    verifyCode: "Code à 6 chiffres",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Vérifier l'email",
+    invalidCode: "Le code est invalide ou a expiré.",
+    alreadyVerified: "Votre email est déjà confirmé.",
+    recentlySent: "Un email de confirmation a été envoyé récemment. Vérifiez votre boîte de réception.",
+    deliveryFailed: "L'email n'a pas pu être livré. Veuillez réessayer plus tard.",
+    generic: "Une erreur s'est produite. Veuillez réessayer.",
+    continue: "Continuer",
+  },
+  de: {
+    resetTitle: "Wählen Sie ein neues Passwort",
+    resetLead: "Der einmalige Link kann nur einmal verwendet werden.",
+    password: "Neues Passwort",
+    confirmPassword: "Passwort bestätigen",
+    savePassword: "Neues Passwort speichern",
+    back: "Zurück zur Anmeldung",
+    mismatch: "Die Passwörter stimmen nicht überein.",
+    invalid: "Dieser Link ist ungültig, abgelaufen oder wurde bereits verwendet.",
+    resetDone: "Passwort aktualisiert. Sie können sich jetzt anmelden.",
+    wait: "Bitte warten...",
+    verifyTitle: "Bestätigen Sie Ihre E-Mail",
+    verifyLead: "Geben Sie den 6-stelligen Code aus Ihrer E-Mail ein. Der Bestätigungslink in derselben Nachricht funktioniert ebenfalls.",
+    resend: "E-Mail erneut senden",
+    verifySent: "Wir haben einen Bestätigungslink an Ihre E-Mail gesendet.",
+    verifyDone: "E-Mail bestätigt. Sie können nun mit LetsBeParents fortfahren.",
+    verifyCode: "6-stelliger Code",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "E-Mail verifizieren",
+    invalidCode: "Der Code ist ungültig oder abgelaufen.",
+    alreadyVerified: "Ihre E-Mail ist bereits bestätigt.",
+    recentlySent: "Kürzlich wurde bereits eine Bestätigungs-E-Mail gesendet. Überprüfen Sie Ihren Posteingang.",
+    deliveryFailed: "Die E-Mail konnte nicht zugestellt werden. Bitte versuchen Sie es später erneut.",
+    generic: "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+    continue: "Weiter",
+  },
+  it: {
+    resetTitle: "Scegli una nuova password",
+    resetLead: "Il link monouso può essere utilizzato una sola volta.",
+    password: "Nuova password",
+    confirmPassword: "Conferma password",
+    savePassword: "Salva nuova password",
+    back: "Torna all'accesso",
+    mismatch: "Le password non coincidono.",
+    invalid: "Questo link non è valido, è scaduto o è già stato utilizzato.",
+    resetDone: "Password aggiornata. Ora puoi accedere.",
+    wait: "Attendere prego...",
+    verifyTitle: "Conferma la tua email",
+    verifyLead: "Inserisci il codice a 6 cifre ricevuto via email. Funziona anche il link di conferma nello stesso messaggio.",
+    resend: "Invia di nuovo l'email",
+    verifySent: "Abbiamo inviato un link di conferma alla tua email.",
+    verifyDone: "Email confermata. Ora puoi continuare su LetsBeParents.",
+    verifyCode: "Codice a 6 cifre",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verifica email",
+    invalidCode: "Il codice non è valido o è scaduto.",
+    alreadyVerified: "La tua email è già confermata.",
+    recentlySent: "Un'email di conferma è stata inviata di recente. Controlla la tua casella di posta.",
+    deliveryFailed: "Non è stato possibile consegnare l'email. Riprova più tardi.",
+    generic: "Qualcosa è andato storto. Riprova.",
+    continue: "Continua",
+  },
+  pl: {
+    resetTitle: "Wybierz nowe hasło",
+    resetLead: "Jednorazowy link można wykorzystać tylko raz.",
+    password: "Nowe hasło",
+    confirmPassword: "Potwierdź hasło",
+    savePassword: "Zapisz nowe hasło",
+    back: "Powrót do logowania",
+    mismatch: "Hasła nie są zgodne.",
+    invalid: "Ten link jest nieprawidłowy, wygasł lub został już użyty.",
+    resetDone: "Hasło zaktualizowane. Możesz teraz się zalogować.",
+    wait: "Proszę czekać...",
+    verifyTitle: "Potwierdź swój email",
+    verifyLead: "Wpisz 6-cyfrowy kod z wiadomości email. Link potwierdzający w tej samej wiadomości również działa.",
+    resend: "Wyślij ponownie email",
+    verifySent: "Wysłaliśmy link potwierdzający na Twój email.",
+    verifyDone: "Email potwierdzony. Możesz teraz kontynuować w LetsBeParents.",
+    verifyCode: "6-cyfrowy kod",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Zweryfikuj email",
+    invalidCode: "Kod jest nieprawidłowy lub wygasł.",
+    alreadyVerified: "Twój email jest już potwierdzony.",
+    recentlySent: "Wiadomość potwierdzająca została niedawno wysłana. Sprawdź swoją skrzynkę odbiorczą.",
+    deliveryFailed: "Nie udało się dostarczyć wiadomości email. Spróbuj ponownie później.",
+    generic: "Coś poszło nie tak. Spróbuj ponownie.",
+    continue: "Kontynuuj",
+  },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
 function StandaloneAuthBackLink({ locale, label }: { locale: CookieLocale; label: string }) {
@@ -1881,7 +2627,8 @@ function Pager({
 }
 
 function Directory({ kind }: { kind: "clinics" | "lawyers" }) {
-  const locale = localeOf();
+ const locale = localeOf();
+ const directoryCopyLocale = legacyLocaleOf(locale);
   const navigate = useNavigate();
   const stateKey = `lbpDirectory:${locale}:${kind}`;
   const stored = (() => {
@@ -1941,46 +2688,46 @@ function Directory({ kind }: { kind: "clinics" | "lawyers" }) {
       apply: "Aplicar filtros", loadMore: "Mostrar más", loading: "Cargando ...", like: "Me gusta", liked: "Guardado",
       website: "Visitar sitio web", noLawyers: "No se encontraron abogados", noClinics: "No se encontraron clínicas", error: "No se pudo cargar el directorio.",
     },
-  }[locale];
+ }[directoryCopyLocale];
 
   const referenceLanguageCodes = ["en", "ar", "af", "be", "bn", "bg", "hu", "vi", "el", "ka", "da", "he", "id", "es", "it", "ca", "zh", "ko", "lv", "lt", "ms", "de", "nl", "no", "fa", "pl", "pt", "ro", "ru", "sr", "sk", "sl", "th", "tr", "uk", "fi", "fr", "hi", "hr", "cs", "sv", "et", "ja"];
   const clinicCardServicePriority = new Map(["hiv_positive_male", "hiv_positive_female", "icsi_ivf", "hepatitis_bc_male", "hepatitis_bc_female"].map((value, index) => [value, index]));
 
   const tagTranslations: Record<string, Record<CookieLocale, string>> = {
-    assisted_reproduction: { en: "Assisted Reproduction", ru: "Вспомогательная репродукция", es: "Reproducción asistida" },
-    contested_adoption: { en: "Contested Adoption", ru: "Оспариваемое усыновление", es: "Adopción impugnada" },
-    domestic_adoption: { en: "Domestic Adoption", ru: "Внутреннее усыновление", es: "Adopción nacional" },
-    icpc_adoption: { en: "Interstate (ICPC) Adoption", ru: "Межштатное (ICPC) усыновление", es: "Adopción interestatal (ICPC)" },
-    intercountry_adoption: { en: "Intercountry Adoption", ru: "Международное усыновление", es: "Adopción internacional" },
-    lgbtq_family_formation: { en: "LGBTQ Family Formation", ru: "Создание ЛГБТК+ семей", es: "Formación de familias LGBTQ" },
-    private_networking: { en: "Private Networking", ru: "Частный нетворкинг", es: "Red privada" },
-    egg_donation: { en: "Egg Donation", ru: "Донорство яйцеклеток", es: "Donación de óvulos" },
-    embryo_donation: { en: "Embryo Donation", ru: "Донорство эмбрионов", es: "Donación de embriones" },
-    sperm_donation: { en: "Sperm Donation", ru: "Донорство спермы", es: "Donación de esperma" },
-    surrogacy: { en: "Surrogacy", ru: "Суррогатное материнство", es: "Gestación subrogada" },
-    grandparent_representation: { en: "Grandparent Representation", ru: "Представительство бабушек и дедушек", es: "Representación de abuelos" },
-    special_needs_children: { en: "Special Needs Children", ru: "Дети с особыми потребностями", es: "Niños con necesidades especiales" },
-    mediation: { en: "Mediation", ru: "Медиация", es: "Mediación" },
-    ivf: { en: "IVF", ru: "ЭКО", es: "FIV" },
-    icsi_ivf: { en: "ICSI IVF", ru: "ИКСИ ЭКО", es: "FIV ICSI" },
-    own_egg_sperm_ivf: { en: "Own Egg & Sperm IVF", ru: "ЭКО с собственными клетками", es: "FIV con óvulos y esperma propios" },
-    egg_donation_ivf: { en: "Egg Donation IVF", ru: "ЭКО с донорской яйцеклеткой", es: "FIV con óvulos donados" },
-    sperm_donations_ivf: { en: "Sperm Donation IVF", ru: "ЭКО с донорской спермой", es: "FIV con esperma donado" },
-    embryo_donations_ivf: { en: "Embryo Donation IVF", ru: "ЭКО с донорским эмбрионом", es: "FIV con embriones donados" },
-    genetic_testing_ivf: { en: "Genetic Testing IVF", ru: "Генетическое тестирование ЭКО", es: "Pruebas genéticas FIV" },
-    freezing: { en: "Freezing", ru: "Криоконсервация", es: "Criopreservación" },
-    egg_freezing: { en: "Egg Freezing", ru: "Заморозка яйцеклеток", es: "Congelación de óvulos" },
-    sperm_freezing: { en: "Sperm Freezing", ru: "Заморозка спермы", es: "Congelación de esperma" },
-    embryo_freezing: { en: "Embryo Freezing", ru: "Заморозка эмбрионов", es: "Congelación de embriones" },
-    iui_intrauterine: { en: "IUI - Intrauterine", ru: "ВМИ — внутриматочная", es: "Inseminación intrauterina" },
-    ici_intracervical: { en: "ICI - Intracervical", ru: "ИЦИ — интрацервикальная", es: "Inseminación intracervical" },
-    iutpi_tuboperitoneal: { en: "IUTPI - Tuboperitoneal", ru: "ИУТПИ — тубоперитонеальная", es: "Inseminación tuboperitoneal" },
-    iti_intratubal: { en: "ITI - Intratubal", ru: "ИТИ — интратубарная", es: "Inseminación intratubárica" },
-    women_over_46: { en: "Women over 46", ru: "Женщины старше 46 лет", es: "Mujeres mayores de 46 años" },
-    hiv_positive_female: { en: "HIV+ Female", ru: "ВИЧ+ женщина", es: "Mujer VIH+" },
-    hiv_positive_male: { en: "HIV+ Male", ru: "ВИЧ+ мужчина", es: "Hombre VIH+" },
-    hepatitis_bc_female: { en: "Hepatitis B/C Female", ru: "Гепатит B/C женщина", es: "Mujer con hepatitis B/C" },
-    hepatitis_bc_male: { en: "Hepatitis B/C Male", ru: "Гепатит B/C мужчина", es: "Hombre con hepatitis B/C" },
+    assisted_reproduction: { en: "Assisted Reproduction", ru: "Вспомогательная репродукция", es: "Reproducción asistida", pt: "Reprodução Assistida", fr: "Procréation médicalement assistée", de: "Assistierte Reproduktion", it: "Riproduzione assistita", pl: "Wspomagana prokreacja" },
+    contested_adoption: { en: "Contested Adoption", ru: "Оспариваемое усыновление", es: "Adopción impugnada", pt: "Adoção contestada", fr: "Adoption contestée", de: "Angefochtene Adoption", it: "Adozione contestata", pl: "Sporna adopcja" },
+    domestic_adoption: { en: "Domestic Adoption", ru: "Внутреннее усыновление", es: "Adopción nacional", pt: "Adoção nacional", fr: "Adoption nationale", de: "Inländische Adoption", it: "Adozione nazionale", pl: "Adopcja krajowa" },
+    icpc_adoption: { en: "Interstate (ICPC) Adoption", ru: "Межштатное (ICPC) усыновление", es: "Adopción interestatal (ICPC)", pt: "Adoção interestadual (ICPC)", fr: "Adoption interétatique (ICPC)", de: "Zwischenstaatliche Adoption (ICPC)", it: "Adozione interstatale (ICPC)", pl: "Adopcja międzystanowa (ICPC)" },
+    intercountry_adoption: { en: "Intercountry Adoption", ru: "Международное усыновление", es: "Adopción internacional", pt: "Adoção internacional", fr: "Adoption internationale", de: "Internationale Adoption", it: "Adozione internazionale", pl: "Adopcja międzynarodowa" },
+    lgbtq_family_formation: { en: "LGBTQ Family Formation", ru: "Создание ЛГБТК+ семей", es: "Formación de familias LGBTQ", pt: "Formação de família LGBTQ", fr: "Formation de famille LGBTQ", de: "LGBTQ-Familiengründung", it: "Formazione familiare LGBTQ", pl: "Zakładanie rodziny LGBTQ" },
+    private_networking: { en: "Private Networking", ru: "Частный нетворкинг", es: "Red privada", pt: "Networking privado", fr: "Réseau privé", de: "Privates Netzwerken", it: "Rete privata", pl: "Prywatny networking" },
+    egg_donation: { en: "Egg Donation", ru: "Донорство яйцеклеток", es: "Donación de óvulos", pt: "Doação de óvulos", fr: "Don d'ovocytes", de: "Eizellspende", it: "Donazione di ovociti", pl: "Dawstwo komórek jajowych" },
+    embryo_donation: { en: "Embryo Donation", ru: "Донорство эмбрионов", es: "Donación de embriones", pt: "Doação de embriões", fr: "Don d'embryons", de: "Embryonenspende", it: "Donazione di embrioni", pl: "Dawstwo zarodków" },
+    sperm_donation: { en: "Sperm Donation", ru: "Донорство спермы", es: "Donación de esperma", pt: "Doação de esperma", fr: "Don de sperme", de: "Samenspende", it: "Donazione di sperma", pl: "Dawstwo nasienia" },
+    surrogacy: { en: "Surrogacy", ru: "Суррогатное материнство", es: "Gestación subrogada", pt: "Gestação de substituição", fr: "Gestation pour autrui (GPA)", de: "Leihmutterschaft", it: "Maternità surrogata", pl: "Surogacja" },
+    grandparent_representation: { en: "Grandparent Representation", ru: "Представительство бабушек и дедушек", es: "Representación de abuelos", pt: "Representação de avós", fr: "Représentation des grands-parents", de: "Vertretung von Großeltern", it: "Rappresentanza dei nonni", pl: "Reprezentacja dziadków" },
+    special_needs_children: { en: "Special Needs Children", ru: "Дети с особыми потребностями", es: "Niños con necesidades especiales", pt: "Crianças com necessidades especiais", fr: "Enfants à besoins particuliers", de: "Kinder mit besonderen Bedürfnissen", it: "Bambini con bisogni speciali", pl: "Dzieci ze specjalnymi potrzebami" },
+    mediation: { en: "Mediation", ru: "Медиация", es: "Mediación", pt: "Mediação", fr: "Médiation", de: "Mediation", it: "Mediazione", pl: "Mediacja" },
+    ivf: { en: "IVF", ru: "ЭКО", es: "FIV", pt: "FIV", fr: "FIV", de: "IVF", it: "FIVET", pl: "In vitro" },
+    icsi_ivf: { en: "ICSI IVF", ru: "ИКСИ ЭКО", es: "FIV ICSI", pt: "FIV com ICSI", fr: "FIV avec ICSI", de: "IVF mit ICSI", it: "FIVET con ICSI", pl: "In vitro z ICSI" },
+    own_egg_sperm_ivf: { en: "Own Egg & Sperm IVF", ru: "ЭКО с собственными клетками", es: "FIV con óvulos y esperma propios", pt: "FIV com óvulos e esperma próprios", fr: "FIV avec ovocytes et sperme propres", de: "IVF mit eigenen Eizellen und eigenem Sperma", it: "FIVET con ovociti e sperma propri", pl: "In vitro z własnymi komórkami jajowymi i nasieniem" },
+    egg_donation_ivf: { en: "Egg Donation IVF", ru: "ЭКО с донорской яйцеклеткой", es: "FIV con óvulos donados", pt: "FIV com doação de óvulos", fr: "FIV avec don d'ovocytes", de: "IVF mit Eizellspende", it: "FIVET con donazione di ovociti", pl: "In vitro z dawstwem komórek jajowych" },
+    sperm_donations_ivf: { en: "Sperm Donation IVF", ru: "ЭКО с донорской спермой", es: "FIV con esperma donado", pt: "FIV com doação de esperma", fr: "FIV avec don de sperme", de: "IVF mit Samenspende", it: "FIVET con donazione di sperma", pl: "In vitro z dawstwem nasienia" },
+    embryo_donations_ivf: { en: "Embryo Donation IVF", ru: "ЭКО с донорским эмбрионом", es: "FIV con embriones donados", pt: "FIV com doação de embriões", fr: "FIV avec don d'embryons", de: "IVF mit Embryonenspende", it: "FIVET con donazione di embrioni", pl: "In vitro z dawstwem zarodków" },
+    genetic_testing_ivf: { en: "Genetic Testing IVF", ru: "Генетическое тестирование ЭКО", es: "Pruebas genéticas FIV", pt: "FIV com teste genético", fr: "FIV avec test génétique", de: "IVF mit Gentest", it: "FIVET con test genetico", pl: "In vitro z badaniem genetycznym" },
+    freezing: { en: "Freezing", ru: "Криоконсервация", es: "Criopreservación", pt: "Congelamento", fr: "Congélation", de: "Einfrieren", it: "Congelamento", pl: "Mrożenie" },
+    egg_freezing: { en: "Egg Freezing", ru: "Заморозка яйцеклеток", es: "Congelación de óvulos", pt: "Congelamento de óvulos", fr: "Congélation d'ovocytes", de: "Einfrieren von Eizellen", it: "Congelamento degli ovociti", pl: "Mrożenie komórek jajowych" },
+    sperm_freezing: { en: "Sperm Freezing", ru: "Заморозка спермы", es: "Congelación de esperma", pt: "Congelamento de esperma", fr: "Congélation de sperme", de: "Einfrieren von Spermien", it: "Congelamento dello sperma", pl: "Mrożenie nasienia" },
+    embryo_freezing: { en: "Embryo Freezing", ru: "Заморозка эмбрионов", es: "Congelación de embriones", pt: "Congelamento de embriões", fr: "Congélation d'embryons", de: "Einfrieren von Embryonen", it: "Congelamento degli embrioni", pl: "Mrożenie zarodków" },
+    iui_intrauterine: { en: "IUI - Intrauterine", ru: "ВМИ — внутриматочная", es: "Inseminación intrauterina", pt: "IIU - Intrauterina", fr: "IIU - Intra-utérine", de: "IUI - Intrauterin", it: "IUI - Intrauterina", pl: "IUI - Domaciczna" },
+    ici_intracervical: { en: "ICI - Intracervical", ru: "ИЦИ — интрацервикальная", es: "Inseminación intracervical", pt: "ICI - Intracervical", fr: "ICI - Intracervicale", de: "ICI - Intrazervikal", it: "ICI - Intracervicale", pl: "ICI - Doszyjkowa" },
+    iutpi_tuboperitoneal: { en: "IUTPI - Tuboperitoneal", ru: "ИУТПИ — тубоперитонеальная", es: "Inseminación tuboperitoneal", pt: "IUTPI - Tuboperitoneal", fr: "IUTPI - Tubopéritonéale", de: "IUTPI - Tuboperitoneal", it: "IUTPI - Tuboperitoneale", pl: "IUTPI - Jajowodowo-otrzewnowa" },
+    iti_intratubal: { en: "ITI - Intratubal", ru: "ИТИ — интратубарная", es: "Inseminación intratubárica", pt: "ITI - Intratubária", fr: "ITI - Intratubaire", de: "ITI - Intratubar", it: "ITI - Intratubarica", pl: "ITI - Dojajowodowa" },
+    women_over_46: { en: "Women over 46", ru: "Женщины старше 46 лет", es: "Mujeres mayores de 46 años", pt: "Mulheres acima de 46 anos", fr: "Femmes de plus de 46 ans", de: "Frauen über 46", it: "Donne oltre i 46 anni", pl: "Kobiety powyżej 46 roku życia" },
+    hiv_positive_female: { en: "HIV+ Female", ru: "ВИЧ+ женщина", es: "Mujer VIH+", pt: "Mulher HIV+", fr: "Femme VIH+", de: "HIV-positive Frau", it: "Donna HIV+", pl: "Kobieta HIV+" },
+    hiv_positive_male: { en: "HIV+ Male", ru: "ВИЧ+ мужчина", es: "Hombre VIH+", pt: "Homem HIV+", fr: "Homme VIH+", de: "HIV-positiver Mann", it: "Uomo HIV+", pl: "Mężczyzna HIV+" },
+    hepatitis_bc_female: { en: "Hepatitis B/C Female", ru: "Гепатит B/C женщина", es: "Mujer con hepatitis B/C", pt: "Mulher com hepatite B/C", fr: "Femme avec hépatite B/C", de: "Frau mit Hepatitis B/C", it: "Donna con epatite B/C", pl: "Kobieta z WZW B/C" },
+    hepatitis_bc_male: { en: "Hepatitis B/C Male", ru: "Гепатит B/C мужчина", es: "Hombre con hepatitis B/C", pt: "Homem com hepatite B/C", fr: "Homme avec hépatite B/C", de: "Mann mit Hepatitis B/C", it: "Uomo con epatite B/C", pl: "Mężczyzna z WZW B/C" },
   };
   const practiceOrder = ["assisted_reproduction", "contested_adoption", "domestic_adoption", "icpc_adoption", "intercountry_adoption", "lgbtq_family_formation", "private_networking", "egg_donation", "embryo_donation", "sperm_donation", "surrogacy", "grandparent_representation", "special_needs_children", "mediation"];
   const rowData = (item: Row) => item.data && typeof item.data === "object" ? item.data as Row : {};
@@ -2323,9 +3070,10 @@ function DirectoryDetailIcon({ name }: { name: DirectoryDetailIconName }) {
 }
 
 function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
-  const { slug = "" } = useParams();
-  const locale = localeOf();
-  const [item, setItem] = useState<Row | null>(null);
+ const { slug = "" } = useParams();
+ const locale = localeOf();
+ const directoryCopyLocale = legacyLocaleOf(locale);
+ const [item, setItem] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const copy = {
     en: {
@@ -2346,7 +3094,7 @@ function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
       practice: "Áreas de práctica", website: "Visitar sitio web", fax: "Fax", otherServices: "Otros servicios",
       error: "No se pudo cargar el directorio.",
     },
-  }[locale];
+ }[directoryCopyLocale];
   useEffect(() => {
     let active = true;
     setItem(null);
@@ -2431,7 +3179,7 @@ function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
     en: { ivf_treatments: "IVF treatments", fertility_preservation: "Fertility preservation", artificial_insemination: "Artificial insemination", special_situations: "Special situations" },
     ru: { ivf_treatments: "ЭКО процедуры", fertility_preservation: "Сохранение фертильности", artificial_insemination: "Искусственная инсеминация", special_situations: "Особые случаи" },
     es: { ivf_treatments: "Tratamientos de FIV", fertility_preservation: "Preservación de la fertilidad", artificial_insemination: "Inseminación artificial", special_situations: "Situaciones especiales" },
-  }[locale];
+ }[directoryCopyLocale];
   const remainingTags = new Map(tags.map((tag) => [tagKey(tag), tag]));
   const groupedServices = serviceGroups.map((group) => {
     const groupTags = group.slugs.map((serviceSlug) => remainingTags.get(serviceSlug)).filter((tag): tag is unknown => Boolean(tag));
@@ -2574,6 +3322,71 @@ const CATALOG_COPY = {
     dailyLikeLimit: "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana.", dailyChatLimit: "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
     profileUnavailable: "Este perfil ya no está disponible.", chatUnavailable: "No se puede abrir esta conversación ahora mismo.",
   },
+  pt: {
+    browse: "Explorar perfis", collections: "Coleções", all: "Todos", day: "dia", days: "dias", month: "mês",
+    filters: "Filtros", allFilters: "Todos os filtros", closeFilters: "Fechar filtros", clear: "Limpar tudo", apply: "Aplicar filtros",
+    country: "País", city: "Cidade", anyCountry: "Qualquer país", cityFirst: "Selecione um único país para filtrar por cidade", cityPlaceholder: "Comece a digitar o nome de uma cidade...",
+    profileType: "Tipo de perfil", donor: "Doador", lookingFor: "Procurando", allTypes: "Todos os tipos",
+    matches: "Mostra perfis que correspondem a qualquer uma dessas opções", verified: "Somente verificados", age: "Idade", from: "De", to: "Até",
+    ethnicity: "Etnia", hair: "Cor do cabelo", eye: "Cor dos olhos", education: "Educação", religion: "Religião",
+    premium: "Somente Premium", premiumTitle: "Filtros Premium", premiumText: "Escolha o Premium para desbloquear filtros avançados e encontrar perfis mais compatíveis.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Fechar oferta Premium", search: "Buscar...", none: "Nenhuma opção encontrada", noProfiles: "Nenhum perfil encontrado", noProfilesHelp: "Tente alterar ou limpar os filtros.",
+    loadMore: "Carregar mais", loading: "Carregando ...", locationHidden: "Localização oculta", message: "Mensagem", like: "Curtir", liked: "Liked",
+    ageError: "A idade mínima não pode ser maior que a idade máxima.", failed: "Não foi possível carregar o catálogo.", actionFailed: "Não foi possível concluir esta ação.",
+    dailyLikeLimit: "Você atingiu o limite diário de curtidas. Você pode curtir mais perfis amanhã.", dailyChatLimit: "Você atingiu o limite diário de novos chats. Você pode iniciar mais chats amanhã.",
+    profileUnavailable: "Este perfil não está mais disponível.", chatUnavailable: "Esta conversa não pode ser aberta no momento.",
+  },
+  fr: {
+    browse: "Parcourir les profils", collections: "Collections", all: "Tous", day: "jour", days: "jours", month: "mois",
+    filters: "Filtres", allFilters: "Tous les filtres", closeFilters: "Fermer les filtres", clear: "Tout effacer", apply: "Appliquer les filtres",
+    country: "Pays", city: "Ville", anyCountry: "Tout pays", cityFirst: "Sélectionnez un seul pays pour filtrer par ville", cityPlaceholder: "Commencez à taper le nom d'une ville...",
+    profileType: "Type de profil", donor: "Donneur", lookingFor: "Recherche", allTypes: "Tous les types",
+    matches: "Affiche les profils correspondant à l'une de ces options", verified: "Vérifiés uniquement", age: "Âge", from: "De", to: "À",
+    ethnicity: "Origine ethnique", hair: "Couleur de cheveux", eye: "Couleur des yeux", education: "Éducation", religion: "Religion",
+    premium: "Premium uniquement", premiumTitle: "Filtres Premium", premiumText: "Choisissez Premium pour débloquer des filtres avancés et trouver des profils plus compatibles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Fermer l'offre Premium", search: "Rechercher...", none: "Aucune option trouvée", noProfiles: "Aucun profil trouvé", noProfilesHelp: "Essayez de modifier ou d'effacer les filtres.",
+    loadMore: "Charger plus", loading: "Chargement ...", locationHidden: "Localisation masquée", message: "Message", like: "J'aime", liked: "Liked",
+    ageError: "L'âge minimum ne peut pas être supérieur à l'âge maximum.", failed: "Impossible de charger le catalogue.", actionFailed: "Cette action n'a pas pu être effectuée.",
+    dailyLikeLimit: "Vous avez atteint la limite quotidienne de « J'aime ». Vous pourrez aimer d'autres profils demain.", dailyChatLimit: "Vous avez atteint la limite quotidienne de nouveaux chats. Vous pourrez démarrer d'autres chats demain.",
+    profileUnavailable: "Ce profil n'est plus disponible.", chatUnavailable: "Cette conversation ne peut pas être ouverte pour le moment.",
+  },
+  de: {
+    browse: "Profile durchsuchen", collections: "Sammlungen", all: "Alle", day: "Tag", days: "Tage", month: "Monat",
+    filters: "Filter", allFilters: "Alle Filter", closeFilters: "Filter schließen", clear: "Alles löschen", apply: "Filter anwenden",
+    country: "Land", city: "Stadt", anyCountry: "Beliebiges Land", cityFirst: "Wählen Sie ein einzelnes Land, um nach Stadt zu filtern", cityPlaceholder: "Beginnen Sie, einen Stadtnamen einzugeben...",
+    profileType: "Profiltyp", donor: "Spender", lookingFor: "Sucht", allTypes: "Alle Typen",
+    matches: "Zeigt Profile, die einer dieser Optionen entsprechen", verified: "Nur verifizierte", age: "Alter", from: "Von", to: "Bis",
+    ethnicity: "Ethnizität", hair: "Haarfarbe", eye: "Augenfarbe", education: "Bildung", religion: "Religion",
+    premium: "Nur Premium", premiumTitle: "Premium-Filter", premiumText: "Wählen Sie Premium, um erweiterte Filter freizuschalten und besser passende Profile zu finden.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Premium-Angebot schließen", search: "Suchen...", none: "Keine Optionen gefunden", noProfiles: "Keine Profile gefunden", noProfilesHelp: "Versuchen Sie, die Filter zu ändern oder zu löschen.",
+    loadMore: "Mehr laden", loading: "Wird geladen ...", locationHidden: "Standort verborgen", message: "Nachricht", like: "Gefällt mir", liked: "Liked",
+    ageError: "Das Mindestalter darf nicht höher sein als das Höchstalter.", failed: "Der Katalog konnte nicht geladen werden.", actionFailed: "Diese Aktion konnte nicht abgeschlossen werden.",
+    dailyLikeLimit: "Sie haben das heutige Like-Limit erreicht. Sie können morgen weitere Profile liken.", dailyChatLimit: "Sie haben das heutige Limit für neue Chats erreicht. Sie können morgen weitere Chats starten.",
+    profileUnavailable: "Dieses Profil ist nicht mehr verfügbar.", chatUnavailable: "Diese Unterhaltung kann derzeit nicht geöffnet werden.",
+  },
+  it: {
+    browse: "Sfoglia profili", collections: "Raccolte", all: "Tutti", day: "giorno", days: "giorni", month: "mese",
+    filters: "Filtri", allFilters: "Tutti i filtri", closeFilters: "Chiudi filtri", clear: "Cancella tutto", apply: "Applica filtri",
+    country: "Paese", city: "Città", anyCountry: "Qualsiasi paese", cityFirst: "Seleziona un solo paese per filtrare per città", cityPlaceholder: "Inizia a digitare il nome di una città...",
+    profileType: "Tipo di profilo", donor: "Donatore", lookingFor: "Cerca", allTypes: "Tutti i tipi",
+    matches: "Mostra i profili che corrispondono a una qualsiasi di queste opzioni", verified: "Solo verificati", age: "Età", from: "Da", to: "A",
+    ethnicity: "Etnia", hair: "Colore dei capelli", eye: "Colore degli occhi", education: "Istruzione", religion: "Religione",
+    premium: "Solo Premium", premiumTitle: "Filtri Premium", premiumText: "Scegli Premium per sbloccare filtri avanzati e trovare profili più compatibili.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Chiudi offerta Premium", search: "Cerca...", none: "Nessuna opzione trovata", noProfiles: "Nessun profilo trovato", noProfilesHelp: "Prova a modificare o cancellare i filtri.",
+    loadMore: "Carica altro", loading: "Caricamento ...", locationHidden: "Posizione nascosta", message: "Messaggio", like: "Mi piace", liked: "Liked",
+    ageError: "L'età minima non può essere maggiore dell'età massima.", failed: "Impossibile caricare il catalogo.", actionFailed: "Non è stato possibile completare questa azione.",
+    dailyLikeLimit: "Hai raggiunto il limite giornaliero di Mi piace. Potrai mettere Mi piace ad altri profili domani.", dailyChatLimit: "Hai raggiunto il limite giornaliero di nuove chat. Potrai avviare altre chat domani.",
+    profileUnavailable: "Questo profilo non è più disponibile.", chatUnavailable: "Questa conversazione non può essere aperta al momento.",
+  },
+  pl: {
+    browse: "Przeglądaj profile", collections: "Kolekcje", all: "Wszystkie", day: "dzień", days: "dni", month: "miesiąc",
+    filters: "Filtry", allFilters: "Wszystkie filtry", closeFilters: "Zamknij filtry", clear: "Wyczyść wszystko", apply: "Zastosuj filtry",
+    country: "Kraj", city: "Miasto", anyCountry: "Dowolny kraj", cityFirst: "Wybierz jeden kraj, aby filtrować według miasta", cityPlaceholder: "Zacznij wpisywać nazwę miasta...",
+    profileType: "Typ profilu", donor: "Dawca", lookingFor: "Szuka", allTypes: "Wszystkie typy",
+    matches: "Pokazuje profile pasujące do dowolnej z tych opcji", verified: "Tylko zweryfikowani", age: "Wiek", from: "Od", to: "Do",
+    ethnicity: "Pochodzenie etniczne", hair: "Kolor włosów", eye: "Kolor oczu", education: "Wykształcenie", religion: "Religia",
+    premium: "Tylko Premium", premiumTitle: "Filtry Premium", premiumText: "Wybierz Premium, aby odblokować zaawansowane filtry i znaleźć bardziej dopasowane profile.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Zamknij ofertę Premium", search: "Szukaj...", none: "Nie znaleziono opcji", noProfiles: "Nie znaleziono profili", noProfilesHelp: "Spróbuj zmienić lub wyczyścić filtry.",
+    loadMore: "Załaduj więcej", loading: "Ładowanie ...", locationHidden: "Lokalizacja ukryta", message: "Wiadomość", like: "Polub", liked: "Liked",
+    ageError: "Minimalny wiek nie może być większy niż maksymalny.", failed: "Nie udało się załadować katalogu.", actionFailed: "Nie udało się wykonać tej czynności.",
+    dailyLikeLimit: "Osiągnięto dzisiejszy limit polubień. Możesz polubić więcej profili jutro.", dailyChatLimit: "Osiągnięto dzisiejszy limit nowych czatów. Możesz rozpocząć więcej czatów jutro.",
+    profileUnavailable: "Ten profil nie jest już dostępny.", chatUnavailable: "Tej rozmowy nie można teraz otworzyć.",
+  },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
 const CATALOG_ENUM_OPTIONS: Record<string, CatalogOption[]> = {
@@ -2696,7 +3509,7 @@ function CatalogCard({
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<Set<string>>(() => new Set());
   const name = catalogText(item.displayName ?? data.displayName, "LetsBeParents member");
   const age = profileAge(item);
-  const location = [item.city ?? data.city, profileCountry(item.countryName ?? data.countryName ?? item.country ?? data.country, locale)]
+ const location = [item.city ?? data.city, profileCountry(item.countryName ?? data.countryName ?? item.country ?? data.country, legacyLocaleOf(locale))]
     .filter(Boolean).map(String).join(", ");
   const donorTypes = catalogList(item.donorType ?? data.donorType);
   const lookingFor = catalogList(item.lookingFor ?? data.lookingFor ?? item.recipientType ?? data.recipientType);
@@ -2868,7 +3681,7 @@ function CatalogFilterModal({
     const controlId = "catalog-filter-city";
     const labelId = `${controlId}-label`;
     const selectedCountry = value.country[0] || "";
-    const countryLabel = countries.find((option) => option.value === selectedCountry)?.label || profileCountry(selectedCountry, locale);
+ const countryLabel = countries.find((option) => option.value === selectedCountry)?.label || profileCountry(selectedCountry, legacyLocaleOf(locale));
     const term = cityQuery.trim().toLowerCase();
     const filtered = term ? cities.filter((option) => option.label.toLowerCase().includes(term) || option.value.toLowerCase().includes(term)).slice(0, 24) : [];
     const dropdownOpen = openField === "city" && !disabled && filtered.length > 0;
@@ -3255,7 +4068,7 @@ function Catalog({ session }: { session: Session }) {
       ) : <div className="catalog-reference-empty"><strong>{copy.noProfiles}</strong><span>{copy.noProfilesHelp}</span></div>}
       {!(loading && offset === 0) && items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
       {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => { setFilterOpen(false); setPremiumPromptOpen(false); }} onApply={applyFilters} countries={catalogOptions.countries} cities={cities} premium={catalogOptions.premium} onPremium={openPremiumPrompt} premiumPromptOpen={premiumPromptOpen} /> : null}
-      {premiumPromptOpen ? <AccountPremium locale={locale} close={() => setPremiumPromptOpen(false)} /> : null}
+{premiumPromptOpen ? <AccountPremium locale={legacyLocaleOf(locale)} close={() => setPremiumPromptOpen(false)} /> : null}
     </section>
   );
 }
@@ -3270,11 +4083,11 @@ function Catalog({ session }: { session: Session }) {
 const REPORT_REASONS = ["Spam", "Harassment", "Inappropriate Content", "Fake Profile", "Scam", "Other"];
 
 function CatalogProfile({ session }: { session: Session }) {
-  return <MemberProfile session={session} locale={localeOf()} />;
+ return <MemberProfile session={session} locale={legacyLocaleOf(localeOf())} />;
 }
 
 function Likes({ session }: { session: Session }) {
-  return <MemberLikes session={session} locale={localeOf()} renderProfileCard={props => <CatalogCard {...props} />} />;
+ return <MemberLikes session={session} locale={legacyLocaleOf(localeOf())} renderProfileCard={props => <CatalogCard {...props} />} />;
 }
 
 function Profile({ session }: { session: Session }) {
@@ -3545,24 +4358,28 @@ function Profile({ session }: { session: Session }) {
 }
 
 function MemberLinks({ locale }: { locale: string }) {
+  // NavLink (not Link) so the current section gets the "active" pink pill
+  // (styles.css .member-links a.active) - previously plain <Link>s had no
+  // way to show which tab you were on at all.
+  const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined);
   return (
     <nav className="member-links">
-      <Link to={`/${locale}/profile`}>Profile</Link>
-      <Link to={`/${locale}/compatibility`}>Compatibility</Link>
-      <Link to={`/${locale}/ai-advisor`}>AI Advisor</Link>
-      <Link to={`/${locale}/photos`}>Photos</Link>
-      <Link to={`/${locale}/verification`}>Verification</Link>
-      <Link to={`/${locale}/chat`}>Messages</Link>
-      <Link to={`/${locale}/visitors`}>Visitors</Link>
-      <Link to={`/${locale}/favourites`}>Saved</Link>
-      <Link to={`/${locale}/blocked`}>Blocked</Link>
-      <Link to={`/${locale}/boost`}>Boost</Link>
-      <Link to={`/${locale}/referral`}>Referral</Link>
-      <Link to={`/${locale}/safety-checkin`}>Safety Check-In</Link>
-      <Link to={`/${locale}/cost-calculator`}>Cost Calculator</Link>
-      <Link to={`/${locale}/video-verification`}>Video Verification</Link>
-      <Link to={`/${locale}/community`}>Community</Link>
-      <Link to={`/${locale}/settings`}>Settings</Link>
+      <NavLink to={`/${locale}/profile`} className={navClass}>Profile</NavLink>
+      <NavLink to={`/${locale}/compatibility`} className={navClass}>Compatibility</NavLink>
+      <NavLink to={`/${locale}/ai-advisor`} className={navClass}>AI Advisor</NavLink>
+      <NavLink to={`/${locale}/photos`} className={navClass}>Photos</NavLink>
+      <NavLink to={`/${locale}/verification`} className={navClass}>Verification</NavLink>
+      <NavLink to={`/${locale}/chat`} className={navClass}>Messages</NavLink>
+      <NavLink to={`/${locale}/visitors`} className={navClass}>Visitors</NavLink>
+      <NavLink to={`/${locale}/favourites`} className={navClass}>Saved</NavLink>
+      <NavLink to={`/${locale}/blocked`} className={navClass}>Blocked</NavLink>
+      <NavLink to={`/${locale}/boost`} className={navClass}>Boost</NavLink>
+      <NavLink to={`/${locale}/referral`} className={navClass}>Referral</NavLink>
+      <NavLink to={`/${locale}/safety-checkin`} className={navClass}>Safety Check-In</NavLink>
+      <NavLink to={`/${locale}/cost-calculator`} className={navClass}>Cost Calculator</NavLink>
+      <NavLink to={`/${locale}/video-verification`} className={navClass}>Video Verification</NavLink>
+      <NavLink to={`/${locale}/community`} className={navClass}>Community</NavLink>
+      <NavLink to={`/${locale}/settings`} className={navClass}>Settings</NavLink>
     </nav>
   );
 }
@@ -3975,7 +4792,7 @@ function Verification({ session }: { session: Session }) {
   );
 }
 
-function Conversations({ session }: { session: Session }) { return <MemberChat session={session} locale={localeOf()} />; }
+function Conversations({ session }: { session: Session }) { return <MemberChat session={session} locale={legacyLocaleOf(localeOf())} />; }
 
 function SimpleMemberList({
   session,
@@ -4175,32 +4992,52 @@ function AccountDeletion({ session }: { session: Session }) {
   );
 }
 
+// Tier display names + rank, mirrors backend SUBSCRIPTION_TIER_RANK
+// (main.py). Used both to label the member's current tier and to decide
+// whether an "Upgrade to Pro" offer makes sense (nothing to upgrade to
+// once you're already on Pro).
+const SUBSCRIPTION_TIER_LABELS: Record<string, string> = {
+  EXPLORE: "Explore (free)",
+  BUILDER: "Family Builder",
+  PRO: "Family Builder Pro",
+};
+const SUBSCRIPTION_TIER_RANK: Record<string, number> = { EXPLORE: 0, BUILDER: 1, PRO: 2 };
+
 function Subscription({ session }: { session: Session }) {
   const locale = localeOf();
   const [data, setData] = useState<Row | null>(null);
   const [notice, setNotice] = useState("");
-  useEffect(() => {
+  const [requesting, setRequesting] = useState(false);
+  const load = () => {
     if (session)
       api
         .get<Row>("/member/subscription")
         .then(setData)
         .catch(() => setNotice("Could not load your Premium access."));
-  }, [session]);
+  };
+  useEffect(load, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
-  const request = async (plan: string) => {
+  const request = async (plan: string, tier: string) => {
+    setRequesting(true);
     try {
       const response = await api.post<Row>("/member/subscription-intent", {
         plan,
+        tier,
         payload: {},
       });
       setNotice(asText(response.message ?? response.status));
+      load();
     } catch {
       setNotice("Premium is available only after profile verification.");
+    } finally {
+      setRequesting(false);
     }
   };
   const verified = data?.isVerified === true;
+  const currentTier = asText(data?.tier || "EXPLORE").toUpperCase();
+  const canUpgradeToPro = data?.isPremium && SUBSCRIPTION_TIER_RANK[currentTier] < SUBSCRIPTION_TIER_RANK.PRO;
   return (
-    <section className="access-card">
+    <section className="access-card premium-card">
       <h1>Premium</h1>
       {data && !verified ? (
         <>
@@ -4213,14 +5050,44 @@ function Subscription({ session }: { session: Session }) {
         <>
           <p>Current status: {asText(data?.status)}</p>
           {data?.isPremium ? (
-            <p>Your Premium subscription is active.</p>
+            <>
+              <p className="premium-current-tier">
+                Current plan: <strong>{SUBSCRIPTION_TIER_LABELS[currentTier] || currentTier}</strong>
+              </p>
+              <p>Your Premium subscription is active.</p>
+              {canUpgradeToPro && (
+                <div className="premium-upgrade">
+                  <p>
+                    Want the Family Builder Pro extras - Detailed Compatibility
+                    Report, Co-Parenting Agreement sign-off, Family Plan &amp;
+                    Shared Family Room?
+                  </p>
+                  <div className="plan-actions">
+                    {["MONTHLY", "QUARTERLY"].map((plan) => (
+                      <button
+                        className="primary"
+                        key={plan}
+                        disabled={requesting}
+                        onClick={() => void request(plan, "PRO")}
+                      >
+                        Upgrade to Pro ({plan.toLowerCase()})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Link className="secondary" to={`/${locale}/pricing`}>
+                Compare all plans
+              </Link>
+            </>
           ) : (
             <div className="plan-actions">
               {["MONTHLY", "QUARTERLY"].map((plan) => (
                 <button
                   className="primary"
                   key={plan}
-                  onClick={() => request(plan)}
+                  disabled={requesting}
+                  onClick={() => void request(plan, "BUILDER")}
                 >
                   {plan.toLowerCase()}
                 </button>
@@ -5052,8 +5919,15 @@ function AiAdvisor({ session }: { session: Session }) {
             placeholder="Ask the Family Advisor…"
             disabled={!configured}
           />
-          <button className="primary" disabled={!draft.trim() || sending || !configured}>
-            Send
+          <button
+            className="primary"
+            disabled={!draft.trim() || sending || !configured}
+            aria-label="Send"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
           </button>
         </form>
       </div>
@@ -5528,6 +6402,346 @@ const PRICING_TEXT = {
       ] },
     ],
   },
+  pt: {
+    eyebrow: "PREÇOS",
+    title: "Encontre a pessoa certa para construir uma família.",
+    intro: "Matches melhores. Compatibilidade mais profunda. Mais confiança. Comece grátis e faça upgrade quando estiver pronto para ir mais fundo.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Grátis para sempre", altNote: "",
+        tagline: "Crie o seu perfil e comece a descobrir.",
+        features: ["Perfil completo e descoberta básica", "3 likes por dia", "Compatibilidade básica"],
+        cta: "Comece grátis", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "por mês, faturação mensal",
+        altNote: "ou €49.99 por 3 meses - €16.66/mês, poupe 33%",
+        tagline: "Para quem está pronto para procurar com intenção.",
+        features: ["Pontuação de Compatibilidade e por que combinam", "AI Family Advisor", "Filtros familiares avançados", "Veja quem gostou de si", "Chamadas de vídeo e áudio", "15 likes/dia, 5 contactos/dia", "Prioridade na descoberta"],
+        cta: "Começar com Family Builder", badge: "Melhor valor",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "por mês", altNote: "",
+        tagline: "Tudo do Family Builder, com acompanhamento mais aprofundado.",
+        features: ["Tudo do Family Builder", "AI Family Advisor", "Relatório de Compatibilidade detalhado", "Family Plan e Sala Familiar Partilhada", "Ferramentas de documentos e listas de verificação", "Suporte prioritário"],
+        cta: "Passar para o Pro", badge: "",
+      },
+    ],
+    footnote: "Preços apresentados em EUR e podem variar consoante a região. Cancele quando quiser. O Premium requer verificação de perfil.",
+    faqLinkLabel: "Veja como verificamos os membros",
+    compareTitle: "Compare todas as funcionalidades",
+    compareSub: "Veja exatamente o que está incluído em cada plano.",
+    matrixGroups: [
+      { name: "Encontre melhores matches", rows: [
+        { label: "Likes diários", values: ["3", "15", "Ilimitado"] },
+        { label: "Ser o primeiro a contactar", values: ["", "5/dia", "Ilimitado"] },
+        { label: "Filtros familiares avançados", values: ["", "check", "check"] },
+        { label: "Prioridade no catálogo", values: ["", "check", "check"] },
+        { label: "Veja quem gostou de si", values: ["", "check", "check"] },
+        { label: "Veja quem visitou o seu perfil", values: ["", "check", "check"] },
+      ] },
+      { name: "Compreenda a compatibilidade", rows: [
+        { label: "Pontuação de Compatibilidade", values: ["", "check", "check"] },
+        { label: "Por que combinam", values: ["", "check", "check"] },
+        { label: "Informações de perfil ampliadas", values: ["", "check", "check"] },
+        { label: "Informações de verificação", values: ["", "check", "check"] },
+      ] },
+      { name: "Destaque-se e mantenha-se seguro", rows: [
+        { label: "Boost de perfil", values: ["check", "check", "check"] },
+        { label: "Convide e ganhe um Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Selo de Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Conecte-se e comunique", rows: [
+        { label: "Chamadas de vídeo e áudio", values: ["", "check", "check"] },
+        { label: "Fotos privadas", values: ["", "check", "check"] },
+        { label: "Modo incógnito", values: ["", "check", "check"] },
+        { label: "Sugestões de mensagens com IA", values: ["", "check", "check"] },
+      ] },
+      { name: "Construa a sua família", rows: [
+        { label: "Family Plan (partilhado)", values: ["", "Limitado", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Análise semanal do AI Advisor", values: ["", "check", "check"] },
+        { label: "Assinatura do Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Grupos e discussões da comunidade", values: ["", "", "check"] },
+        { label: "Relatório de Compatibilidade detalhado", values: ["", "", "check"] },
+        { label: "Ferramentas de documentos e listas de verificação", values: ["", "", "check"] },
+        { label: "Suporte prioritário", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  fr: {
+    eyebrow: "TARIFS",
+    title: "Trouvez la bonne personne pour construire une famille.",
+    intro: "De meilleurs matchs. Une compatibilité plus profonde. Plus de confiance. Commencez gratuitement, passez à un forfait supérieur quand vous êtes prêt à aller plus loin.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Gratuit pour toujours", altNote: "",
+        tagline: "Créez votre profil et commencez à découvrir.",
+        features: ["Profil complet et découverte de base", "3 likes par jour", "Mise en relation de base"],
+        cta: "Commencer gratuitement", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "par mois, facturation mensuelle",
+        altNote: "ou €49.99 pour 3 mois - €16.66/mois, économisez 33%",
+        tagline: "Pour les membres prêts à matcher avec intention.",
+        features: ["Score de compatibilité et pourquoi vous matchez", "AI Family Advisor", "Filtres familiaux avancés", "Voir qui vous a liké", "Appels vidéo et audio", "15 likes/jour, 5 prises de contact/jour", "Priorité dans la découverte"],
+        cta: "Choisir Family Builder", badge: "Meilleur rapport qualité-prix",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "par mois", altNote: "",
+        tagline: "Tout Family Builder, avec un accompagnement plus approfondi.",
+        features: ["Tout Family Builder", "AI Family Advisor", "Rapport de compatibilité détaillé", "Family Plan et Espace Familial Partagé", "Outils de documents et listes de vérification", "Support prioritaire"],
+        cta: "Passer au Pro", badge: "",
+      },
+    ],
+    footnote: "Prix affichés en EUR, pouvant varier selon la région. Annulation à tout moment. Premium nécessite la vérification du profil.",
+    faqLinkLabel: "Découvrez comment nous vérifions les membres",
+    compareTitle: "Comparez toutes les fonctionnalités",
+    compareSub: "Découvrez exactement ce qui est inclus dans chaque forfait.",
+    matrixGroups: [
+      { name: "Mieux matcher", rows: [
+        { label: "Likes quotidiens", values: ["3", "15", "Illimité"] },
+        { label: "Prendre contact en premier", values: ["", "5/jour", "Illimité"] },
+        { label: "Filtres familiaux avancés", values: ["", "check", "check"] },
+        { label: "Priorité dans le catalogue", values: ["", "check", "check"] },
+        { label: "Voir qui vous a liké", values: ["", "check", "check"] },
+        { label: "Voir les visiteurs du profil", values: ["", "check", "check"] },
+      ] },
+      { name: "Comprendre la compatibilité", rows: [
+        { label: "Score de compatibilité", values: ["", "check", "check"] },
+        { label: "Pourquoi vous matchez", values: ["", "check", "check"] },
+        { label: "Informations de profil étendues", values: ["", "check", "check"] },
+        { label: "Informations de vérification", values: ["", "check", "check"] },
+      ] },
+      { name: "Se démarquer et rester en sécurité", rows: [
+        { label: "Boost de profil", values: ["check", "check", "check"] },
+        { label: "Invitez et gagnez un Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Badge Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Se connecter et communiquer", rows: [
+        { label: "Appels vidéo et audio", values: ["", "check", "check"] },
+        { label: "Photos privées", values: ["", "check", "check"] },
+        { label: "Mode incognito", values: ["", "check", "check"] },
+        { label: "Messages de démarrage suggérés par l'IA", values: ["", "check", "check"] },
+      ] },
+      { name: "Construisez votre famille", rows: [
+        { label: "Family Plan (partagé)", values: ["", "Limité", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Conseil hebdomadaire de l'AI Advisor", values: ["", "check", "check"] },
+        { label: "Signature du Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Groupes et discussions communautaires", values: ["", "", "check"] },
+        { label: "Rapport de compatibilité détaillé", values: ["", "", "check"] },
+        { label: "Outils de documents et listes de vérification", values: ["", "", "check"] },
+        { label: "Support prioritaire", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  de: {
+    eyebrow: "PREISE",
+    title: "Finden Sie die richtige Person, um eine Familie zu gründen.",
+    intro: "Bessere Matches. Tiefere Kompatibilität. Mehr Sicherheit. Starten Sie kostenlos und upgraden Sie, wenn Sie bereit für mehr sind.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Für immer kostenlos", altNote: "",
+        tagline: "Erstellen Sie Ihr Profil und beginnen Sie zu entdecken.",
+        features: ["Vollständiges Profil & einfache Entdeckung", "3 Likes pro Tag", "Einfaches Matching"],
+        cta: "Kostenlos starten", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "pro Monat, monatliche Abrechnung",
+        altNote: "oder €49.99 für 3 Monate - €16.66/Monat, 33 % sparen",
+        tagline: "Für Mitglieder, die gezielt matchen möchten.",
+        features: ["Kompatibilitäts-Score & warum ihr zueinander passt", "AI Family Advisor", "Erweiterte Familienfilter", "Sehen, wer Sie geliked hat", "Video- und Audioanrufe", "15 Likes/Tag, 5 Kontaktaufnahmen/Tag", "Priorität in der Entdeckung"],
+        cta: "Family Builder starten", badge: "Bester Wert",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "pro Monat", altNote: "",
+        tagline: "Alles aus Family Builder, plus tiefere Begleitung.",
+        features: ["Alles aus Family Builder", "AI Family Advisor", "Detaillierter Kompatibilitätsbericht", "Family Plan & gemeinsamer Familienraum", "Dokument- & Checklisten-Tools", "Prioritäts-Support"],
+        cta: "Zu Pro wechseln", badge: "",
+      },
+    ],
+    footnote: "Preise in EUR angegeben und können je nach Region abweichen. Jederzeit kündbar. Premium erfordert eine Profilverifizierung.",
+    faqLinkLabel: "So verifizieren wir Mitglieder",
+    compareTitle: "Alle Funktionen vergleichen",
+    compareSub: "Sehen Sie genau, was in jedem Plan enthalten ist.",
+    matrixGroups: [
+      { name: "Besser matchen", rows: [
+        { label: "Likes pro Tag", values: ["3", "15", "Unbegrenzt"] },
+        { label: "Zuerst Kontakt aufnehmen", values: ["", "5/Tag", "Unbegrenzt"] },
+        { label: "Erweiterte Familienfilter", values: ["", "check", "check"] },
+        { label: "Priorität im Katalog", values: ["", "check", "check"] },
+        { label: "Sehen, wer Sie geliked hat", values: ["", "check", "check"] },
+        { label: "Profilbesucher sehen", values: ["", "check", "check"] },
+      ] },
+      { name: "Kompatibilität verstehen", rows: [
+        { label: "Kompatibilitäts-Score", values: ["", "check", "check"] },
+        { label: "Warum ihr zueinander passt", values: ["", "check", "check"] },
+        { label: "Erweiterte Profilinformationen", values: ["", "check", "check"] },
+        { label: "Verifizierungsinformationen", values: ["", "check", "check"] },
+      ] },
+      { name: "Auffallen & sicher bleiben", rows: [
+        { label: "Profil-Boost", values: ["check", "check", "check"] },
+        { label: "Einladen & einen Boost erhalten", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Video-Verification-Abzeichen", values: ["check", "check", "check"] },
+      ] },
+      { name: "Verbinden & kommunizieren", rows: [
+        { label: "Video- und Audioanrufe", values: ["", "check", "check"] },
+        { label: "Private Fotos", values: ["", "check", "check"] },
+        { label: "Inkognito-Modus", values: ["", "check", "check"] },
+        { label: "KI-vorgeschlagene Gesprächseinstiege", values: ["", "check", "check"] },
+      ] },
+      { name: "Bauen Sie Ihre Familie auf", rows: [
+        { label: "Family Plan (gemeinsam)", values: ["", "Eingeschränkt", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Wöchentliche Einblicke des AI Advisor", values: ["", "check", "check"] },
+        { label: "Unterzeichnung der Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Community-Gruppen & Diskussionen", values: ["", "", "check"] },
+        { label: "Detaillierter Kompatibilitätsbericht", values: ["", "", "check"] },
+        { label: "Dokument- & Checklisten-Tools", values: ["", "", "check"] },
+        { label: "Prioritäts-Support", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  it: {
+    eyebrow: "PREZZI",
+    title: "Trova la persona giusta con cui costruire una famiglia.",
+    intro: "Match migliori. Compatibilità più profonda. Più sicurezza. Inizia gratis e passa a un piano superiore quando sei pronto ad andare oltre.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Gratis per sempre", altNote: "",
+        tagline: "Crea il tuo profilo e inizia a scoprire.",
+        features: ["Profilo completo e scoperta di base", "3 like al giorno", "Abbinamento di base"],
+        cta: "Inizia gratis", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "al mese, fatturazione mensile",
+        altNote: "oppure €49.99 per 3 mesi - €16.66/mese, risparmia il 33%",
+        tagline: "Per chi è pronto a fare match con intenzione.",
+        features: ["Punteggio di Compatibilità e perché siete compatibili", "AI Family Advisor", "Filtri familiari avanzati", "Vedi chi ti ha messo like", "Videochiamate e chiamate audio", "15 like/giorno, 5 contatti/giorno", "Priorità nella scoperta"],
+        cta: "Inizia con Family Builder", badge: "Miglior valore",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "al mese", altNote: "",
+        tagline: "Tutto Family Builder, con un accompagnamento più approfondito.",
+        features: ["Tutto Family Builder", "AI Family Advisor", "Report di Compatibilità dettagliato", "Family Plan e Family Room condivisa", "Strumenti per documenti e checklist", "Supporto prioritario"],
+        cta: "Passa a Pro", badge: "",
+      },
+    ],
+    footnote: "Prezzi mostrati in EUR e possono variare in base alla regione. Annulla in qualsiasi momento. Premium richiede la verifica del profilo.",
+    faqLinkLabel: "Scopri come verifichiamo i membri",
+    compareTitle: "Confronta tutte le funzionalità",
+    compareSub: "Scopri esattamente cosa è incluso in ciascun piano.",
+    matrixGroups: [
+      { name: "Trova match migliori", rows: [
+        { label: "Like giornalieri", values: ["3", "15", "Illimitati"] },
+        { label: "Scrivere per primi", values: ["", "5/giorno", "Illimitato"] },
+        { label: "Filtri familiari avanzati", values: ["", "check", "check"] },
+        { label: "Priorità nel catalogo", values: ["", "check", "check"] },
+        { label: "Vedi chi ti ha messo like", values: ["", "check", "check"] },
+        { label: "Vedi chi ha visitato il profilo", values: ["", "check", "check"] },
+      ] },
+      { name: "Capire la compatibilità", rows: [
+        { label: "Punteggio di Compatibilità", values: ["", "check", "check"] },
+        { label: "Perché siete compatibili", values: ["", "check", "check"] },
+        { label: "Informazioni di profilo estese", values: ["", "check", "check"] },
+        { label: "Informazioni di verifica", values: ["", "check", "check"] },
+      ] },
+      { name: "Distinguiti e resta al sicuro", rows: [
+        { label: "Boost del profilo", values: ["check", "check", "check"] },
+        { label: "Invita e ottieni un Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Badge Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Connettiti e comunica", rows: [
+        { label: "Videochiamate e chiamate audio", values: ["", "check", "check"] },
+        { label: "Foto private", values: ["", "check", "check"] },
+        { label: "Modalità incognito", values: ["", "check", "check"] },
+        { label: "Messaggi di apertura suggeriti dall'IA", values: ["", "check", "check"] },
+      ] },
+      { name: "Costruisci la tua famiglia", rows: [
+        { label: "Family Plan (condiviso)", values: ["", "Limitato", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Approfondimento settimanale dell'AI Advisor", values: ["", "check", "check"] },
+        { label: "Firma del Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Gruppi e discussioni della community", values: ["", "", "check"] },
+        { label: "Report di Compatibilità dettagliato", values: ["", "", "check"] },
+        { label: "Strumenti per documenti e checklist", values: ["", "", "check"] },
+        { label: "Supporto prioritario", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  pl: {
+    eyebrow: "CENY",
+    title: "Znajdź odpowiednią osobę, z którą założysz rodzinę.",
+    intro: "Lepsze dopasowania. Głębsza kompatybilność. Więcej pewności. Zacznij za darmo, ulepsz plan, gdy będziesz gotowy na więcej.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Zawsze za darmo", altNote: "",
+        tagline: "Stwórz profil i zacznij odkrywać.",
+        features: ["Pełny profil i podstawowe odkrywanie", "3 polubienia dziennie", "Podstawowe dopasowanie"],
+        cta: "Zacznij za darmo", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "miesięcznie, rozliczenie co miesiąc",
+        altNote: "lub €49.99 za 3 miesiące - €16.66/miesiąc, oszczędź 33%",
+        tagline: "Dla osób gotowych na świadome dopasowania.",
+        features: ["Wskaźnik Kompatybilności i dlaczego pasujecie do siebie", "AI Family Advisor", "Zaawansowane filtry rodzinne", "Zobacz, kto Cię polubił", "Połączenia wideo i audio", "15 polubień/dzień, 5 kontaktów/dzień", "Priorytet w wyszukiwaniu"],
+        cta: "Wybierz Family Builder", badge: "Najlepsza wartość",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "miesięcznie", altNote: "",
+        tagline: "Wszystko z Family Builder oraz głębsze wsparcie.",
+        features: ["Wszystko z Family Builder", "AI Family Advisor", "Szczegółowy Raport Kompatybilności", "Family Plan i wspólny Pokój Rodzinny", "Narzędzia do dokumentów i list kontrolnych", "Priorytetowe wsparcie"],
+        cta: "Przejdź na Pro", badge: "",
+      },
+    ],
+    footnote: "Ceny podane w EUR i mogą się różnić w zależności od regionu. Anuluj w dowolnym momencie. Premium wymaga weryfikacji profilu.",
+    faqLinkLabel: "Zobacz, jak weryfikujemy użytkowników",
+    compareTitle: "Porównaj wszystkie funkcje",
+    compareSub: "Zobacz dokładnie, co zawiera każdy plan.",
+    matrixGroups: [
+      { name: "Dopasuj się lepiej", rows: [
+        { label: "Polubienia dziennie", values: ["3", "15", "Bez limitu"] },
+        { label: "Pierwszy kontakt", values: ["", "5/dzień", "Bez limitu"] },
+        { label: "Zaawansowane filtry rodzinne", values: ["", "check", "check"] },
+        { label: "Priorytet w katalogu", values: ["", "check", "check"] },
+        { label: "Zobacz, kto Cię polubił", values: ["", "check", "check"] },
+        { label: "Zobacz, kto odwiedził profil", values: ["", "check", "check"] },
+      ] },
+      { name: "Zrozum kompatybilność", rows: [
+        { label: "Wskaźnik Kompatybilności", values: ["", "check", "check"] },
+        { label: "Dlaczego pasujecie do siebie", values: ["", "check", "check"] },
+        { label: "Rozszerzone informacje o profilu", values: ["", "check", "check"] },
+        { label: "Informacje o weryfikacji", values: ["", "check", "check"] },
+      ] },
+      { name: "Wyróżnij się i zachowaj bezpieczeństwo", rows: [
+        { label: "Boost profilu", values: ["check", "check", "check"] },
+        { label: "Zaproś i zdobądź Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Odznaka Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Łącz się i komunikuj", rows: [
+        { label: "Połączenia wideo i audio", values: ["", "check", "check"] },
+        { label: "Prywatne zdjęcia", values: ["", "check", "check"] },
+        { label: "Tryb incognito", values: ["", "check", "check"] },
+        { label: "Sugestie wiadomości od AI", values: ["", "check", "check"] },
+      ] },
+      { name: "Zbuduj swoją rodzinę", rows: [
+        { label: "Family Plan (wspólny)", values: ["", "Ograniczony", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Cotygodniowa analiza od AI Advisor", values: ["", "check", "check"] },
+        { label: "Podpisanie Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Grupy i dyskusje społeczności", values: ["", "", "check"] },
+        { label: "Szczegółowy Raport Kompatybilności", values: ["", "", "check"] },
+        { label: "Narzędzia do dokumentów i list kontrolnych", values: ["", "", "check"] },
+        { label: "Priorytetowe wsparcie", values: ["", "", "check"] },
+      ] },
+    ],
+  },
 } satisfies Record<CookieLocale, Record<string, unknown>>;
 
 function Pricing({ session }: { session: Session }) {
@@ -5638,6 +6852,41 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     fertility: "Fertilidad",
     lgbtq: "LGBTQ+",
   },
+  pt: {
+    "ivf-in-vitro-fertilization": "FIV - Fertilização in vitro",
+    "co-parenting": "Coparentalidade",
+    "sperm-donor": "Doador de esperma",
+    fertility: "Fertilidade",
+    lgbtq: "LGBTQ+",
+  },
+  fr: {
+    "ivf-in-vitro-fertilization": "FIV - Fécondation in vitro",
+    "co-parenting": "Coparentalité",
+    "sperm-donor": "Donneur de sperme",
+    fertility: "Fertilité",
+    lgbtq: "LGBTQ+",
+  },
+  de: {
+    "ivf-in-vitro-fertilization": "IVF - In-vitro-Fertilisation",
+    "co-parenting": "Co-Parenting",
+    "sperm-donor": "Samenspender",
+    fertility: "Fruchtbarkeit",
+    lgbtq: "LGBTQ+",
+  },
+  it: {
+    "ivf-in-vitro-fertilization": "FIVET - Fecondazione in vitro",
+    "co-parenting": "Co-genitorialità",
+    "sperm-donor": "Donatore di sperma",
+    fertility: "Fertilità",
+    lgbtq: "LGBTQ+",
+  },
+  pl: {
+    "ivf-in-vitro-fertilization": "In vitro - Zapłodnienie pozaustrojowe",
+    "co-parenting": "Współrodzicielstwo",
+    "sperm-donor": "Dawca nasienia",
+    fertility: "Płodność",
+    lgbtq: "LGBTQ+",
+  },
 };
 
 const knowledgeHubCopy: Record<CookieLocale, {
@@ -5692,6 +6941,71 @@ const knowledgeHubCopy: Record<CookieLocale, {
     next: "Artículo siguiente",
     navigationLabel: "Navegación de artículos",
   },
+  pt: {
+    title: "Central de Conhecimento",
+    intro: "Artigos de especialistas sobre doação, coparentalidade e saúde reprodutiva",
+    all: "Todos",
+    categoriesLabel: "Categorias de artigos",
+    views: "visualizações",
+    unavailable: "Este artigo não está disponível.",
+    back: "Voltar à Central de Conhecimento",
+    published: "Publicado em",
+    previous: "Artigo anterior",
+    next: "Próximo artigo",
+    navigationLabel: "Navegação de artigos",
+  },
+  fr: {
+    title: "Centre de connaissances",
+    intro: "Articles d'experts sur le don, la coparentalité et la santé reproductive",
+    all: "Tous",
+    categoriesLabel: "Catégories d'articles",
+    views: "vues",
+    unavailable: "Cet article n'est pas disponible.",
+    back: "Retour au centre de connaissances",
+    published: "Publié le",
+    previous: "Article précédent",
+    next: "Article suivant",
+    navigationLabel: "Navigation des articles",
+  },
+  de: {
+    title: "Wissenszentrum",
+    intro: "Expertenartikel zu Spende, Co-Parenting und reproduktiver Gesundheit",
+    all: "Alle",
+    categoriesLabel: "Artikelkategorien",
+    views: "Aufrufe",
+    unavailable: "Dieser Artikel ist nicht verfügbar.",
+    back: "Zurück zum Wissenszentrum",
+    published: "Veröffentlicht am",
+    previous: "Vorheriger Artikel",
+    next: "Nächster Artikel",
+    navigationLabel: "Artikelnavigation",
+  },
+  it: {
+    title: "Centro di conoscenza",
+    intro: "Articoli di esperti su donazione, co-genitorialità e salute riproduttiva",
+    all: "Tutti",
+    categoriesLabel: "Categorie di articoli",
+    views: "visualizzazioni",
+    unavailable: "Questo articolo non è disponibile.",
+    back: "Torna al Centro di conoscenza",
+    published: "Pubblicato il",
+    previous: "Articolo precedente",
+    next: "Articolo successivo",
+    navigationLabel: "Navigazione articoli",
+  },
+  pl: {
+    title: "Centrum Wiedzy",
+    intro: "Artykuły ekspertów na temat dawstwa, współrodzicielstwa i zdrowia reprodukcyjnego",
+    all: "Wszystkie",
+    categoriesLabel: "Kategorie artykułów",
+    views: "wyświetleń",
+    unavailable: "Ten artykuł jest niedostępny.",
+    back: "Powrót do Centrum Wiedzy",
+    published: "Opublikowano",
+    previous: "Poprzedni artykuł",
+    next: "Następny artykuł",
+    navigationLabel: "Nawigacja artykułów",
+  },
 };
 
 
@@ -5707,12 +7021,22 @@ const knowledgeLoadMoreCopy: Record<
   en: { idle: "Load more", loading: "Loading ..." },
   ru: { idle: "Показать ещё", loading: "Загрузка ..." },
   es: { idle: "Cargar más", loading: "Cargando ..." },
+  pt: { idle: "Carregar mais", loading: "Carregando ..." },
+  fr: { idle: "Charger plus", loading: "Chargement ..." },
+  de: { idle: "Mehr laden", loading: "Wird geladen ..." },
+  it: { idle: "Carica altro", loading: "Caricamento ..." },
+  pl: { idle: "Załaduj więcej", loading: "Ładowanie ..." },
 };
 
 const articlePreviewCopy: Record<CookieLocale, string> = {
   en: "Preview Mode — This article is not published yet",
   ru: "Режим предпросмотра — Эта статья ещё не опубликована",
   es: "Modo de vista previa — Este artículo aún no está publicado",
+  pt: "Modo de pré-visualização — Este artigo ainda não foi publicado",
+  fr: "Mode aperçu — Cet article n'est pas encore publié",
+  de: "Vorschaumodus — Dieser Artikel wurde noch nicht veröffentlicht",
+  it: "Modalità anteprima — Questo articolo non è ancora stato pubblicato",
+  pl: "Tryb podglądu — Ten artykuł nie został jeszcze opublikowany",
 };
 
 const knowledgeDate = (value: unknown) => {
@@ -6010,6 +7334,41 @@ const contactPageCopy: Record<CookieLocale, {
     emailField: "Tu correo", reason: "Motivo", message: "Mensaje",
     options: ["Pregunta general", "Soporte", "Colaboración", "Reportar un error", "Otro"], send: "Enviar mensaje",
     success: "Gracias. Tu mensaje ha sido enviado.", error: "No se pudo enviar el mensaje. Inténtalo de nuevo.",
+  },
+  pt: {
+    address: "Endereço:", registration: "Número de registro:", phone: "Telefone:", email: "Email:",
+    title: "Contate-nos", intro: "Envie-nos uma mensagem e entraremos em contato.", name: "Seu nome",
+    emailField: "Seu email", reason: "Motivo", message: "Mensagem",
+    options: ["Pergunta geral", "Suporte", "Parceria", "Reportar um erro", "Outro"], send: "Enviar mensagem",
+    success: "Obrigado. Sua mensagem foi enviada.", error: "Não foi possível enviar sua mensagem. Tente novamente.",
+  },
+  fr: {
+    address: "Adresse :", registration: "N° d'enregistrement :", phone: "Téléphone :", email: "Email :",
+    title: "Contactez-nous", intro: "Envoyez-nous un message et nous vous répondrons.", name: "Votre nom",
+    emailField: "Votre email", reason: "Motif", message: "Message",
+    options: ["Question générale", "Assistance", "Partenariat", "Signaler un bug", "Autre"], send: "Envoyer le message",
+    success: "Merci. Votre message a été envoyé.", error: "Nous n'avons pas pu envoyer votre message. Veuillez réessayer.",
+  },
+  de: {
+    address: "Adresse:", registration: "Registrierungsnummer:", phone: "Telefon:", email: "E-Mail:",
+    title: "Kontaktieren Sie uns", intro: "Senden Sie uns eine Nachricht und wir melden uns bei Ihnen.", name: "Ihr Name",
+    emailField: "Ihre E-Mail", reason: "Grund", message: "Nachricht",
+    options: ["Allgemeine Frage", "Support", "Partnerschaft", "Fehlerbericht", "Sonstiges"], send: "Nachricht senden",
+    success: "Vielen Dank. Ihre Nachricht wurde gesendet.", error: "Ihre Nachricht konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+  },
+  it: {
+    address: "Indirizzo:", registration: "Numero di registrazione:", phone: "Telefono:", email: "Email:",
+    title: "Contattaci", intro: "Inviaci un messaggio e ti risponderemo.", name: "Il tuo nome",
+    emailField: "La tua email", reason: "Motivo", message: "Messaggio",
+    options: ["Domanda generale", "Assistenza", "Collaborazione", "Segnala un bug", "Altro"], send: "Invia messaggio",
+    success: "Grazie. Il tuo messaggio è stato inviato.", error: "Non è stato possibile inviare il messaggio. Riprova.",
+  },
+  pl: {
+    address: "Adres:", registration: "Numer rejestracyjny:", phone: "Telefon:", email: "Email:",
+    title: "Skontaktuj się z nami", intro: "Wyślij nam wiadomość, a odpowiemy najszybciej jak to możliwe.", name: "Twoje imię",
+    emailField: "Twój email", reason: "Temat", message: "Wiadomość",
+    options: ["Pytanie ogólne", "Wsparcie", "Współpraca", "Zgłoszenie błędu", "Inne"], send: "Wyślij wiadomość",
+    success: "Dziękujemy. Twoja wiadomość została wysłana.", error: "Nie udało się wysłać wiadomości. Spróbuj ponownie.",
   },
 };
 
@@ -7083,6 +8442,406 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
       },
     ],
   },
+  pt: {
+    eyebrow: "Encontre o seu caminho",
+    whatThisLooksLike: "Como é esse caminho na prática",
+    resourcesTitle: "Recursos para este caminho",
+    resourcesAllTitle: "Ainda não tem certeza? Veja tudo",
+    resourcesAllCopy: "Explore o conjunto completo de checklists, planilhas e modelos para cada caminho - coparentalidade, fertilidade, concepção com doador e planejamento futuro.",
+    resourcesAllCta: "Ver todos os recursos e ferramentas",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Encontrar o coparceiro certo começa por saber o que você quer",
+        subtitle: "Coparentalidade significa criar um filho juntos sem uma relação romântica. Funciona quando ambas as pessoas estão claras sobre as expectativas desde o início.",
+        paragraphs: [
+          "A coparentalidade na LetsBeParents significa construir uma família com alguém com quem você não tem uma relação romântica - duas casas separadas, decisões compartilhadas sobre a vida do seu filho. Funciona melhor quando ambas as pessoas são honestas sobre o que querem antes de começar a procurar, não depois de já terem encontrado alguém de quem gostam.",
+          "Em vez de um feed baseado em swipe, a compatibilização aqui começa com um questionário baseado em valores e uma Pontuação de Compatibilidade que mostra onde você e um possível coparceiro realmente se alinham - em estilo de criação, envolvimento, prazos e limites - para que você compare o que importa, não apenas uma foto.",
+          "Depois da primeira conversa, os próximos passos são os mesmos que qualquer decisão de coparentalidade bem pensada exige: mais conversas, um plano por escrito e, quando estiver pronto, aconselhamento jurídico independente.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Criar o seu perfil", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Encontre o doador certo para a sua família",
+        subtitle: "Quer esteja à procura de um doador conhecido ou anônimo, a LetsBeParents ajuda você a filtrar pelo que mais importa.",
+        paragraphs: [
+          "Escolher um doador é uma das decisões mais pessoais na construção de uma família, com implicações médicas, jurídicas e de longo prazo reais. Algumas pessoas querem um doador conhecido, com uma relação contínua com a criança; outras preferem o anonimato através de uma clínica. Ambos os caminhos são válidos e levam a perguntas diferentes.",
+          "Na LetsBeParents, os perfis de doadores incluem as informações que realmente importam para essa decisão, e cada doador passa por verificação de identidade antes que você possa entrar em contato. Você define os filtros que importam para você - histórico médico, abertura ao contato, localização - em vez de percorrer perfis às cegas.",
+          "Antes de avançar com qualquer doador, vale a pena esclarecer as questões práticas com uma clínica de fertilidade e, quando relevante, com um advogado, fazendo isso cedo, em vez de depois de já ter tomado uma decisão emocional.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Ver perfis de doadores", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Construa uma família com um parceiro que compartilhe a sua visão",
+        subtitle: "Um parceiro de construção familiar não é um doador nem um coparceiro à distância - é alguém com quem você constrói uma vida familiar compartilhada.",
+        paragraphs: [
+          "Um parceiro de construção familiar é diferente tanto de um coparceiro quanto de um doador: é alguém com quem você construiria um lar e uma vida diária compartilhados, como faria um casal - só que com a parentalidade como objetivo explícito e compartilhado desde o início, em vez de algo que você espera que surja.",
+          "Como isso está mais próximo de uma parceria de vida do que de uma transação, a LetsBeParents não trata isso como um app de namoro. Aqui não há swipe - tudo começa com um breve questionário de compatibilidade que revela como cada um de vocês pensa sobre parentalidade, compromisso e vida cotidiana, para que as primeiras conversas comecem a partir de um alinhamento real, e não de uma foto de perfil.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Fazer o questionário de compatibilidade", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Encontrem um doador juntos, como casal",
+        subtitle: "Procurar um doador como casal traz suas próprias questões - desde a filiação legal até o quanto vocês querem que o doador esteja envolvido.",
+        paragraphs: [
+          "Procurar um doador como casal levanta perguntas que uma busca individual não traz: o quanto (ou o quão pouco) vocês querem que o doador esteja envolvido, como funcionará a filiação legal para ambos, e como vocês tomarão decisões juntos ao longo do processo. Alinhar-se com o parceiro antes de começar a procurar poupa muito atrito depois.",
+          "A LetsBeParents permite que vocês dois explorem e filtrem perfis de doadores juntos, com o mesmo grupo de doadores com identidade verificada e os mesmos filtros - histórico médico, abertura ao contato e mais - disponíveis quer estejam procurando sozinhos ou em dupla.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Criar o seu perfil", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Ainda está definindo o seu caminho? Comece aqui.",
+        subtitle: "Você não precisa ter tudo resolvido. A maioria das pessoas começa explorando as suas opções antes de decidir um caminho.",
+        paragraphs: [
+          "A maioria das pessoas que acaba construindo uma família com a LetsBeParents não começou com certeza de como seria exatamente. Se você ainda está pesando coparentalidade contra concepção com doador, ou um parceiro contra seguir sozinho, esse é um lugar completamente normal em que estar - e não algo que precise resolver antes de começar.",
+          "O melhor próximo passo não é uma decisão, é informação: leia o que cada caminho realmente envolve e faça o Questionário de Compatibilidade para ter uma ideia mais clara do que você procura. Não há pressão para se cadastrar ou se comprometer com nada enquanto você ainda está explorando.",
+        ],
+        resources: "all",
+        ctaLabel: "Fazer o Questionário de Compatibilidade de Coparentalidade", ctaType: "quiz",
+      },
+    ],
+  },
+  fr: {
+    eyebrow: "Trouvez votre voie",
+    whatThisLooksLike: "À quoi ressemble ce parcours",
+    resourcesTitle: "Ressources pour ce parcours",
+    resourcesAllTitle: "Pas encore sûr(e) ? Explorez tout",
+    resourcesAllCopy: "Découvrez l'ensemble des checklists, fiches pratiques et modèles pour chaque parcours - coparentalité, fertilité, conception avec donneur et planification.",
+    resourcesAllCta: "Voir toutes les ressources et tous les outils",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Trouver le bon coparent commence par savoir ce que vous voulez",
+        subtitle: "La coparentalité, c'est élever un enfant ensemble sans relation amoureuse. Cela fonctionne quand les deux personnes sont claires sur leurs attentes dès le départ.",
+        paragraphs: [
+          "La coparentalité sur LetsBeParents signifie construire une famille avec une personne avec qui vous n'avez pas de relation amoureuse - deux foyers distincts, des décisions partagées concernant la vie de votre enfant. Cela fonctionne mieux quand les deux personnes sont honnêtes sur ce qu'elles veulent avant de commencer à chercher, et non après avoir déjà trouvé quelqu'un qui leur plaît.",
+          "Plutôt qu'un fil basé sur le swipe, la mise en relation commence ici par un questionnaire basé sur les valeurs et un Score de Compatibilité qui montre où vous et un coparent potentiel êtes réellement alignés - style parental, implication, calendrier et limites - pour que vous compariez ce qui compte vraiment, pas seulement une photo.",
+          "Après une première conversation, les étapes suivantes sont les mêmes que pour toute décision de coparentalité réfléchie : davantage de discussions, un plan écrit et, le moment venu, un avis juridique indépendant.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Créer votre profil", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Trouvez le bon donneur pour votre famille",
+        subtitle: "Que vous recherchiez un donneur connu ou anonyme, LetsBeParents vous aide à filtrer selon ce qui compte le plus pour vous.",
+        paragraphs: [
+          "Choisir un donneur est l'une des décisions les plus personnelles dans la construction d'une famille, avec de réelles implications médicales, juridiques et à long terme. Certaines personnes souhaitent un donneur connu avec une relation continue avec l'enfant ; d'autres préfèrent l'anonymat via une clinique. Les deux voies sont légitimes et soulèvent des questions différentes.",
+          "Sur LetsBeParents, les profils de donneurs incluent les informations qui comptent réellement pour cette décision, et chaque donneur passe par une vérification d'identité avant que vous puissiez le contacter. Vous définissez les filtres qui vous importent - antécédents médicaux, ouverture au contact, localisation - au lieu de parcourir des profils à l'aveugle.",
+          "Avant d'avancer avec un donneur, il est utile de traiter les questions pratiques avec une clinique de fertilité et, le cas échéant, avec un avocat, et de le faire tôt plutôt qu'après avoir déjà pris une décision sur le plan émotionnel.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Parcourir les profils de donneurs", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Construisez une famille avec un partenaire qui partage votre vision",
+        subtitle: "Un partenaire de construction familiale n'est ni un donneur ni un coparent à distance - c'est une personne avec qui vous bâtissez une vie de famille partagée.",
+        paragraphs: [
+          "Un partenaire de construction familiale est différent à la fois d'un coparent et d'un donneur : c'est une personne avec qui vous construiriez un foyer et une vie quotidienne partagés, comme le ferait un couple - sauf que la parentalité est l'objectif explicite et partagé dès le départ, plutôt qu'une chose que vous espérez voir émerger.",
+          "Comme cela se rapproche davantage d'un partenariat de vie que d'une transaction, LetsBeParents ne traite pas cela comme un site de rencontres. Il n'y a pas de swipe ici - tout commence par un court questionnaire de compatibilité qui met en évidence la façon dont chacun de vous envisage la parentalité, l'engagement et la vie quotidienne, afin que les premières conversations partent d'un véritable alignement plutôt que d'une photo de profil.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Faire le questionnaire de compatibilité", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Trouvez un donneur ensemble, en couple",
+        subtitle: "Chercher un donneur en couple soulève ses propres questions - de la filiation légale au degré d'implication que vous souhaitez pour le donneur.",
+        paragraphs: [
+          "Chercher un donneur en couple soulève des questions qu'une recherche en solo ne pose pas : à quel point (ou non) vous souhaitez que le donneur soit impliqué, comment la filiation légale fonctionnera pour vous deux, et comment vous prendrez les décisions ensemble en cours de route. S'accorder avec son ou sa partenaire avant de commencer à chercher évite bien des frictions par la suite.",
+          "LetsBeParents vous permet, à tous les deux, de parcourir et de filtrer les profils de donneurs ensemble, avec le même vivier de donneurs à identité vérifiée et les mêmes filtres - antécédents médicaux, ouverture au contact et plus - que vous cherchiez seul(e) ou à deux.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Créer votre profil", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Vous cherchez encore votre voie ? Commencez ici.",
+        subtitle: "Vous n'avez pas besoin d'avoir tout résolu. La plupart des gens commencent par explorer leurs options avant de choisir une voie.",
+        paragraphs: [
+          "La plupart des personnes qui finissent par construire une famille avec LetsBeParents ne savaient pas exactement, au départ, à quoi cela ressemblerait. Si vous hésitez encore entre la coparentalité et la conception avec donneur, ou entre un partenaire et le fait de vous lancer seul(e), c'est une situation tout à fait normale - et ce n'est pas quelque chose que vous devez résoudre avant de commencer.",
+          "La meilleure prochaine étape n'est pas une décision, c'est de l'information : lisez ce que chaque voie implique réellement, et faites le Questionnaire de Compatibilité pour mieux cerner ce que vous recherchez. Il n'y a aucune pression pour vous inscrire ou vous engager tant que vous êtes encore en phase d'exploration.",
+        ],
+        resources: "all",
+        ctaLabel: "Faire le Questionnaire de Compatibilité de Coparentalité", ctaType: "quiz",
+      },
+    ],
+  },
+  de: {
+    eyebrow: "Finden Sie Ihren Weg",
+    whatThisLooksLike: "So sieht dieser Weg in der Praxis aus",
+    resourcesTitle: "Ressourcen für diesen Weg",
+    resourcesAllTitle: "Noch nicht sicher? Alles durchstöbern",
+    resourcesAllCopy: "Entdecken Sie die vollständige Sammlung an Checklisten, Arbeitsblättern und Vorlagen für jeden Weg - Co-Parenting, Kinderwunschbehandlung, Samenspende und Zukunftsplanung.",
+    resourcesAllCta: "Alle Ressourcen und Tools durchstöbern",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Den richtigen Co-Elternteil zu finden beginnt damit, zu wissen, was man will",
+        subtitle: "Co-Parenting bedeutet, gemeinsam ein Kind großzuziehen, ohne romantisch liiert zu sein. Es funktioniert, wenn beide von Anfang an klar über ihre Erwartungen sind.",
+        paragraphs: [
+          "Co-Parenting auf LetsBeParents bedeutet, mit jemandem eine Familie aufzubauen, mit dem man nicht romantisch liiert ist - zwei getrennte Haushalte, gemeinsame Entscheidungen über das Leben des Kindes. Es funktioniert am besten, wenn beide ehrlich darüber sind, was sie wollen, bevor sie mit der Suche beginnen - nicht erst, nachdem sie bereits jemanden gefunden haben, der ihnen gefällt.",
+          "Statt eines Swipe-Feeds beginnt das Matching hier mit einem werteorientierten Quiz und einem Compatibility Score, der zeigt, wo Sie und ein möglicher Co-Elternteil tatsächlich übereinstimmen - bei Erziehungsstil, Engagement, Zeitplan und Grenzen -, sodass Sie das vergleichen, was wirklich zählt, und nicht nur ein Foto.",
+          "Nach dem ersten Gespräch folgen dieselben Schritte, die jede durchdachte Co-Parenting-Entscheidung braucht: weitere Gespräche, ein schriftlicher Plan und, sobald Sie bereit sind, unabhängige Rechtsberatung.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Profil erstellen", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Finden Sie den richtigen Samenspender für Ihre Familie",
+        subtitle: "Ob Sie einen bekannten oder anonymen Spender suchen - LetsBeParents hilft Ihnen, nach dem zu filtern, was Ihnen am wichtigsten ist.",
+        paragraphs: [
+          "Die Wahl eines Spenders ist eine der persönlichsten Entscheidungen beim Aufbau einer Familie, mit realen medizinischen, rechtlichen und langfristigen Folgen. Manche Menschen wünschen sich einen bekannten Spender mit fortlaufendem Kontakt zum Kind; andere bevorzugen Anonymität über eine Klinik. Beide Wege sind legitim und führen zu unterschiedlichen Fragen.",
+          "Bei LetsBeParents enthalten Spenderprofile die Informationen, die für diese Entscheidung wirklich zählen, und jeder Spender durchläuft eine Identitätsprüfung, bevor Sie Kontakt aufnehmen können. Sie legen selbst fest, welche Filter für Sie wichtig sind - Krankengeschichte, Offenheit für Kontakt, Standort - statt blind zu suchen.",
+          "Bevor Sie mit einem Spender weitermachen, lohnt es sich, die praktischen Fragen frühzeitig mit einer Kinderwunschklinik und, wo relevant, mit einem Anwalt zu klären - statt erst, nachdem Sie sich bereits emotional entschieden haben.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Spenderprofile durchstöbern", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Bauen Sie eine Familie mit einem Partner auf, der Ihre Vision teilt",
+        subtitle: "Ein Partner für den Familienaufbau ist weder ein Spender noch ein Co-Elternteil auf Distanz - es ist jemand, mit dem Sie ein gemeinsames Familienleben aufbauen.",
+        paragraphs: [
+          "Ein Partner für den Familienaufbau unterscheidet sich sowohl von einem Co-Elternteil als auch von einem Spender: Es ist jemand, mit dem Sie einen gemeinsamen Haushalt und Alltag aufbauen würden, wie es ein Paar tun würde - nur dass die Elternschaft von Anfang an das ausdrückliche, gemeinsame Ziel ist, statt etwas, von dem Sie hoffen, dass es sich ergibt.",
+          "Weil dies eher einer Lebenspartnerschaft als einer Transaktion ähnelt, behandelt LetsBeParents es nicht wie Dating. Hier gibt es kein Swipen - es beginnt mit einem kurzen Kompatibilitätsquiz, das zeigt, wie jeder von Ihnen über Elternschaft, Verbindlichkeit und den Alltag denkt, sodass die ersten Gespräche von echter Übereinstimmung ausgehen und nicht von einem Profilfoto.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Kompatibilitätsquiz machen", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Finden Sie gemeinsam als Paar einen Spender",
+        subtitle: "Die Suche nach einem Spender als Paar wirft eigene Fragen auf - von der rechtlichen Elternschaft bis dazu, wie eingebunden der Spender sein soll.",
+        paragraphs: [
+          "Die Suche nach einem Spender als Paar wirft Fragen auf, die eine Einzelsuche nicht stellt: wie eingebunden (oder nicht) der Spender sein soll, wie die rechtliche Elternschaft für Sie beide funktioniert und wie Sie unterwegs gemeinsam Entscheidungen treffen. Sich mit dem Partner abzustimmen, bevor die Suche beginnt, erspart später viel Reibung.",
+          "LetsBeParents ermöglicht es Ihnen beiden, Spenderprofile gemeinsam zu durchstöbern und zu filtern - mit demselben identitätsgeprüften Spenderpool und denselben Filtern (Krankengeschichte, Offenheit für Kontakt und mehr), egal ob Sie allein oder zu zweit suchen.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Profil erstellen", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Noch auf der Suche nach Ihrem Weg? Fangen Sie hier an.",
+        subtitle: "Sie müssen nicht schon alles wissen. Die meisten Menschen beginnen damit, ihre Möglichkeiten zu erkunden, bevor sie sich für einen Weg entscheiden.",
+        paragraphs: [
+          "Die meisten Menschen, die am Ende mit LetsBeParents eine Familie aufbauen, wussten anfangs nicht genau, wie das aussehen würde. Wenn Sie noch zwischen Co-Parenting und Samenspende abwägen, oder zwischen einem Partner und dem Alleingang, ist das ein völlig normaler Zustand - und nichts, das Sie klären müssen, bevor Sie starten.",
+          "Der beste nächste Schritt ist keine Entscheidung, sondern Information: Lesen Sie, was jeder Weg wirklich bedeutet, und machen Sie das Compatibility Quiz, um ein klareres Bild davon zu bekommen, wonach Sie suchen. Solange Sie noch erkunden, besteht kein Druck, sich zu registrieren oder sich auf etwas festzulegen.",
+        ],
+        resources: "all",
+        ctaLabel: "Co-Parenting-Kompatibilitätsquiz machen", ctaType: "quiz",
+      },
+    ],
+  },
+  it: {
+    eyebrow: "Trova il tuo percorso",
+    whatThisLooksLike: "Com'è questo percorso nella pratica",
+    resourcesTitle: "Risorse per questo percorso",
+    resourcesAllTitle: "Non sei ancora sicuro/a? Esplora tutto",
+    resourcesAllCopy: "Scopri l'intera raccolta di checklist, schede pratiche e modelli per ogni percorso - co-parenting, fertilità, concepimento con donatore e pianificazione futura.",
+    resourcesAllCta: "Sfoglia tutte le risorse e gli strumenti",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Trovare il co-genitore giusto inizia dal sapere cosa vuoi",
+        subtitle: "Il co-parenting significa crescere un figlio insieme senza una relazione romantica. Funziona quando entrambe le persone sono chiare fin dall'inizio sulle proprie aspettative.",
+        paragraphs: [
+          "Il co-parenting su LetsBeParents significa costruire una famiglia con qualcuno con cui non hai una relazione romantica - due case separate, decisioni condivise sulla vita di tuo figlio. Funziona meglio quando entrambe le persone sono oneste su ciò che vogliono prima di iniziare a cercare, non dopo aver già trovato qualcuno che piace.",
+          "Invece di un feed basato sullo swipe, l'abbinamento qui inizia con un quiz basato sui valori e un Compatibility Score che mostra dove tu e un potenziale co-genitore vi allineate davvero - stile genitoriale, coinvolgimento, tempistiche e confini - così confronti ciò che conta, non solo una foto.",
+          "Dopo una prima conversazione, i passi successivi sono gli stessi richiesti da qualsiasi decisione di co-parenting ponderata: altre conversazioni, un piano scritto e, quando sarai pronto/a, una consulenza legale indipendente.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Crea il tuo profilo", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Trova il donatore giusto per la tua famiglia",
+        subtitle: "Che tu stia cercando un donatore conosciuto o anonimo, LetsBeParents ti aiuta a filtrare in base a ciò che conta di più per te.",
+        paragraphs: [
+          "Scegliere un donatore è una delle decisioni più personali nella costruzione di una famiglia, con reali implicazioni mediche, legali e a lungo termine. Alcune persone desiderano un donatore conosciuto, con una relazione continuativa con il bambino; altre preferiscono l'anonimato tramite una clinica. Entrambi i percorsi sono validi e portano a domande diverse.",
+          "Su LetsBeParents, i profili dei donatori includono le informazioni che contano davvero per questa decisione, e ogni donatore passa attraverso una verifica dell'identità prima che tu possa contattarlo. Sei tu a impostare i filtri importanti per te - anamnesi medica, apertura al contatto, posizione - invece di scorrere alla cieca.",
+          "Prima di procedere con qualsiasi donatore, vale la pena affrontare presto le domande pratiche con una clinica della fertilità e, dove rilevante, con un avvocato, piuttosto che dopo aver già preso una decisione sul piano emotivo.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Sfoglia i profili dei donatori", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Costruisci una famiglia con un partner che condivide la tua visione",
+        subtitle: "Un partner per costruire una famiglia non è un donatore né un co-genitore a distanza - è qualcuno con cui costruisci una vita familiare condivisa.",
+        paragraphs: [
+          "Un partner per costruire una famiglia è diverso sia da un co-genitore sia da un donatore: è qualcuno con cui costruiresti una casa e una vita quotidiana condivise, come farebbe una coppia - solo che la genitorialità è l'obiettivo esplicito e condiviso fin dall'inizio, invece di qualcosa che speri emerga.",
+          "Poiché questo si avvicina più a un'unione di vita che a una transazione, LetsBeParents non lo tratta come un'app di incontri. Qui non c'è swipe - si parte con un breve quiz di compatibilità che fa emergere come ciascuno di voi pensa alla genitorialità, all'impegno e alla vita quotidiana, così le prime conversazioni partono da un allineamento reale e non da una foto profilo.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Fai il quiz di compatibilità", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Trovate un donatore insieme, come coppia",
+        subtitle: "Cercare un donatore in coppia porta con sé domande proprie - dalla genitorialità legale a quanto volete che il donatore sia coinvolto.",
+        paragraphs: [
+          "Cercare un donatore in coppia solleva domande che una ricerca individuale non pone: quanto (o quanto poco) volete che il donatore sia coinvolto, come funzionerà la genitorialità legale per entrambi, e come prenderete le decisioni insieme lungo il percorso. Allinearvi con il partner prima di iniziare a cercare risparmia molti attriti in seguito.",
+          "LetsBeParents permette a entrambi di sfogliare e filtrare i profili dei donatori insieme, con lo stesso pool di donatori a identità verificata e gli stessi filtri - anamnesi medica, apertura al contatto e altro - disponibili sia che cerchiate da soli sia in coppia.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Crea il tuo profilo", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Stai ancora definendo il tuo percorso? Inizia da qui.",
+        subtitle: "Non devi avere già tutto chiaro. La maggior parte delle persone inizia esplorando le proprie opzioni prima di scegliere un percorso.",
+        paragraphs: [
+          "La maggior parte delle persone che finisce per costruire una famiglia con LetsBeParents non sapeva esattamente, all'inizio, come sarebbe stato. Se stai ancora valutando il co-parenting rispetto al concepimento con donatore, o un partner rispetto a procedere da solo/a, è una condizione del tutto normale - e non qualcosa che devi risolvere prima di iniziare.",
+          "Il passo successivo migliore non è una decisione, è informazione: leggi cosa comporta davvero ogni percorso, e fai il Compatibility Quiz per avere un'idea più chiara di ciò che stai cercando. Non c'è alcuna pressione a registrarti o a impegnarti in qualcosa mentre stai ancora esplorando.",
+        ],
+        resources: "all",
+        ctaLabel: "Fai il Quiz di Compatibilità per il Co-Parenting", ctaType: "quiz",
+      },
+    ],
+  },
+  pl: {
+    eyebrow: "Znajdź swoją drogę",
+    whatThisLooksLike: "Jak wygląda ta droga w praktyce",
+    resourcesTitle: "Zasoby dla tej drogi",
+    resourcesAllTitle: "Jeszcze nie masz pewności? Zobacz wszystko",
+    resourcesAllCopy: "Poznaj pełny zestaw list kontrolnych, arkuszy i szablonów dla każdej drogi - co-parenting, płodność, poczęcie z dawcą i planowanie na przyszłość.",
+    resourcesAllCta: "Zobacz wszystkie zasoby i narzędzia",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Znalezienie odpowiedniego co-rodzica zaczyna się od wiedzy, czego chcesz",
+        subtitle: "Co-parenting oznacza wspólne wychowywanie dziecka bez związku romantycznego. Sprawdza się, gdy oboje od początku jasno określają swoje oczekiwania.",
+        paragraphs: [
+          "Co-parenting na LetsBeParents oznacza budowanie rodziny z osobą, z którą nie łączy cię związek romantyczny - dwa oddzielne gospodarstwa domowe, wspólne decyzje dotyczące życia dziecka. Działa najlepiej, gdy oboje są szczerzy co do tego, czego chcą, zanim zaczną szukać - a nie dopiero po tym, jak już znaleźli kogoś, kto im się podoba.",
+          "Zamiast kanału opartego na przesuwaniu profili, dopasowywanie zaczyna się tu od quizu opartego na wartościach i Wskaźnika Kompatybilności, który pokazuje, w czym Ty i potencjalny co-rodzic naprawdę się zgadzacie - styl wychowania, zaangażowanie, harmonogram i granice - dzięki czemu porównujecie to, co ważne, a nie tylko zdjęcie.",
+          "Po pierwszej rozmowie kolejne kroki są takie same jak przy każdej przemyślanej decyzji o co-parentingu: więcej rozmów, spisany plan i, gdy będziecie gotowi, niezależna porada prawna.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Utwórz swój profil", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Znajdź odpowiedniego dawcę dla swojej rodziny",
+        subtitle: "Niezależnie od tego, czy szukasz dawcy znanego, czy anonimowego, LetsBeParents pomaga filtrować według tego, co jest dla Ciebie najważniejsze.",
+        paragraphs: [
+          "Wybór dawcy to jedna z najbardziej osobistych decyzji przy budowaniu rodziny, z realnymi konsekwencjami medycznymi, prawnymi i długoterminowymi. Niektórzy chcą dawcy znanego, z ciągłą relacją z dzieckiem; inni wolą anonimowość za pośrednictwem kliniki. Obie drogi są uzasadnione i prowadzą do różnych pytań.",
+          "Na LetsBeParents profile dawców zawierają informacje, które naprawdę mają znaczenie przy tej decyzji, a każdy dawca przechodzi weryfikację tożsamości, zanim będziesz mógł się z nim skontaktować. To Ty ustawiasz filtry, które są dla Ciebie ważne - historię medyczną, otwartość na kontakt, lokalizację - zamiast przeglądać na oślep.",
+          "Zanim zdecydujesz się na konkretnego dawcę, warto wcześnie omówić praktyczne kwestie z kliniką leczenia niepłodności, a tam, gdzie to istotne, także z prawnikiem - zamiast robić to dopiero po podjęciu decyzji emocjonalnej.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Przeglądaj profile dawców", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Zbuduj rodzinę z partnerem, który podziela Twoją wizję",
+        subtitle: "Partner do budowania rodziny to nie dawca ani co-rodzic na odległość - to ktoś, z kim budujesz wspólne życie rodzinne.",
+        paragraphs: [
+          "Partner do budowania rodziny różni się zarówno od co-rodzica, jak i od dawcy: to ktoś, z kim zbudowałbyś/zbudowałabyś wspólny dom i codzienne życie, tak jak robi to para - z tą różnicą, że rodzicielstwo jest jawnym, wspólnym celem od samego początku, a nie czymś, czego się mamy nadzieję dorobić.",
+          "Ponieważ jest to bliższe partnerstwu życiowemu niż transakcji, LetsBeParents nie traktuje tego jak randkowania. Nie ma tu przesuwania profili - zaczyna się od krótkiego quizu kompatybilności, który pokazuje, jak każde z Was myśli o rodzicielstwie, zaangażowaniu i codziennym życiu, dzięki czemu pierwsze rozmowy zaczynają się od prawdziwego dopasowania, a nie od zdjęcia profilowego.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Wypełnij quiz kompatybilności", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Znajdźcie dawcę razem, jako para",
+        subtitle: "Szukanie dawcy jako para wiąże się z własnymi pytaniami - od prawnego rodzicielstwa po to, jak bardzo zaangażowany ma być dawca.",
+        paragraphs: [
+          "Szukanie dawcy jako para rodzi pytania, których nie ma przy szukaniu w pojedynkę: jak bardzo (lub jak mało) zaangażowany ma być dawca, jak będzie wyglądać prawne rodzicielstwo dla Was obojga i jak będziecie razem podejmować decyzje w trakcie tego procesu. Ustalenie wspólnego stanowiska z partnerem/partnerką przed rozpoczęciem poszukiwań oszczędza wiele napięć później.",
+          "LetsBeParents pozwala Wam obojgu wspólnie przeglądać i filtrować profile dawców, z tą samą pulą dawców o zweryfikowanej tożsamości i tymi samymi filtrami - historią medyczną, otwartością na kontakt i innymi - dostępnymi bez względu na to, czy szukacie sami, czy we dwoje.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Utwórz swój profil", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Wciąż zastanawiasz się nad swoją drogą? Zacznij tutaj.",
+        subtitle: "Nie musisz mieć wszystkiego ustalonego. Większość osób zaczyna od zapoznania się z opcjami, zanim wybierze drogę.",
+        paragraphs: [
+          "Większość osób, które ostatecznie budują rodzinę z LetsBeParents, na początku nie była pewna, jak dokładnie będzie to wyglądać. Jeśli wciąż rozważasz co-parenting w porównaniu z poczęciem z dawcą, albo partnera w porównaniu z samodzielną drogą, to zupełnie normalny etap - i nie musisz go rozstrzygać, zanim zaczniesz.",
+          "Najlepszym kolejnym krokiem nie jest decyzja, lecz informacja: przeczytaj, co naprawdę wiąże się z każdą drogą, i wypełnij Quiz Kompatybilności, aby lepiej zrozumieć, czego szukasz. Nie ma presji, by się rejestrować czy się do czegokolwiek zobowiązywać, dopóki wciąż eksplorujesz możliwości.",
+        ],
+        resources: "all",
+        ctaLabel: "Wypełnij Quiz Kompatybilności Co-Parentingu", ctaType: "quiz",
+      },
+    ],
+  },
 };
 
 function FindYourPath() {
@@ -7289,6 +9048,156 @@ const PROFESSIONALS_TEXT: Record<CookieLocale, {
     closingSubtitle: "Crea tu cuenta gratuita para desbloquear perfiles completos y reservar tu primera consulta.",
     closingCta: "Crear cuenta gratuita",
   },
+  pt: {
+    eyebrow: "Apoio profissional",
+    heroTitle: "Especialistas de confiança em cada etapa da sua jornada",
+    heroSubtitle: "Clínicas de fertilidade, advogados de família, terapeutas e consultores financeiros - avaliados, verificados e disponíveis quando você estiver pronto para conversar.",
+    heroCtaPrimary: "Cadastre-se grátis",
+    heroCtaSecondary: "Veja como funciona a verificação",
+    categoriesEyebrow: "Quem está na plataforma",
+    categoriesTitle: "Apoio para cada parte da construção de uma família",
+    categoriesSubtitle: "Explore as categorias publicamente - os perfis completos e o agendamento são desbloqueados ao criar uma conta gratuita.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Clínicas de fertilidade", description: "Compare clínicas de fertilidade verificadas em todo o mundo. Agende videoconsultas depois de entrar na sua conta.", statSuffix: "clínicas parceiras", available: true },
+      { key: "lawyers", icon: "scale", title: "Advogados de família", description: "Especialistas em direito reprodutivo para contratos, filiação e acordos de coparentalidade.", statSuffix: "advogados", available: true },
+      { key: "therapists", icon: "support", title: "Terapeutas e conselheiros", description: "Converse sobre o lado emocional de construir uma família - antes, durante e depois de encontrar o seu match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Consultores financeiros", description: "Entenda o custo real da concepção com doador, da barriga de aluguel ou da adoção antes de se comprometer.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Em breve",
+    stepsEyebrow: "Como funciona",
+    stepsTitle: "Da busca ao agendamento, em três passos",
+    steps: [
+      ["01", "Explore as categorias", "Veja quem está disponível no seu país, nas quatro categorias.", "clinic"],
+      ["02", "Cadastre-se grátis", "Crie a sua conta para desbloquear perfis completos e detalhes.", "profile"],
+      ["03", "Agende uma consulta", "Converse por chat ou videochamada, direto na LetsBeParents.", "match"],
+    ],
+    trustTitle: "Todo profissional é verificado antes de ser listado",
+    trustDescription: "Licenças e credenciais são verificadas antes que uma clínica ou advogado apareça na LetsBeParents. Veja exatamente o que verificamos e o que ainda cabe a você confirmar.",
+    trustCta: "Veja o que verificamos",
+    closingTitle: "Pronto para se conectar com o especialista certo?",
+    closingSubtitle: "Crie a sua conta gratuita para desbloquear perfis completos e agendar a sua primeira consulta.",
+    closingCta: "Criar conta gratuita",
+  },
+  fr: {
+    eyebrow: "Accompagnement professionnel",
+    heroTitle: "Des experts de confiance à chaque étape de votre parcours",
+    heroSubtitle: "Cliniques de fertilité, avocats spécialisés en droit de la famille, thérapeutes et conseillers financiers - vérifiés et disponibles dès que vous êtes prêt(e) à en parler.",
+    heroCtaPrimary: "Inscrivez-vous gratuitement",
+    heroCtaSecondary: "Découvrir comment fonctionne la vérification",
+    categoriesEyebrow: "Qui est présent sur la plateforme",
+    categoriesTitle: "Un accompagnement pour chaque étape de la construction d'une famille",
+    categoriesSubtitle: "Parcourez les catégories librement - les profils complets et la réservation se débloquent dès la création d'un compte gratuit.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Cliniques de fertilité", description: "Comparez des cliniques de fertilité vérifiées dans le monde entier. Réservez des consultations vidéo une fois connecté(e).", statSuffix: "cliniques partenaires", available: true },
+      { key: "lawyers", icon: "scale", title: "Avocats spécialisés en droit de la famille", description: "Spécialistes du droit de la reproduction pour les contrats, la filiation et les accords de coparentalité.", statSuffix: "avocats", available: true },
+      { key: "therapists", icon: "support", title: "Thérapeutes et conseillers", description: "Parlez de la dimension émotionnelle de la construction d'une famille - avant, pendant et après avoir trouvé votre match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Conseillers financiers", description: "Comprenez le coût réel de la conception avec donneur, de la GPA ou de l'adoption avant de vous engager.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Bientôt disponible",
+    stepsEyebrow: "Comment ça marche",
+    stepsTitle: "De la recherche à la réservation, en trois étapes",
+    steps: [
+      ["01", "Parcourez les catégories", "Découvrez qui est disponible dans votre pays, dans les quatre catégories.", "clinic"],
+      ["02", "Inscrivez-vous gratuitement", "Créez votre compte pour débloquer les profils complets et tous les détails.", "profile"],
+      ["03", "Réservez une consultation", "Chat ou appel vidéo, directement au sein de LetsBeParents.", "match"],
+    ],
+    trustTitle: "Chaque professionnel est vérifié avant d'être référencé",
+    trustDescription: "Les licences et qualifications sont vérifiées avant qu'une clinique ou un avocat n'apparaisse sur LetsBeParents. Découvrez exactement ce que nous vérifions et ce qu'il vous reste à confirmer vous-même.",
+    trustCta: "Voir ce que nous vérifions",
+    closingTitle: "Prêt(e) à entrer en contact avec le bon expert ?",
+    closingSubtitle: "Créez votre compte gratuit pour débloquer les profils complets et réserver votre première consultation.",
+    closingCta: "Créer un compte gratuit",
+  },
+  de: {
+    eyebrow: "Professionelle Unterstützung",
+    heroTitle: "Vertrauenswürdige Expertinnen und Experten für jeden Schritt Ihrer Reise",
+    heroSubtitle: "Kinderwunschkliniken, Familienanwälte, Therapeutinnen und Finanzberater - geprüft, verifiziert und verfügbar, sobald Sie bereit sind zu sprechen.",
+    heroCtaPrimary: "Kostenlos registrieren",
+    heroCtaSecondary: "So funktioniert die Verifizierung",
+    categoriesEyebrow: "Wer auf der Plattform vertreten ist",
+    categoriesTitle: "Unterstützung für jeden Teil des Familienaufbaus",
+    categoriesSubtitle: "Kategorien können öffentlich durchstöbert werden - vollständige Profile und Buchung werden freigeschaltet, sobald Sie ein kostenloses Konto erstellen.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Kinderwunschkliniken", description: "Vergleichen Sie verifizierte Kinderwunschkliniken weltweit. Buchen Sie Videoberatungen, sobald Sie angemeldet sind.", statSuffix: "Partnerkliniken", available: true },
+      { key: "lawyers", icon: "scale", title: "Familienanwälte", description: "Spezialisten für Reproduktionsrecht - Verträge, Elternschaft und Co-Parenting-Vereinbarungen.", statSuffix: "Anwälte", available: true },
+      { key: "therapists", icon: "support", title: "Therapeuten & Beraterinnen", description: "Sprechen Sie über die emotionale Seite des Familienaufbaus - davor, währenddessen und nachdem Sie Ihr Match gefunden haben.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Finanzberater", description: "Verstehen Sie die tatsächlichen Kosten von Samenspende, Leihmutterschaft oder Adoption, bevor Sie sich festlegen.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Demnächst verfügbar",
+    stepsEyebrow: "So funktioniert's",
+    stepsTitle: "Vom Stöbern bis zur Buchung in drei Schritten",
+    steps: [
+      ["01", "Kategorien durchstöbern", "Sehen Sie, wer in Ihrem Land verfügbar ist - in allen vier Kategorien.", "clinic"],
+      ["02", "Kostenlos registrieren", "Erstellen Sie Ihr Konto, um vollständige Profile und Details freizuschalten.", "profile"],
+      ["03", "Beratung buchen", "Chat oder Videoanruf, direkt in LetsBeParents.", "match"],
+    ],
+    trustTitle: "Jede Fachperson wird vor der Aufnahme verifiziert",
+    trustDescription: "Lizenzen und Qualifikationen werden geprüft, bevor eine Klinik oder ein Anwalt auf LetsBeParents erscheint. Erfahren Sie genau, was wir prüfen und was Sie selbst noch bestätigen sollten.",
+    trustCta: "Sehen, was wir prüfen",
+    closingTitle: "Bereit, die richtige Fachperson kennenzulernen?",
+    closingSubtitle: "Erstellen Sie Ihr kostenloses Konto, um vollständige Profile freizuschalten und Ihre erste Beratung zu buchen.",
+    closingCta: "Kostenloses Konto erstellen",
+  },
+  it: {
+    eyebrow: "Supporto professionale",
+    heroTitle: "Esperti di fiducia per ogni fase del tuo percorso",
+    heroSubtitle: "Cliniche della fertilità, avvocati di famiglia, terapeuti e consulenti finanziari - verificati e disponibili quando sei pronto/a a parlarne.",
+    heroCtaPrimary: "Iscriviti gratis",
+    heroCtaSecondary: "Scopri come funziona la verifica",
+    categoriesEyebrow: "Chi è presente sulla piattaforma",
+    categoriesTitle: "Supporto per ogni fase della costruzione di una famiglia",
+    categoriesSubtitle: "Sfoglia le categorie pubblicamente - i profili completi e la prenotazione si sbloccano creando un account gratuito.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Cliniche della fertilità", description: "Confronta cliniche della fertilità verificate in tutto il mondo. Prenota videoconsulti una volta effettuato l'accesso.", statSuffix: "cliniche partner", available: true },
+      { key: "lawyers", icon: "scale", title: "Avvocati di famiglia", description: "Specialisti in diritto della riproduzione per contratti, genitorialità legale e accordi di co-parenting.", statSuffix: "avvocati", available: true },
+      { key: "therapists", icon: "support", title: "Terapeuti e consulenti", description: "Parla del lato emotivo della costruzione di una famiglia - prima, durante e dopo aver trovato il tuo match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Consulenti finanziari", description: "Comprendi il costo reale del concepimento con donatore, della maternità surrogata o dell'adozione prima di impegnarti.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Prossimamente",
+    stepsEyebrow: "Come funziona",
+    stepsTitle: "Dalla ricerca alla prenotazione, in tre passi",
+    steps: [
+      ["01", "Sfoglia le categorie", "Scopri chi è disponibile nel tuo paese, in tutte e quattro le categorie.", "clinic"],
+      ["02", "Iscriviti gratis", "Crea il tuo account per sbloccare profili completi e dettagli.", "profile"],
+      ["03", "Prenota una consulenza", "Chat o videochiamata, direttamente dentro LetsBeParents.", "match"],
+    ],
+    trustTitle: "Ogni professionista viene verificato prima di essere inserito nell'elenco",
+    trustDescription: "Licenze e credenziali vengono controllate prima che una clinica o un avvocato compaia su LetsBeParents. Scopri esattamente cosa verifichiamo noi e cosa spetta a te confermare.",
+    trustCta: "Scopri cosa verifichiamo",
+    closingTitle: "Pronto/a a entrare in contatto con l'esperto giusto?",
+    closingSubtitle: "Crea il tuo account gratuito per sbloccare i profili completi e prenotare la tua prima consulenza.",
+    closingCta: "Crea account gratuito",
+  },
+  pl: {
+    eyebrow: "Wsparcie profesjonalistów",
+    heroTitle: "Zaufani eksperci na każdym etapie Twojej drogi",
+    heroSubtitle: "Kliniki leczenia niepłodności, prawnicy rodzinni, terapeuci i doradcy finansowi - zweryfikowani i dostępni, gdy będziesz gotowy/a porozmawiać.",
+    heroCtaPrimary: "Zarejestruj się za darmo",
+    heroCtaSecondary: "Zobacz, jak działa weryfikacja",
+    categoriesEyebrow: "Kto jest na platformie",
+    categoriesTitle: "Wsparcie na każdym etapie budowania rodziny",
+    categoriesSubtitle: "Przeglądaj kategorie publicznie - pełne profile i możliwość rezerwacji odblokowują się po założeniu darmowego konta.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Kliniki leczenia niepłodności", description: "Porównuj zweryfikowane kliniki leczenia niepłodności na całym świecie. Rezerwuj konsultacje wideo po zalogowaniu.", statSuffix: "klinik partnerskich", available: true },
+      { key: "lawyers", icon: "scale", title: "Prawnicy rodzinni", description: "Specjaliści prawa reprodukcyjnego - umowy, ustalanie rodzicielstwa i porozumienia dotyczące co-parentingu.", statSuffix: "prawników", available: true },
+      { key: "therapists", icon: "support", title: "Terapeuci i doradcy", description: "Porozmawiaj o emocjonalnej stronie budowania rodziny - przed, w trakcie i po znalezieniu dopasowania.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Doradcy finansowi", description: "Poznaj rzeczywisty koszt poczęcia z dawcą, surogacji lub adopcji, zanim podejmiesz decyzję.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Wkrótce",
+    stepsEyebrow: "Jak to działa",
+    stepsTitle: "Od przeglądania do rezerwacji w trzech krokach",
+    steps: [
+      ["01", "Przeglądaj kategorie", "Zobacz, kto jest dostępny w Twoim kraju, we wszystkich czterech kategoriach.", "clinic"],
+      ["02", "Zarejestruj się za darmo", "Utwórz konto, aby odblokować pełne profile i szczegóły.", "profile"],
+      ["03", "Zarezerwuj konsultację", "Czat lub rozmowa wideo - bezpośrednio w LetsBeParents.", "match"],
+    ],
+    trustTitle: "Każdy profesjonalista jest weryfikowany, zanim trafi na listę",
+    trustDescription: "Licencje i kwalifikacje są sprawdzane, zanim klinika lub prawnik pojawią się na LetsBeParents. Zobacz dokładnie, co weryfikujemy, a co nadal musisz potwierdzić samodzielnie.",
+    trustCta: "Zobacz, co weryfikujemy",
+    closingTitle: "Gotowy/a, by skontaktować się z odpowiednim ekspertem?",
+    closingSubtitle: "Załóż darmowe konto, aby odblokować pełne profile i zarezerwować pierwszą konsultację.",
+    closingCta: "Załóż darmowe konto",
+  },
 };
 
 function Professionals() {
@@ -7428,6 +9337,96 @@ const TRUST_TEXT = {
     noteCopy: "Las verificaciones de identidad y fotos reducen los perfiles falsos y duplicados, pero no son una garantía médica, legal ni de antecedentes. Recomendamos encarecidamente obtener asesoría legal independiente antes de cualquier acuerdo de donación o co-parentalidad, y conocer en persona por primera vez en un lugar público.",
     ctaTitle: "¿Tienes dudas sobre la seguridad en LetsBeParents?",
     ctaButton: "Contactar con nuestro equipo",
+  },
+  pt: {
+    pill: "Confiança e Segurança",
+    title: "Todos os perfis têm identidade verificada - veja exatamente o que verificamos.",
+    intro: "Construir uma família significa confiar nas pessoas que você conhece pelo caminho. Veja o que a LetsBeParents verifica antes de você se conectar, e o que ainda cabe a você conferir por conta própria.",
+    checks: [
+      ["Verificação de identidade", "Antes de desbloquear acesso completo às combinações, os membros confirmam sua identidade por meio de uma verificação segura de documentos, realizada por nosso parceiro de verificação, a Didit. Não armazenamos seu documento de identidade ou selfie nos servidores da LetsBeParents - esses dados são processados e mantidos pela Didit conforme seus próprios termos de privacidade, e podem ser excluídos mediante solicitação."],
+      ["Revisão de fotos", "Cada foto de perfil é analisada automaticamente em busca de violações das políticas, e qualquer foto denunciada é revisada por nossa equipe."],
+      ["Mensagens e vídeo privados", "Conversas e chamadas de vídeo acontecem dentro da LetsBeParents. Seu telefone e e-mail permanecem privados até você decidir compartilhá-los."],
+      ["Clínicas e advogados avaliados", "Cada clínica e advogado em nosso diretório é avaliado antes de ser listado, para que você nunca precise adivinhar com quem está falando."],
+      ["Denuncie e bloqueie, a qualquer momento", "Você pode denunciar ou bloquear qualquer membro com um toque. Cada denúncia é revisada por nossa equipe, não por um robô."],
+      ["Proteção de dados", "Seus dados são criptografados em trânsito e em repouso. Nunca vendemos suas informações, e você controla o que é visível no seu perfil."],
+    ],
+    diditLinks: { privacy: "Política de Privacidade da Didit", terms: "Termos de Verificação de Identidade da Didit" },
+    noteTitle: "O que a verificação significa - e o que não significa",
+    noteCopy: "As verificações de identidade e de fotos reduzem perfis falsos e duplicados, mas não são uma garantia médica, jurídica ou de verificação de antecedentes. Recomendamos fortemente buscar aconselhamento jurídico independente antes de qualquer acordo de doação ou coparentalidade, e encontrar novas conexões pela primeira vez em um local público.",
+    ctaTitle: "Dúvidas sobre segurança na LetsBeParents?",
+    ctaButton: "Fale com nossa equipe",
+  },
+  fr: {
+    pill: "Confiance et sécurité",
+    title: "Chaque profil a une identité vérifiée - découvrez exactement ce que nous contrôlons.",
+    intro: "Fonder une famille, c'est faire confiance aux personnes que vous rencontrez en chemin. Voici ce que LetsBeParents vérifie avant que vous entriez en contact, et ce qu'il vous reste à vérifier vous-même.",
+    checks: [
+      ["Vérification d'identité", "Avant de débloquer l'accès complet aux mises en relation, les membres confirment leur identité via une vérification sécurisée de documents, assurée par notre partenaire de vérification, Didit. Nous ne conservons pas votre pièce d'identité ni votre selfie sur les serveurs de LetsBeParents - ces données sont traitées et conservées par Didit selon ses propres conditions de confidentialité, et peuvent être supprimées sur demande."],
+      ["Contrôle des photos", "Chaque photo de profil est automatiquement analysée pour détecter les violations des règles, et toute photo signalée est examinée par notre équipe."],
+      ["Messagerie et vidéo privées", "Les discussions et appels vidéo se déroulent au sein de LetsBeParents. Votre numéro de téléphone et votre e-mail restent privés jusqu'à ce que vous choisissiez de les partager."],
+      ["Cliniques et avocats vérifiés", "Chaque clinique et avocat de notre annuaire est examiné avant d'être répertorié, afin que vous n'ayez jamais à deviner à qui vous vous adressez."],
+      ["Signaler et bloquer, à tout moment", "Vous pouvez signaler ou bloquer n'importe quel membre en un geste. Chaque signalement est examiné par notre équipe, pas par un robot."],
+      ["Protection des données", "Vos données sont chiffrées en transit et au repos. Nous ne vendons jamais vos informations, et vous contrôlez ce qui est visible sur votre profil."],
+    ],
+    diditLinks: { privacy: "Politique de confidentialité de Didit", terms: "Conditions de vérification d'identité de Didit" },
+    noteTitle: "Ce que signifie la vérification - et ce qu'elle ne signifie pas",
+    noteCopy: "Les vérifications d'identité et de photos réduisent les profils faux et en double, mais elles ne constituent pas une garantie médicale, juridique ou de vérification des antécédents. Nous recommandons vivement de consulter un conseil juridique indépendant avant tout accord de don ou de coparentalité, et de rencontrer une nouvelle personne pour la première fois dans un lieu public.",
+    ctaTitle: "Des questions sur la sécurité sur LetsBeParents ?",
+    ctaButton: "Contacter notre équipe",
+  },
+  de: {
+    pill: "Vertrauen & Sicherheit",
+    title: "Jedes Profil ist identitätsgeprüft - sehen Sie genau, was wir kontrollieren.",
+    intro: "Eine Familie zu gründen bedeutet, den Menschen zu vertrauen, die Sie auf diesem Weg treffen. Hier erfahren Sie, was LetsBeParents prüft, bevor Sie in Kontakt treten, und was Sie selbst noch überprüfen sollten.",
+    checks: [
+      ["Identitätsprüfung", "Bevor Mitglieder vollen Zugriff auf Matches erhalten, bestätigen sie ihre Identität durch eine sichere Dokumentenprüfung, die von unserem Verifizierungspartner Didit durchgeführt wird. Wir speichern Ihr Ausweisdokument oder Selfie nicht auf den eigenen Servern von LetsBeParents - diese Daten werden von Didit gemäß dessen eigenen Datenschutzbestimmungen verarbeitet und gespeichert und können auf Anfrage gelöscht werden."],
+      ["Fotoprüfung", "Jedes Profilfoto wird automatisch auf Regelverstöße geprüft, und jedes gemeldete Foto wird von unserem Team überprüft."],
+      ["Private Nachrichten & Video", "Chats und Videoanrufe finden innerhalb von LetsBeParents statt. Ihre Telefonnummer und E-Mail-Adresse bleiben privat, bis Sie sich entscheiden, sie zu teilen."],
+      ["Geprüfte Kliniken & Anwälte", "Jede Klinik und jeder Anwalt in unserem Verzeichnis wird vor der Aufnahme überprüft, sodass Sie nie raten müssen, mit wem Sie es zu tun haben."],
+      ["Jederzeit melden & blockieren", "Sie können jedes Mitglied mit einem Tippen melden oder blockieren. Jede Meldung wird von unserem Team geprüft, nicht von einem Bot."],
+      ["Datenschutz", "Ihre Daten werden bei der Übertragung und Speicherung verschlüsselt. Wir verkaufen Ihre Informationen niemals, und Sie bestimmen, was in Ihrem Profil sichtbar ist."],
+    ],
+    diditLinks: { privacy: "Datenschutzrichtlinie von Didit", terms: "Bedingungen zur Identitätsprüfung von Didit" },
+    noteTitle: "Was die Verifizierung bedeutet - und was nicht",
+    noteCopy: "Identitäts- und Fotoprüfungen verringern gefälschte und doppelte Profile, sind aber keine medizinische, rechtliche oder Background-Check-Garantie. Wir empfehlen dringend, vor jeder Samenspende- oder Co-Elternschaftsvereinbarung unabhängigen rechtlichen Rat einzuholen und neue Kontakte zum ersten Mal an einem öffentlichen Ort zu treffen.",
+    ctaTitle: "Fragen zur Sicherheit auf LetsBeParents?",
+    ctaButton: "Unser Team kontaktieren",
+  },
+  it: {
+    pill: "Fiducia e sicurezza",
+    title: "Ogni profilo ha l'identità verificata - scopri esattamente cosa controlliamo.",
+    intro: "Costruire una famiglia significa fidarsi delle persone che incontri lungo il percorso. Ecco cosa verifica LetsBeParents prima che tu ti metta in contatto, e cosa spetta ancora a te controllare.",
+    checks: [
+      ["Verifica dell'identità", "Prima di sbloccare l'accesso completo agli abbinamenti, i membri confermano la propria identità tramite un controllo sicuro dei documenti, gestito dal nostro partner di verifica, Didit. Non conserviamo il tuo documento d'identità o il selfie sui server di LetsBeParents - questi dati vengono elaborati e conservati da Didit secondo i propri termini sulla privacy, e possono essere cancellati su richiesta."],
+      ["Revisione delle foto", "Ogni foto del profilo viene controllata automaticamente per individuare violazioni delle regole, e ogni foto segnalata viene rivista dal nostro team."],
+      ["Messaggi e video privati", "Chat e videochiamate avvengono all'interno di LetsBeParents. Il tuo numero di telefono e la tua email restano privati finché non decidi di condividerli."],
+      ["Cliniche e avvocati verificati", "Ogni clinica e avvocato nella nostra directory viene esaminato prima di essere inserito, così non devi mai indovinare con chi stai parlando."],
+      ["Segnala e blocca, in qualsiasi momento", "Puoi segnalare o bloccare qualsiasi membro con un tocco. Ogni segnalazione viene esaminata dal nostro team, non da un bot."],
+      ["Protezione dei dati", "I tuoi dati sono crittografati in transito e a riposo. Non vendiamo mai le tue informazioni, e sei tu a controllare cosa è visibile nel tuo profilo."],
+    ],
+    diditLinks: { privacy: "Informativa sulla privacy di Didit", terms: "Termini di verifica dell'identità di Didit" },
+    noteTitle: "Cosa significa la verifica - e cosa non significa",
+    noteCopy: "I controlli sull'identità e sulle foto riducono i profili falsi e duplicati, ma non sono una garanzia medica, legale o di controllo dei precedenti. Consigliamo vivamente di richiedere una consulenza legale indipendente prima di qualsiasi accordo di donazione o co-genitorialità, e di incontrare per la prima volta nuove persone in un luogo pubblico.",
+    ctaTitle: "Domande sulla sicurezza su LetsBeParents?",
+    ctaButton: "Contatta il nostro team",
+  },
+  pl: {
+    pill: "Zaufanie i bezpieczeństwo",
+    title: "Każdy profil ma zweryfikowaną tożsamość - zobacz dokładnie, co sprawdzamy.",
+    intro: "Budowanie rodziny oznacza zaufanie do osób, które spotykasz po drodze. Oto, co LetsBeParents weryfikuje, zanim się skontaktujesz, i co nadal warto sprawdzić samodzielnie.",
+    checks: [
+      ["Weryfikacja tożsamości", "Zanim członkowie odblokują pełny dostęp do dopasowań, potwierdzają swoją tożsamość poprzez bezpieczną weryfikację dokumentów, przeprowadzaną przez naszego partnera weryfikacyjnego, Didit. Nie przechowujemy Twojego dokumentu tożsamości ani selfie na własnych serwerach LetsBeParents - te dane są przetwarzane i przechowywane przez Didit zgodnie z ich własnymi zasadami prywatności i mogą zostać usunięte na żądanie."],
+      ["Weryfikacja zdjęć", "Każde zdjęcie profilowe jest automatycznie sprawdzane pod kątem naruszeń zasad, a każde zgłoszone zdjęcie jest sprawdzane przez nasz zespół."],
+      ["Prywatne wiadomości i wideo", "Czaty i połączenia wideo odbywają się w ramach LetsBeParents. Twój numer telefonu i e-mail pozostają prywatne, dopóki sam(a) nie zdecydujesz się je udostępnić."],
+      ["Zweryfikowane kliniki i prawnicy", "Każda klinika i prawnik w naszym katalogu są sprawdzani, zanim zostaną dodani do listy, więc nigdy nie musisz zgadywać, z kim się kontaktujesz."],
+      ["Zgłoś i zablokuj w każdej chwili", "Możesz zgłosić lub zablokować dowolnego członka jednym dotknięciem. Każde zgłoszenie jest sprawdzane przez nasz zespół, a nie przez bota."],
+      ["Ochrona danych", "Twoje dane są szyfrowane podczas przesyłania i przechowywania. Nigdy nie sprzedajemy Twoich informacji, a Ty decydujesz, co jest widoczne w Twoim profilu."],
+    ],
+    diditLinks: { privacy: "Polityka prywatności Didit", terms: "Warunki weryfikacji tożsamości Didit" },
+    noteTitle: "Co oznacza weryfikacja - a czego nie oznacza",
+    noteCopy: "Weryfikacja tożsamości i zdjęć zmniejsza liczbę fałszywych i zduplikowanych profili, ale nie stanowi gwarancji medycznej, prawnej ani sprawdzenia przeszłości. Zdecydowanie zalecamy skorzystanie z niezależnej porady prawnej przed zawarciem jakiejkolwiek umowy dawstwa lub co-rodzicielstwa oraz spotykanie się z nowo poznanymi osobami po raz pierwszy w miejscu publicznym.",
+    ctaTitle: "Masz pytania dotyczące bezpieczeństwa na LetsBeParents?",
+    ctaButton: "Skontaktuj się z naszym zespołem",
   },
 } satisfies Record<CookieLocale, Record<string, unknown>>;
 
@@ -8192,6 +10191,29 @@ function Referral({ session }: { session: Session }) {
     }
   };
 
+  // Alena: "а почему нельзя прислать ссылку просто для регистрации" - the
+  // code alone made a friend type it in by hand on the "Have an invite
+  // code?" field below. A link is much lower-friction: Signup (see the
+  // Signup() component above) now reads ?invite=CODE from the URL and
+  // redeems it automatically right after the friend's account is created,
+  // so sharing this link is a true one-click flow. The raw code is kept
+  // too - some people prefer to just read it out loud or paste it in a
+  // message rather than a link.
+  const inviteLink = typeof window !== "undefined" && code
+    ? `${window.location.origin}/${locale}/auth/register?invite=${encodeURIComponent(code)}`
+    : "";
+  const [linkCopied, setLinkCopied] = useState(false);
+  const copyInviteLink = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      setErrorMsg("Could not copy the link - you can select and copy it manually.");
+    }
+  };
+
   return (
     <section className="member-form">
       <h1>Referral</h1>
@@ -8206,10 +10228,16 @@ function Referral({ session }: { session: Session }) {
       )}
       {status === "ok" && (
         <>
-          <div className="list-card">
-            <p>Your invite code</p>
-            <p>
-              <strong>{code}</strong>
+          <div className="list-card referral-code-card">
+            <p>Your invite link</p>
+            <div className="referral-link-row">
+              <input className="referral-link-field" value={inviteLink} readOnly onFocus={(event) => event.target.select()} />
+              <button type="button" className="primary" onClick={() => void copyInviteLink()}>
+                {linkCopied ? "Copied!" : "Copy link"}
+              </button>
+            </div>
+            <p className="referral-code-fallback">
+              Or share the code directly: <strong>{code}</strong>
             </p>
             <p>
               {referredCount} friend(s) invited - {rewardedCount} rewarded
@@ -9198,16 +11226,16 @@ export function WebApp() {
       />
       <Route
         path="/:locale/profile"
-        element={content(<MemberAccount session={session} locale={locale} onLogout={logout} />)}
+        element={content(<MemberAccount session={session} locale={legacyLocaleOf(locale)} onLogout={logout} />)}
       />
-      <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={localeOf()} />)} />
-      <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={localeOf()} />)} />
-      <Route path="/:locale/profile/verification" element={content(<MemberProfileVerification locale={localeOf()} />)} />
-      <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={locale} onLogout={logout} view="notifications" />)} />
-      <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={locale} onLogout={logout} view="blocked" />)} />
+ <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={legacyLocaleOf(localeOf())} />)} />
+ <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)} />
+ <Route path="/:locale/profile/verification" element={content(<MemberProfileVerification locale={legacyLocaleOf(localeOf())} />)} />
+      <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={legacyLocaleOf(locale)} onLogout={logout} view="notifications" />)} />
+      <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={legacyLocaleOf(locale)} onLogout={logout} view="blocked" />)} />
       <Route
         path="/:locale/photos"
-        element={content(<MemberProfilePhotos locale={localeOf()} />)}
+        element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)}
       />
       <Route
         path="/:locale/settings"
@@ -9215,7 +11243,7 @@ export function WebApp() {
       />
       <Route
         path="/:locale/verification"
-        element={content(<MemberProfileVerification locale={localeOf()} />)}
+        element={content(<MemberProfileVerification locale={legacyLocaleOf(localeOf())} />)}
       />
       <Route
         path="/:locale/messages"
@@ -9297,7 +11325,7 @@ export function WebApp() {
         path="/:locale/community/post/:postId"
         element={content(<CommunityPostDetail session={session} />)}
       />
-      <Route path="*" element={content(<NotFoundPage locale={locale} />)} />
+      <Route path="*" element={content(<NotFoundPage locale={legacyLocaleOf(locale)} />)} />
       </Routes>
     </>
   );

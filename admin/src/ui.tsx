@@ -25,7 +25,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { ADMIN_AUTH_REQUIRED_EVENT, createApiClient } from "./api";
+import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
@@ -197,6 +197,20 @@ const nav: ReadonlyArray<{
     view: "moderation-reports",
     icon: "flag",
     badge: "pending_reports",
+  },
+  {
+    path: "/boosts",
+    title: "Boost Requests",
+    view: "boosts",
+    icon: "trendingUp",
+    badge: "pending_boosts",
+  },
+  {
+    path: "/video-verifications",
+    title: "Video Verifications",
+    view: "video-verifications",
+    icon: "video",
+    badge: "pending_video_verifications",
   },
   { path: "/livekit", title: "LiveKit Calls", view: "livekit", icon: "phone" },
   { path: "/monitoring", title: "Monitoring", icon: "activity" },
@@ -5254,6 +5268,212 @@ function ModerationPhotos() {
   );
 }
 
+// Boost requests + Video Verification requests - Alena: "где это смотреть
+// в админке??" / "и да все новые функции где добавлены в админке?". Both
+// entities (backend/main.py's ADMIN_ENTITY_VIEWS: "boosts" -> "boost",
+// "video-verifications" -> "video_verification") already had working
+// list + approve/decline endpoints with nobody able to reach them from
+// here - members could submit a Boost or a verification video and it
+// would just sit there forever. Kept as their own small components
+// (mirrors ModerationPhotos above) rather than wedged into the big
+// generic table component used by Users/Subscriptions/Verifications,
+// since their data shape (a handful of fields in `data`, no bulk table
+// columns) doesn't need that machinery.
+function AdminBoosts() {
+  const [status, setStatus] = useState("PENDING");
+  const [result, setResult] = useState<ListResponse | null>(null);
+  const [notice, setNotice] = useState("");
+  const [hoursByRow, setHoursByRow] = useState<Record<string, string>>({});
+  const limit = 100;
+  const load = () => {
+    setResult(null);
+    api
+      .get<ListResponse>(`/admin/list/boosts?limit=${limit}&offset=0&status=${encodeURIComponent(status)}`)
+      .then(setResult)
+      .catch(() => setNotice("Could not load Boost requests."));
+  };
+  useEffect(load, [status]);
+  const review = async (row: RecordValue, next: "APPROVED" | "DECLINED") => {
+    const rowId = String(row.id);
+    const data = (row.data as RecordValue) || {};
+    try {
+      const hoursRaw = (hoursByRow[rowId] || "").trim();
+      const body: RecordValue = { status: next };
+      if (next === "APPROVED" && hoursRaw) body.hours = Number(hoursRaw);
+      await api.post(`/admin/boosts/${encodeURIComponent(rowId)}/review`, body);
+      setNotice(next === "APPROVED" ? `Boost approved for ${valueOf(data.profileName)}.` : "Boost request declined.");
+      load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not update this Boost request.");
+    }
+  };
+  const items = result?.items ?? [];
+  return (
+    <>
+      <header className="page-heading">
+        <h1>Boost Requests</h1>
+      </header>
+      <nav className="moderation-tabs">
+        {[
+          ["PENDING", "Pending"],
+          ["ACTIVE", "Active"],
+          ["DECLINED", "Declined"],
+        ].map(([key, title]) => (
+          <button
+            type="button"
+            key={key}
+            className={status === key ? "active" : ""}
+            aria-pressed={status === key}
+            onClick={() => setStatus(key)}
+          >
+            <AdminIcon name={key === "PENDING" ? "clock" : key === "ACTIVE" ? "circleCheck" : "circleX"} /> {title}
+          </button>
+        ))}
+      </nav>
+      {notice && <p className={notice.includes("Could not") ? "error" : "notice"}>{notice}</p>}
+      {!result ? (
+        <p className="loading-inline">Loading Boost requests…</p>
+      ) : !items.length ? (
+        <div className="moderation-empty">
+          <b>No Boost requests {status === "PENDING" ? "pending review" : `in the ${status.toLowerCase()} queue`}</b>
+        </div>
+      ) : (
+        <section className="generic-request-list">
+          {items.map((row) => {
+            const data = (row.data as RecordValue) || {};
+            const profileId = data.profileId;
+            const rowId = String(row.id);
+            return (
+              <article key={rowId} className="generic-request-row">
+                <div>
+                  {profileId ? (
+                    <Link to={`/users/${encodeURIComponent(String(profileId))}`}>{valueOf(data.profileName) || `Profile #${String(profileId)}`}</Link>
+                  ) : (
+                    <b>{valueOf(data.profileName) || "No profile"}</b>
+                  )}
+                  <p>{valueOf(data.email)}</p>
+                  <p>Requested {verificationDate(data.requestedAt ?? row.createdAt)}</p>
+                  {status === "ACTIVE" && Boolean(data.expiresAt) && <p>Active until {verificationDate(data.expiresAt)}</p>}
+                </div>
+                {status === "PENDING" && (
+                  <div className="row-actions">
+                    <label className="boost-hours-field">
+                      Hours
+                      <input
+                        type="number"
+                        min={1}
+                        max={168}
+                        placeholder="default"
+                        value={hoursByRow[rowId] || ""}
+                        onChange={(event) => setHoursByRow((prev) => ({ ...prev, [rowId]: event.target.value }))}
+                      />
+                    </label>
+                    <button className="primary" onClick={() => void review(row, "APPROVED")}>
+                      Approve
+                    </button>
+                    <button className="danger" onClick={() => void review(row, "DECLINED")}>
+                      Decline
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
+    </>
+  );
+}
+
+function AdminVideoVerifications() {
+  const [status, setStatus] = useState("PENDING");
+  const [result, setResult] = useState<ListResponse | null>(null);
+  const [notice, setNotice] = useState("");
+  const limit = 100;
+  const load = () => {
+    setResult(null);
+    api
+      .get<ListResponse>(`/admin/list/video-verifications?limit=${limit}&offset=0&status=${encodeURIComponent(status)}`)
+      .then(setResult)
+      .catch(() => setNotice("Could not load video verification requests."));
+  };
+  useEffect(load, [status]);
+  const review = async (row: RecordValue, next: "APPROVED" | "DECLINED") => {
+    try {
+      await api.post(`/admin/video-verifications/${encodeURIComponent(String(row.id))}/review`, { status: next });
+      setNotice(next === "APPROVED" ? "Video verification approved." : "Video verification declined.");
+      load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not update this request.");
+    }
+  };
+  const items = result?.items ?? [];
+  return (
+    <>
+      <header className="page-heading">
+        <h1>Video Verifications</h1>
+      </header>
+      <nav className="moderation-tabs">
+        {[
+          ["PENDING", "Pending"],
+          ["APPROVED", "Approved"],
+          ["DECLINED", "Declined"],
+        ].map(([key, title]) => (
+          <button
+            type="button"
+            key={key}
+            className={status === key ? "active" : ""}
+            aria-pressed={status === key}
+            onClick={() => setStatus(key)}
+          >
+            <AdminIcon name={key === "PENDING" ? "clock" : key === "APPROVED" ? "circleCheck" : "circleX"} /> {title}
+          </button>
+        ))}
+      </nav>
+      {notice && <p className={notice.includes("Could not") ? "error" : "notice"}>{notice}</p>}
+      {!result ? (
+        <p className="loading-inline">Loading video verification requests…</p>
+      ) : !items.length ? (
+        <div className="moderation-empty">
+          <b>No requests {status === "PENDING" ? "pending review" : `in the ${status.toLowerCase()} queue`}</b>
+        </div>
+      ) : (
+        <section className="generic-request-list">
+          {items.map((row) => {
+            const data = (row.data as RecordValue) || {};
+            const profileId = data.profileId;
+            const rowId = String(row.id);
+            return (
+              <article key={rowId} className="generic-request-row video-verification-row">
+                <video controls preload="none" src={`/admin/api/admin/video-verifications/${encodeURIComponent(rowId)}/content`} />
+                <div>
+                  {profileId ? (
+                    <Link to={`/users/${encodeURIComponent(String(profileId))}`}>{valueOf(data.profileName) || `Profile #${String(profileId)}`}</Link>
+                  ) : (
+                    <b>{valueOf(data.profileName) || "No profile"}</b>
+                  )}
+                  <p>{valueOf(data.email)}</p>
+                  <p>Submitted {verificationDate(data.requestedAt ?? row.createdAt)}</p>
+                  {status === "PENDING" && (
+                    <div className="row-actions">
+                      <button className="primary" onClick={() => void review(row, "APPROVED")}>
+                        Approve
+                      </button>
+                      <button className="danger" onClick={() => void review(row, "DECLINED")}>
+                        Decline
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </section>
+      )}
+    </>
+  );
+}
+
 function reportDate(value: unknown) {
   const date = value ? new Date(String(value)) : null;
   if (!date || Number.isNaN(date.valueOf())) return valueOf(value);
@@ -6371,6 +6591,11 @@ function StaticPageEditor({
               ["en", "English"],
               ["ru", "Russian"],
               ["es", "Spanish"],
+              ["pt", "Portuguese"],
+              ["fr", "French"],
+              ["de", "German"],
+              ["it", "Italian"],
+              ["pl", "Polish"],
             ].map(([code, name]) => (
               <button
                 type="button"
@@ -9193,6 +9418,11 @@ function ArticleEditor({
               ["en", "English"],
               ["ru", "Russian"],
               ["es", "Spanish"],
+              ["pt", "Portuguese"],
+              ["fr", "French"],
+              ["de", "German"],
+              ["it", "Italian"],
+              ["pl", "Polish"],
             ].map(([code, name]) => (
               <button
                 type="button"
@@ -13376,6 +13606,8 @@ export function AdminApp() {
             <Route path="/photo-moderation" element={<ModerationPhotos />} />
             <Route path="/moderation/photos" element={<ModerationPhotos />} />
             <Route path="/moderation/reports" element={<ModerationReports />} />
+            <Route path="/boosts" element={<AdminBoosts />} />
+            <Route path="/video-verifications" element={<AdminVideoVerifications />} />
             <Route path="/livekit" element={<LiveKitCalls />} />
             <Route path="/static-pages" element={<StaticPages />} />
             <Route
