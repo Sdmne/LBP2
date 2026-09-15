@@ -27,6 +27,7 @@ import CommunityGroupScreen from "../screens/CommunityGroupScreen";
 import CommunityPostScreen from "../screens/CommunityPostScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
 import LikesPaywallScreen from "../screens/LikesPaywallScreen";
+import PurchasesScreen from "../screens/PurchasesScreen";
 import AiAdvisorScreen from "../screens/AiAdvisorScreen";
 import PrivacyScreen from "../screens/PrivacyScreen";
 import BlockedUsersScreen from "../screens/BlockedUsersScreen";
@@ -83,6 +84,7 @@ export type RootStackParamList = {
   CommunityGroup: { groupId: number; groupName: string };
   CommunityPost: { post: CommunityPost; groupId: number };
   Subscription: undefined;
+  Purchases: undefined;
   LikesPaywall: undefined;
   AiAdvisor: undefined;
   Privacy: undefined;
@@ -315,6 +317,14 @@ export default function RootNavigator() {
                   </Pressable>
                 ),
               })}
+            />
+            {/* Item 19 - one-time RevenueCat purchases (Boost/Superlike/
+                Rewind/Likes-unlock/Compat-report-unlock/Extra-likes),
+                reached from the Me tab's "Boosts & extras" row. */}
+            <Stack.Screen
+              name="Purchases"
+              component={PurchasesScreen}
+              options={{ headerShown: true, title: t("nav.purchasesTitle") }}
             />
             {/* Item 0(b) - polished paywall reachable from the Likes
                 screen's upgrade entry points. Modal presentation + its

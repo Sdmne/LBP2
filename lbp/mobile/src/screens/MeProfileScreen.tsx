@@ -350,6 +350,24 @@ export default function MeProfileScreen(_props: Props) {
         </Pressable>
       ) : null}
 
+      {/* Item 19 - one-time RevenueCat purchases. Alena: "И где здесь можно
+          посмотреть что можно купить руководство и цена... нигде нет
+          информации" (screenshot of this exact screen) / "Так сейчас
+          создай экраны сам для приложения и сайта" - this card is the fix:
+          a direct, visible entry point to the Purchases screen right next
+          to the plan card and Boost card, the two other "spend money here"
+          spots on this screen. */}
+      <Pressable style={styles.storeCard} onPress={() => rootNav.navigate("Purchases")}>
+        <View style={styles.storeIconWrap}>
+          <Feather name="shopping-bag" size={18} color={colors.blue} />
+        </View>
+        <View style={styles.boostTextWrap}>
+          <Text style={styles.boostTitle}>{t("me.storeCardTitle")}</Text>
+          <Text style={styles.boostSubtitle}>{t("me.storeCardSubtitle")}</Text>
+        </View>
+        <Feather name="chevron-right" size={18} color={colors.muted} />
+      </Pressable>
+
       <View style={styles.card}>
         {rows.map((row, i) => (
           <Pressable
@@ -490,6 +508,29 @@ const styles = StyleSheet.create({
   boostSubtitle: { fontSize: 12, color: colors.muted, marginTop: 2 },
   boostSubtitleActive: { color: "rgba(255,255,255,0.85)" },
   boostCta: { fontSize: 13, color: colors.pink, fontWeight: "700" },
+  // Store card (item 19) - same row shape as boostCard above, but a
+  // neutral light-blue tint (not pink/gold, both already used by the plan
+  // and Boost cards above it) with a plain chevron instead of a CTA label,
+  // since this just navigates to a list rather than performing an action
+  // itself.
+  storeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    marginBottom: spacing.md,
+    backgroundColor: colors.tint,
+    gap: spacing.sm,
+  },
+  storeIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   card: {
     backgroundColor: colors.card,
     borderWidth: 1,

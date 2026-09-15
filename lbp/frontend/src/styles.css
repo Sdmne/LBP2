@@ -2465,7 +2465,63 @@ body {
   font-weight: 600;
 }
 
+/* Item 19, 2026-09-15 - one-time purchases showcase on the Pricing page
+   (mobile-app-only checkout, informational here - see the "Payments /
+   business" note about why there's no buy button on this page). Reuses
+   the same card look as .pricing-card (border/radius/bg tokens) but as a
+   compact 3-up grid, since these are small add-ons, not full plans. */
+.pricing-onetime {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  padding: 0 60px 72px;
+}
+
+.pricing-onetime-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.pricing-onetime-card {
+  padding: 24px;
+  border: 1px solid #ececec;
+  border-radius: 20px;
+  background: #fafafa;
+}
+
+.pricing-onetime-card h4 {
+  margin: 0 0 8px;
+  color: #171717;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pricing-onetime-card p {
+  margin: 0 0 12px;
+  color: #737373;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.pricing-onetime-card strong {
+  color: #4e9bff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pricing-onetime-note {
+  margin: 24px 0 0;
+  color: #a3a3a3;
+  font-size: 13px;
+  text-align: center;
+}
+
 @media (max-width: 767px) {
+  .pricing-onetime-grid {
+    grid-template-columns: 1fr;
+  }
+
   .pricing-hero {
     padding: 64px 24px 48px;
   }

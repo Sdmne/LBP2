@@ -239,6 +239,17 @@ export default function LikesPaywallScreen({ navigation }: Props) {
             </Pressable>
           )}
 
+          {/* Item 19 - Alena screenshotted this exact screen asking "Там
+              нету про разовые покупки и их цена. Как человек их может
+              купить вообще?" - this is that answer: a visible way out to
+              the one-time Likes-unlock purchase for anyone who doesn't
+              want a recurring subscription. */}
+          {!message ? (
+            <Pressable onPress={() => navigation.navigate("Purchases")} hitSlop={8} style={styles.oneTimeLink}>
+              <Text style={styles.oneTimeLinkText}>{t("paywall.oneTimeLink")}</Text>
+            </Pressable>
+          ) : null}
+
           {!message ? (
             <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.notNow}>
               <Text style={styles.notNowText}>{t("paywall.notNow")}</Text>
@@ -307,4 +318,6 @@ const styles = StyleSheet.create({
   ctaButtonText: { color: colors.white, fontSize: 15, fontWeight: "800" },
   notNow: { alignItems: "center", marginTop: spacing.md },
   notNowText: { fontSize: 13, color: colors.muted, fontWeight: "600" },
+  oneTimeLink: { alignItems: "center", marginTop: spacing.md },
+  oneTimeLinkText: { fontSize: 13, color: colors.blueDark, fontWeight: "700" },
 });

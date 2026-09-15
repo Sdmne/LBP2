@@ -6265,6 +6265,20 @@ const PRICING_TEXT = {
         { label: "Priority support", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "ONE-TIME PURCHASES",
+      title: "Need just one boost? Buy it once.",
+      intro: "Prefer not to subscribe? These extras are available as one-time purchases in the LetsBeParents app (iOS - Android coming soon). Prices shown are approximate and set in the app.",
+      items: [
+        { name: "Boost", body: "Get shown more often in Browse for 24 hours.", price: "≈ €3.99" },
+        { name: "Superlike", body: "Stand out immediately - skips the daily like limit.", price: "≈ €1.99" },
+        { name: "Rewind", body: "Undo your last swipe.", price: "≈ €1.99" },
+        { name: "See who liked you (48h)", body: "Reveal everyone who's liked you for 48 hours.", price: "≈ €4.99–5.99" },
+        { name: "Full Compatibility Report", body: "Unlock the detailed report for one match.", price: "≈ €2.99" },
+        { name: "+10 extra likes", body: "Get 10 extra likes to use today.", price: "≈ €2.99" },
+      ],
+      note: "Purchases are made in the mobile app, not on this website.",
+    },
   },
   ru: {
     eyebrow: "ЦЕНЫ",
@@ -6333,6 +6347,20 @@ const PRICING_TEXT = {
         { label: "Приоритетная поддержка", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "РАЗОВЫЕ ПОКУПКИ",
+      title: "Нужен только один буст? Купите один раз.",
+      intro: "Не хотите оформлять подписку? Эти дополнения доступны как разовые покупки в приложении LetsBeParents (iOS - Android скоро). Указанные цены приблизительные и задаются в приложении.",
+      items: [
+        { name: "Буст", body: "Ваша анкета будет чаще показываться в Обзоре в течение 24 часов.", price: "≈ €3.99" },
+        { name: "Суперлайк", body: "Выделитесь сразу - лайк не учитывается в дневном лимите.", price: "≈ €1.99" },
+        { name: "Rewind", body: "Отмените последний свайп.", price: "≈ €1.99" },
+        { name: "Кто вас лайкнул (48 часов)", body: "Откройте всех, кто вас лайкнул, на 48 часов.", price: "≈ €4.99–5.99" },
+        { name: "Полный отчёт совместимости", body: "Откройте подробный отчёт совместимости для одного мэтча.", price: "≈ €2.99" },
+        { name: "+10 лайков", body: "Получите 10 дополнительных лайков на сегодня.", price: "≈ €2.99" },
+      ],
+      note: "Покупки совершаются в мобильном приложении, а не на этом сайте.",
+    },
   },
   es: {
     eyebrow: "PRECIOS",
@@ -6401,6 +6429,20 @@ const PRICING_TEXT = {
         { label: "Soporte prioritario", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "COMPRAS ÚNICAS",
+      title: "¿Solo necesitas un boost? Cómpralo una vez.",
+      intro: "¿Prefieres no suscribirte? Estos extras están disponibles como compras únicas en la app de LetsBeParents (iOS - Android próximamente). Los precios mostrados son aproximados y se establecen en la app.",
+      items: [
+        { name: "Boost", body: "Aparece con más frecuencia en Explorar durante 24 horas.", price: "≈ €3.99" },
+        { name: "Superlike", body: "Destaca al instante - tu like no cuenta para el límite diario.", price: "≈ €1.99" },
+        { name: "Rewind", body: "Deshaz tu último swipe.", price: "≈ €1.99" },
+        { name: "Ve quién te dio like (48h)", body: "Descubre a todos los que te dieron like durante 48 horas.", price: "≈ €4.99–5.99" },
+        { name: "Informe de compatibilidad completo", body: "Desbloquea el informe detallado para un match.", price: "≈ €2.99" },
+        { name: "+10 likes extra", body: "Obtén 10 likes extra para usar hoy.", price: "≈ €2.99" },
+      ],
+      note: "Las compras se realizan en la app móvil, no en este sitio web.",
+    },
   },
   pt: {
     eyebrow: "PREÇOS",
@@ -6469,6 +6511,20 @@ const PRICING_TEXT = {
         { label: "Suporte prioritário", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "COMPRAS ÚNICAS",
+      title: "Só precisa de um boost? Compre uma vez.",
+      intro: "Prefere não assinar? Estes extras estão disponíveis como compras únicas na app LetsBeParents (iOS - Android brevemente). Os preços apresentados são aproximados e definidos na app.",
+      items: [
+        { name: "Boost", body: "Apareça com mais frequência na navegação durante 24 horas.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Destaque-se imediatamente - ignora o limite diário de likes.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Desfaça o seu último swipe.", price: "≈ 1,99 €" },
+        { name: "Ver quem gostou de você (48h)", body: "Revele todas as pessoas que gostaram de você durante 48 horas.", price: "≈ 4,99–5,99 €" },
+        { name: "Relatório de Compatibilidade Completo", body: "Desbloqueie o relatório detalhado de um match.", price: "≈ 2,99 €" },
+        { name: "+10 likes extra", body: "Receba 10 likes extra para usar hoje.", price: "≈ 2,99 €" },
+      ],
+      note: "As compras são feitas na app, não neste site.",
+    },
   },
   fr: {
     eyebrow: "TARIFS",
@@ -6537,6 +6593,20 @@ const PRICING_TEXT = {
         { label: "Support prioritaire", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "ACHATS UNIQUES",
+      title: "Besoin d'un seul boost ? Achetez-le une seule fois.",
+      intro: "Vous préférez ne pas vous abonner ? Ces options sont disponibles en achat unique dans l'application LetsBeParents (iOS - Android bientôt disponible). Les prix indiqués sont approximatifs et définis dans l'application.",
+      items: [
+        { name: "Boost", body: "Apparaissez plus souvent lors de la navigation, pendant 24 heures.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Démarquez-vous immédiatement - passe outre la limite quotidienne de likes.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Annulez votre dernier swipe.", price: "≈ 1,99 €" },
+        { name: "Voir qui vous a liké (48h)", body: "Révélez toutes les personnes qui vous ont liké(e) pendant 48 heures.", price: "≈ 4,99–5,99 €" },
+        { name: "Rapport de compatibilité complet", body: "Débloquez le rapport détaillé pour un match.", price: "≈ 2,99 €" },
+        { name: "+10 likes supplémentaires", body: "Obtenez 10 likes supplémentaires à utiliser aujourd'hui.", price: "≈ 2,99 €" },
+      ],
+      note: "Les achats se font dans l'application mobile, pas sur ce site.",
+    },
   },
   de: {
     eyebrow: "PREISE",
@@ -6605,6 +6675,20 @@ const PRICING_TEXT = {
         { label: "Prioritäts-Support", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "EINMALKÄUFE",
+      title: "Brauchst du nur einen Boost? Einmal kaufen.",
+      intro: "Kein Abo gewünscht? Diese Extras sind als Einmalkäufe in der LetsBeParents App erhältlich (iOS - Android folgt in Kürze). Die angezeigten Preise sind ungefähre Richtwerte und werden in der App festgelegt.",
+      items: [
+        { name: "Boost", body: "Du wirst beim Stöbern 24 Stunden lang häufiger angezeigt.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Falle sofort auf - umgeht das tägliche Like-Limit.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Mache deinen letzten Swipe rückgängig.", price: "≈ 1,99 €" },
+        { name: "Wer hat dich geliked? (48 Std.)", body: "Zeigt dir 48 Stunden lang alle, die dich geliked haben.", price: "≈ 4,99–5,99 €" },
+        { name: "Vollständiger Kompatibilitätsbericht", body: "Schalte den detaillierten Bericht für ein Match frei.", price: "≈ 2,99 €" },
+        { name: "+10 zusätzliche Likes", body: "Erhalte 10 zusätzliche Likes für den heutigen Tag.", price: "≈ 2,99 €" },
+      ],
+      note: "Käufe erfolgen in der mobilen App, nicht auf dieser Website.",
+    },
   },
   it: {
     eyebrow: "PREZZI",
@@ -6673,6 +6757,20 @@ const PRICING_TEXT = {
         { label: "Supporto prioritario", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "ACQUISTI UNA TANTUM",
+      title: "Ti serve solo un boost? Acquistalo una volta sola.",
+      intro: "Preferisci non abbonarti? Questi extra sono disponibili come acquisti una tantum nell'app LetsBeParents (iOS - Android in arrivo). I prezzi mostrati sono indicativi e vengono impostati nell'app.",
+      items: [
+        { name: "Boost", body: "Vieni mostrato più spesso durante la navigazione per 24 ore.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Fatti notare subito - salta il limite giornaliero di like.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Annulla il tuo ultimo swipe.", price: "≈ 1,99 €" },
+        { name: "Scopri chi ti ha messo like (48h)", body: "Rivela tutte le persone che ti hanno messo like nelle ultime 48 ore.", price: "≈ 4,99–5,99 €" },
+        { name: "Report di compatibilità completo", body: "Sblocca il report dettagliato per un match.", price: "≈ 2,99 €" },
+        { name: "+10 like extra", body: "Ricevi 10 like extra da usare oggi.", price: "≈ 2,99 €" },
+      ],
+      note: "Gli acquisti si effettuano nell'app mobile, non su questo sito.",
+    },
   },
   pl: {
     eyebrow: "CENY",
@@ -6741,6 +6839,20 @@ const PRICING_TEXT = {
         { label: "Priorytetowe wsparcie", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "ZAKUPY JEDNORAZOWE",
+      title: "Potrzebujesz tylko jednego boosta? Kup go raz.",
+      intro: "Wolisz nie subskrybować? Te dodatki są dostępne jako zakupy jednorazowe w aplikacji LetsBeParents (iOS - Android wkrótce). Podane ceny są przybliżone i ustalane w aplikacji.",
+      items: [
+        { name: "Boost", body: "Pojawiaj się częściej podczas przeglądania przez 24 godziny.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Wyróżnij się od razu - pomija dzienny limit polubień.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Cofnij swój ostatni swipe.", price: "≈ 1,99 €" },
+        { name: "Zobacz, kto cię polubił (48h)", body: "Odkryj wszystkie osoby, które cię polubiły, przez 48 godzin.", price: "≈ 4,99–5,99 €" },
+        { name: "Pełny raport kompatybilności", body: "Odblokuj szczegółowy raport dla jednego dopasowania.", price: "≈ 2,99 €" },
+        { name: "+10 dodatkowych polubień", body: "Otrzymaj 10 dodatkowych polubień do wykorzystania dziś.", price: "≈ 2,99 €" },
+      ],
+      note: "Zakupy odbywają się w aplikacji mobilnej, a nie na tej stronie.",
+    },
   },
 } satisfies Record<CookieLocale, Record<string, unknown>>;
 
@@ -6815,6 +6927,31 @@ function Pricing({ session }: { session: Session }) {
           ))}
         </div>
       </section>
+      {/* Item 19, 2026-09-15 - Alena: "Так сейчас создай экраны сам для
+          приложения и сайта" (also asked earlier "Там нету про разовые
+          покупки и их цена" about the mobile Premium screen). This is the
+          website half: an informational-only showcase of the six one-time
+          consumable purchases sold in the mobile app - no checkout here,
+          per her explicit choice ("Только показать цены"). */}
+      {text.oneTime ? (
+        <section className="pricing-onetime">
+          <div className="landing-section-intro">
+            <span>{text.oneTime.eyebrow}</span>
+            <h2>{text.oneTime.title}</h2>
+            <p className="resources-section-sub">{text.oneTime.intro}</p>
+          </div>
+          <div className="pricing-onetime-grid">
+            {text.oneTime.items.map((item) => (
+              <div key={item.name} className="pricing-onetime-card">
+                <h4>{item.name}</h4>
+                <p>{item.body}</p>
+                <strong>{item.price}</strong>
+              </div>
+            ))}
+          </div>
+          <p className="pricing-onetime-note">{text.oneTime.note}</p>
+        </section>
+      ) : null}
       <section className="pricing-footnote">
         <p>{text.footnote} <Link to={`/${locale}/trust-safety`}>{text.faqLinkLabel}</Link></p>
       </section>
