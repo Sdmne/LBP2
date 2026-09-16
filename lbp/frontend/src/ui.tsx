@@ -40,6 +40,7 @@ import { NotFoundPage } from "./not-found";
 const api = createApiClient("/api");
 type Row = Record<string, unknown>;
 type Session = { user: Row } | null;
+type FooterPageLink = { slug: string; title: string };
 type Page<T> = {
   items: T[];
   total: number;
@@ -56,6 +57,12 @@ const legacyLocaleOf = (locale: CookieLocale): ChatLocale => (locale === "ru" ||
 // localeOf()/switchLocale() below can't silently drift out of sync with
 // CookieLocale again the way the original 3-locale version did.
 const SUPPORTED_SITE_LOCALES: CookieLocale[] = ["en", "ru", "es", "pt", "fr", "de", "it", "pl"];
+const defaultFooterPages = (text: (typeof SITE_TEXT)[CookieLocale]): FooterPageLink[] => [
+  { slug: "terms-of-use", title: text.terms },
+  { slug: "privacy-policy", title: text.privacy },
+];
+const footerPagePath = (locale: CookieLocale, slug: string) =>
+  slug === "delete-account" ? `/${locale}/delete-account` : `/${locale}/pages/${encodeURIComponent(slug)}`;
 
 function ScrollToTopOnNavigation() {
   const { pathname, search } = useLocation();
@@ -857,6 +864,7 @@ function Shell({
   const { pathname } = useLocation();
   const locale = localeOf();
   const text = SITE_TEXT[locale];
+  const [footerPages, setFooterPages] = useState<FooterPageLink[]>(() => defaultFooterPages(text));
   const [menuOpen, setMenuOpen] = useState(false);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const navigationRef = useRef<HTMLElement>(null);
@@ -920,6 +928,22 @@ function Shell({
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<{ items: FooterPageLink[] }>(`/public/footer-pages/${encodeURIComponent(locale)}`)
+      .then((result) => {
+        if (!alive) return;
+        const items = Array.isArray(result.items) ? result.items : [];
+        setFooterPages(items.length ? items : defaultFooterPages(text));
+      })
+      .catch(() => {
+        if (alive) setFooterPages(defaultFooterPages(text));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [locale, text]);
   useEffect(() => {
     let scrolled = window.scrollY > 24;
     let frame = 0;
@@ -1077,8 +1101,9 @@ function Shell({
             <nav>
               <Link to={`/${locale}/contact`}>{text.contact}</Link>
               <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
-              <Link to={`/${locale}/pages/terms-of-use`}>{text.terms}</Link>
-              <Link to={`/${locale}/pages/privacy-policy`}>{text.privacy}</Link>
+              {footerPages.map((page) => (
+                <Link key={page.slug} to={footerPagePath(locale, page.slug)}>{page.title}</Link>
+              ))}
             </nav>
           </div>
           <div className="footer-bottom">
@@ -7581,8 +7606,9 @@ function Contact() {
   );
 }
 
-function ContentPage() {
-  const { locale = "en", slug = "" } = useParams();
+function ContentPage({ forcedSlug }: { forcedSlug?: string } = {}) {
+  const { locale = "en", slug: routeSlug = "" } = useParams();
+  const slug = forcedSlug ?? routeSlug;
   const [page, setPage] = useState<Row | null>(null);
   useEffect(() => {
     api
@@ -11361,6 +11387,7 @@ export function WebApp() {
       <Route path="/:locale/find-your-path/:slug" element={content(<FindYourPath />)} />
       <Route path="/:locale/professionals" element={content(<Professionals />)} />
       <Route path="/:locale/pages/:slug" element={content(<ContentPage />)} />
+      <Route path="/:locale/delete-account" element={content(<ContentPage forcedSlug="delete-account" />)} />
       <Route
         path="/:locale/likes"
         element={content(<Likes session={session} />)}
@@ -11411,7 +11438,7 @@ export function WebApp() {
         element={content(<SimpleMemberList session={session} kind="blocked" />)}
       />
       <Route
-        path="/:locale/delete-account"
+        path="/:locale/account/delete"
         element={content(<AccountDeletion session={session} />)}
       />
       <Route

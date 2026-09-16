@@ -18891,9 +18891,47 @@ def public_content_page(locale: str, slug: str):
             (locale, slug),
         )
         row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Content page not found")
-    return normalize_row(row)
+        if not row:
+            raise HTTPException(status_code=404, detail="Content page not found")
+        return normalize_row(row)
+
+
+@app.get("/api/public/footer-pages/{locale}")
+def public_footer_pages(locale: str):
+    requested_locale = locale if locale in {"en", "ru", "es", "pt", "fr", "de", "it", "pl"} else "en"
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT id, locale, slug, title, meta, updated_at
+            FROM content_pages
+            WHERE locale IN (%s, 'en') AND status = 'PUBLISHED'
+            ORDER BY CASE WHEN locale = %s THEN 0 ELSE 1 END, id ASC
+            """,
+            (requested_locale, requested_locale),
+        )
+        rows = [normalize_row(row) for row in cursor.fetchall()]
+
+    fallback_order = {"terms-of-use": 0, "privacy-policy": 1}
+    by_slug: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        slug = str(row.get("slug") or "").strip()
+        title = str(row.get("title") or "").strip()
+        if not slug or not title or slug in by_slug:
+            continue
+        meta = as_dict(row.get("meta"))
+        has_footer_flag = "inFooter" in meta or "in_footer" in meta
+        in_footer = bool(meta.get("inFooter", meta.get("in_footer", slug in fallback_order and not has_footer_flag)))
+        if not in_footer:
+            continue
+        sort_value = meta.get("footerOrder", meta.get("footer_order", meta.get("sortOrder", meta.get("sort_order"))))
+        try:
+            sort_order = int(sort_value)
+        except (TypeError, ValueError):
+            sort_order = fallback_order.get(slug, int(row.get("id") or 0) + 100)
+        by_slug[slug] = {"slug": slug, "title": title, "sortOrder": sort_order}
+
+    items = sorted(by_slug.values(), key=lambda item: (int(item["sortOrder"]), str(item["slug"])))
+    return {"items": [{"slug": item["slug"], "title": item["title"]} for item in items]}
 
 
 @app.get("/api/screenshot-sections")
