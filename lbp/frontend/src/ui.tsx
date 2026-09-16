@@ -5637,6 +5637,7 @@ function Photos({ session }: { session: Session }) {
 
 function Settings({ session }: { session: Session }) {
   const locale = localeOf();
+  const navigate = useNavigate();
   const text = SETTINGS_TEXT[locale] ?? SETTINGS_TEXT.en;
   const [settings, setSettings] = useState<Row>({});
   const [notice, setNotice] = useState("");
@@ -5665,6 +5666,13 @@ function Settings({ session }: { session: Session }) {
     try {
       await api.patch("/member/settings", settings);
       setNotice(text.saveSuccess);
+      const nextLocale = String(settings.interfaceLanguage || locale).toLowerCase();
+      if ((SUPPORTED_SITE_LOCALES as string[]).includes(nextLocale) && nextLocale !== locale) {
+        writeCookie("NEXT_LOCALE", nextLocale, COOKIE_LOCALE_MAX_AGE);
+        const parts = window.location.pathname.split("/");
+        parts[1] = nextLocale;
+        navigate(`${parts.join("/")}${window.location.search}${window.location.hash}`, { replace: true });
+      }
     } catch {
       setNotice(text.saveError);
     }
@@ -7128,16 +7136,18 @@ function Subscription({ session }: { session: Session }) {
             </>
           ) : (
             <div className="plan-actions">
-              {["MONTHLY", "QUARTERLY"].map((plan) => (
-                <button
-                  className="primary"
-                  key={plan}
-                  disabled={requesting}
-                  onClick={() => void request(plan, "BUILDER")}
-                >
-                  {text.planLabels[plan]}
-                </button>
-              ))}
+              {(["BUILDER", "PRO"] as const).flatMap((tier) =>
+                ["MONTHLY", "QUARTERLY"].map((plan) => (
+                  <button
+                    className="primary"
+                    key={`${tier}-${plan}`}
+                    disabled={requesting}
+                    onClick={() => void request(plan, tier)}
+                  >
+                    {text.tierLabels[tier]} ({text.planLabels[plan]})
+                  </button>
+                )),
+              )}
             </div>
           )}
         </>
