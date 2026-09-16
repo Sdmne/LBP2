@@ -3648,7 +3648,7 @@ function CatalogCard({
     .filter(Boolean).map(String).join(", ");
   const donorTypes = catalogList(item.donorType ?? data.donorType);
   const lookingFor = catalogList(item.lookingFor ?? data.lookingFor ?? item.recipientType ?? data.recipientType);
-  const verified = catalogBoolean(item.isVerified ?? data.isVerified);
+  const verified = catalogBoolean(item.isVerified);
   const videoVerified = catalogBoolean(item.isVideoVerified ?? data.isVideoVerified);
   const liked = catalogBoolean(item.likedByViewer ?? data.likedByViewer);
   const id = catalogText(item.id ?? data.id);

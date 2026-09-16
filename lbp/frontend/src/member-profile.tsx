@@ -1163,7 +1163,7 @@ function ProfileScreen({
   const own =
     text(String(session?.user.profileId ?? session?.user.profile_id ?? "")) ===
     text(String(profile.id ?? ""));
-  const verified = bool(profile.isVerified ?? data.isVerified);
+  const verified = bool(profile.isVerified);
   const lookingFor = (
     [
       data.lookingFor,

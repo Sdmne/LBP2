@@ -536,7 +536,7 @@ function Overview({
   );
   const age = profileAge(profile),
     completion = profileCompletion(profile, name);
-  const verified = memberBoolean(profile.isVerified ?? data.isVerified);
+  const verified = memberBoolean(profile.isVerified);
   const location = [text(data.city), profileCountry(data.country, locale)]
     .filter(Boolean)
     .join(", ");
