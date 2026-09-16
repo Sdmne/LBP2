@@ -4,11 +4,13 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as WebBrowser from "expo-web-browser";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import GradientBackground from "../components/GradientBackground";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import { markWhatsNewSeen } from "../utils/whatsNew";
+import { SITE_BASE_URL } from "../config";
 
 // Mirrors the website's new homepage "What's new" section (Alena: "и в
 // приложении надо какой-то экран создать при входе первый раз что
@@ -31,7 +33,11 @@ type ItemKey =
   | "messages"
   | "insight"
   | "agreement"
-  | "community";
+  | "community"
+  | "quizAi"
+  | "askAi"
+  | "agreementDraft"
+  | "familyPlanAi";
 
 type Tier = "free" | "builder" | "pro";
 
@@ -44,6 +50,15 @@ const ICONS: Record<ItemKey, keyof typeof Feather.glyphMap> = {
   insight: "trending-up",
   agreement: "file-text",
   community: "users",
+  // Sept 2026 AI growth push (4 new items, item 25 in the project log) -
+  // mirrors the website's landing-whatsnew "sparkle"/"message"/"agreement"
+  // icons where they line up; askAi/agreementDraft have no in-app screen
+  // of their own (they're public website tools), so openItem() below opens
+  // them in the in-app browser instead of navigating to a native screen.
+  quizAi: "star",
+  askAi: "message-square",
+  agreementDraft: "edit-3",
+  familyPlanAi: "cpu",
 };
 
 const ITEMS: { key: ItemKey; tier: Tier; titleKey: string; bodyKey: string }[] = [
@@ -55,6 +70,10 @@ const ITEMS: { key: ItemKey; tier: Tier; titleKey: string; bodyKey: string }[] =
   { key: "insight", tier: "builder", titleKey: "whatsnew.insightTitle", bodyKey: "whatsnew.insightBody" },
   { key: "agreement", tier: "pro", titleKey: "whatsnew.agreementTitle", bodyKey: "whatsnew.agreementBody" },
   { key: "community", tier: "pro", titleKey: "whatsnew.communityTitle", bodyKey: "whatsnew.communityBody" },
+  { key: "quizAi", tier: "free", titleKey: "whatsnew.quizAiTitle", bodyKey: "whatsnew.quizAiBody" },
+  { key: "askAi", tier: "free", titleKey: "whatsnew.askAiTitle", bodyKey: "whatsnew.askAiBody" },
+  { key: "agreementDraft", tier: "free", titleKey: "whatsnew.agreementDraftTitle", bodyKey: "whatsnew.agreementDraftBody" },
+  { key: "familyPlanAi", tier: "pro", titleKey: "whatsnew.familyPlanAiTitle", bodyKey: "whatsnew.familyPlanAiBody" },
 ];
 
 const TIER_COLORS: Record<Tier, { bg: string; text: string }> = {
@@ -64,7 +83,7 @@ const TIER_COLORS: Record<Tier, { bg: string; text: string }> = {
 };
 
 export default function WhatsNewScreen() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -110,6 +129,27 @@ export default function WhatsNewScreen() {
         return;
       case "community":
         navigation.replace("Community");
+        return;
+      case "quizAi":
+        // The AI reflection lives inside the existing quiz results screen
+        // (a button there, not a separate route) - opening the quiz itself
+        // gets a person straight to it either way.
+        navigation.replace("CompatibilityQuiz");
+        return;
+      case "askAi":
+      case "agreementDraft":
+        // Both are free public website tools with no native screen of
+        // their own (backend/main.py's public/ask-ai and
+        // public/agreement-draft, item 25) - open them in the in-app
+        // browser, same pattern SubscriptionScreen.tsx already uses for
+        // the Terms/Privacy links.
+        void WebBrowser.openBrowserAsync(`${SITE_BASE_URL}/${locale}/tools/${key === "askAi" ? "ask-ai" : "agreement-draft"}`);
+        return;
+      case "familyPlanAi":
+        // No generic entry point (needs a matched profileId, same as
+        // "agreement" above) - falls back to the pricing page since this
+        // is a Family Builder Pro feature.
+        navigation.replace("Subscription");
         return;
     }
   }

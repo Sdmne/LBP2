@@ -9811,3 +9811,62 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
     grid-template-columns: 1fr;
   }
 }
+
+/* AI growth features (Sept 2026): quiz personalized reflection, public
+   Ask AI tool, public Agreement Draft tool, Resources "Free AI tools"
+   section. New class names only - everything else reuses existing rules
+   (.quiz-result-card, .advisor-page/.advisor-card/.message-bubble,
+   .contact-form-panel/.contact-submit, .resources-start-grid/-card). */
+.quiz-ai-insight {
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+.quiz-ai-insight .quiz-result-card {
+  text-align: left;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.resources-ai-tools {
+  padding: 0 24px 64px;
+}
+
+.ask-ai-page {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 48px 24px 96px;
+}
+
+.ask-ai-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.agreement-draft-page {
+  padding-bottom: 64px;
+}
+
+.agreement-draft-result {
+  width: min(760px, 100%);
+  margin: 24px auto 64px;
+}
+
+.agreement-draft-result .message-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 767px) {
+  .ask-ai-page {
+    padding: 32px 16px 72px;
+  }
+
+  .agreement-draft-result {
+    margin: 20px auto 48px;
+  }
+}

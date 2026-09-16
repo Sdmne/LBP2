@@ -16,6 +16,7 @@ import {
   createFamilyChecklistItem,
   deleteFamilyChecklistItem,
   deleteFamilyDocument,
+  fetchFamilyPlanAiDraft,
   fetchFamilyRoom,
   updateFamilyChecklistItem,
   updateFamilyPlanSection,
@@ -45,7 +46,7 @@ const SECTIONS: FamilyChecklistItem["section"][] = ["parenting", "finances", "le
 
 export default function FamilyRoomScreen({ route, navigation }: Props) {
   const { profileId, displayName } = route.params;
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const insets = useSafeAreaInsets();
 
   const [room, setRoom] = useState<FamilyRoom | null>(null);
@@ -64,6 +65,11 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
   const [newItemText, setNewItemText] = useState<Record<string, string>>({});
   const [addingSection, setAddingSection] = useState<string | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  // AI-assisted section drafting (Sept 2026 growth push) - see
+  // fetchFamilyPlanAiDraft() in api/familyRoom.ts. Only ever fills the
+  // existing draft textarea below; the couple still reviews/edits and taps
+  // Save themselves, exactly like typing it by hand.
+  const [aiDraftingSection, setAiDraftingSection] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setStatus("loading");
@@ -117,6 +123,19 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
       Alert.alert(t("familyRoom.sections.saveError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
     } finally {
       setSavingSection(null);
+    }
+  }
+
+  async function handleAiDraftSection(key: string) {
+    if (aiDraftingSection) return;
+    setAiDraftingSection(key);
+    try {
+      const res = await fetchFamilyPlanAiDraft(profileId, key, { notes: sectionDrafts[key] || undefined, locale });
+      setSectionDrafts((prev) => ({ ...prev, [key]: res.draft }));
+    } catch (err) {
+      Alert.alert(t("familyRoom.sections.aiDraftError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
+    } finally {
+      setAiDraftingSection(null);
     }
   }
 
@@ -427,6 +446,17 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
                     placeholderTextColor={colors.muted}
                     onChangeText={(v) => setSectionDrafts((prev) => ({ ...prev, [key]: v }))}
                   />
+                  <Pressable
+                    style={styles.sectionAiDraftButton}
+                    onPress={() => void handleAiDraftSection(key)}
+                    disabled={aiDraftingSection === key}
+                  >
+                    {aiDraftingSection === key ? (
+                      <ActivityIndicator color={colors.pink} size="small" />
+                    ) : (
+                      <Text style={styles.sectionAiDraftButtonText}>{t("familyRoom.sections.aiDraft")}</Text>
+                    )}
+                  </Pressable>
                   <View style={styles.sectionPlanActions}>
                     <Pressable
                       style={styles.sectionCompleteButton}
@@ -606,6 +636,16 @@ const styles = StyleSheet.create({
   },
   sectionCompleteButtonText: { color: colors.pink, fontWeight: "700", fontSize: 13 },
   sectionSaveButton: { flex: 1, marginTop: 0 },
+  sectionAiDraftButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: colors.pink,
+    borderRadius: radius.pill,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.xs,
+  },
+  sectionAiDraftButtonText: { color: colors.pink, fontWeight: "700", fontSize: 12.5 },
   sharedPlanNote: { fontSize: 12.5, color: colors.muted, marginBottom: spacing.xs, lineHeight: 17 },
   pregnancyCard: {
     flexDirection: "row",

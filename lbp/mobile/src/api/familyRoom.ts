@@ -88,6 +88,24 @@ export function updateFamilyPlanSection(
   );
 }
 
+// AI-assisted section drafting (Sept 2026 growth push) - suggests a draft
+// only, never saves it: FamilyRoomScreen puts the returned text into the
+// section's existing TextInput (sectionDrafts) so the couple can review and
+// edit it together before calling updateFamilyPlanSection() themselves,
+// same Save button as any manual edit. Gated the same as the rest of the
+// Family Room (Family Builder Pro + an active match - see
+// member_family_plan_ai_draft() in backend/main.py).
+export function fetchFamilyPlanAiDraft(
+  profileId: number | string,
+  sectionKey: string,
+  payload: { notes?: string; locale: string },
+) {
+  return api.post<{ ok: true; draft: string }>(
+    `/api/member/family-room/${profileId}/sections/${encodeURIComponent(sectionKey)}/ai-draft`,
+    payload,
+  );
+}
+
 export function createFamilyChecklistItem(
   profileId: number | string,
   section: FamilyChecklistItem["section"],

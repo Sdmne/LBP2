@@ -41,10 +41,12 @@ except ImportError:  # pragma: no cover - optional until the image is rebuilt
     redis_client = None
 
 try:
-    from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 except ImportError:  # pragma: no cover - optional until the image is rebuilt
     Image = None
+    ImageDraw = None
     ImageFilter = None
+    ImageFont = None
     ImageOps = None
     UnidentifiedImageError = OSError
 
@@ -1237,6 +1239,105 @@ AI_ADVISOR_SYSTEM_PROMPT = (
 )
 
 
+# Four new public/member-facing AI features (Sept 2026 growth push), all
+# built on top of ai_advisor_call_claude() below. Each gets its own narrow
+# system prompt rather than reusing AI_ADVISOR_SYSTEM_PROMPT verbatim, since
+# the audience/task differs (anonymous quiz-taker, anonymous site visitor,
+# anonymous draft-requester, matched Family Room couple) - but all four keep
+# the same house safety rules: never a doctor/lawyer/financial/psych opinion,
+# never a specific match/clinic/lawyer recommendation, reply in the request's
+# own language.
+QUIZ_INSIGHT_SYSTEM_PROMPT = (
+    "You are the LetsBeParents Compatibility Quiz assistant. LetsBeParents is a platform for people planning a "
+    "family together (co-parents, intended parents, surrogates, and donors). A visitor has just finished a short "
+    "compatibility quiz about parenting values, roles, communication, and practical planning. You will be given "
+    "their answers and the quiz's own bucketed summary (their strongest areas and the areas worth discussing "
+    "further). Your job is to write a short, warm, specific reflection (roughly 150-250 words) that helps them "
+    "understand what their answers suggest about how they approach (co-)parenting, in plain, encouraging "
+    "language.\n\n"
+    "Strict rules you must always follow:\n"
+    "- Never present this as a test, score, pass/fail result, or percentage match - there is no 'good' or 'bad' "
+    "result, only areas of natural alignment and areas worth an open conversation.\n"
+    "- Never diagnose, give legal/medical/financial advice, or claim to predict relationship or parenting "
+    "outcomes.\n"
+    "- Do not recommend a specific person, match, clinic, or lawyer.\n"
+    "- Ground everything in the answers and buckets you were given - do not invent facts about the person.\n"
+    "- End with one gentle, open-ended suggestion for a conversation they could have with a (co-)parenting "
+    "partner.\n"
+    "- Reply in the language specified for this request, not the language of the raw answer text.\n"
+)
+
+ASK_AI_SYSTEM_PROMPT = (
+    "You are 'Ask AI', a free public assistant on the LetsBeParents website. LetsBeParents connects intended "
+    "parents, surrogates, and donors, and also runs a directory of fertility clinics and family-law lawyers. "
+    "Visitors here have not created an account yet - you are often their first impression of the platform.\n\n"
+    "You answer general questions about donor conception, surrogacy, co-parenting, adoption, third-party "
+    "reproduction, and related family-law and family-planning basics, in plain language.\n\n"
+    "Strict rules you must always follow:\n"
+    "- You are not a doctor, lawyer, financial advisor, or psychologist. Never give a diagnosis, a legal opinion "
+    "for someone's specific situation, financial advice, or a clinical assessment - give general orientation "
+    "only, and clearly recommend consulting a licensed professional (or a clinic/lawyer from LetsBeParents' own "
+    "directory) for anything specific to the person's situation.\n"
+    "- Laws on donor conception, surrogacy, and parentage vary enormously by country and state. Never state that "
+    "something is legal or illegal in a specific place unless you are highly confident, and always say to verify "
+    "locally.\n"
+    "- Never recommend a specific clinic, lawyer, donor, or match - point to LetsBeParents' own directory/search "
+    "instead of naming a provider.\n"
+    "- If a question has nothing to do with family-building, donor conception, surrogacy, or LetsBeParents, say "
+    "briefly that this tool is focused on those topics and does not answer general questions.\n"
+    "- Be warm, concise (aim for well under 200 words unless the question genuinely needs more), and practical.\n"
+    "- Reply in the same language the visitor writes in.\n"
+)
+
+AGREEMENT_DRAFT_SYSTEM_PROMPT = (
+    "You are the LetsBeParents Agreement Draft tool. You produce a FIRST-DRAFT discussion document for people "
+    "planning a co-parenting, known-donor, or surrogacy arrangement together, based on the agreement type, "
+    "jurisdiction, and key points they provide.\n\n"
+    "Strict rules you must always follow:\n"
+    "- Begin your output with this exact disclaimer, translated naturally into the reply language: "
+    "'This is an AI-generated first draft for discussion only. It is not a legal document and is not legal "
+    "advice - have a licensed family-law attorney in your jurisdiction review and finalize any agreement before "
+    "signing or relying on it.'\n"
+    "- Write a clearly organized draft (use short headed sections) covering the practical topics relevant to the "
+    "requested agreement type (for example: intentions and roles, decision-making, contact/visitation, financial "
+    "responsibilities, health and insurance, what happens if circumstances change, and dispute resolution) - "
+    "adapt the sections to what the person actually asked for rather than forcing every topic in.\n"
+    "- Where the answer depends on local law (parentage, compensation limits, enforceability, required "
+    "witnesses/notarization, etc.), write a clear bracketed placeholder such as "
+    "'[confirm with a local family-law attorney: ...]' instead of guessing at the law for their jurisdiction.\n"
+    "- Never claim the draft is binding, enforceable, or complete as-is.\n"
+    "- Do not fabricate legal citations, statute numbers, or case names.\n"
+    "- Reply in the language specified for this request.\n"
+)
+
+FAMILY_PLAN_AI_DRAFT_SYSTEM_PROMPT = (
+    "You help a matched couple inside the LetsBeParents Family Room draft one section of their shared Family "
+    "Plan together. You will be given the section's topic, anything they have already written in it, and "
+    "optional notes about what they want help with.\n\n"
+    "Strict rules you must always follow:\n"
+    "- Produce a suggested draft (or, if they already wrote something, a tidied-up and expanded version of it) "
+    "that BOTH partners can review, discuss, and edit together before saving - never present it as already "
+    "decided or final.\n"
+    "- If the section is empty, do not invent facts about this specific couple; instead write a thoughtful "
+    "starting draft built around open questions and common options for that topic, clearly framed as a "
+    "conversation starter.\n"
+    "- Never give medical, legal, financial, or psychological advice - for topics like legal custody, health "
+    "insurance, or finances, note what a licensed professional should confirm, and mention LetsBeParents' own "
+    "clinic/lawyer directory where relevant.\n"
+    "- Keep a warm, practical, non-judgmental tone with no assumption about the couple's specific circumstances "
+    "beyond what they've told you.\n"
+    "- Reply in the language specified for this request.\n"
+)
+
+
+def locale_language_name(locale: str) -> str:
+    names = {
+        "en": "English", "ru": "Russian", "es": "Spanish", "pt": "Portuguese",
+        "fr": "French", "de": "German", "it": "Italian", "pl": "Polish",
+    }
+    return names.get((locale or "en").split("-")[0].lower(), "English")
+
+
 def ai_advisor_call_claude(
     messages: list[dict[str, str]],
     system_prompt: str | None = None,
@@ -1286,6 +1387,69 @@ def ai_advisor_call_claude(
     if not reply:
         raise HTTPException(status_code=502, detail="AI Family Advisor returned an empty response")
     return reply
+
+
+def client_ip_of(request: Request) -> str:
+    # Mirrors the forwarded-for extraction already used for device-session
+    # logging (record_device_session, below) - same reverse-proxy assumption.
+    forwarded_for = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+    client_host = getattr(request.client, "host", "") if request.client else ""
+    return forwarded_for or client_host or "unknown"
+
+
+# Public AI tools (quiz insight / Ask AI / agreement draft) are free,
+# unauthenticated, and each call spends real Anthropic API credit, unlike the
+# in-app AI Family Advisor which is gated behind a paid tier. There is no
+# existing rate-limit precedent in this file (public_contact has none), so
+# this adds a simple per-IP-per-day counter using app_entities, the same
+# generic KV/audit table daily_cold_chat_count() already uses for a daily
+# per-profile count above. One row per call (source_key includes a random
+# suffix) rather than an upsert counter, so concurrent requests can never
+# race-clobber each other's count.
+AI_PUBLIC_RATE_LIMITS: dict[str, int] = {
+    "quiz-insight": 10,
+    "ask-ai": 15,
+    "agreement-draft": 5,
+    # Not an LLM call (server-side Pillow rendering, item 26) - a much
+    # higher ceiling, purely as a lightweight load/abuse guard.
+    "quiz-card": 40,
+}
+
+
+def ai_public_daily_use_count(cursor, feature: str, client_ip: str) -> int:
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM app_entities
+        WHERE entity_type = 'ai_public_use'
+          AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.feature')) = %s
+          AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.ip')) = %s
+          AND created_at >= UTC_DATE()
+          AND created_at < UTC_DATE() + INTERVAL 1 DAY
+        """,
+        (feature, client_ip),
+    )
+    return int(cursor.fetchone()["cnt"])
+
+
+def ai_public_record_use(cursor, feature: str, client_ip: str) -> None:
+    data = {"feature": feature, "ip": client_ip, "at": now_utc().isoformat()}
+    cursor.execute(
+        """
+        INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at)
+        VALUES ('ai_public_use', %s, %s, 'ACTIVE', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        """,
+        (f"ai-{feature}-{client_ip}-{uuid.uuid4().hex}", f"AI {feature} use", json.dumps(data, ensure_ascii=False)),
+    )
+
+
+def enforce_ai_public_rate_limit(cursor, feature: str, client_ip: str) -> None:
+    limit = AI_PUBLIC_RATE_LIMITS.get(feature, 10)
+    if ai_public_daily_use_count(cursor, feature, client_ip) >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily limit for this free AI tool has been reached. Please try again tomorrow.",
+        )
 
 
 def send_expo_push(tokens: list[str], title: str, body: str, data: dict[str, Any] | None = None) -> None:
@@ -1662,6 +1826,33 @@ class StickerSendPayload(BaseModel):
 
 class AiAdvisorMessagePayload(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+
+
+class QuizInsightPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    locale: str = Field(default="en", max_length=8)
+    strongestTitles: list[str] = Field(default_factory=list, max_length=8)
+    discussTitles: list[str] = Field(default_factory=list, max_length=8)
+    answers: list[str] = Field(default_factory=list, max_length=40)
+
+
+class AskAiPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    question: str = Field(min_length=1, max_length=1500)
+
+
+class AgreementDraftPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    locale: str = Field(default="en", max_length=8)
+    agreementType: str = Field(min_length=1, max_length=120)
+    jurisdiction: str | None = Field(default=None, max_length=200)
+    keyPoints: str = Field(min_length=1, max_length=4000)
+
+
+class FamilyPlanAiDraftPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    notes: str | None = Field(default=None, max_length=2000)
+    locale: str = Field(default="en", max_length=8)
 
 
 # Item 16 - push notifications. Just the Expo push token string; platform
@@ -5228,6 +5419,370 @@ def public_runtime_config(response: Response):
     }
 
 
+# Three free, unauthenticated AI growth tools (Sept 2026) - see
+# AI_PUBLIC_RATE_LIMITS/enforce_ai_public_rate_limit above for the shared
+# per-IP-per-day abuse guard, and the *_SYSTEM_PROMPT constants above
+# ai_advisor_call_claude() for the safety rules each one follows.
+@app.post("/api/public/quiz-insight")
+def public_quiz_insight(payload: QuizInsightPayload, request: Request):
+    client_ip = client_ip_of(request)
+    with db_cursor() as (conn, cursor):
+        enforce_ai_public_rate_limit(cursor, "quiz-insight", client_ip)
+        ai_public_record_use(cursor, "quiz-insight", client_ip)
+        conn.commit()
+    strongest = [s.strip()[:200] for s in payload.strongestTitles[:8] if s.strip()]
+    discuss = [s.strip()[:200] for s in payload.discussTitles[:8] if s.strip()]
+    answers = [s.strip()[:400] for s in payload.answers[:40] if s.strip()]
+    language = locale_language_name(payload.locale)
+    user_message = (
+        f"Reply in {language}.\n\n"
+        f"Their strongest areas (from the quiz's own bucketing): {'; '.join(strongest) or 'none identified'}\n"
+        f"Areas worth discussing further (from the quiz's own bucketing): {'; '.join(discuss) or 'none identified'}\n"
+        f"Their raw answers, in order: {' | '.join(answers) if answers else 'not provided'}\n\n"
+        "Write the personalized reflection now."
+    )
+    reply = ai_advisor_call_claude(
+        [{"role": "user", "content": user_message}],
+        system_prompt=QUIZ_INSIGHT_SYSTEM_PROMPT,
+        max_tokens=500,
+    )
+    return {"ok": True, "insight": reply}
+
+
+@app.post("/api/public/ask-ai")
+def public_ask_ai(payload: AskAiPayload, request: Request):
+    client_ip = client_ip_of(request)
+    with db_cursor() as (conn, cursor):
+        enforce_ai_public_rate_limit(cursor, "ask-ai", client_ip)
+        ai_public_record_use(cursor, "ask-ai", client_ip)
+        conn.commit()
+    question = payload.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question cannot be empty")
+    reply = ai_advisor_call_claude(
+        [{"role": "user", "content": question}],
+        system_prompt=ASK_AI_SYSTEM_PROMPT,
+        max_tokens=500,
+    )
+    return {"ok": True, "answer": reply}
+
+
+@app.post("/api/public/agreement-draft")
+def public_agreement_draft(payload: AgreementDraftPayload, request: Request):
+    client_ip = client_ip_of(request)
+    with db_cursor() as (conn, cursor):
+        enforce_ai_public_rate_limit(cursor, "agreement-draft", client_ip)
+        ai_public_record_use(cursor, "agreement-draft", client_ip)
+        conn.commit()
+    language = locale_language_name(payload.locale)
+    jurisdiction = (payload.jurisdiction or "").strip()[:200]
+    key_points = payload.keyPoints.strip()[:4000]
+    agreement_type = payload.agreementType.strip()[:120]
+    user_message = (
+        f"Reply in {language}.\n\n"
+        f"Agreement type: {agreement_type}\n"
+        f"Jurisdiction (as given by the user, may be blank or vague): {jurisdiction or 'not specified'}\n"
+        f"Key points the user wants included:\n{key_points}\n\n"
+        "Write the first-draft document now."
+    )
+    reply = ai_advisor_call_claude(
+        [{"role": "user", "content": user_message}],
+        system_prompt=AGREEMENT_DRAFT_SYSTEM_PROMPT,
+        max_tokens=1400,
+    )
+    return {"ok": True, "draft": reply}
+
+
+# Item 26 - shareable quiz result card (Alena: "и после квиза отсылается
+# красивая картикна?" -> no, the quiz only ever produced a plain-text
+# download/share; this renders an actual branded PNG instead). Built
+# server-side with Pillow rather than a frontend/mobile image library,
+# since neither the website nor the mobile app can install a new npm/Expo
+# package right now (registry.npmjs.org is blocked for this account) -
+# both platforms just fetch this endpoint and download/share the bytes.
+#
+# The card never shows a score or percentage, matching the quiz's
+# long-standing "no compatibility %" rule (QUIZ_STRENGTH_COPY /
+# QUIZ_DISCUSS_COPY on the frontend, quiz.results.noScore on mobile) - it
+# only ever echoes back the same strongest/discuss bucket titles the quiz
+# itself already computed and sends to /api/public/quiz-insight above.
+QUIZ_CARD_FONT_DIR = Path(__file__).with_name("assets") / "fonts"
+QUIZ_CARD_FONT_BOLD = QUIZ_CARD_FONT_DIR / "Lora-Bold.ttf"
+QUIZ_CARD_FONT_REGULAR = QUIZ_CARD_FONT_DIR / "Lora-Regular.ttf"
+QUIZ_CARD_FONT_ITALIC = QUIZ_CARD_FONT_DIR / "Lora-Italic.ttf"
+# Lora is bundled (not a system font, which can't be assumed present on
+# the production server) specifically because it's one of the few
+# open-license sans/serif options on hand that covers both Cyrillic and
+# full Latin Extended - needed since this card serves all 8 site locales
+# from a single typeface rather than juggling a font per script.
+QUIZ_CARD_SIZE = 1080
+QUIZ_CARD_GRADIENT_START = (78, 155, 255)  # frontend styles.css landing gradient, #4e9bff
+QUIZ_CARD_GRADIENT_END = (240, 112, 169)  # frontend styles.css landing gradient, #f070a9
+QUIZ_CARD_INK = (26, 27, 38)
+QUIZ_CARD_MUTED = (120, 124, 140)
+QUIZ_CARD_PINK = (243, 18, 96)  # mobile theme.ts colors.pink, #f31260
+QUIZ_CARD_GREEN = (30, 138, 76)
+QUIZ_CARD_BLUE = (46, 110, 214)
+
+QUIZ_CARD_TEXT: dict[str, dict[str, str]] = {
+    "en": {
+        "brand": "LetsBeParents",
+        "eyebrow": "COMPATIBILITY QUIZ",
+        "title": "Our co-parenting reflection",
+        "strongest": "Where we're aligned",
+        "discuss": "Worth discussing further",
+        "tagline": "No score, no pass or fail — just a starting point for the conversation.",
+        "footer": "letsbeparents.com",
+        "empty": "Take the quiz to see your results",
+    },
+    "ru": {
+        "brand": "LetsBeParents",
+        "eyebrow": "ТЕСТ НА СОВМЕСТИМОСТЬ",
+        "title": "Наша рефлексия о совместном родительстве",
+        "strongest": "В чём мы совпадаем",
+        "discuss": "Стоит обсудить подробнее",
+        "tagline": "Без баллов и оценок — это просто повод для разговора.",
+        "footer": "letsbeparents.com",
+        "empty": "Пройдите тест, чтобы увидеть результаты",
+    },
+    "es": {
+        "brand": "LetsBeParents",
+        "eyebrow": "TEST DE COMPATIBILIDAD",
+        "title": "Nuestra reflexión sobre la co-crianza",
+        "strongest": "En qué estamos alineados",
+        "discuss": "Vale la pena seguir hablando",
+        "tagline": "Sin puntuación ni aprobado o suspenso: solo un punto de partida para la conversación.",
+        "footer": "letsbeparents.com",
+        "empty": "Haz el test para ver tus resultados",
+    },
+    "pt": {
+        "brand": "LetsBeParents",
+        "eyebrow": "TESTE DE COMPATIBILIDADE",
+        "title": "Nossa reflexão sobre a co-parentalidade",
+        "strongest": "Onde estamos alinhados",
+        "discuss": "Vale a pena conversar mais",
+        "tagline": "Sem pontuação, sem aprovação ou reprovação — apenas um ponto de partida para a conversa.",
+        "footer": "letsbeparents.com",
+        "empty": "Faça o teste para ver seus resultados",
+    },
+    "fr": {
+        "brand": "LetsBeParents",
+        "eyebrow": "TEST DE COMPATIBILITÉ",
+        "title": "Notre réflexion sur la coparentalité",
+        "strongest": "Là où nous sommes alignés",
+        "discuss": "À approfondir ensemble",
+        "tagline": "Pas de score, pas de réussite ou d'échec — juste un point de départ pour la conversation.",
+        "footer": "letsbeparents.com",
+        "empty": "Faites le test pour voir vos résultats",
+    },
+    "de": {
+        "brand": "LetsBeParents",
+        "eyebrow": "KOMPATIBILITÄTSTEST",
+        "title": "Unsere Reflexion zur Co-Elternschaft",
+        "strongest": "Worin wir übereinstimmen",
+        "discuss": "Wert, weiter zu besprechen",
+        "tagline": "Keine Punktzahl, kein Bestehen oder Durchfallen — nur ein Ausgangspunkt für das Gespräch.",
+        "footer": "letsbeparents.com",
+        "empty": "Machen Sie den Test, um Ihre Ergebnisse zu sehen",
+    },
+    "it": {
+        "brand": "LetsBeParents",
+        "eyebrow": "TEST DI COMPATIBILITÀ",
+        "title": "La nostra riflessione sulla co-genitorialità",
+        "strongest": "Dove siamo allineati",
+        "discuss": "Vale la pena discuterne ulteriormente",
+        "tagline": "Nessun punteggio, nessuna promozione o bocciatura: solo un punto di partenza per la conversazione.",
+        "footer": "letsbeparents.com",
+        "empty": "Fai il test per vedere i tuoi risultati",
+    },
+    "pl": {
+        "brand": "LetsBeParents",
+        "eyebrow": "TEST KOMPATYBILNOŚCI",
+        "title": "Nasza refleksja na temat współrodzicielstwa",
+        "strongest": "W czym się zgadzamy",
+        "discuss": "Warto to jeszcze omówić",
+        "tagline": "Bez punktacji, bez zdania czy oblania — to po prostu punkt wyjścia do rozmowy.",
+        "footer": "letsbeparents.com",
+        "empty": "Rozwiąż test, aby zobaczyć swoje wyniki",
+    },
+}
+
+
+def _quiz_card_font(path: Path, size: int):
+    return ImageFont.truetype(str(path), size)
+
+
+def _quiz_card_gradient_background(size: int):
+    # Small diagonal (top-left -> bottom-right, approximating the CSS
+    # 135deg landing-page gradient) grid, upscaled with bicubic resampling
+    # for a smooth blend - avoids a numpy dependency (not in
+    # backend/requirements.txt) for what is otherwise a per-pixel op.
+    grid = 48
+    small = Image.new("RGB", (grid, grid))
+    px = small.load()
+    for gy in range(grid):
+        for gx in range(grid):
+            t = (gx + gy) / (2 * (grid - 1))
+            r = round(QUIZ_CARD_GRADIENT_START[0] + (QUIZ_CARD_GRADIENT_END[0] - QUIZ_CARD_GRADIENT_START[0]) * t)
+            g = round(QUIZ_CARD_GRADIENT_START[1] + (QUIZ_CARD_GRADIENT_END[1] - QUIZ_CARD_GRADIENT_START[1]) * t)
+            b = round(QUIZ_CARD_GRADIENT_START[2] + (QUIZ_CARD_GRADIENT_END[2] - QUIZ_CARD_GRADIENT_START[2]) * t)
+            px[gx, gy] = (r, g, b)
+    return small.resize((size, size), Image.BICUBIC)
+
+
+def _quiz_card_wrap_text(draw, text: str, font, max_width: int) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if draw.textbbox((0, 0), candidate, font=font)[2] <= max_width or not current:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _quiz_card_heart(draw, cx: float, cy: float, size: float, fill: tuple[int, int, int]) -> None:
+    # Small drawn heart (two circles + a triangle) rather than an emoji
+    # character - the bundled Lora font has no color-emoji table, so a
+    # literal heart glyph would render as a missing-glyph box.
+    r = size / 2.6
+    draw.ellipse((cx - r * 1.9, cy - r * 1.1, cx - r * 0.05, cy + r * 1.1), fill=fill)
+    draw.ellipse((cx + r * 0.05, cy - r * 1.1, cx + r * 1.9, cy + r * 1.1), fill=fill)
+    draw.polygon(
+        [(cx - r * 1.85, cy + r * 0.35), (cx + r * 1.85, cy + r * 0.35), (cx, cy + r * 2.3)],
+        fill=fill,
+    )
+
+
+def render_quiz_result_card(locale: str, strongest: list[str], discuss: list[str]) -> bytes:
+    text = QUIZ_CARD_TEXT.get(locale, QUIZ_CARD_TEXT["en"])
+    size = QUIZ_CARD_SIZE
+    img = _quiz_card_gradient_background(size)
+
+    margin = 56
+    panel_box = (margin, margin, size - margin, size - margin)
+    panel_radius = 40
+    shadow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.rounded_rectangle(
+        (panel_box[0] + 10, panel_box[1] + 16, panel_box[2] + 10, panel_box[3] + 16),
+        radius=panel_radius,
+        fill=(20, 20, 40, 70),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(18))
+    img = img.convert("RGBA")
+    img.alpha_composite(shadow)
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle(panel_box, radius=panel_radius, fill=(255, 255, 255, 255))
+
+    pad_x = panel_box[0] + 64
+    content_width = (panel_box[2] - 64) - pad_x
+
+    brand_font = _quiz_card_font(QUIZ_CARD_FONT_BOLD, 22)
+    eyebrow_font = _quiz_card_font(QUIZ_CARD_FONT_BOLD, 22)
+    title_font = _quiz_card_font(QUIZ_CARD_FONT_BOLD, 42)
+    section_font = _quiz_card_font(QUIZ_CARD_FONT_BOLD, 25)
+    item_font = _quiz_card_font(QUIZ_CARD_FONT_REGULAR, 29)
+    tagline_font = _quiz_card_font(QUIZ_CARD_FONT_ITALIC, 24)
+    footer_font = _quiz_card_font(QUIZ_CARD_FONT_BOLD, 21)
+
+    y = panel_box[1] + 56
+
+    # Brand lockup (small heart mark + wordmark) above the eyebrow, so the
+    # card reads as "from LetsBeParents" even if cropped to just the top
+    # half by whatever it's shared into.
+    _quiz_card_heart(draw, pad_x + 9, y + 14, 15, QUIZ_CARD_PINK)
+    draw.text((pad_x + 28, y + 1), text["brand"], font=brand_font, fill=QUIZ_CARD_MUTED)
+    y += 52
+
+    eyebrow = " ".join(text["eyebrow"])
+    draw.text((pad_x, y), eyebrow, font=eyebrow_font, fill=QUIZ_CARD_PINK)
+    y += 40
+
+    title_lines = _quiz_card_wrap_text(draw, text["title"], title_font, content_width)
+    for line in title_lines:
+        draw.text((pad_x, y), line, font=title_font, fill=QUIZ_CARD_INK)
+        y += 52
+    y += 20
+
+    def draw_section(label: str, items: list[str], dot_color: tuple[int, int, int], y: float) -> float:
+        draw.text((pad_x, y), label, font=section_font, fill=QUIZ_CARD_MUTED)
+        y += 44
+        for item in items[:4]:
+            dot_r = 6
+            dot_cy = y + 18
+            draw.ellipse((pad_x, dot_cy - dot_r, pad_x + dot_r * 2, dot_cy + dot_r), fill=dot_color)
+            lines = _quiz_card_wrap_text(draw, item, item_font, content_width - 34)
+            for i, line in enumerate(lines):
+                draw.text((pad_x + 34, y + i * 37), line, font=item_font, fill=QUIZ_CARD_INK)
+            y += 37 * max(1, len(lines)) + 16
+        return y + 22
+
+    if strongest:
+        y = draw_section(text["strongest"], strongest, QUIZ_CARD_GREEN, y)
+    if discuss:
+        y = draw_section(text["discuss"], discuss, QUIZ_CARD_BLUE, y)
+    if not strongest and not discuss:
+        for line in _quiz_card_wrap_text(draw, text["empty"], item_font, content_width):
+            draw.text((pad_x, y), line, font=item_font, fill=QUIZ_CARD_MUTED)
+            y += 37
+        y += 22
+
+    # Tagline reinforces the "no score, no pass/fail" rule and doubles as
+    # a graceful filler for the remaining space above the footer when
+    # there are only one or two items - never leaves a bare gap.
+    footer_top = panel_box[3] - 88
+    tagline_lines = _quiz_card_wrap_text(draw, text["tagline"], tagline_font, content_width)
+    tagline_height = len(tagline_lines) * 34
+    tagline_y = max(y + 12, footer_top - tagline_height - 24)
+    for line in tagline_lines:
+        draw.text((pad_x, tagline_y), line, font=tagline_font, fill=QUIZ_CARD_MUTED)
+        tagline_y += 34
+
+    footer_text = text["footer"]
+    fb = draw.textbbox((0, 0), footer_text, font=footer_font)
+    fw = fb[2] - fb[0]
+    heart_gap = 28
+    total_w = fw + heart_gap
+    start_x = size / 2 - total_w / 2
+    footer_cy = panel_box[3] - 56
+    _quiz_card_heart(draw, start_x + 8, footer_cy, 14, QUIZ_CARD_PINK)
+    draw.text((start_x + heart_gap, footer_cy - 13), footer_text, font=footer_font, fill=QUIZ_CARD_PINK)
+
+    out = io.BytesIO()
+    img.convert("RGB").save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+@app.get("/api/public/quiz-result-card")
+def public_quiz_result_card(
+    request: Request,
+    locale: str = Query(default="en", max_length=8),
+    strongest: list[str] = Query(default=[]),
+    discuss: list[str] = Query(default=[]),
+):
+    if Image is None or ImageDraw is None or ImageFont is None or ImageFilter is None:
+        raise HTTPException(status_code=503, detail="Image rendering is unavailable")
+    client_ip = client_ip_of(request)
+    with db_cursor() as (conn, cursor):
+        enforce_ai_public_rate_limit(cursor, "quiz-card", client_ip)
+        ai_public_record_use(cursor, "quiz-card", client_ip)
+        conn.commit()
+    strongest_clean = [s.strip()[:80] for s in strongest[:4] if s.strip()]
+    discuss_clean = [s.strip()[:80] for s in discuss[:4] if s.strip()]
+    png_bytes = render_quiz_result_card(locale, strongest_clean, discuss_clean)
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store", "Content-Disposition": 'inline; filename="quiz-result.png"'},
+    )
+
+
 @app.post("/api/partner/login")
 def partner_login(payload: PartnerLoginPayload):
     if not PARTNER_API_PASSWORD:
@@ -8299,6 +8854,43 @@ def member_update_family_plan_section(
             "ok": True,
             "sections": fetch_family_plan_sections(cursor, match_id, profile_id, other_profile_id),
         }
+
+
+@app.post("/api/member/family-room/{profile_identifier}/sections/{section_key}/ai-draft")
+def member_family_plan_ai_draft(
+    profile_identifier: str,
+    section_key: str,
+    payload: FamilyPlanAiDraftPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    # Suggests a draft only - it is never saved here. The couple reviews/
+    # edits it in the existing section TextInput and saves it themselves via
+    # member_update_family_plan_section() above, same as any manual edit.
+    if section_key not in FAMILY_PLAN_SECTION_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown Family Plan section")
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        sections = fetch_family_plan_sections(cursor, match_id, profile_id, other_profile_id)
+    section = next((s for s in sections if s["key"] == section_key), None)
+    existing_content = ((section or {}).get("content") or "").strip()
+    language = locale_language_name(payload.locale)
+    notes = (payload.notes or "").strip()[:2000]
+    user_message = (
+        f"Reply in {language}.\n\n"
+        f"Family Plan section: {section_key}\n"
+        f"What the couple has written so far (may be empty): {existing_content[:4000] or '(nothing written yet)'}\n"
+        f"Notes from the person requesting help (may be empty): {notes or '(none)'}\n\n"
+        "Write the suggested draft for this section now."
+    )
+    reply = ai_advisor_call_claude(
+        [{"role": "user", "content": user_message}],
+        system_prompt=FAMILY_PLAN_AI_DRAFT_SYSTEM_PROMPT,
+        max_tokens=700,
+    )
+    return {"ok": True, "draft": reply}
 
 
 @app.post("/api/member/family-room/{profile_identifier}/checklist")
