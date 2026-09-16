@@ -22,6 +22,16 @@ export type MemberRow = Record<string, unknown>;
 export type MemberLocale = keyof typeof ACCOUNT_COPY;
 type Session = { user: MemberRow } | null;
 const api = createApiClient("/api");
+const LANGUAGE_OPTIONS = [
+  ["en", "English"],
+  ["ru", "Русский"],
+  ["es", "Español"],
+  ["pt", "Português"],
+  ["fr", "Français"],
+  ["de", "Deutsch"],
+  ["it", "Italiano"],
+  ["pl", "Polski"],
+] as const;
 export const memberText = (...values: unknown[]) =>
   firstAvatarText(
     ...values.map((value) =>
@@ -362,13 +372,7 @@ function LanguageDialog({
         <MemberLoading locale={locale} />
       ) : (
         <div className="account-language-options">
-          {(
-            [
-              ["en", "English"],
-              ["ru", "Русский"],
-              ["es", "Español"],
-            ] as const
-          ).map(([code, label]) => (
+          {LANGUAGE_OPTIONS.map(([code, label]) => (
             <button
               key={code}
               type="button"

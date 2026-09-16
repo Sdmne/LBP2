@@ -10,12 +10,17 @@
 // that same string, not independently maintained copies - keep them in
 // sync when you change an English string.
 
-export type Locale = "en" | "ru" | "es";
+export type Locale = "en" | "ru" | "es" | "pt" | "fr" | "de" | "it" | "pl";
 
 export const SUPPORTED_LOCALES: { code: Locale; label: string }[] = [
   { code: "en", label: "English" },
   { code: "ru", label: "Русский" },
   { code: "es", label: "Español" },
+  { code: "pt", label: "Português" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "it", label: "Italiano" },
+  { code: "pl", label: "Polski" },
 ];
 
 type Dict = Record<string, string>;
@@ -3288,4 +3293,10 @@ const es: Dict = {
   "paywall.oneTimeLink": "¿Prefieres una compra única?",
 };
 
-export const translations: Record<Locale, Dict> = { en, ru, es };
+const pt: Dict = en;
+const fr: Dict = en;
+const de: Dict = en;
+const it: Dict = en;
+const pl: Dict = en;
+
+export const translations: Record<Locale, Dict> = { en, ru, es, pt, fr, de, it, pl };

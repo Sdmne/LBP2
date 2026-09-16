@@ -63,11 +63,12 @@ export default function VerificationScreen() {
     load().finally(() => setLoading(false));
   }, [load]);
 
-  async function handleStart() {
-    setStarting(true);
-    setError(null);
-    try {
-      const res = await startVerification(locale);
+ async function handleStart() {
+  setStarting(true);
+  setError(null);
+  try {
+  const verificationLocale = locale === "ru" || locale === "es" ? locale : "en";
+  const res = await startVerification(verificationLocale);
       if (res.url) {
         await WebBrowser.openBrowserAsync(res.url);
         // The person completes verification in the browser, then Didit

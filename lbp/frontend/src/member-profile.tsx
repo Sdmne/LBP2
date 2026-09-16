@@ -342,7 +342,7 @@ export function PremiumDialog({
     common = PROFILE_COPY[locale];
   const [subscription, setSubscription] = useState<Row | null>(null);
   const [error, setError] = useState(false);
-  const [tier, setTier] = useState<1 | 2>(1);
+  const [tier, setTier] = useState<0 | 1 | 2>(1);
   const pricing = PRICING_TEXT[locale];
   const selectedPlan = pricing.plans[tier];
   const [plan, setPlan] = useState("quarterly");
@@ -375,6 +375,7 @@ export function PremiumDialog({
       : subscription?.status === "ACTIVE";
   const currentTier = subscription?.tier ?? (active ? "PRO" : "EXPLORE");
   const topTier = active && currentTier === "PRO";
+  const tierChoices = [0, 1, 2] as const;
   const feature = (value: string) =>
     value !== "check" && value !== "" ? (
       <span className="premium-feature-number">{value}</span>
@@ -447,35 +448,37 @@ export function PremiumDialog({
               <div className="loading" role="status" aria-label={c.title}>
                 <span className="loading-spinner" />
               </div>
-            ) : topTier ? (
-              <section className="premium-current-plan">
-                <span>
-                  <Icon name="premiumCheckIcon" />
-                </span>
-                <div>
-                  <strong>{c.alreadyPremium}</strong>
-                  <p>{c.alreadyPremiumDesc}</p>
-                </div>
-              </section>
             ) : (
               <>
+                {active ? (
+                  <section className="premium-current-plan">
+                    <span>
+                      <Icon name="premiumCheckIcon" />
+                    </span>
+                    <div>
+                      <strong>{c.alreadyPremium}</strong>
+                      <p>{c.alreadyPremiumDesc}</p>
+                    </div>
+                  </section>
+                ) : null}
                 <div className="premium-tier-grid" role="group" aria-label={pricing.compareTitle}>
-                  {([1, 2] as const).map((value) => (
+                  {tierChoices.map((value) => (
                     <button type="button" key={value} aria-pressed={tier === value}
                       className={`premium-tier${tier === value ? " selected" : ""}`}
-                      disabled={active && currentTier === "BUILDER" && value === 1}
+                      disabled={active && ((currentTier === "BUILDER" && value < 1) || (currentTier === "PRO" && value < 2))}
                       onClick={() => { setTier(value); setPlan(value === 2 ? "monthly" : "quarterly"); }}>
                       {pricing.plans[value].name}
                     </button>
                   ))}
                 </div>
                 <p className="premium-plan-tagline">{selectedPlan.tagline}</p>
-                <div
-                  className={`premium-plan-grid${tier === 2 ? " single-plan" : ""}`}
-                  role="radiogroup"
-                  aria-label={c.title}
-                >
-                  {(tier === 2 ? ["monthly"] : ["monthly", "quarterly"]).map((value) => (
+                {tier === 0 ? null : (
+                  <div
+                    className={`premium-plan-grid${tier === 2 ? " single-plan" : ""}`}
+                    role="radiogroup"
+                    aria-label={c.title}
+                  >
+                    {(tier === 2 ? ["monthly"] : ["monthly", "quarterly"]).map((value) => (
                     <button
                       key={value}
                       type="button"
@@ -518,13 +521,13 @@ export function PremiumDialog({
                         <small>{c.billedQuarterly}</small>
                       )}
                     </button>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
                 <div className="premium-comparison premium-tier-comparison">
                   <div className="premium-comparison-head">
                     <span />
-                    <strong>{pricing.plans[0].name}</strong>
-                    <strong>{selectedPlan.name}</strong>
+                    {pricing.plans.map((plan) => <strong key={plan.key}>{plan.name}</strong>)}
                   </div>
                   {pricing.matrixGroups.map((group) => (
                     <section key={group.name}>
@@ -532,8 +535,9 @@ export function PremiumDialog({
                       {group.rows.map((entry) => (
                         <div className="premium-comparison-row" key={entry.label}>
                           <span className="premium-feature-label"><span>{entry.label}</span></span>
-                          {feature(entry.values[0])}
-                          {feature(entry.values[tier])}
+                          {pricing.plans.map((plan, index) => (
+                            <span className="premium-comparison-cell" key={plan.key}>{feature(entry.values[index])}</span>
+                          ))}
                         </div>
                       ))}
                     </section>
@@ -544,7 +548,7 @@ export function PremiumDialog({
               </>
             )}
           </div>
-          {subscription && !topTier && !error && (
+          {subscription && !error && tier > 0 && !(active && ((currentTier === "BUILDER" && tier === 1) || (currentTier === "PRO" && tier === 2))) && (
             <footer className="premium-paywall-footer">
               <button type="button" onClick={() => setMobile(true)}>
                 {tier === 2 ? `${selectedPlan.cta} — ${selectedPlan.price} / ${c.perMonth}` : plan === "monthly" ? c.getMonthly : c.getQuarterly}

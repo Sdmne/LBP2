@@ -2048,7 +2048,7 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
     setBusy(true);
     setError("");
     try {
-      const response = await api.post<{ user: Row }>("/auth/signup", {
+      const response = await api.post<{ user: Row; emailSent?: boolean }>("/auth/signup", {
         displayName: email.split("@")[0] || email,
         email,
         password,
@@ -2062,7 +2062,7 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
           // Silent - worst case they enter the code by hand later.
         }
       }
-      navigate(`/${locale}/auth/verify-email`);
+      navigate(`/${locale}/auth/verify-email${response.emailSent === false ? "?delivery=failed" : ""}`);
     } catch {
       setError(
         copy.createError,
@@ -2483,14 +2483,18 @@ function ResetPassword() {
 
 function VerifyEmail() {
   const locale = localeOf();
-  const copy = standaloneAuthCopy[locale];
-  const navigate = useNavigate();
-  const token = new URLSearchParams(window.location.search).get("token") || "";
-  const [status, setStatus] = useState(
-    token
-      ? copy.wait
-      : copy.verifySent,
-  );
+ const copy = standaloneAuthCopy[locale];
+ const navigate = useNavigate();
+ const search = new URLSearchParams(window.location.search);
+ const token = search.get("token") || "";
+ const initialDeliveryFailed = search.get("delivery") === "failed";
+ const [status, setStatus] = useState(
+  token
+  ? copy.wait
+  : initialDeliveryFailed
+  ? copy.deliveryFailed
+  : copy.verifySent,
+ );
   const [busy, setBusy] = useState(Boolean(token));
   const [confirmed, setConfirmed] = useState(false);
   const [code, setCode] = useState("");
