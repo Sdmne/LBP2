@@ -112,8 +112,10 @@ export function profileCountry(value: unknown, locale: Locale) {
   const code =
     ({ USA: "US", UK: "GB", UAE: "AE" } as Record<string, string>)[
       country.toUpperCase()
-    ] || country.toUpperCase();
-  try {
+] || country.toUpperCase();
+if (locale === "en" && code === "CZ") return "Czech Republic";
+if (locale === "en" && code === "GB") return "UK";
+try {
     return /^[A-Z]{2}$/.test(code)
       ? new Intl.DisplayNames([locale], { type: "region" }).of(code) || country
       : country;
@@ -124,14 +126,13 @@ export function profileCountry(value: unknown, locale: Locale) {
 
 export function profilePhotos(item: Row): string[] {
   const data = row(item.data);
-  const source = [
+  const photos = [
     ...profileList(item.photos),
     ...profileList(data.photos),
-    item.avatarUrl,
-    data.avatarUrl,
-    item.photoUrl,
-    data.photoUrl,
   ];
+  const source = photos.length
+    ? photos
+    : [item.avatarUrl, data.avatarUrl, item.photoUrl, data.photoUrl];
   return [
     ...new Set(
       source

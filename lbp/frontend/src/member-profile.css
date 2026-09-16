@@ -2295,6 +2295,49 @@
 }
 
 /* Loading and unavailable profiles share one stable content area. */
+.member-profile-surface .detail-thumbnails-wrap {
+  width: 100%;
+  display: block;
+  margin-top: 12px;
+}
+
+.member-profile-surface .detail-thumbnails-wrap .detail-thumbnails {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}
+
+.member-profile-surface .detail-thumbnails-wrap .detail-thumbnail {
+  width: 100%;
+  min-width: 0;
+  flex: initial;
+  aspect-ratio: 1;
+}
+
+.member-profile-surface .detail-thumbnails-arrow,
+.member-profile-surface .detail-thumbnails-arrow.visible {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .member-profile-surface .detail-thumbnails-wrap .detail-thumbnails {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+    overflow: visible;
+    padding: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .member-profile-surface .detail-thumbnails-wrap .detail-thumbnails {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .web-main.member-profile-main:has(> .member-profile-load-state) {
   min-height: 60vh;
   min-height: 60svh;

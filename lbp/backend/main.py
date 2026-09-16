@@ -277,6 +277,8 @@ SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
 SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", SMTP_USER).strip()
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "LetsBeParents").strip() or "LetsBeParents"
+CONTACT_FORM_FROM_EMAIL = os.getenv("CONTACT_FORM_FROM_EMAIL", "noreply@letsbeparents.com").strip()
+CONTACT_FORM_FROM_NAME = os.getenv("CONTACT_FORM_FROM_NAME", "LetsBeParents").strip() or "LetsBeParents"
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1").strip().lower() in {"1", "true", "yes", "on"}
 SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "0").strip().lower() in {"1", "true", "yes", "on"}
 SMTP_TIMEOUT_SECONDS = max(1, int(os.getenv("SMTP_TIMEOUT_SECONDS", "20")))
@@ -2351,7 +2353,7 @@ def send_contact_request_email(recipient: str, body: dict[str, Any]) -> str:
 
     email_message = EmailMessage()
     email_message["Subject"] = f"LetsBeParents contact: {subject_value}"
-    email_message["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM_EMAIL))
+    email_message["From"] = formataddr((CONTACT_FORM_FROM_NAME, CONTACT_FORM_FROM_EMAIL))
     email_message["To"] = recipient_email
     if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sender_email):
         email_message["Reply-To"] = formataddr((sender_name, sender_email))
@@ -2925,6 +2927,16 @@ def normalize_platform_name(raw_source: Any, raw_user_agent: Any) -> str:
     return "Unknown"
 
 
+def profile_has_verified_badge(profile: dict[str, Any] | None) -> bool:
+    if not profile:
+        return False
+    data = profile_data(profile)
+    provider = str(data.get("verificationProvider") or "").strip().lower()
+    provider_verified = provider in {"didit", "manual_test", "test", "admin"}
+    approved_verification = json_bool(profile, "approvedVerification") or json_bool(data, "approvedVerification")
+    return approved_verification or (provider_verified and (json_bool(data, "isVerified") or bool(data.get("verifiedAt"))))
+
+
 def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
         return None
@@ -2939,7 +2951,7 @@ def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
         "city": row.get("city") or data.get("city"),
         "avatarUrl": row.get("avatarUrl") or data.get("avatarUrl"),
         "profileType": data.get("profileType") or row.get("role"),
-        "isVerified": data.get("isVerified"),
+        "isVerified": profile_has_verified_badge({**row, "data": data}),
         "isVideoVerified": data.get("isVideoVerified"),
         "isPremium": data.get("isPremium"),
         "likedByViewer": row.get("likedByViewer"),
@@ -3060,8 +3072,19 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
                email,
                JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) AS country,
                JSON_UNQUOTE(JSON_EXTRACT(data, '$.city')) AS city,
-               JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')) AS avatarUrl,
-               data,
+ JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')) AS avatarUrl,
+ EXISTS (
+ SELECT 1
+ FROM app_entities verification
+ WHERE verification.entity_type = 'verification'
+ AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
+ AND (
+ CAST(JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.profileId')) AS CHAR) = CAST(profiles.id AS CHAR)
+ OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')
+ )
+ )
+ ) AS approvedVerification,
+ data,
                created_at,
                updated_at
         FROM profiles
@@ -3211,8 +3234,7 @@ def profile_is_premium(profile: dict[str, Any] | None) -> bool:
 
 
 def profile_is_verified(profile: dict[str, Any] | None) -> bool:
-    data = profile_data(profile)
-    return json_bool(data, "isVerified") or bool(data.get("verifiedAt"))
+    return profile_has_verified_badge(profile)
 
 
 def profile_completeness_percent(profile: dict[str, Any] | None) -> int:
@@ -5918,6 +5940,8 @@ def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = 
         raise HTTPException(status_code=422, detail="Country is required")
     if not updates.get("city"):
         raise HTTPException(status_code=422, detail="City is required")
+    if not updates.get("cityPlaceId"):
+        raise HTTPException(status_code=422, detail="Select a city from the list")
     if not updates.get("profileType"):
         raise HTTPException(status_code=422, detail="Profile type is required")
     looking_for = updates.get("lookingFor") if isinstance(updates.get("lookingFor"), list) else []

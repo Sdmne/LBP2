@@ -2793,11 +2793,13 @@ function Directory({ kind }: { kind: "clinics" | "lawyers" }) {
     const contact = item.contact && typeof item.contact === "object" ? item.contact as Row : {};
     return cleanText(contact.website ?? item.website ?? data.website);
   };
-  const countryName = (code: unknown) => {
-    const value = cleanText(code).toUpperCase();
-    if (!value) return "";
-    try { return new Intl.DisplayNames([locale], { type: "region" }).of(value) || value; } catch { return value; }
-  };
+const countryName = (code: unknown) => {
+const value = cleanText(code).toUpperCase();
+if (!value) return "";
+if (locale === "en" && value === "CZ") return "Czech Republic";
+if (locale === "en" && value === "GB") return "UK";
+try { return new Intl.DisplayNames([locale], { type: "region" }).of(value) || value; } catch { return value; }
+};
   const locationCountryName = (code: unknown) => ({ US: "USA", GB: "UK", AE: "UAE" }[cleanText(code).toUpperCase()] || countryName(code));
   const itemLocation = (item: Row) => {
     const data = rowData(item);
@@ -3152,11 +3154,13 @@ function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
     .map(text)
     .find((value) => value && !/^(?:null|none|undefined)$/i.test(value)) || "";
   const countryCode = text(item.country ?? data.country).toUpperCase();
-  const displayCountry = (code: string, displayLocale = locale) => {
-    if (!code) return "";
-    if (displayLocale === "en" && code === "US") return "USA";
-    try { return new Intl.DisplayNames([displayLocale], { type: "region" }).of(code) || code; } catch { return code; }
-  };
+const displayCountry = (code: string, displayLocale = locale) => {
+if (!code) return "";
+if (displayLocale === "en" && code === "US") return "USA";
+if (displayLocale === "en" && code === "CZ") return "Czech Republic";
+if (displayLocale === "en" && code === "GB") return "UK";
+try { return new Intl.DisplayNames([displayLocale], { type: "region" }).of(code) || code; } catch { return code; }
+};
   const locationLabel = kind === "clinics"
     ? [text(item.city ?? data.city), text(item.region ?? data.region), displayCountry(countryCode, "en")].filter(Boolean).join(", ")
     : text(item.location ?? data.location) || [text(item.city ?? data.city), text(item.state ?? data.state), displayCountry(countryCode)].filter(Boolean).join(", ");
@@ -7839,52 +7843,214 @@ function resourceChatIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>;
 }
 
+const RESOURCES_INDEX_TEXT: Partial<Record<CookieLocale, {
+  pill: string;
+  title: string;
+  subtitle: string;
+  startLabel: string;
+  startTitle: string;
+  startSubtitle: string;
+  startCards: Record<string, { title: string; description: string; cta: string }>;
+  browseLabel: string;
+  browseTitle: string;
+  browseSubtitle: string;
+  categories: Record<string, { eyebrow: string; title: string; description: string; cta: string; disclaimer?: string }>;
+  toolTitles: Record<string, string>;
+  routesTitle: string;
+  routesCopy: string;
+  routeLinks: string[];
+  proTitle: string;
+  proCopy: string;
+  proCta: string;
+  ctaTitle: string;
+  ctaCopy: string;
+  ctaButton: string;
+}>> = {
+  en: {
+    pill: "Resources & tools",
+    title: "Parenthood resources and tools",
+    subtitle: "Practical checklists, worksheets and planning tools to help you explore co-parenting, fertility, donor conception and the practical side of becoming a parent.",
+    startLabel: "Start here",
+    startTitle: "Three good places to begin",
+    startSubtitle: "Whichever stage you're at.",
+    startCards: {
+      "planning-template": { title: "Co-Parenting Planning Template", description: "Thinking about becoming co-parents? Talk through parenting, finances, living arrangements and boundaries before you move forward.", cta: "Download template" },
+      "questions-to-ask": { title: "Questions to Ask a Potential Co-Parent", description: "Not sure what to ask before taking the next step? Use a practical list covering parenting, money, communication and everyday life.", cta: "View questions" },
+      "compatibility-quiz": { title: "Co-Parenting Compatibility Quiz", description: "See where expectations line up and what is worth discussing further. It will not tell you whether you are a match.", cta: "Take quiz" },
+    },
+    browseLabel: "Browse all",
+    browseTitle: "Free resources",
+    browseSubtitle: "The right checklist at the right moment can make the next conversation easier.",
+    categories: {
+      "co-parenting": { eyebrow: "Co-parenting", title: "Tools for building a family with a co-parent", description: "Questions, checklists and templates for finding and getting to know a co-parent.", cta: "Explore co-parenting" },
+      "fertility-donor": { eyebrow: "Fertility & donor conception", title: "Prepare for clinic and donor conversations", description: "Practical questions and checklists for talking to clinics and professionals.", cta: "Explore fertility & donor conception", disclaimer: "These resources help you prepare conversations with qualified professionals. They are not medical or legal advice." },
+      "parenthood-planning": { eyebrow: "Parenthood planning", title: "Get ready for the practical side", description: "Worksheets for the practical side of preparing for a child.", cta: "Explore parenthood planning" },
+    },
+    toolTitles: {},
+    routesTitle: "Not sure where to start?",
+    routesCopy: "You do not need to have everything figured out. Start with the question that is most relevant to you right now.",
+    routeLinks: ["I'm exploring co-parenting", "I'm thinking about fertility", "I'm considering donor conception", "I want to plan ahead"],
+    proTitle: "Looking for professional guidance?",
+    proCopy: "Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.",
+    proCta: "Learn about professional support",
+    ctaTitle: "Explore LetsBeParents",
+    ctaCopy: "These tools work well on their own, or as part of your journey on the platform.",
+    ctaButton: "Create free account",
+  },
+  ru: {
+    pill: "Ресурсы и инструменты",
+    title: "Ресурсы и инструменты для будущих родителей",
+    subtitle: "Практические чек-листы, рабочие листы и шаблоны планирования для ко-родительства, фертильности, донорского зачатия и подготовки к родительству.",
+    startLabel: "Начните здесь",
+    startTitle: "Три хороших первых шага",
+    startSubtitle: "Для любого этапа, на котором вы сейчас.",
+    startCards: {
+      "planning-template": { title: "Шаблон плана ко-родительства", description: "Думаете о ко-родительстве? Обсудите воспитание, финансы, быт и границы до того, как двигаться дальше.", cta: "Скачать шаблон" },
+      "questions-to-ask": { title: "Вопросы потенциальному ко-родителю", description: "Не знаете, что спросить перед следующим шагом? Используйте список вопросов про воспитание, деньги, общение и повседневную жизнь.", cta: "Открыть вопросы" },
+      "compatibility-quiz": { title: "Квиз совместимости ко-родителей", description: "Посмотрите, где ваши ожидания совпадают и что стоит обсудить подробнее. Это не тест с вердиктом о совместимости.", cta: "Пройти квиз" },
+    },
+    browseLabel: "Все материалы",
+    browseTitle: "Бесплатные ресурсы",
+    browseSubtitle: "Подходящий чек-лист в нужный момент помогает сделать следующий разговор проще.",
+    categories: {
+      "co-parenting": { eyebrow: "Ко-родительство", title: "Инструменты для семьи с ко-родителем", description: "Вопросы, чек-листы и шаблоны для знакомства с потенциальным ко-родителем.", cta: "Открыть ко-родительство" },
+      "fertility-donor": { eyebrow: "Фертильность и донорское зачатие", title: "Подготовка к разговору с клиникой или донором", description: "Практические вопросы и чек-листы для общения с клиниками и специалистами.", cta: "Открыть фертильность и донорство", disclaimer: "Эти материалы помогают подготовиться к разговору со специалистами. Это не медицинская и не юридическая консультация." },
+      "parenthood-planning": { eyebrow: "Планирование родительства", title: "Подготовьтесь к практической стороне", description: "Рабочие листы для практической подготовки к появлению ребёнка.", cta: "Открыть планирование" },
+    },
+    toolTitles: {
+      "planning-template": "Шаблон плана ко-родительства",
+      "questions-to-ask": "Вопросы потенциальному ко-родителю",
+      "first-meeting": "Первая встреча с потенциальным ко-родителем",
+      "red-flags-checklist": "Чек-лист тревожных сигналов в ко-родительстве",
+      "compatibility-scorecard": "Карта совместимости ко-родителей",
+      "parenting-values-worksheet": "Рабочий лист родительских ценностей",
+      "fertility-consultation-questions": "Вопросы для консультации по фертильности",
+      "donor-conception-questions": "Чек-лист вопросов о донорском зачатии",
+      "fertility-clinic-checklist": "Чек-лист выбора клиники фертильности",
+      "financial-planning": "Финансовое планирование для будущих родителей",
+    },
+    routesTitle: "Не знаете, с чего начать?",
+    routesCopy: "Не нужно сразу знать все ответы. Начните с вопроса, который сейчас важнее всего.",
+    routeLinks: ["Я изучаю ко-родительство", "Я думаю о фертильности", "Я рассматриваю донорское зачатие", "Я хочу подготовиться заранее"],
+    proTitle: "Нужна профессиональная поддержка?",
+    proCopy: "Некоторые вопросы лучше обсуждать с квалифицированным специалистом. LetsBeParents создаёт доверенное пространство для психологической, медицинской и другой профессиональной поддержки.",
+    proCta: "Узнать о поддержке специалистов",
+    ctaTitle: "Откройте LetsBeParents",
+    ctaCopy: "Эти инструменты полезны сами по себе и как часть вашего пути на платформе.",
+    ctaButton: "Создать бесплатный аккаунт",
+  },
+  es: {
+    pill: "Recursos y herramientas",
+    title: "Recursos y herramientas para la parentalidad",
+    subtitle: "Listas de verificación, hojas de trabajo y herramientas de planificación para explorar la coparentalidad, la fertilidad, la concepción con donante y la parte práctica de ser madre o padre.",
+    startLabel: "Empieza aquí",
+    startTitle: "Tres buenos puntos de partida",
+    startSubtitle: "Sea cual sea tu etapa actual.",
+    startCards: {
+      "planning-template": { title: "Plantilla de planificación de coparentalidad", description: "¿Estás pensando en ser copadre o comadre? Habla sobre crianza, finanzas, convivencia y límites antes de avanzar.", cta: "Descargar plantilla" },
+      "questions-to-ask": { title: "Preguntas para un posible coprogenitor", description: "¿No sabes qué preguntar antes de dar el siguiente paso? Usa una lista práctica sobre crianza, dinero, comunicación y vida diaria.", cta: "Ver preguntas" },
+      "compatibility-quiz": { title: "Cuestionario de compatibilidad de coparentalidad", description: "Ve dónde coinciden las expectativas y qué conviene conversar más. No es una prueba que diga si sois compatibles.", cta: "Hacer cuestionario" },
+    },
+    browseLabel: "Ver todo",
+    browseTitle: "Recursos gratuitos",
+    browseSubtitle: "La lista adecuada en el momento adecuado puede hacer más fácil la siguiente conversación.",
+    categories: {
+      "co-parenting": { eyebrow: "Coparentalidad", title: "Herramientas para crear una familia con un coprogenitor", description: "Preguntas, listas y plantillas para encontrar y conocer a un posible coprogenitor.", cta: "Explorar coparentalidad" },
+      "fertility-donor": { eyebrow: "Fertilidad y concepción con donante", title: "Prepárate para conversaciones con clínicas y donantes", description: "Preguntas prácticas y listas de verificación para hablar con clínicas y profesionales.", cta: "Explorar fertilidad y donación", disclaimer: "Estos recursos ayudan a preparar conversaciones con profesionales cualificados. No son asesoramiento médico ni legal." },
+      "parenthood-planning": { eyebrow: "Planificación de la parentalidad", title: "Prepárate para la parte práctica", description: "Hojas de trabajo para organizar la parte práctica de prepararse para un hijo.", cta: "Explorar planificación" },
+    },
+    toolTitles: {
+      "planning-template": "Plantilla de planificación de coparentalidad",
+      "questions-to-ask": "Preguntas para un posible coprogenitor",
+      "first-meeting": "Primera reunión con un posible coprogenitor",
+      "red-flags-checklist": "Lista de señales de alerta en coparentalidad",
+      "compatibility-scorecard": "Tarjeta de compatibilidad de coparentalidad",
+      "parenting-values-worksheet": "Hoja de valores de crianza",
+      "fertility-consultation-questions": "Preguntas para una consulta de fertilidad",
+      "donor-conception-questions": "Lista de preguntas sobre concepción con donante",
+      "fertility-clinic-checklist": "Lista para elegir una clínica de fertilidad",
+      "financial-planning": "Planificación financiera para futuros padres",
+    },
+    routesTitle: "¿No sabes por dónde empezar?",
+    routesCopy: "No necesitas tenerlo todo resuelto. Empieza por la pregunta que más te importa ahora.",
+    routeLinks: ["Estoy explorando la coparentalidad", "Estoy pensando en fertilidad", "Estoy considerando la concepción con donante", "Quiero planificar con antelación"],
+    proTitle: "¿Buscas orientación profesional?",
+    proCopy: "Algunas preguntas es mejor tratarlas con un profesional cualificado. LetsBeParents está creando un espacio de confianza para conectar con apoyo psicológico, médico y otros especialistas.",
+    proCta: "Conocer el apoyo profesional",
+    ctaTitle: "Explora LetsBeParents",
+    ctaCopy: "Estas herramientas funcionan bien por sí solas o como parte de tu recorrido en la plataforma.",
+    ctaButton: "Crear cuenta gratis",
+  },
+};
+
+function resourceIndexText(locale: CookieLocale) {
+  return RESOURCES_INDEX_TEXT[locale] ?? RESOURCES_INDEX_TEXT.en!;
+}
+
+function localizedResourceCategory(cat: ResourceCategoryData, locale: CookieLocale) {
+  const text = resourceIndexText(locale);
+  const categoryText = text.categories[cat.slug];
+  return {
+    ...cat,
+    eyebrow: categoryText?.eyebrow ?? cat.eyebrow,
+    title: categoryText?.title ?? cat.title,
+    description: categoryText?.description ?? cat.description,
+    disclaimer: categoryText?.disclaimer ?? cat.disclaimer,
+    cta: categoryText?.cta ?? `Explore ${cat.eyebrow.toLowerCase()}`,
+    tools: cat.tools.map((tool) => ({ ...tool, title: text.toolTitles[tool.slug] ?? tool.title })),
+  };
+}
+
 function ResourcesIndex() {
   const locale = localeOf();
+  const text = resourceIndexText(locale);
+  const categories = RESOURCES_CATEGORIES.map((cat) => localizedResourceCategory(cat, locale));
+  const startCards = [
+    { slug: "planning-template", href: `/${locale}/resources/co-parenting/planning-template`, icon: resourceDocIcon() },
+    { slug: "questions-to-ask", href: `/${locale}/resources/co-parenting/questions-to-ask`, icon: resourceDocIcon() },
+    { slug: "compatibility-quiz", href: `/${locale}/resources/co-parenting/compatibility-quiz`, icon: resourceQuizIcon(), featured: true },
+  ];
+  const routeLinks = [
+    { href: `/${locale}/resources/co-parenting`, label: text.routeLinks[0] },
+    { href: `/${locale}/resources/fertility-donor`, label: text.routeLinks[1] },
+    { href: `/${locale}/resources/fertility-donor`, label: text.routeLinks[2] },
+    { href: `/${locale}/resources/parenthood-planning`, label: text.routeLinks[3] },
+  ];
   return (
     <div className="resources-page">
       <section className="resources-hero">
-        <span className="landing-pill resources-pill"><i /><span>Resources & tools</span></span>
-        <h1>Parenthood resources and tools</h1>
-        <p>Practical checklists, worksheets and planning tools to help you explore co-parenting, fertility, donor conception and the practical side of becoming a parent.</p>
+        <span className="landing-pill resources-pill"><i /><span>{text.pill}</span></span>
+        <h1>{text.title}</h1>
+        <p>{text.subtitle}</p>
       </section>
-
       <section className="resources-start">
         <div className="landing-section-intro">
-          <span>Start here</span>
-          <h2>Three good places to begin</h2>
-          <p className="resources-section-sub">Whichever stage you're at.</p>
+          <span>{text.startLabel}</span>
+          <h2>{text.startTitle}</h2>
+          <p className="resources-section-sub">{text.startSubtitle}</p>
         </div>
         <div className="resources-start-grid">
-          <Link className="resources-start-card" to={`/${locale}/resources/co-parenting/planning-template`}>
-            <span className="resources-start-icon">{resourceDocIcon()}</span>
-            <h3>Co-Parenting Planning Template</h3>
-            <p>Thinking about becoming co-parents? Talk through parenting, finances, living arrangements and boundaries before you move forward.</p>
-            <span className="resources-start-link">Download the template {resourceArrow()}</span>
-          </Link>
-          <Link className="resources-start-card" to={`/${locale}/resources/co-parenting/questions-to-ask`}>
-            <span className="resources-start-icon">{resourceDocIcon()}</span>
-            <h3>Questions to Ask a Potential Co-Parent</h3>
-            <p>Not sure what to ask before taking the next step? A practical list covering parenting, money, communication and everyday life.</p>
-            <span className="resources-start-link">View the questions {resourceArrow()}</span>
-          </Link>
-          <Link className="resources-start-card featured" to={`/${locale}/resources/co-parenting/compatibility-quiz`}>
-            <span className="resources-start-icon">{resourceQuizIcon()}</span>
-            <h3>Co-Parenting Compatibility Quiz</h3>
-            <p>See where your expectations line up, and what's worth discussing further. It won't tell you whether you're a "match."</p>
-            <span className="resources-start-link">Take the quiz {resourceArrow()}</span>
-          </Link>
+          {startCards.map((card) => {
+            const cardText = text.startCards[card.slug];
+            return (
+              <Link key={card.slug} className={`resources-start-card${card.featured ? " featured" : ""}`} to={card.href}>
+                <span className="resources-start-icon">{card.icon}</span>
+                <h3>{cardText.title}</h3>
+                <p>{cardText.description}</p>
+                <span className="resources-start-link">{cardText.cta} {resourceArrow()}</span>
+              </Link>
+            );
+          })}
         </div>
       </section>
-
       <section className="resources-categories">
         <div className="landing-section-intro">
-          <span>Explore all</span>
-          <h2>Explore all resources</h2>
-          <p className="resources-section-sub">The full set of checklists, worksheets and templates, grouped by what you're working through.</p>
+          <span>{text.browseLabel}</span>
+          <h2>{text.browseTitle}</h2>
+          <p className="resources-section-sub">{text.browseSubtitle}</p>
         </div>
         <div className="resources-category-grid">
-          {RESOURCES_CATEGORIES.map((cat) => (
+          {categories.map((cat) => (
             <article key={cat.slug} className="resources-category-card">
               <span className="resources-category-icon">{resourceCategoryIcon(cat.icon)}</span>
               <span className="resources-category-eyebrow">{cat.eyebrow}</span>
@@ -7896,46 +8062,37 @@ function ResourcesIndex() {
                 ))}
               </ul>
               {cat.disclaimer && <p className="resources-category-note">{cat.disclaimer}</p>}
-              <Link className="resources-category-cta" to={`/${locale}/resources/${cat.slug}`}>
-                Explore {cat.eyebrow.toLowerCase()} {resourceArrow()}
-              </Link>
+              <Link className="resources-category-cta" to={`/${locale}/resources/${cat.slug}`}>{cat.cta} {resourceArrow()}</Link>
             </article>
           ))}
         </div>
       </section>
-
       <section className="resources-routes">
         <span className="resources-routes-icon">{resourceArrow()}</span>
         <div className="resources-routes-copy">
-          <h2>Not sure where to start?</h2>
-          <p>You don't have to have everything figured out. Start with the question that's most relevant to you right now.</p>
+          <h2>{text.routesTitle}</h2>
+          <p>{text.routesCopy}</p>
         </div>
         <div className="resources-routes-grid">
-          <Link to={`/${locale}/resources/co-parenting`}>I'm exploring co-parenting {resourceArrow()}</Link>
-          <Link to={`/${locale}/resources/fertility-donor`}>I'm thinking about fertility {resourceArrow()}</Link>
-          <Link to={`/${locale}/resources/fertility-donor`}>I'm considering donor conception {resourceArrow()}</Link>
-          <Link to={`/${locale}/resources/parenthood-planning`}>I want to plan ahead {resourceArrow()}</Link>
+          {routeLinks.map((link) => <Link key={link.label} to={link.href}>{link.label} {resourceArrow()}</Link>)}
         </div>
       </section>
-
       <section className="resources-pro">
         <span className="resources-pro-icon">{resourceChatIcon()}</span>
         <div className="resources-pro-copy">
-          <h2>Looking for professional guidance?</h2>
-          <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
+          <h2>{text.proTitle}</h2>
+          <p>{text.proCopy}</p>
         </div>
-        <Link className="resources-pro-button" to={`/${locale}/professionals`}>Learn about professional support {resourceArrow()}</Link>
+        <Link className="resources-pro-button" to={`/${locale}/professionals`}>{text.proCta} {resourceArrow()}</Link>
       </section>
-
       <section className="landing-cta">
-        <h2>Explore LetsBeParents</h2>
-        <p>These tools work well on their own - or as part of your journey on the platform.</p>
-        <Link to={`/${locale}/auth/register`}>Create free account <span>→</span></Link>
+        <h2>{text.ctaTitle}</h2>
+        <p>{text.ctaCopy}</p>
+        <Link to={`/${locale}/auth/register`}>{text.ctaButton} <span>→</span></Link>
       </section>
     </div>
   );
 }
-
 function ResourceCategory() {
   const locale = localeOf();
   const { category = "" } = useParams();

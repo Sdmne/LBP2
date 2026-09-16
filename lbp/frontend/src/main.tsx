@@ -8,6 +8,7 @@ import "./member-premium.css";
 import "./member-account.css";
 import "./member-chat-reference.css";
 import "./member-chat.css";
+import "./member-chat-avatar-fix.css";
 import "./member-tools-reference.css";
 import "./member-tools.css";
 import "./site-navigation.css";

@@ -288,9 +288,11 @@ function settingBoolean(value: unknown) {
 }
 function countryName(value: unknown) {
   const code = String(value ?? "").trim();
-  if (!code) return "";
-  if (code.length !== 2) return code;
-  try {
+if (!code) return "";
+if (code.length !== 2) return code;
+if (code.toUpperCase() === "CZ") return "Czech Republic";
+if (code.toUpperCase() === "GB" || code.toUpperCase() === "UK") return "UK";
+try {
     return (
       new Intl.DisplayNames(["en"], { type: "region" }).of(
         code === "UK" ? "GB" : code.toUpperCase(),

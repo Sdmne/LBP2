@@ -12,7 +12,10 @@ export function fieldLabel(locale: Locale, key: string, value: string) {
  return fields[locale]?.[key]?.[value] || all[locale]?.[value] || options[key]?.find(x=>x[0]===value)?.[1] || value;
 }
 export function countryLabel(value: string, locale: Locale) {
- try { return /^[a-z]{2}$/i.test(value) ? new Intl.DisplayNames([locale],{type:'region'}).of(value.toUpperCase()) || value : value; } catch { return value; }
+const code=value.toUpperCase();
+if (locale==='en'&&code==='CZ') return 'Czech Republic';
+if (locale==='en'&&code==='GB') return 'UK';
+try { return /^[a-z]{2}$/i.test(value) ? new Intl.DisplayNames([locale],{type:'region'}).of(code) || value : value; } catch { return value; }
 }
 export function languageLabel(value: string, locale: Locale) {
  try { return TOOLS_LANGUAGES.includes(value) ? new Intl.DisplayNames([locale],{type:'language'}).of(value) || value : value; } catch { return value; }
@@ -56,7 +59,7 @@ export function hostedVerificationUrl(value:unknown) {try {const u=new URL(text(
 export function completedDate(value:unknown) {const d=new Date(text(value));return Number.isNaN(d.getTime())?'':new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'UTC'}).format(d);}
 export function imperialHeight(value:number) {const total=Math.round(value/2.54);return {feet:Math.floor(total/12),inches:total%12};}
 export function cropGeometry(naturalWidth:number,naturalHeight:number,stageWidth:number,stageHeight:number,zoom:number,x:number,y:number) {
- const fit=Math.min(stageWidth/naturalWidth,stageHeight/naturalHeight),width=naturalWidth*fit,height=naturalHeight*fit,size=Math.min(width,height);
+  const size=Math.min(stageWidth,stageHeight),fit=Math.max(size/naturalWidth,size/naturalHeight),width=naturalWidth*fit,height=naturalHeight*fit;
  const panX=Math.max(-(width*zoom-size)/2,Math.min((width*zoom-size)/2,x)),panY=Math.max(-(height*zoom-size)/2,Math.min((height*zoom-size)/2,y));
  const scale=fit*zoom,sourceSize=size/scale;
  return {width,height,size,x:panX,y:panY,sourceSize,sx:Math.max(0,Math.min(naturalWidth-sourceSize,naturalWidth/2-panX/scale-sourceSize/2)),sy:Math.max(0,Math.min(naturalHeight-sourceSize,naturalHeight/2-panY/scale-sourceSize/2))};

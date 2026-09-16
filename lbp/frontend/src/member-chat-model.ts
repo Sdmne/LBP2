@@ -8,6 +8,8 @@ export const chatText = (...values: unknown[]) => {
 export const chatRow = (value: unknown): ChatRow => value && typeof value === 'object' && !Array.isArray(value) ? value as ChatRow : {};
 export const chatName = (item: ChatRow, locale: ChatLocale) => chatText(item.otherDisplayName,item.peerDisplayName,item.displayName,item.title) || CHAT_COPY[locale].member;
 export const chatPeer = (item: ChatRow) => chatText(item.otherProfileId,item.other_profile_id);
+export const chatSenderProfileId = (item: ChatRow) => chatText(item.senderProfileId,item.sender_profile_id);
+export const chatLastMessageSenderProfileId = (item: ChatRow) => chatText(item.lastMessageSenderProfileId,item.last_message_sender_profile_id);
 export const chatSupport = (item: ChatRow) => chatText(item.otherRole,item.other_role).toUpperCase() === 'SUPPORT';
 export const chatInitials = (name: unknown) => (chatText(name) || 'LB').normalize('NFC').split(/\s+/).slice(0,2).map(part=>Array.from(part)[0]).join('').toLocaleUpperCase();
 export const chatPath = (locale: string, id?: unknown) => `/${locale}/chat${chatText(id) ? '/'+encodeURIComponent(chatText(id)) : ''}`;
@@ -43,7 +45,7 @@ export function chatActivity(item:ChatRow,locale:ChatLocale,now=new Date()) {
 export const chatFileSize=(size:number)=>size<1024?`${size} B`:size<1024*1024?`${(size/1024).toFixed(1)} KB`:`${(size/(1024*1024)).toFixed(1)} MB`;
 export function chatMediaUrl(value:unknown) {const url=chatText(value);if(!url)return '';if(url.startsWith('/')&&!url.startsWith('//'))return url;try{const parsed=new URL(url);return ['https:','http:'].includes(parsed.protocol)?url:'';}catch{return '';}}
 export const chatImage=(value:unknown)=>/\.(?:jpe?g|png|webp|gif)(?:[?#]|$)/i.test(chatText(value));
-export function chatPreview(item:ChatRow,profileId:unknown,locale:ChatLocale){const c=CHAT_COPY[locale],own=!!chatText(profileId)&&chatText(item.lastMessageSenderProfileId)===chatText(profileId);return (own?c.you+': ':'')+(chatImage(item.lastMessageMediaUrl)?'📷 '+c.photo:chatText(item.lastMessage,item.lastMessageBody)||c.noMessages);}
+export function chatPreview(item:ChatRow,profileId:unknown,locale:ChatLocale){const c=CHAT_COPY[locale],own=!!chatText(profileId)&&chatLastMessageSenderProfileId(item)===chatText(profileId);return (own?c.you+': ':'')+(chatImage(item.lastMessageMediaUrl)?'📷 '+c.photo:chatText(item.lastMessage,item.lastMessageBody)||c.noMessages);}
 export function chatSearch(items:ChatRow[],query:string,profileId:unknown,locale:ChatLocale){const words=query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);return items.filter(item=>{const tokens=(chatName(item,locale)+' '+chatPreview(item,profileId,locale)).toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u);return words.every(word=>tokens.some(token=>token.startsWith(word)));});}
 export const chatDelivery=(message:ChatRow)=>message.readAt||message.read_at?'read':message.deliveredAt||message.delivered_at?'delivered':'sent';
 export function mergeChatMessages(previous:ChatRow[],incoming:ChatRow[]){const items=new Map(previous.map(m=>[chatText(m.id),m]));for(const m of incoming)items.set(chatText(m.id),m);return [...items.values()].sort((a,b)=>(chatDate(a.created_at||a.createdAt)?.getTime()||0)-(chatDate(b.created_at||b.createdAt)?.getTime()||0)||chatText(a.id).localeCompare(chatText(b.id),undefined,{numeric:true}));}
