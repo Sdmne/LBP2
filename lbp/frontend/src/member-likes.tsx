@@ -42,7 +42,7 @@ type CardProps = {
   onLike: (item: MemberRow) => void;
   onMessage: (item: MemberRow) => void;
 };
-const COPY = {
+const COPY_BASE = {
   en: {
     error: "This action could not be completed. Please try again.",
     likeLimit: "You have reached today's like limit. You can like more profiles tomorrow.",
@@ -79,6 +79,14 @@ const COPY = {
     noMatches: "Aún no hay coincidencias. ¡Sigue explorando perfiles!",
     myLikesEmpty: "Aún no te ha gustado nadie. ¡Empieza a explorar perfiles!",
   },
+};
+const COPY = {
+  ...COPY_BASE,
+  pt: COPY_BASE.en,
+  fr: COPY_BASE.en,
+  de: COPY_BASE.en,
+  it: COPY_BASE.en,
+  pl: COPY_BASE.en,
 };
 export function likesProfile(item: MemberRow): MemberRow {
   const data = memberRow(item.data);

@@ -51,7 +51,9 @@ type Page<T> = {
 const asText = (value: unknown) =>
   value === null || value === undefined || value === "" ? "—" : String(value);
 type CookieLocale = "en" | "ru" | "es" | "pt" | "fr" | "de" | "it" | "pl";
-const legacyLocaleOf = (locale: CookieLocale): ChatLocale => (locale === "ru" || locale === "es" ? locale : "en");
+type LegacyLocale = "en" | "ru" | "es";
+const legacyLocaleOf = (locale: CookieLocale): LegacyLocale => (locale === "ru" || locale === "es" ? locale : "en");
+const memberLocaleOf = (locale: CookieLocale): ChatLocale => locale;
 // 2026-09-15: extended from en/ru/es to add pt/fr/de/it/pl (machine-translated,
 // same batch as mobile/src/i18n/translations.ts) - kept as one shared array so
 // localeOf()/switchLocale() below can't silently drift out of sync with
@@ -699,7 +701,7 @@ function CookieConsent() {
   );
 }
 
-function CallManager({session}:{session:Session}) { return <MemberChatCalls session={session} locale={legacyLocaleOf(localeOf())} />; }
+function CallManager({session}:{session:Session}) { return <MemberChatCalls session={session} locale={memberLocaleOf(localeOf())} />; }
 
 const SITE_TEXT = {
   en: {
@@ -4203,7 +4205,7 @@ function Catalog({ session }: { session: Session }) {
       ) : <div className="catalog-reference-empty"><strong>{copy.noProfiles}</strong><span>{copy.noProfilesHelp}</span></div>}
       {!(loading && offset === 0) && items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
       {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => { setFilterOpen(false); setPremiumPromptOpen(false); }} onApply={applyFilters} countries={catalogOptions.countries} cities={cities} premium={catalogOptions.premium} onPremium={openPremiumPrompt} premiumPromptOpen={premiumPromptOpen} /> : null}
-{premiumPromptOpen ? <AccountPremium locale={legacyLocaleOf(locale)} close={() => setPremiumPromptOpen(false)} /> : null}
+{premiumPromptOpen ? <AccountPremium locale={memberLocaleOf(locale)} close={() => setPremiumPromptOpen(false)} /> : null}
     </section>
   );
 }
@@ -4218,11 +4220,11 @@ function Catalog({ session }: { session: Session }) {
 const REPORT_REASONS = ["Spam", "Harassment", "Inappropriate Content", "Fake Profile", "Scam", "Other"];
 
 function CatalogProfile({ session }: { session: Session }) {
- return <MemberProfile session={session} locale={legacyLocaleOf(localeOf())} />;
+  return <MemberProfile session={session} locale={legacyLocaleOf(localeOf())} />;
 }
 
 function Likes({ session }: { session: Session }) {
- return <MemberLikes session={session} locale={legacyLocaleOf(localeOf())} renderProfileCard={props => <CatalogCard {...props} />} />;
+  return <MemberLikes session={session} locale={legacyLocaleOf(localeOf())} renderProfileCard={props => <CatalogCard {...props} />} />;
 }
 
 
@@ -6392,7 +6394,7 @@ function Verification({ session }: { session: Session }) {
     </>
   );
 }
-function Conversations({ session }: { session: Session }) { return <MemberChat session={session} locale={legacyLocaleOf(localeOf())} />; }
+function Conversations({ session }: { session: Session }) { return <MemberChat session={session} locale={memberLocaleOf(localeOf())} />; }
 
 function SimpleMemberList({
   session,
@@ -17153,13 +17155,13 @@ export function WebApp() {
       />
       <Route
         path="/:locale/profile"
-        element={content(<MemberAccount session={session} locale={legacyLocaleOf(locale)} onLogout={logout} />)}
+        element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} />)}
       />
  <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={legacyLocaleOf(localeOf())} />)} />
  <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)} />
  <Route path="/:locale/profile/verification" element={content(<MemberProfileVerification locale={legacyLocaleOf(localeOf())} />)} />
-      <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={legacyLocaleOf(locale)} onLogout={logout} view="notifications" />)} />
-      <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={legacyLocaleOf(locale)} onLogout={logout} view="blocked" />)} />
+      <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} view="notifications" />)} />
+      <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} view="blocked" />)} />
       <Route
         path="/:locale/photos"
         element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)}

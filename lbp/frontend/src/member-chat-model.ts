@@ -1,6 +1,7 @@
 import { CHAT_COPY } from './member-chat-reference';
 export type ChatRow = Record<string, unknown>;
 export type ChatLocale = keyof typeof CHAT_COPY;
+const chatLocaleKey = (locale: ChatLocale): 'en' | 'ru' | 'es' => locale === 'ru' || locale === 'es' ? locale : 'en';
 export const chatText = (...values: unknown[]) => {
   for (const value of values) if ((typeof value === 'string' || typeof value === 'number') && String(value).trim() && !['null','undefined','—'].includes(String(value))) return String(value).trim();
   return '';
@@ -35,12 +36,12 @@ export function chatActivity(item:ChatRow,locale:ChatLocale,now=new Date()) {
   if(chatSupport(item))return CHAT_COPY[locale].support;
   const date=chatDate(item.otherLastSeenAt||item.other_last_seen_at);
   if(!date)return [item.otherCity,item.otherCountry].filter(Boolean).join(', ');
-  if(chatOnline(item,now.getTime()))return {en:'Online',ru:'В сети',es:'En línea'}[locale];
-  const language={en:'en-GB',ru:'ru-RU',es:'es-ES'}[locale];
+  if(chatOnline(item,now.getTime()))return {en:'Online',ru:'В сети',es:'En línea'}[chatLocaleKey(locale)];
+  const language={en:'en-GB',ru:'ru-RU',es:'es-ES'}[chatLocaleKey(locale)];
   const time=date.toLocaleTimeString(language,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   const dayDifference=Math.round((new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime()-new Date(date.getFullYear(),date.getMonth(),date.getDate()).getTime())/86400000);
   const formattedDate=date.toLocaleDateString(language,{day:'2-digit',month:'2-digit',year:'numeric'});
-  return {en:dayDifference===0?`Last seen today at ${time}`:dayDifference===1?`Last seen yesterday at ${time}`:`Last seen ${formattedDate} at ${time}`,ru:dayDifference===0?`Был(а) сегодня в ${time}`:dayDifference===1?`Был(а) вчера в ${time}`:`Был(а) ${formattedDate} в ${time}`,es:dayDifference===0?`Última vez hoy a las ${time}`:dayDifference===1?`Última vez ayer a las ${time}`:`Última vez el ${formattedDate} a las ${time}`}[locale];
+  return {en:dayDifference===0?`Last seen today at ${time}`:dayDifference===1?`Last seen yesterday at ${time}`:`Last seen ${formattedDate} at ${time}`,ru:dayDifference===0?`Был(а) сегодня в ${time}`:dayDifference===1?`Был(а) вчера в ${time}`:`Был(а) ${formattedDate} в ${time}`,es:dayDifference===0?`Última vez hoy a las ${time}`:dayDifference===1?`Última vez ayer a las ${time}`:`Última vez el ${formattedDate} a las ${time}`}[chatLocaleKey(locale)];
 }
 export const chatFileSize=(size:number)=>size<1024?`${size} B`:size<1024*1024?`${(size/1024).toFixed(1)} KB`:`${(size/(1024*1024)).toFixed(1)} MB`;
 export function chatMediaUrl(value:unknown) {const url=chatText(value);if(!url)return '';if(url.startsWith('/')&&!url.startsWith('//'))return url;try{const parsed=new URL(url);return ['https:','http:'].includes(parsed.protocol)?url:'';}catch{return '';}}
@@ -49,5 +50,6 @@ export function chatPreview(item:ChatRow,profileId:unknown,locale:ChatLocale){co
 export function chatSearch(items:ChatRow[],query:string,profileId:unknown,locale:ChatLocale){const words=query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);return items.filter(item=>{const tokens=(chatName(item,locale)+' '+chatPreview(item,profileId,locale)).toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u);return words.every(word=>tokens.some(token=>token.startsWith(word)));});}
 export const chatDelivery=(message:ChatRow)=>message.readAt||message.read_at?'read':message.deliveredAt||message.delivered_at?'delivered':'sent';
 export function mergeChatMessages(previous:ChatRow[],incoming:ChatRow[]){const items=new Map(previous.map(m=>[chatText(m.id),m]));for(const m of incoming)items.set(chatText(m.id),m);return [...items.values()].sort((a,b)=>(chatDate(a.created_at||a.createdAt)?.getTime()||0)-(chatDate(b.created_at||b.createdAt)?.getTime()||0)||chatText(a.id).localeCompare(chatText(b.id),undefined,{numeric:true}));}
-export function chatAttachmentError(file:Pick<File,'type'|'size'>,locale:ChatLocale){if(file.size>10*1024*1024)return CHAT_COPY[locale].attachmentTooLarge;if(!['image/jpeg','image/png','image/webp','application/pdf'].includes(file.type))return {en:'Only JPEG, PNG, WebP images and PDF files are supported.',ru:'Поддерживаются JPEG, PNG, WebP и PDF.',es:'Se admiten imágenes JPEG, PNG, WebP y archivos PDF.'}[locale];return '';}
-export const CHAT_REPORT_REASONS={en:['Spam','Harassment','Inappropriate Content','Fake Profile','Scam','Other'],ru:['Спам','Домогательства','Недопустимый контент','Фейковый профиль','Мошенничество','Другое'],es:['Spam','Acoso','Contenido inapropiado','Perfil falso','Estafa','Otro']};
+export function chatAttachmentError(file:Pick<File,'type'|'size'>,locale:ChatLocale){if(file.size>10*1024*1024)return CHAT_COPY[locale].attachmentTooLarge;if(!['image/jpeg','image/png','image/webp','application/pdf'].includes(file.type))return {en:'Only JPEG, PNG, WebP images and PDF files are supported.',ru:'Поддерживаются JPEG, PNG, WebP и PDF.',es:'Se admiten imágenes JPEG, PNG, WebP y archivos PDF.'}[chatLocaleKey(locale)];return '';}
+const CHAT_REPORT_REASONS_BASE={en:['Spam','Harassment','Inappropriate Content','Fake Profile','Scam','Other'],ru:['Спам','Домогательства','Недопустимый контент','Фейковый профиль','Мошенничество','Другое'],es:['Spam','Acoso','Contenido inapropiado','Perfil falso','Estafa','Otro']};
+export const CHAT_REPORT_REASONS={...CHAT_REPORT_REASONS_BASE,pt:CHAT_REPORT_REASONS_BASE.en,fr:CHAT_REPORT_REASONS_BASE.en,de:CHAT_REPORT_REASONS_BASE.en,it:CHAT_REPORT_REASONS_BASE.en,pl:CHAT_REPORT_REASONS_BASE.en};

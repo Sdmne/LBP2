@@ -49,7 +49,7 @@ export const memberBoolean = (value: unknown) =>
   value === true ||
   value === 1 ||
   ["true", "1", "yes"].includes(String(value).toLowerCase());
-const COPY = {
+const COPY_BASE = {
   en: {
     loading: "Loading…",
     loadError: "Could not load this page.",
@@ -106,6 +106,14 @@ const COPY = {
     verify: "Verificar ahora",
     later: "Ahora no",
   },
+};
+const COPY = {
+  ...COPY_BASE,
+  pt: COPY_BASE.en,
+  fr: COPY_BASE.en,
+  de: COPY_BASE.en,
+  it: COPY_BASE.en,
+  pl: COPY_BASE.en,
 };
 
 export function AccountIcon({ name }: { name: keyof typeof ACCOUNT_ICONS }) {
@@ -741,7 +749,16 @@ function Overview({
               undefined,
               () => setDialog("language"),
               (
-                { en: "English", ru: "Русский", es: "Español" } as Record<
+                {
+                  en: "English",
+                  ru: "Русский",
+                  es: "Español",
+                  pt: "Português",
+                  fr: "Français",
+                  de: "Deutsch",
+                  it: "Italiano",
+                  pl: "Polski",
+                } as Record<
                   string,
                   string
                 >

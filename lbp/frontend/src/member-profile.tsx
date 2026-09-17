@@ -15,6 +15,7 @@ import { NotFoundPage } from "./not-found";
 
 type Row = Record<string, unknown>;
 type Locale = keyof typeof PROFILE_COPY;
+const profileLocaleKey = (locale: Locale): 'en' | 'ru' | 'es' => locale === 'ru' || locale === 'es' ? locale : 'en';
 type Session = { user: Row } | null;
 const api = createApiClient("/api");
 const icons = { ...PROFILE_ICONS, ...PREMIUM_ICONS };
@@ -344,7 +345,8 @@ export function PremiumDialog({
   const [subscription, setSubscription] = useState<Row | null>(null);
   const [error, setError] = useState(false);
   const [tier, setTier] = useState<0 | 1 | 2>(1);
-  const pricing = PRICING_TEXT[locale];
+  const pricingLocale = locale === "ru" || locale === "es" ? locale : "en";
+  const pricing = PRICING_TEXT[pricingLocale];
   const selectedPlan = pricing.plans[tier];
   const [plan, setPlan] = useState("quarterly");
   const [mobile, setMobile] = useState(false);
@@ -425,13 +427,13 @@ export function PremiumDialog({
             {error ? (
               <div className="premium-current-plan">
                 <p role="alert">
-                  {
-                    {
-                      en: "Could not load your Premium access.",
-                      ru: "Не удалось загрузить данные Premium.",
-                      es: "No se pudo cargar tu acceso Premium.",
-                    }[locale]
-                  }
+            {
+              {
+                en: "Could not load your Premium access.",
+                ru: "Не удалось загрузить данные Premium.",
+                es: "No se pudo cargar tu acceso Premium.",
+              }[pricingLocale]
+            }
                 </p>
                 <button
                   type="button"
@@ -439,9 +441,9 @@ export function PremiumDialog({
                   onClick={() => setRetry((value) => value + 1)}
                 >
                   {
-                    { en: "Try again", ru: "Повторить", es: "Reintentar" }[
-                      locale
-                    ]
+              { en: "Try again", ru: "Повторить", es: "Reintentar" }[
+                pricingLocale
+              ]
                   }
                 </button>
               </div>
@@ -895,7 +897,7 @@ function ProfileScreen({
       failedDescription: "Comprueba tu conexión e inténtalo de nuevo.",
       retry: "Reintentar",
     },
-  }[locale];
+  }[profileLocaleKey(locale)];
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Row | null>(null);
   const [loadError, setLoadError] = useState<"unavailable" | "failed" | null>(null);
@@ -1049,7 +1051,7 @@ function ProfileScreen({
               kind === "like"
                 ? "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana."
                 : "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
-          }[locale],
+          }[profileLocaleKey(locale)],
         );
       else if (
         failure instanceof ApiError &&
@@ -1070,14 +1072,14 @@ function ProfileScreen({
               kind === "like"
                 ? "Este perfil ya no está disponible."
                 : "No se puede abrir esta conversación ahora mismo.",
-          }[locale],
+          }[profileLocaleKey(locale)],
         );
       else {
         let message = {
           en: "Unable to complete this action. Please try again.",
           ru: "Не удалось выполнить действие. Попробуйте ещё раз.",
           es: "No se pudo completar la acción. Inténtalo de nuevo.",
-        }[locale];
+        }[profileLocaleKey(locale)];
         if (failure instanceof ApiError && failure.status < 500) {
           try {
             const parsed = JSON.parse(failure.message);
@@ -1093,7 +1095,7 @@ function ProfileScreen({
       if (mounted.current) setPending(false);
     }
   };
-  if (loadError === "unavailable") return <NotFoundPage locale={locale} />;
+  if (loadError === "unavailable") return <NotFoundPage locale={profileLocaleKey(locale)} />;
   if (loadError)
     return (
       <section
@@ -1133,7 +1135,7 @@ function ProfileScreen({
             en: "Loading profile",
             ru: "Загрузка профиля",
             es: "Cargando perfil",
-          }[locale]
+          }[profileLocaleKey(locale)]
         }
       >
         <span className="loading-spinner" aria-hidden="true" />
@@ -1264,7 +1266,7 @@ function ProfileScreen({
       "Estafa",
       "Otro",
     ],
-  }[locale];
+  }[profileLocaleKey(locale)];
   const errorNode = error && (
     <p className="member-profile-error" role="alert">
       {error}
@@ -1407,7 +1409,7 @@ function ProfileScreen({
                               en: "Donor's contact",
                               ru: "Контакт донора",
                               es: "Contacto del donante",
-                            }[locale]
+                            }[profileLocaleKey(locale)]
                           : c.childContact}
                       </h2>
                       <div className="chip-row">

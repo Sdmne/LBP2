@@ -1,5 +1,5 @@
 // Copy and fixed SVG assets retained from the existing HTML implementation.
-export const ACCOUNT_COPY = {
+const ACCOUNT_COPY_BASE = {
   en: {
     back: "Back to profile",
     blockedBack: "My profile",
@@ -508,6 +508,15 @@ export const ACCOUNT_COPY = {
   },
 } as const;
 
+export const ACCOUNT_COPY = {
+  ...ACCOUNT_COPY_BASE,
+  pt: { ...ACCOUNT_COPY_BASE.en, language: "Idioma da interface", selectLanguage: "Escolha o idioma da interface", close: "Fechar", save: "Salvar alteracoes", saved: "Perfil salvo." },
+  fr: { ...ACCOUNT_COPY_BASE.en, language: "Langue de l'interface", selectLanguage: "Choisir la langue de l'interface", close: "Fermer", save: "Enregistrer les modifications", saved: "Profil enregistre." },
+  de: { ...ACCOUNT_COPY_BASE.en, language: "Sprache der Oberflaeche", selectLanguage: "Sprache der Oberflaeche waehlen", close: "Schliessen", save: "Aenderungen speichern", saved: "Profil gespeichert." },
+  it: { ...ACCOUNT_COPY_BASE.en, language: "Lingua dell'interfaccia", selectLanguage: "Scegli la lingua dell'interfaccia", close: "Chiudi", save: "Salva modifiche", saved: "Profilo salvato." },
+  pl: { ...ACCOUNT_COPY_BASE.en, language: "Jezyk interfejsu", selectLanguage: "Wybierz jezyk interfejsu", close: "Zamknij", save: "Zapisz zmiany", saved: "Profil zapisany." },
+} as const;
+
 export const ACCOUNT_ICONS = {
   eyeIcon:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg>',
@@ -540,7 +549,7 @@ export const ACCOUNT_ICONS = {
     '<svg class="saved-directory-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"></path><path d="M7 10v12"></path></svg>',
 } as const;
 
-export const ACCOUNT_DELETION_REASONS = {
+const ACCOUNT_DELETION_REASONS_BASE = {
   en: [
     "No matches",
     "No longer interested",
@@ -576,7 +585,16 @@ export const ACCOUNT_DELETION_REASONS = {
   ],
 } as const;
 
-export const LIKES_COPY = {
+export const ACCOUNT_DELETION_REASONS = {
+  ...ACCOUNT_DELETION_REASONS_BASE,
+  pt: ACCOUNT_DELETION_REASONS_BASE.en,
+  fr: ACCOUNT_DELETION_REASONS_BASE.en,
+  de: ACCOUNT_DELETION_REASONS_BASE.en,
+  it: ACCOUNT_DELETION_REASONS_BASE.en,
+  pl: ACCOUNT_DELETION_REASONS_BASE.en,
+} as const;
+
+const LIKES_COPY_BASE = {
   en: {
     likesTitle: "Likes",
     likesYou: "Likes you",
@@ -658,4 +676,13 @@ export const LIKES_COPY = {
     liked: "Liked",
     sendMessage: "Enviar mensaje",
   },
+} as const;
+
+export const LIKES_COPY = {
+  ...LIKES_COPY_BASE,
+  pt: LIKES_COPY_BASE.en,
+  fr: LIKES_COPY_BASE.en,
+  de: LIKES_COPY_BASE.en,
+  it: LIKES_COPY_BASE.en,
+  pl: LIKES_COPY_BASE.en,
 } as const;

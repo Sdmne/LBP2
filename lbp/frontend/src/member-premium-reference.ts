@@ -3,7 +3,7 @@ import { PRICING_TEXT } from "./pricing-reference";
 export const BUILDER_QUARTERLY_TOTAL = PRICING_TEXT.en.plans[1].altNote.match(/€[\d.]+/g)![0];
 export const BUILDER_QUARTERLY_MONTH = PRICING_TEXT.en.plans[1].altNote.match(/€[\d.]+/g)![1];
 export const BUILDER_QUARTERLY_SAVING = PRICING_TEXT.en.plans[1].altNote.match(/\d+%/)![0];
-export const PREMIUM_COPY = {
+const PREMIUM_COPY_BASE = {
   en: {
     title: "Premium subscription",
     subtitle: "Unlock all features of LetsBeParents",
@@ -103,6 +103,15 @@ export const PREMIUM_COPY = {
     maybeLater: "Quizá más tarde",
     paymentUnavailable: "El pago todavía no está conectado.",
   },
+};
+
+export const PREMIUM_COPY = {
+  ...PREMIUM_COPY_BASE,
+  pt: PREMIUM_COPY_BASE.en,
+  fr: PREMIUM_COPY_BASE.en,
+  de: PREMIUM_COPY_BASE.en,
+  it: PREMIUM_COPY_BASE.en,
+  pl: PREMIUM_COPY_BASE.en,
 };
 export const PREMIUM_ICONS = {
   heartIcon:

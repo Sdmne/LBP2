@@ -1,4 +1,4 @@
-export const CHAT_COPY = {
+const CHAT_COPY_BASE = {
   "en": {
     "messagesTitle": "Messages",
     "searchConversations": "Search conversations...",
@@ -224,6 +224,15 @@ export const CHAT_COPY = {
       "unavailable": "Las llamadas no están disponibles temporalmente."
     }
   }
+} as const;
+
+export const CHAT_COPY = {
+  ...CHAT_COPY_BASE,
+  pt: { ...CHAT_COPY_BASE.en, messagesTitle: "Mensagens", searchConversations: "Pesquisar conversas...", noConversations: "Ainda nao ha conversas.", writeMessage: "Digite uma mensagem...", send: "Enviar", today: "Hoje", you: "Voce", close: "Fechar", report: "Denunciar", blockUser: "Bloquear" },
+  fr: { ...CHAT_COPY_BASE.en, messagesTitle: "Messages", searchConversations: "Rechercher des conversations...", noConversations: "Aucune conversation pour le moment.", writeMessage: "Ecrire un message...", send: "Envoyer", today: "Aujourd'hui", you: "Vous", close: "Fermer", report: "Signaler", blockUser: "Bloquer" },
+  de: { ...CHAT_COPY_BASE.en, messagesTitle: "Nachrichten", searchConversations: "Unterhaltungen suchen...", noConversations: "Noch keine Unterhaltungen.", writeMessage: "Nachricht eingeben...", send: "Senden", today: "Heute", you: "Du", close: "Schliessen", report: "Melden", blockUser: "Blockieren" },
+  it: { ...CHAT_COPY_BASE.en, messagesTitle: "Messaggi", searchConversations: "Cerca conversazioni...", noConversations: "Ancora nessuna conversazione.", writeMessage: "Scrivi un messaggio...", send: "Invia", today: "Oggi", you: "Tu", close: "Chiudi", report: "Segnala", blockUser: "Blocca" },
+  pl: { ...CHAT_COPY_BASE.en, messagesTitle: "Wiadomosci", searchConversations: "Szukaj rozmow...", noConversations: "Brak rozmow.", writeMessage: "Napisz wiadomosc...", send: "Wyslij", today: "Dzisiaj", you: "Ty", close: "Zamknij", report: "Zglos", blockUser: "Zablokuj" },
 } as const;
 export const CHAT_ICONS: Record<string,string> = {
   "supportIcon": "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 14v-2a8 8 0 0 1 16 0v2\"></path><path d=\"M18 19h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3v4a3 3 0 0 1-3 3Z\"></path><path d=\"M6 19h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H4v4a3 3 0 0 0 3 3Z\"></path></svg>",

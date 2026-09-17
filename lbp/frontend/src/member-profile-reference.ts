@@ -1,5 +1,5 @@
 // Text, option labels and SVG markup preserved from the existing HTML member profile.
-export const PROFILE_COPY = {
+const PROFILE_COPY_BASE = {
   en: {
     close: "Close",
     member: "LetsBeParents member",
@@ -187,6 +187,15 @@ export const PROFILE_COPY = {
     openContact: "Contacto abierto",
     identity: "Revelación de identidad a los 18 años",
   },
+};
+
+export const PROFILE_COPY = {
+  ...PROFILE_COPY_BASE,
+  pt: { ...PROFILE_COPY_BASE.en, close: "Fechar", sendMessage: "Enviar mensagem", like: "Curtir", liked: "Curtido", aboutMe: "Sobre mim", languages: "Idiomas", appearance: "Aparencia", locationHidden: "Localizacao oculta", verified: "Verificado", verifyProfile: "Verificacao do perfil", verifyNow: "Iniciar verificacao", notNow: "Agora nao" },
+  fr: { ...PROFILE_COPY_BASE.en, close: "Fermer", sendMessage: "Envoyer un message", like: "J'aime", liked: "Aime", aboutMe: "A propos de moi", languages: "Langues", appearance: "Apparence", locationHidden: "Lieu masque", verified: "Verifie", verifyProfile: "Verification du profil", verifyNow: "Commencer la verification", notNow: "Pas maintenant" },
+  de: { ...PROFILE_COPY_BASE.en, close: "Schliessen", sendMessage: "Nachricht senden", like: "Like", liked: "Geliket", aboutMe: "Ueber mich", languages: "Sprachen", appearance: "Aussehen", locationHidden: "Standort verborgen", verified: "Verifiziert", verifyProfile: "Profilverifizierung", verifyNow: "Verifizierung starten", notNow: "Nicht jetzt" },
+  it: { ...PROFILE_COPY_BASE.en, close: "Chiudi", sendMessage: "Invia messaggio", like: "Mi piace", liked: "Piaciuto", aboutMe: "Su di me", languages: "Lingue", appearance: "Aspetto", locationHidden: "Posizione nascosta", verified: "Verificato", verifyProfile: "Verifica del profilo", verifyNow: "Avvia verifica", notNow: "Non ora" },
+  pl: { ...PROFILE_COPY_BASE.en, close: "Zamknij", sendMessage: "Wyslij wiadomosc", like: "Polub", liked: "Polubiono", aboutMe: "O mnie", languages: "Jezyki", appearance: "Wyglad", locationHidden: "Lokalizacja ukryta", verified: "Zweryfikowany", verifyProfile: "Weryfikacja profilu", verifyNow: "Rozpocznij weryfikacje", notNow: "Nie teraz" },
 };
 export const PROFILE_OPTIONS: Record<string, string[][]> = {
   profileTypes: [
@@ -448,6 +457,10 @@ export const PROFILE_TRANSLATIONS: Record<string, Record<string, string>> = {
     REGULARLY: "Regularmente",
   },
 };
+
+for (const locale of ["pt", "fr", "de", "it", "pl"]) {
+  PROFILE_TRANSLATIONS[locale] = PROFILE_TRANSLATIONS[locale] || {};
+}
 export const PROFILE_ICONS = {
   pageBackIcon:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>',
