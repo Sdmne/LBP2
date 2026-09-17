@@ -543,6 +543,7 @@ body {
 }
 .photo-card img {
   width: 100%;
+  height: auto;
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: 10px;
@@ -968,6 +969,13 @@ body {
   max-width: 80%;
   display: grid;
   gap: 5px;
+}
+.message-bubble.mine {
+  align-self: flex-end;
+  background: #eaf6fd;
+}
+.message-bubble.theirs {
+  align-self: flex-start;
 }
 .message-bubble a {
   color: #0b68d8;
@@ -5496,7 +5504,7 @@ button.landing-gradient-button:disabled {
 }
 
 .catalog-card-dots.empty {
-  visibility: hidden;
+  display: none;
 }
 
 .catalog-card-dots button {
@@ -5560,6 +5568,7 @@ button.landing-gradient-button:disabled {
 }
 
 .catalog-verified-icon.is-unverified {
+  display: none;
   stroke: #c4cedb;
 }
 
