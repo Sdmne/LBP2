@@ -14616,7 +14616,7 @@ function Boost({ session }: { session: Session }) {
   };
 
   return (
-    <section className="member-form">
+    <section className="member-form tool-page tool-page-boost">
       <h1>{text.title}</h1>
       <MemberLinks locale={locale} />
       <p>
@@ -14735,7 +14735,7 @@ function Referral({ session }: { session: Session }) {
   };
 
   return (
-    <section className="member-form">
+    <section className="member-form tool-page tool-page-referral">
       <h1>{text.title}</h1>
       <MemberLinks locale={locale} />
       <p>
@@ -15937,7 +15937,7 @@ function SafetyCheckIn({ session }: { session: Session }) {
   };
 
   return (
-    <section className="member-form">
+    <section className="member-form tool-page tool-page-safety">
       <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
       <p>{text.intro}</p>
@@ -16085,7 +16085,7 @@ function VideoVerification({ session }: { session: Session }) {
   };
 
   return (
-    <section className="member-form">
+    <section className="member-form tool-page tool-page-video">
       <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
       <p>{text.intro}</p>
@@ -16307,7 +16307,7 @@ function CostCalculator() {
     });
   };
   return (
-    <section className="member-form">
+    <section className="member-form tool-page tool-page-calculator">
       <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
       <p>{text.intro}</p>
@@ -16756,28 +16756,31 @@ function CommunityGroups({ session }: { session: Session }) {
   }, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
   return (
-    <section>
+    <section className="member-form tool-page tool-page-community">
       <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
       {status === "loading" && <p className="notice">{text.loading}</p>}
       {status === "error" && <p className="error">{text.error}</p>}
-      <div className="list-card">
-        {status === "ok" && groups.length === 0 ? (
-          <p className="notice">{text.empty}</p>
-        ) : (
-          <ul className="family-room-documents">
-            {groups.map((group) => (
-              <li key={asText(group.id)}>
-                <Link to={`/${locale}/community/${encodeURIComponent(asText(group.id))}`}>
-                  {asText(group.name)}
-                </Link>
-                <span>{asText(group.description)}</span>
-                <span>{asText(group.postCount)} {text.postsCountLabel}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {status === "ok" && groups.length === 0 ? (
+        <p className="notice">{text.empty}</p>
+      ) : (
+        <div className="community-group-grid">
+          {groups.map((group) => (
+            <Link
+              key={asText(group.id)}
+              className="community-group-card"
+              to={`/${locale}/community/${encodeURIComponent(asText(group.id))}`}
+            >
+              <span className="community-group-card-icon" />
+              <h3>{asText(group.name)}</h3>
+              <p>{asText(group.description)}</p>
+              <span className="community-group-card-count">
+                {asText(group.postCount)} {text.postsCountLabel}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

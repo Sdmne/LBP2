@@ -5019,6 +5019,8 @@ function Support() {
                 <Link
                   className="support-view-profile"
                   to={`/users/${encodeURIComponent(String(selectedConversation.userId))}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   <AdminIcon name="externalLink" /> View Profile
                 </Link>
@@ -5211,9 +5213,13 @@ function ModerationPhotos() {
                 </div>
                 <div className="moderation-photo-details">
                   {profileId ? (
-                    <Link to={`/users/${encodeURIComponent(String(profileId))}`}>
-                      {rowName(row)}
-                    </Link>
+              <Link
+                to={`/users/${encodeURIComponent(String(profileId))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {rowName(row)}
+              </Link>
                   ) : (
                     <b>{rowName(row)}</b>
                   )}
@@ -5349,7 +5355,13 @@ function AdminBoosts() {
               <article key={rowId} className="generic-request-row">
                 <div>
                   {profileId ? (
-                    <Link to={`/users/${encodeURIComponent(String(profileId))}`}>{valueOf(data.profileName) || `Profile #${String(profileId)}`}</Link>
+                <Link
+                  to={`/users/${encodeURIComponent(String(profileId))}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {valueOf(data.profileName) || `Profile #${String(profileId)}`}
+                </Link>
                   ) : (
                     <b>{valueOf(data.profileName) || "No profile"}</b>
                   )}
@@ -5450,7 +5462,13 @@ function AdminVideoVerifications() {
                 <video controls preload="none" src={`/admin/api/admin/video-verifications/${encodeURIComponent(rowId)}/content`} />
                 <div>
                   {profileId ? (
-                    <Link to={`/users/${encodeURIComponent(String(profileId))}`}>{valueOf(data.profileName) || `Profile #${String(profileId)}`}</Link>
+                    <Link
+                      to={`/users/${encodeURIComponent(String(profileId))}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {valueOf(data.profileName) || `Profile #${String(profileId)}`}
+                    </Link>
                   ) : (
                     <b>{valueOf(data.profileName) || "No profile"}</b>
                   )}
@@ -5583,6 +5601,8 @@ function ReportPerson({
     <Link
       className="moderation-report-person"
       to={`/users/${encodeURIComponent(String(profileId))}`}
+      target="_blank"
+      rel="noopener noreferrer"
     >
       {content}
     </Link>
@@ -11443,7 +11463,12 @@ function UserTabContent({
         row.id,
     );
     return id ? (
-      <Link className="user-mini-link" to={`/users/${id}`}>
+      <Link
+        className="user-mini-link"
+        to={`/users/${id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         <PersonAvatar
           row={{ ...row, ...item }}
           name={name}

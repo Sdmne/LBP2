@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 
-export type OptionRow = { value: string; label: string; count?: number; icon?: string };
+export type OptionRow = { value: string; label: string; count?: number; icon?: string; placeId?: string };
 
 // Shared full-screen modal list picker - single or multi-select, with an
 // optional loading spinner for async option lists (country/city). Extracted
@@ -33,7 +33,7 @@ export function OptionListPicker({
   // shorter country/city/ethnicity lists that don't pass it.
   searchable?: boolean;
   searchPlaceholder?: string;
-  onToggle: (value: string) => void;
+  onToggle: (value: string, option: OptionRow) => void;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -74,7 +74,7 @@ export function OptionListPicker({
           {filteredOptions.map((option) => {
             const isSelected = selected.includes(option.value);
             return (
-              <Pressable key={option.value || "any"} style={styles.row} onPress={() => onToggle(option.value)}>
+              <Pressable key={option.value || "any"} style={styles.row} onPress={() => onToggle(option.value, option)}>
                 <View style={styles.rowLabelWrap}>
                   {option.icon ? <Text style={styles.rowIcon}>{option.icon}</Text> : null}
                   <Text style={styles.rowLabel}>

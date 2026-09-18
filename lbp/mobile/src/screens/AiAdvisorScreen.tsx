@@ -245,7 +245,12 @@ export default function AiAdvisorScreen({}: Props) {
           multiline
           editable={configured}
         />
-        <Pressable onPress={() => void send()} disabled={!draft.trim() || sending || !configured} hitSlop={8}>
+        <Pressable
+          onPress={() => void send()}
+          disabled={!draft.trim() || sending || !configured}
+          hitSlop={8}
+          style={styles.sendButton}
+        >
           <Feather name="send" size={20} color={draft.trim() && configured ? colors.pink : colors.muted} />
         </Pressable>
       </View>
@@ -294,6 +299,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgSoft,
   },
   clearButton: { paddingBottom: 8 },
+  // Alena: "Кнопка отправить уехала" - unlike clearButton just above (which
+  // has an explicit paddingBottom to line it up with the input's own
+  // padding), this Pressable used to carry no style at all. With inputBar's
+  // alignItems: "flex-end" that left it flush against the very bottom edge
+  // of the row instead of level with the clear button and the input text -
+  // more noticeable the taller the multiline input grows. Matching
+  // clearButton's paddingBottom keeps both icons visually anchored
+  // together regardless of how many lines the draft wraps to.
+  sendButton: { paddingBottom: 8 },
   input: {
     flex: 1,
     maxHeight: 100,

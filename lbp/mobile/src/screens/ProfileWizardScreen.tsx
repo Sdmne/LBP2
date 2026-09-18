@@ -113,6 +113,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
   const [dobYear, setDobYear] = useState("");
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
+  const [cityPlaceId, setCityPlaceId] = useState("");
   const [countries, setCountries] = useState<CatalogFilterOptionRow[]>([]);
   const [cities, setCities] = useState<CatalogFilterOptionRow[]>([]);
   const [loadingCountries, setLoadingCountries] = useState(false);
@@ -217,8 +218,10 @@ export default function ProfileWizardScreen({ navigation }: Props) {
   }
 
   function validateBasic(): string | null {
-    if (!name.trim()) return t("editProfile.nameRequired");
-    if (!dobDay || !dobMonth || !dobYear) return t("editProfile.dobRequired");
+  if (!name.trim()) return t("editProfile.nameRequired");
+  if (!dobDay || !dobMonth || !dobYear) return t("editProfile.dobRequired");
+  if (!country) return t("filters.selectCountryFirst");
+  if (!city || !cityPlaceId) return t("editProfile.selectCity");
     const day = parseInt(dobDay, 10);
     const month = parseInt(dobMonth, 10);
     const year = parseInt(dobYear, 10);
@@ -307,6 +310,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         dateOfBirth,
         country,
         city,
+        cityPlaceId,
         ethnicity,
         about,
         languages,
@@ -859,7 +863,10 @@ export default function ProfileWizardScreen({ navigation }: Props) {
           selected={country ? [country] : []}
           multi={false}
           onToggle={(value) => {
-            if (value !== country) setCity("");
+            if (value !== country) {
+              setCity("");
+              setCityPlaceId("");
+            }
             setCountry(value);
             setPicker(null);
           }}
@@ -870,11 +877,12 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         <OptionListPicker
           title={t("filters.city")}
           loading={loadingCities}
-          options={cities.map((c): OptionRow => ({ value: c.value, label: c.label }))}
+          options={cities.map((c): OptionRow => ({ value: c.value, label: c.label, placeId: c.placeId }))}
           selected={city ? [city] : []}
           multi={false}
-          onToggle={(value) => {
+          onToggle={(value, option) => {
             setCity(value);
+            setCityPlaceId(option.placeId || "");
             setPicker(null);
           }}
           onClose={() => setPicker(null)}

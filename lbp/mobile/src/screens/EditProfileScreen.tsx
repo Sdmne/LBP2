@@ -215,6 +215,7 @@ export default function EditProfileScreen({ navigation }: Props) {
   const [dobYear, setDobYear] = useState("");
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
+  const [cityPlaceId, setCityPlaceId] = useState("");
   const [ethnicity, setEthnicity] = useState("");
   const [about, setAbout] = useState("");
   const [languages, setLanguages] = useState<string[]>([]);
@@ -240,6 +241,7 @@ export default function EditProfileScreen({ navigation }: Props) {
     setDobDay(d || "");
     setCountry(profile.country || "");
     setCity(profile.city || "");
+    setCityPlaceId(profile.data.cityPlaceId || "");
     setEthnicity(profile.data.ethnicity || "");
     setAbout(profile.data.about || profile.data.bio || "");
     setLanguages(profile.data.languages || []);
@@ -309,6 +311,14 @@ export default function EditProfileScreen({ navigation }: Props) {
       setSaveError(t("editProfile.dobInvalid"));
       return;
     }
+    if (!country) {
+      setSaveError(t("filters.selectCountryFirst"));
+      return;
+    }
+    if (!city || !cityPlaceId) {
+      setSaveError(t("editProfile.selectCity"));
+      return;
+    }
     const dateOfBirth = `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
 
     setSaving(true);
@@ -318,6 +328,7 @@ export default function EditProfileScreen({ navigation }: Props) {
         dateOfBirth,
         country,
         city,
+        cityPlaceId,
         ethnicity,
         about,
         languages,
@@ -498,7 +509,10 @@ export default function EditProfileScreen({ navigation }: Props) {
           selected={country ? [country] : []}
           multi={false}
           onToggle={(value) => {
-            if (value !== country) setCity("");
+            if (value !== country) {
+              setCity("");
+              setCityPlaceId("");
+            }
             setCountry(value);
             setPicker(null);
           }}
@@ -510,11 +524,12 @@ export default function EditProfileScreen({ navigation }: Props) {
         <OptionListPicker
           title={t("filters.city")}
           loading={loadingCities}
-          options={cities.map((c): OptionRow => ({ value: c.value, label: c.label }))}
+          options={cities.map((c): OptionRow => ({ value: c.value, label: c.label, placeId: c.placeId }))}
           selected={city ? [city] : []}
           multi={false}
-          onToggle={(value) => {
+          onToggle={(value, option) => {
             setCity(value);
+            setCityPlaceId(option.placeId || "");
             setPicker(null);
           }}
           onClose={() => setPicker(null)}
