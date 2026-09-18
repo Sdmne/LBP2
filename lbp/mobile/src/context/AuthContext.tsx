@@ -27,7 +27,13 @@ const TOKEN_STORAGE_KEY = "lbp_session_token";
 // badge or current-plan status - both real fields the backend already
 // sends, just not exposed. Widened to match reality instead of adding a
 // second fetch.
-type AuthUser = PublicUser & { profileVerified?: boolean; isPremium?: boolean; profileCompleteness?: number };
+type AuthUser = PublicUser & {
+  profileVerified?: boolean;
+  isPremium?: boolean;
+  profileCompleteness?: number;
+  isWizardCompleted?: boolean;
+  needsProfileWizard?: boolean;
+};
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -133,7 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSessionToken(res.sessionToken);
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
-        setPendingProfileWizard(true);
+        setPendingProfileWizard(res.user.needsProfileWizard !== false);
         setInitialEmailSendFailed(res.emailSent === false);
         void syncPushToken();
       },
@@ -144,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(res.user);
         // Only a brand-new social account needs the wizard - one that already
         // existed (a returning Google/Apple login) already has a profile.
-        setPendingProfileWizard(!!res.isNewUser);
+        setPendingProfileWizard(res.user.needsProfileWizard === true || (!!res.isNewUser && res.user.isWizardCompleted !== true));
         void syncPushToken();
       },
       async refreshUser() {
@@ -154,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       async confirmEmailCode(code) {
         const res = await authApi.confirmEmailCode(code);
         setUser(res.user);
+        setPendingProfileWizard(res.user.needsProfileWizard === true);
       },
       async resendEmailVerification(locale = "en") {
         const res = await authApi.resendEmailVerification(locale);

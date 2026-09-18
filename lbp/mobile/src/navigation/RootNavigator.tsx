@@ -188,6 +188,7 @@ export default function RootNavigator() {
   } = useAuth();
   const { t } = useI18n();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const needsProfileWizard = pendingProfileWizard || user?.needsProfileWizard === true;
 
   // One-shot post-signup push for the profile wizard. Guarded against the
   // blocking VerifyCode gate (user signed in but !user.emailVerified) -
@@ -196,12 +197,13 @@ export default function RootNavigator() {
   // once the person clears verification this effect's own re-run (user
   // changes on confirmEmailCode) picks the wizard back up.
   useEffect(() => {
-    if (!isAuthenticated || !pendingProfileWizard) return;
+    if (!isAuthenticated || !needsProfileWizard) return;
     if (user && !user.emailVerified) return;
     if (!navigationRef.isReady()) return;
+    if (navigationRef.getCurrentRoute()?.name === "ProfileWizard") return;
     navigationRef.navigate("ProfileWizard");
     clearPendingProfileWizard();
-  }, [isAuthenticated, pendingProfileWizard, user, navigationRef, clearPendingProfileWizard]);
+  }, [isAuthenticated, needsProfileWizard, user, navigationRef, clearPendingProfileWizard]);
 
   // One-shot "what's new" push (Alena: "в приложении надо какой-то экран
   // создать при входе первый раз что появилось на сайте") - shown once per
@@ -212,7 +214,7 @@ export default function RootNavigator() {
   // AsyncStorage read is in flight.
   const whatsNewChecked = useRef(false);
   useEffect(() => {
-    if (!isAuthenticated || pendingProfileWizard) return;
+    if (!isAuthenticated || needsProfileWizard) return;
     if (user && !user.emailVerified) return;
     if (!navigationRef.isReady()) return;
     if (whatsNewChecked.current) return;
@@ -220,7 +222,7 @@ export default function RootNavigator() {
     hasSeenWhatsNew().then((seen) => {
       if (!seen) navigationRef.navigate("WhatsNew");
     });
-  }, [isAuthenticated, pendingProfileWizard, user, navigationRef]);
+  }, [isAuthenticated, needsProfileWizard, user, navigationRef]);
 
   if (isLoading) {
     return (

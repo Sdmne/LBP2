@@ -93,6 +93,11 @@ const refreshSession = async (fallback: Session): Promise<Session> => {
   }
 };
 
+const userNeedsProfileWizard = (session: Session | undefined | null): boolean =>
+  session?.user?.emailVerified !== false && session?.user?.needsProfileWizard === true;
+
+const profileWizardPath = (locale: CookieLocale): string => `/${locale}/profile/edit`;
+
 const COOKIE_MAX_AGE = 180 * 24 * 60 * 60;
 const COOKIE_LOCALE_MAX_AGE = 365 * 24 * 60 * 60;
 
@@ -2004,7 +2009,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
       });
       const nextSession = await refreshSession({ user: response.user });
       onLogin(nextSession);
-      navigate(`/${locale}/${nextSession?.user.emailVerified === false ? "auth/verify-email" : "catalog"}`);
+      navigate(nextSession?.user.emailVerified === false ? `/${locale}/auth/verify-email` : userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
     } catch {
       setError(copy.signInError);
     } finally {
@@ -2016,8 +2021,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     setError("");
     try {
       const response = await signInWithSocial(provider, "login");
-      onLogin(await refreshSession(response));
-      navigate(`/${locale}/${response.isNewUser ? "profile" : "catalog"}`);
+      const nextSession = await refreshSession(response);
+      onLogin(nextSession);
+      navigate(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
     } catch (error) {
       setError(socialErrorMessage(error));
     } finally {
@@ -2136,8 +2142,9 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
     setError("");
     try {
       const response = await signInWithSocial(provider, "register");
-      onLogin(await refreshSession(response));
-      navigate(`/${locale}/profile`);
+      const nextSession = await refreshSession(response);
+      onLogin(nextSession);
+      navigate(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/profile`);
     } catch (error) {
       setError(socialErrorMessage(error));
     } finally {
@@ -2557,19 +2564,22 @@ function VerifyEmail() {
  );
   const [busy, setBusy] = useState(Boolean(token));
   const [confirmed, setConfirmed] = useState(false);
+  const [continuePath, setContinuePath] = useState(`/${locale}/catalog`);
   const [code, setCode] = useState("");
   useEffect(() => {
     if (!token) return;
     window.history.replaceState(null, "", window.location.pathname);
     api
       .post("/auth/email-verification/confirm", { token })
-      .then(() => {
+      .then(async () => {
+        const nextSession = await refreshSession(null);
+        setContinuePath(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
         setConfirmed(true);
         setStatus(copy.verifyDone);
       })
       .catch(() => setStatus(copy.invalid))
       .finally(() => setBusy(false));
-  }, [copy.invalid, copy.verifyDone, token]);
+  }, [copy.invalid, copy.verifyDone, locale, token]);
   const resend = async () => {
     setBusy(true);
     try {
@@ -2600,7 +2610,9 @@ function VerifyEmail() {
     }
     setBusy(true);
     try {
-      await api.post("/auth/email-verification/code/confirm", { code });
+      const response = await api.post<{ user: Row }>("/auth/email-verification/code/confirm", { code });
+      const nextSession = await refreshSession({ user: response.user });
+      setContinuePath(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
       setConfirmed(true);
       setStatus(copy.verifyDone);
     } catch {
@@ -2617,7 +2629,7 @@ function VerifyEmail() {
           <h1>{copy.verifyTitle}</h1>
           <p>{copy.verifyLead}</p>
           {confirmed ? (
-            <form onSubmit={(event) => { event.preventDefault(); navigate(`/${locale}/catalog`); }}>
+          <form onSubmit={(event) => { event.preventDefault(); navigate(continuePath); }}>
               <button className="standalone-auth-primary">{copy.continue}</button>
             </form>
           ) : (
@@ -17002,6 +17014,7 @@ function CommunityPostDetail({ session }: { session: Session }) {
 export function WebApp() {
   const locale = localeOf();
   const location = useLocation();
+  const navigate = useNavigate();
   const [session, setSession] = useState<Session | undefined>(undefined);
   useEffect(() => {
     let active = true;
@@ -17026,6 +17039,18 @@ export function WebApp() {
     await api.post("/auth/logout");
     setSession(null);
   };
+  useEffect(() => {
+    if (!userNeedsProfileWizard(session)) return;
+    const allowed = new Set([
+      `/${locale}/profile/edit`,
+      `/${locale}/auth/verify-email`,
+      `/${locale}/auth/login`,
+      `/${locale}/auth/register`,
+    ]);
+    if (!allowed.has(location.pathname)) {
+      navigate(profileWizardPath(locale), { replace: true });
+    }
+  }, [session, locale, location.pathname, navigate]);
   if (session === undefined) return <Shell session={null} onLogout={logout} pendingSession><LoadingIndicator fullPage /></Shell>;
   const content = (element: React.ReactNode) => (
     <Shell session={session} onLogout={logout}>

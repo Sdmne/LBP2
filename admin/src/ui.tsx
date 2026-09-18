@@ -4790,6 +4790,7 @@ function Support() {
   const [detail, setDetail] = useState<RecordValue | null>(null);
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
+  const [resolving, setResolving] = useState(false);
   const [unanswered, setUnanswered] = useState(true);
   const messageListRef = useRef<HTMLDivElement>(null);
   const loadSequenceRef = useRef(0);
@@ -4872,10 +4873,30 @@ function Support() {
       setError("Could not send the support response.");
     }
   };
+  const resolveThread = async () => {
+    if (!active?.id || resolving) return;
+    setResolving(true);
+    try {
+      await api.post(`/admin/support/${encodeURIComponent(String(active.id))}/resolve`, {});
+      const updated = await api.get<RecordValue>(
+        `/admin/support/${encodeURIComponent(String(active.id))}`,
+      );
+      setDetail(updated);
+      setActive((updated.conversation as RecordValue) ?? active);
+      load();
+      setError("");
+    } catch {
+      setError("Could not resolve support conversation.");
+    } finally {
+      setResolving(false);
+    }
+  };
   const items = result?.items ?? [];
   const total = result?.total ?? 0;
   const selectedConversation =
     (detail?.conversation as RecordValue | undefined) ?? active ?? {};
+  const selectedResolved =
+    String(selectedConversation.status ?? "").toUpperCase() === "RESOLVED";
   const selectedName = rowName(selectedConversation);
   const selectedEmail = valueOf(selectedConversation.email);
   const selectedType = supportProfileType(selectedConversation.profileType);
@@ -5025,6 +5046,15 @@ function Support() {
                   <AdminIcon name="externalLink" /> View Profile
                 </Link>
               )}
+              <button
+                className="support-resolve-button"
+                type="button"
+                disabled={selectedResolved || resolving}
+                onClick={() => void resolveThread()}
+              >
+                <AdminIcon name="badgeCheck" />
+                {selectedResolved ? "Resolved" : resolving ? "Resolving..." : "Resolve"}
+              </button>
             </header>
             <div className="message-list" ref={messageListRef}>
               {messages.map((message, index) => {
@@ -5080,6 +5110,7 @@ function Support() {
               <textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
+                disabled={selectedResolved}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
@@ -5098,7 +5129,7 @@ function Support() {
                 className="support-send"
                 type="submit"
                 aria-label="Send reply"
-                disabled={!body.trim()}
+                disabled={selectedResolved || !body.trim()}
               >
                 <AdminIcon name="send" />
               </button>
@@ -6988,7 +7019,7 @@ function GenericList({ view }: { view: string }) {
   } | null>(null);
   const [userAction, setUserAction] = useState<{
     row: RecordValue;
-    kind: "ban" | "delete";
+    kind: "ban" | "delete" | "restore";
   } | null>(null);
   const [openUserMenu, setOpenUserMenu] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -7325,15 +7356,30 @@ function GenericList({ view }: { view: string }) {
         await api.delete(
           `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
         );
-      else {
-        const data = (
-          userAction.row.data && typeof userAction.row.data === "object"
-            ? userAction.row.data
-            : {}
-        ) as RecordValue;
-        await api.patch(
-          `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
-          {
+    else {
+      const data = (
+      userAction.row.data && typeof userAction.row.data === "object"
+      ? userAction.row.data
+      : {}
+      ) as RecordValue;
+      if (userAction.kind === "restore") {
+      await api.patch(
+      `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
+      {
+      values: {
+      status: "ACTIVE",
+      data: {
+      ...data,
+      deletionRestoredAt: new Date().toISOString(),
+      restoredAt: new Date().toISOString(),
+      },
+      },
+      },
+      );
+      } else {
+      await api.patch(
+      `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
+      {
             values: {
               status: "BANNED",
               data: {
@@ -7342,10 +7388,11 @@ function GenericList({ view }: { view: string }) {
                 banDetails: values.details,
                 bannedAt: new Date().toISOString(),
               },
-            },
-          },
-        );
+      },
+      },
+      );
       }
+    }
       setUserAction(null);
       setOpenUserMenu(null);
       refreshList();
@@ -8100,12 +8147,23 @@ function GenericList({ view }: { view: string }) {
                                       onClick={() =>
                                         setUserAction({ row, kind: "ban" })
                                       }
-                                    >
-                                      Ban
-                                    </button>
-                                    <button
-                                      className="danger-text"
-                                      type="button"
+                  >
+                    Ban
+                  </button>
+                  {String(row.status ?? "").toUpperCase() === "PENDING_DELETION" && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() =>
+                      setUserAction({ row, kind: "restore" })
+                    }
+                  >
+                    Restore account
+                  </button>
+                  )}
+                  <button
+                    className="danger-text"
+                    type="button"
                                       role="menuitem"
                                       onClick={() =>
                                         setUserAction({ row, kind: "delete" })
@@ -8415,10 +8473,12 @@ function GenericList({ view }: { view: string }) {
           userAction
             ? {
                 kind: userAction.kind,
-                title:
+                  title:
                   userAction.kind === "ban"
-                    ? "Ban user"
-                    : "Permanently Delete User",
+                  ? "Ban user"
+                  : userAction.kind === "restore"
+                  ? "Restore User"
+                  : "Permanently Delete User",
               }
             : null
         }
@@ -11153,7 +11213,7 @@ function EntityModal({
 }
 
 type ModalState = {
-  kind: "ban" | "grant" | "shadow" | "delete";
+  kind: "ban" | "grant" | "shadow" | "delete" | "restore";
   title: string;
 } | null;
 function ConfirmModal({

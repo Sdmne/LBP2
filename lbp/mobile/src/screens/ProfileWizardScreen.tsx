@@ -95,7 +95,7 @@ type WizStep = "role" | "goal" | "childway" | "basic" | "appearance" | "about" |
 //   read-only with no edit path yet) - out of scope for "get a fresh
 //   signup to a complete profile," not silently dropped.
 export default function ProfileWizardScreen({ navigation }: Props) {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
 
@@ -328,6 +328,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         ...(drinking ? { drinkingStatus: drinking } : {}),
         unitPreference: unit,
       });
+      await refreshUser();
       navigation.goBack();
     } catch (err2) {
       setSaveError(err2 instanceof ApiError ? err2.message : t("common.somethingWrong"));

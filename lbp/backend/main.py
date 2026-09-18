@@ -787,13 +787,20 @@ def set_user_session_cookie(response: Response, token: str) -> None:
     delete_private_cookie(response, COOKIE_LEGACY_SESSION_NAME)
 
 
-def auth_session_response(response: Response, token: str, expires_at: str, user: dict[str, Any], **extra: Any) -> dict[str, Any]:
+def auth_session_response(
+    response: Response,
+    token: str,
+    expires_at: str,
+    user: dict[str, Any],
+    user_payload: dict[str, Any] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
     # Browsers retain the HttpOnly cookie. Native clients can use the same
     # session as a Bearer token without depending on a cookie jar.
     set_user_session_cookie(response, token)
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
-    return {"sessionToken": token, "expiresAt": expires_at, "user": public_user(user), **extra}
+    return {"sessionToken": token, "expiresAt": expires_at, "user": user_payload or public_user(user), **extra}
 
 
 def app_redis():
@@ -3454,6 +3461,31 @@ def profile_has_completed_onboarding(profile: dict[str, Any] | None) -> bool:
     return json_bool(data, "isWizardCompleted") or bool(str(data.get("avatarUrl") or "").strip())
 
 
+def profile_has_required_onboarding_fields(profile: dict[str, Any] | None) -> bool:
+    data = profile_data(profile)
+
+    def filled(key: str) -> bool:
+        value = data.get(key)
+        return bool(str(value or "").strip())
+
+    return all(
+        filled(key)
+        for key in ("displayName", "dateOfBirth", "country", "city", "cityPlaceId", "profileType", "lookingFor")
+    )
+
+
+def auth_user_payload(cursor, user: dict[str, Any]) -> dict[str, Any]:
+    profile = fetch_profile(cursor, int(user["profile_id"])) if user.get("profile_id") else None
+    completed = profile_has_completed_onboarding(profile)
+    result = public_user(user)
+    result["profileVerified"] = profile_is_verified(profile)
+    result["isPremium"] = profile_is_premium(profile)
+    result["profileCompleteness"] = profile_completeness_percent(profile)
+    result["isWizardCompleted"] = completed
+    result["needsProfileWizard"] = not completed
+    return result
+
+
 def profile_birth_date(value: Any) -> date | None:
     try:
         return datetime.strptime(str(value or "").strip(), "%Y-%m-%d").date()
@@ -4809,7 +4841,15 @@ def auth_signup(payload: SignupPayload, response: Response, request: Request):
         payload.locale,
         verification_code,
     )
-    return auth_session_response(response, token, expires_at, user, emailVerificationRequired=True, emailSent=email_sent)
+    return auth_session_response(
+        response,
+        token,
+        expires_at,
+        user,
+        user_payload=auth_user_payload(cursor, user),
+        emailVerificationRequired=True,
+        emailSent=email_sent,
+    )
 
 
 @app.post("/api/auth/firebase", response_model=FirebaseSessionResponse)
@@ -4962,9 +5002,10 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
         ensure_support_welcome(cursor, int(user["profile_id"]))
         record_device_session(cursor, int(user["profile_id"]), request, f"social:{provider}", payload.deviceInfo, is_registration=is_new_user)
         token, expires_at = create_session(cursor, user["id"])
+        user_payload = auth_user_payload(cursor, user)
         conn.commit()
 
-    return auth_session_response(response, token, expires_at, user, provider=provider, isNewUser=is_new_user)
+    return auth_session_response(response, token, expires_at, user, user_payload=user_payload, provider=provider, isNewUser=is_new_user)
 
 
 @app.post("/api/auth/login", response_model=AuthSessionResponse)
@@ -5000,8 +5041,9 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
         ensure_support_welcome(cursor, int(user["profile_id"]))
         record_device_session(cursor, int(user["profile_id"]), request, "password", payload.deviceInfo)
         token, expires_at = create_session(cursor, user["id"])
+        user_payload = auth_user_payload(cursor, user)
         conn.commit()
-    return auth_session_response(response, token, expires_at, user)
+    return auth_session_response(response, token, expires_at, user, user_payload=user_payload)
 
 
 @app.get("/api/auth/me")
@@ -5009,11 +5051,7 @@ def auth_me(user: dict[str, Any] = Depends(require_user)):
     # Session consumers need this state to avoid rendering restricted member
     # actions before their corresponding endpoint rejects the request.
     with db_cursor() as (_, cursor):
-        profile = fetch_profile(cursor, int(user["profile_id"])) if user.get("profile_id") else None
-    result = public_user(user)
-    result["profileVerified"] = profile_is_verified(profile)
-    result["isPremium"] = profile_is_premium(profile)
-    result["profileCompleteness"] = profile_completeness_percent(profile)
+        result = auth_user_payload(cursor, user)
     return {"user": result}
 
 
@@ -5184,7 +5222,9 @@ def auth_confirm_email_code(
 ):
     if user.get("email_verified_at"):
         redis_delete(f"auth:email-verification-code-attempts:{int(user['id'])}")
-        return {"ok": True, "status": "EMAIL_ALREADY_VERIFIED", "user": public_user(user)}
+        with db_cursor() as (_, cursor):
+            user_payload = auth_user_payload(cursor, user)
+        return {"ok": True, "status": "EMAIL_ALREADY_VERIFIED", "user": user_payload}
     attempts_key = f"auth:email-verification-code-attempts:{int(user['id'])}"
     cached_attempts = redis_counter(attempts_key)
     if cached_attempts is not None and cached_attempts >= 10:
@@ -5246,9 +5286,10 @@ def auth_confirm_email_code(
             (user["id"],),
         )
         verified_user = cursor.fetchone()
+        user_payload = auth_user_payload(cursor, verified_user)
         conn.commit()
     redis_delete(attempts_key)
-    return {"ok": True, "status": "EMAIL_VERIFIED", "user": public_user(verified_user)}
+    return {"ok": True, "status": "EMAIL_VERIFIED", "user": user_payload}
 
 
 @app.post("/api/auth/reset-password")
@@ -6524,8 +6565,11 @@ def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = 
         update_profile_data(cursor, profile_id, updates, display_name=display_name)
         if display_name is not None:
             cursor.execute("UPDATE local_users SET display_name = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (display_name, user["id"]))
-        conn.commit()
         profile = fetch_profile(cursor, profile_id)
+        if profile_has_required_onboarding_fields(profile) and not profile_has_completed_onboarding(profile):
+            update_profile_data(cursor, profile_id, {"isWizardCompleted": True})
+            profile = fetch_profile(cursor, profile_id)
+        conn.commit()
     return {"ok": True, "profile": public_profile_summary(profile)}
 
 
@@ -13338,7 +13382,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "deletion_feedback_30d": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'deletion_feedback' AND created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
             "partner_accounts": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'PARTNER'",
             "pending_verifications": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND status = 'PENDING'",
-            "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')",
+            "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE c.status = 'ACTIVE' AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')",
             "pending_photo_moderation": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_photo' AND status = 'PENDING'",
             "pending_reports": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_report' AND status = 'PENDING'",
             "pending_boosts": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'boost' AND status = 'PENDING'",
@@ -15725,7 +15769,7 @@ def admin_support_list(
             """)
             like = f"%{search}%"
             base_params.extend([like, like, like, like, like])
-    unanswered_clause = "EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')"
+    unanswered_clause = "c.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')"
     where = list(base_where)
     if unanswered:
         where.append(unanswered_clause)
@@ -15883,6 +15927,27 @@ def admin_send_support_message(conversation_id: int, payload: AdminSupportMessag
         audit(conn, actor, "send_support_message", "conversation", conversation_id, {"messageId": message_id})
         conn.commit()
     return {"ok": True, "messageId": message_id}
+
+
+@app.post("/api/admin/support/{conversation_id}/resolve")
+def admin_resolve_support_conversation(conversation_id: int, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        support = support_profile(cursor)
+        cursor.execute(
+            "SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1",
+            (conversation_id, support["id"], support["id"]),
+        )
+        conversation = cursor.fetchone()
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Support conversation not found")
+        cursor.execute(
+            "UPDATE conversation_messages SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE conversation_id = %s AND sender_profile_id <> %s AND status = 'ACTIVE'",
+            (conversation_id, support["id"]),
+        )
+        cursor.execute("UPDATE conversations SET status = 'RESOLVED', updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
+        audit(conn, actor, "resolve_support", "conversation", conversation_id, {"previousStatus": conversation.get("status")})
+        conn.commit()
+    return {"ok": True, "id": conversation_id, "status": "RESOLVED"}
 
 
 ADMIN_LOCATION_MISMATCH_SQL = """
@@ -18362,7 +18427,10 @@ def purge_due_account_deletions() -> None:
             except ValueError:
                 continue
             if profile_id and due_at <= current_time:
-                due_profile_ids.append(profile_id)
+                cursor.execute("SELECT status FROM profiles WHERE id = %s LIMIT 1", (profile_id,))
+                profile = cursor.fetchone()
+                if str((profile or {}).get("status") or "").upper() == "PENDING_DELETION":
+                    due_profile_ids.append(profile_id)
         for profile_id in due_profile_ids:
             try:
                 deleted = permanently_delete_profile(cursor, profile_id)
