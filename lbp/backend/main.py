@@ -3225,6 +3225,8 @@ def inferred_article_category(title: str, slug: str, meta: dict[str, Any]) -> st
         return "sperm-donor"
     if any(token in haystack for token in ("ivf", "iui", "egg freezing", "egg-freezing", "embryo")):
         return "ivf"
+    if any(token in haystack for token in ("parenthood", "parenting", "parents", "parental")):
+        return "parenthood"
     return "fertility"
 
 
@@ -17842,6 +17844,8 @@ def admin_storage(
         local_profile_ids: set[int] = set()
         source_profile_ids: set[str] = set()
         clinic_ids: set[int] = set()
+        lawyer_ids: set[int] = set()
+        article_urls: set[str] = set()
         for item in files:
             metadata = as_dict(item.get("metadata"))
             profile_id = int_or_none(metadata.get("profileId") or metadata.get("senderProfileId"))
@@ -17857,9 +17861,16 @@ def admin_storage(
             conversation_id = int_or_none(metadata.get("conversationId"))
             if conversation_id:
                 conversation_ids.add(conversation_id)
-            clinic_id = int_or_none(metadata.get("clinicLocalId"))
+            clinic_id = int_or_none(metadata.get("clinicLocalId") or metadata.get("clinicId"))
             if clinic_id:
                 clinic_ids.add(clinic_id)
+            lawyer_id = int_or_none(metadata.get("lawyerLocalId") or metadata.get("lawyerId"))
+            if lawyer_id:
+                lawyer_ids.add(lawyer_id)
+            if item.get("category") == "article_images":
+                public_url = str(item.get("publicUrl") or "").strip()
+                if public_url:
+                    article_urls.add(public_url)
 
         conversations: dict[int, dict[str, Any]] = {}
         if conversation_ids:
@@ -17909,7 +17920,42 @@ def admin_storage(
             )
             clinics_by_id = {int(item["id"]): item for item in cursor.fetchall()}
 
-    items: list[dict[str, Any]] = []
+        lawyers_by_id: dict[int, dict[str, Any]] = {}
+        if lawyer_ids:
+            placeholders = ", ".join(["%s"] * len(lawyer_ids))
+            cursor.execute(
+                f"SELECT id, name FROM lawyers WHERE id IN ({placeholders})",
+                list(lawyer_ids),
+            )
+            lawyers_by_id = {int(item["id"]): item for item in cursor.fetchall()}
+
+        articles_by_url: dict[str, dict[str, Any]] = {}
+        if article_urls:
+            article_predicates = []
+            article_params: list[Any] = []
+            for public_url in article_urls:
+                article_predicates.append("(cover_url = %s OR body_html LIKE %s)")
+                article_params.extend([public_url, f"%{public_url}%"])
+            cursor.execute(
+                f"""
+                SELECT id, title, cover_url, body_html
+                FROM articles
+                WHERE {' OR '.join(article_predicates)}
+                """,
+                article_params,
+            )
+            for article in cursor.fetchall():
+                article_id = int(article["id"])
+                title = str(article.get("title") or f"Article #{article_id}")
+                cover_url = str(article.get("cover_url") or "").strip()
+                if cover_url:
+                    articles_by_url[cover_url] = {"id": article_id, "title": title}
+                body_html = str(article.get("body_html") or "")
+                for public_url in article_urls:
+                    if public_url in body_html:
+                        articles_by_url.setdefault(public_url, {"id": article_id, "title": title})
+
+        items: list[dict[str, Any]] = []
     category_labels = {
         "profile_photos": "Profile",
         "chat_images": "Chat",
@@ -17955,15 +18001,20 @@ def admin_storage(
                     related_url += f"&chat={conversation_id}"
                 route_profile_id = sender_route_id
         elif file_category == "clinic_logos":
-            clinic = clinics_by_id.get(int_or_none(metadata.get("clinicLocalId")) or -1)
+            clinic_id = int_or_none(metadata.get("clinicLocalId") or metadata.get("clinicId"))
+            clinic = clinics_by_id.get(clinic_id or -1)
             related_label = str((clinic or {}).get("name") or "Clinic")
-            related_url = "/clinics"
+            related_url = f"/clinics/{clinic_id}" if clinic_id else "/clinics"
         elif file_category == "lawyer_photos":
-            related_label = "Lawyer photo"
-            related_url = "/lawyers"
+            lawyer_id = int_or_none(metadata.get("lawyerLocalId") or metadata.get("lawyerId"))
+            lawyer = lawyers_by_id.get(lawyer_id or -1)
+            related_label = str((lawyer or {}).get("name") or "Lawyer photo")
+            related_url = f"/lawyers/{lawyer_id}" if lawyer_id else "/lawyers"
         elif file_category == "article_images":
-            related_label = "Article image"
-            related_url = "/articles"
+            public_url = str(file.get("publicUrl") or "").strip()
+            article = articles_by_url.get(public_url)
+            related_label = str((article or {}).get("title") or "Article image")
+            related_url = f"/articles/{article['id']}" if article else "/articles"
 
         items.append(
             {
@@ -19470,14 +19521,11 @@ def public_articles(
             """
             SELECT id, locale, slug, title, excerpt, cover_url, status, meta, published_at, created_at, updated_at
             FROM articles
-            WHERE locale = CASE
-                WHEN EXISTS (SELECT 1 FROM articles locale_check WHERE locale_check.locale = %s AND locale_check.status = 'PUBLISHED') THEN %s
-                ELSE 'en'
-              END
-              AND status = 'PUBLISHED'
+            WHERE locale = %s
+            AND status = 'PUBLISHED'
             ORDER BY COALESCE(published_at, created_at) DESC, id DESC
             """,
-            (locale, locale),
+            (locale,),
         )
         all_items = []
         for row in cursor.fetchall():
@@ -19499,7 +19547,7 @@ def public_articles(
         "offset": offset,
         "total": len(filtered),
         "hasMore": offset + len(items) < len(filtered),
-        "categories": ["ivf", "co-parenting", "sperm-donor", "fertility", "lgbtq"],
+            "categories": ["ivf", "co-parenting", "sperm-donor", "fertility", "parenthood", "lgbtq"],
     }
 
 

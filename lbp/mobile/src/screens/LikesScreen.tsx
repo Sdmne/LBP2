@@ -16,6 +16,7 @@ import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
+import { countryName } from "../utils/countryNames";
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Likes">;
 
@@ -47,7 +48,7 @@ const FREE_PREVIEW_COUNT = 4;
 export default function LikesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [tab, setTab] = useState<Tab>("likesYou");
   const [data, setData] = useState<LikesResponse | null>(null);
   const [visitors, setVisitors] = useState<ProfileVisitor[] | null>(null);
@@ -454,10 +455,10 @@ export default function LikesScreen({ navigation }: Props) {
                   ) : (
                     <>
                       <Text style={styles.name} numberOfLines={1}>
-                        {item.displayName}
+                        {item.age != null ? `${item.displayName ?? "?"}, ${item.age}` : item.displayName}
                       </Text>
                       <Text style={styles.subtitle} numberOfLines={1}>
-                        {[item.city, item.country].filter(Boolean).join(", ") || t("common.locationNotSet")}
+                        {[item.city, item.country ? countryName(item.country, locale) : null].filter(Boolean).join(", ") || t("common.locationNotSet")}
                       </Text>
                     </>
                   )}

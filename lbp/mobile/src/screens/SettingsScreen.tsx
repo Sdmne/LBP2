@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import * as Application from "expo-application";
-import * as Updates from "expo-updates";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import * as WebBrowser from "expo-web-browser";
 import { fetchSettings, updateSettings } from "../api/settings";
@@ -280,7 +279,7 @@ export default function SettingsScreen({ navigation }: Props) {
           downloaded). Updates.updateId is null when running the embedded
           bundle (no OTA update ever applied since install), not an error. */}
       <Text style={styles.versionFooter}>
-        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"}) · {Updates.channel || "embedded"} · {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"}
+        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"})
       </Text>
     </ScrollView>
     </GradientBackground>

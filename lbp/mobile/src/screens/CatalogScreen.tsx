@@ -360,7 +360,14 @@ export default function CatalogScreen({ navigation, route }: Props) {
       </View>
 
       {actionError ? (
-        <Pressable style={styles.actionErrorBanner} onPress={() => setActionError(null)}>
+        <Pressable
+          style={styles.actionErrorBanner}
+          onPress={() =>
+            actionError === t("catalog.messageNeedsVerification")
+              ? rootNav.navigate("Verification")
+              : setActionError(null)
+          }
+        >
           <Text style={styles.actionErrorText}>{actionError}</Text>
         </Pressable>
       ) : null}
@@ -853,11 +860,11 @@ const styles = StyleSheet.create({
   headerBrand: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerLogo: { width: 24, height: 24 },
   headerTitle: { fontSize: 15, fontWeight: "600", color: colors.ink },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
   avatarButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.card,
     alignItems: "center",
     justifyContent: "center",
@@ -870,10 +877,18 @@ const styles = StyleSheet.create({
   avatarButtonText: { fontSize: 16 },
   // Same gradient-initial avatar AppHeader uses elsewhere - Alena's
   // "Browse profiles" reference has the same right-side avatar shape here.
-  profileAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  profileAvatarText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  actionErrorBanner: { marginHorizontal: spacing.md, marginBottom: spacing.xs, backgroundColor: colors.tintPink, borderRadius: radius.md, padding: spacing.sm },
-  actionErrorText: { color: colors.pink, fontSize: 12.5, fontWeight: "600", textAlign: "center" },
+  profileAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  profileAvatarText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  actionErrorBanner: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.tintPink,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  actionErrorText: { color: colors.pink, fontSize: 12.5, fontWeight: "700", textAlign: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg, gap: spacing.md },
   errorText: { color: colors.danger, textAlign: "center" },
   emptyText: { color: colors.textMuted, textAlign: "center" },

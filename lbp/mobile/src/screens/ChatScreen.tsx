@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -150,6 +150,24 @@ export default function ChatScreen({ route, navigation }: Props) {
       setCallError(err instanceof ApiError ? err.message : t("chat.callErrorDefault"));
     }
   }
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.headerActions}>
+          <Pressable style={styles.headerIconButton} onPress={() => void handleStartCall("VOICE")}>
+            <Feather name="phone" size={18} color={colors.ink} />
+          </Pressable>
+          <Pressable style={styles.headerIconButton} onPress={() => void handleStartCall("VIDEO")}>
+            <Feather name="video" size={18} color={colors.ink} />
+          </Pressable>
+          <Pressable style={styles.headerIconButton} onPress={() => setMenuVisible(true)}>
+            <Feather name="more-vertical" size={18} color={colors.ink} />
+          </Pressable>
+        </View>
+      ),
+    });
+  }, [navigation, conversationId]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -382,17 +400,6 @@ export default function ChatScreen({ route, navigation }: Props) {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
     >
-      <View style={styles.toolbar}>
-        <Pressable style={styles.iconButton} onPress={() => void handleStartCall("VOICE")}>
-          <Feather name="phone" size={18} color={colors.ink} />
-        </Pressable>
-        <Pressable style={styles.iconButton} onPress={() => void handleStartCall("VIDEO")}>
-          <Feather name="video" size={18} color={colors.ink} />
-        </Pressable>
-        <Pressable style={styles.iconButton} onPress={() => setMenuVisible(true)}>
-          <Feather name="more-vertical" size={18} color={colors.ink} />
-        </Pressable>
-      </View>
       {callError ? <Text style={styles.errorBanner}>{callError}</Text> : null}
       {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
       {/* UPDATE (Sept 2026): the gradient above was itself a stand-in for
@@ -647,17 +654,12 @@ const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   errorBanner: { color: colors.danger, textAlign: "center", padding: spacing.xs },
-  toolbar: {
+  headerActions: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-    backgroundColor: colors.card,
+    alignItems: "center",
+    gap: 8,
   },
-  iconButton: {
+  headerIconButton: {
     width: 34,
     height: 34,
     borderRadius: 17,

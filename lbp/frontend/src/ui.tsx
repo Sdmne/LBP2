@@ -9916,9 +9916,10 @@ function Pricing({ session }: { session: Session }) {
 
 const knowledgeCategories = [
   { slug: "ivf-in-vitro-fertilization", name: "IVF - In Vitro Fertilization" },
-  { slug: "Co-parenting", name: "Co-parenting" },
+  { slug: "co-parenting", name: "Co-parenting" },
   { slug: "sperm-donor", name: "Sperm donor" },
   { slug: "fertility", name: "Fertility" },
+  { slug: "parenthood", name: "Parenthood" },
   { slug: "lgbtq", name: "LGBTQ+" },
 ];
 
@@ -9928,13 +9929,15 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Co-parenting",
     "sperm-donor": "Sperm donor",
     fertility: "Fertility",
+    parenthood: "Parenthood",
     lgbtq: "LGBTQ+",
   },
   ru: {
     "ivf-in-vitro-fertilization": "ЭКО - Экстракорпоральное оплодотворение",
     "co-parenting": "Копереннтинг",
     "sperm-donor": "Донор спермы",
-    fertility: "Fertility",
+    fertility: "Фертильность",
+    parenthood: "Родительство",
     lgbtq: "ЛГБТК+",
   },
   es: {
@@ -9942,6 +9945,7 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Coparentalidad",
     "sperm-donor": "Donante de esperma",
     fertility: "Fertilidad",
+    parenthood: "Parentalidad",
     lgbtq: "LGBTQ+",
   },
   pt: {
@@ -9949,6 +9953,7 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Coparentalidade",
     "sperm-donor": "Doador de esperma",
     fertility: "Fertilidade",
+    parenthood: "Parentalidade",
     lgbtq: "LGBTQ+",
   },
   fr: {
@@ -9956,6 +9961,7 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Coparentalité",
     "sperm-donor": "Donneur de sperme",
     fertility: "Fertilité",
+    parenthood: "Parentalité",
     lgbtq: "LGBTQ+",
   },
   de: {
@@ -9963,6 +9969,7 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Co-Parenting",
     "sperm-donor": "Samenspender",
     fertility: "Fruchtbarkeit",
+    parenthood: "Elternschaft",
     lgbtq: "LGBTQ+",
   },
   it: {
@@ -9970,6 +9977,7 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Co-genitorialità",
     "sperm-donor": "Donatore di sperma",
     fertility: "Fertilità",
+    parenthood: "Genitorialità",
     lgbtq: "LGBTQ+",
   },
   pl: {
@@ -9977,6 +9985,7 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Współrodzicielstwo",
     "sperm-donor": "Dawca nasienia",
     fertility: "Płodność",
+    parenthood: "Rodzicielstwo",
     lgbtq: "LGBTQ+",
   },
 };

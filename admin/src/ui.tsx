@@ -5177,7 +5177,9 @@ function ModerationPhotos() {
       setNotice("Could not update this photo.");
     }
   };
-  const items = result?.items ?? [];
+  const items = (result?.items ?? []).filter((row) =>
+    status === "PENDING" ? !settingBoolean(row.isDeleted) && !settingBoolean(row.isUnavailable) : true,
+  );
   return (
     <>
       <header className="page-heading">
@@ -7206,9 +7208,10 @@ function GenericList({ view }: { view: string }) {
     const linkedProfileId =
       row.profileSourceId ?? row.profileId ?? data?.profileId;
     const clinicId = data?.id ?? row.id;
-    if (view === "users" && userId) navigate(`/users/${userId}`);
+    if (view === "users" && userId)
+      window.open(`/users/${encodeURIComponent(String(userId))}`, "_blank", "noopener,noreferrer");
     if (view === "subscriptions" && linkedProfileId)
-      navigate(`/users/${linkedProfileId}`);
+      window.open(`/users/${encodeURIComponent(String(linkedProfileId))}`, "_blank", "noopener,noreferrer");
     if (view === "verifications") {
       const verificationId = verificationRouteId(row);
       if (verificationId)

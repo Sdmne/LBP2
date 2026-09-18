@@ -8663,8 +8663,9 @@ body {
   color: #f31260;
 }
 .article-source-editor {
+  box-sizing: border-box;
   width: 100%;
-  min-height: 420px;
+  min-height: 620px;
   padding: 16px;
   border: 0;
   outline: 0;
