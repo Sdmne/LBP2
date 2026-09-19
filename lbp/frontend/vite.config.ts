@@ -17,8 +17,8 @@ export default defineConfig(({ mode, command }) => {
     if (missing.length) {
       throw new Error(`Missing required frontend environment: ${missing.join(", ")}`);
     }
-    if (env.VITE_FIREBASE_PROJECT_ID !== "parents-698f8") {
-      throw new Error("Frontend build is restricted to Firebase project parents-698f8");
+    if (env.VITE_FIREBASE_PROJECT_ID !== "let-s-be-parents") {
+      throw new Error("Frontend build is restricted to Firebase project let-s-be-parents");
     }
   }
 

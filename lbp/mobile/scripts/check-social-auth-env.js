@@ -26,8 +26,8 @@ if (missing.length) {
   process.exit(1);
 }
 
-if (process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID !== "parents-698f8") {
-  console.error("EXPO_PUBLIC_FIREBASE_PROJECT_ID must be parents-698f8.");
+if (process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID !== "let-s-be-parents") {
+  console.error("EXPO_PUBLIC_FIREBASE_PROJECT_ID must be let-s-be-parents.");
   process.exit(1);
 }
 
