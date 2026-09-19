@@ -1051,7 +1051,23 @@ def automatic_photo_decision(result: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def moderate_profile_image(body: bytes, require_face: bool) -> dict[str, Any]:
+def profile_type_allows_couple_photo(profile: dict[str, Any] | None) -> bool:
+    # Alena: "у нас здесь и пары есть и они добавляют свои фото вместе" -
+    # CATALOG_PROFILE_TYPES includes HETERO_COUPLE/LESBIAN_COUPLE/GAY_COUPLE
+    # (both partners are meant to be in frame together), but the single-
+    # face moderation check below was hardcoded to reject anything but
+    # exactly one face for every profile type, including couples - so a
+    # couple's own joint main photo, or any of their other photo slots
+    # showing both of them, got auto-rejected as "should show only you,
+    # not a group" every single time. Two faces is the correct, expected
+    # shape for a couple account's photo, not a violation of it.
+    if not profile:
+        return False
+    profile_type = str(as_dict(profile.get("data")).get("profileType") or "").strip().upper()
+    return profile_type.endswith("_COUPLE")
+
+
+def moderate_profile_image(body: bytes, require_face: bool, max_faces: int = 1) -> dict[str, Any]:
     if not vision_is_configured():
         return automatic_photo_decision({
             "decision": "MANUAL_REVIEW",
@@ -1119,10 +1135,13 @@ def moderate_profile_image(body: bytes, require_face: bool) -> dict[str, Any]:
     if not faces:
         result.update(decision="REJECTED", reason="MAIN_PHOTO_FACE_REQUIRED")
         return automatic_photo_decision(result)
-    if len(faces) != 1:
+    if len(faces) > max(1, max_faces):
         result.update(decision="REJECTED", reason="MAIN_PHOTO_SINGLE_FACE_REQUIRED")
         return automatic_photo_decision(result)
-    face = faces[0]
+    # A couple's photo legitimately has 2 faces - pick the larger/more
+    # confident detection for the existing quality checks (blur, exposure,
+    # angle) below, same as the single-face case just picked faces[0].
+    face = max(faces, key=lambda f: float(getattr(f, "detection_confidence", 0) or 0))
     face_quality = {
         "detectionConfidence": round(float(getattr(face, "detection_confidence", 0) or 0), 4),
         "blurred": vision_likelihood(getattr(face, "blurred_likelihood", 0)),
@@ -7010,6 +7029,8 @@ def automatically_recheck_legacy_profile_photos() -> None:
 
     for item in items:
         photo_id = int(item["id"])
+        with db_cursor() as (_, profile_cursor):
+            max_faces = 2 if profile_type_allows_couple_photo(fetch_profile(profile_cursor, int(item["profile_id"]))) else 1
         body = quarantine_photo_bytes(item.get("storage_key"))
         if not body:
             result = {
@@ -7018,14 +7039,14 @@ def automatically_recheck_legacy_profile_photos() -> None:
                 "providerConfigured": vision_is_configured(),
             }
         else:
-            result = moderate_profile_image(body, require_face=True)
+            result = moderate_profile_image(body, require_face=True, max_faces=max_faces)
         try:
             photo = apply_profile_photo_moderation(photo_id, result, actor="automatic_recheck")
             avatar_media_file_id = int_or_none(item.get("avatar_media_file_id"))
             if photo.get("moderationStatus") == "APPROVED" and avatar_media_file_id:
                 avatar_body = quarantine_photo_bytes(item.get("avatar_storage_key"))
                 avatar_result = (
-                    moderate_profile_image(avatar_body, require_face=True)
+                    moderate_profile_image(avatar_body, require_face=True, max_faces=max_faces)
                     if avatar_body
                     else {
                         "decision": "REJECTED",
@@ -7116,6 +7137,7 @@ async def member_upload_photo(
             (position, profile_id),
         )
         quota = cursor.fetchone() or {}
+        max_faces = 2 if profile_type_allows_couple_photo(fetch_profile(cursor, profile_id)) else 1
     if int(quota.get("total") or 0) >= MAX_PROFILE_PHOTOS and not int(quota.get("atPosition") or 0):
         raise HTTPException(status_code=409, detail=f"A profile can contain at most {MAX_PROFILE_PHOTOS} photos")
 
@@ -7219,12 +7241,12 @@ async def member_upload_photo(
             ),
         )
         conn.commit()
-    profile_moderation = moderate_profile_image(body, require_face=True)
+    profile_moderation = moderate_profile_image(body, require_face=True, max_faces=max_faces)
     photo = apply_profile_photo_moderation(photo_id, profile_moderation)
     avatar_outcome = None
     avatar_moderation = None
     if photo.get("moderationStatus") == "APPROVED" and avatar_body is not None and avatar_media_id:
-        avatar_moderation = moderate_profile_image(avatar_body, require_face=True)
+        avatar_moderation = moderate_profile_image(avatar_body, require_face=True, max_faces=max_faces)
         avatar_outcome = apply_avatar_crop_moderation(
             int(avatar_media_id),
             profile_id,
@@ -7276,6 +7298,7 @@ async def upload_profile_avatar(
             (profile_id,),
         )
         primary_photo = cursor.fetchone()
+        max_faces = 2 if profile_type_allows_couple_photo(fetch_profile(cursor, profile_id)) else 1
     if not primary_photo:
         raise HTTPException(status_code=409, detail="Upload and approve a primary profile photo first")
     if expected_photo_id is not None and int(primary_photo["id"]) != expected_photo_id:
@@ -7326,7 +7349,7 @@ async def upload_profile_avatar(
             ),
         )
         conn.commit()
-    moderation = moderate_profile_image(body, require_face=True)
+    moderation = moderate_profile_image(body, require_face=True, max_faces=max_faces)
     outcome = apply_avatar_crop_moderation(
         media_file_id,
         profile_id,
@@ -7335,7 +7358,10 @@ async def upload_profile_avatar(
         actor=actor,
     )
     if outcome["status"] == "REJECTED":
-        raise HTTPException(status_code=422, detail="Avatar photo was rejected by moderation")
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "PHOTO_REJECTED", "reason": outcome.get("reason") or ""},
+        )
     return {
         "ok": True,
         "avatarUrl": outcome.get("avatarUrl"),

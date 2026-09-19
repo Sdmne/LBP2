@@ -10042,3 +10042,34 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
     margin: 20px auto 48px;
   }
 }
+
+.contact-success-card {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 24px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #fff;
+  text-align: center;
+}
+
+.contact-form-panel .contact-success-card h1 {
+  margin: 0;
+  color: #020817;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+}
+
+.contact-form-panel .contact-success-card p {
+  max-width: 480px;
+  margin: 8px 0 0;
+  color: #667085;
+  font-size: 14px;
+  line-height: 20px;
+}

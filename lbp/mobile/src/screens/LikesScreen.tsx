@@ -3,7 +3,6 @@ import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, S
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { BlurView } from "expo-blur";
 import { ApiError } from "../api/client";
 import { likeProfile, unlikeProfile } from "../api/catalog";
 import { createConversation } from "../api/messages";
@@ -419,36 +418,43 @@ export default function LikesScreen({ navigation }: Props) {
                 style={styles.card}
                 onPress={() => (previewLocked ? rootNav.navigate("LikesPaywall") : rootNav.navigate("ProfileDetail", { profileId: item.id }))}
               >
-                {/* item.identityHidden: a real free-tier preview row from
-                    member_likes() (main.py) - name/city/country are never
-                    sent for these at all. avatarUrl, if present, is a
-                    server-blurred copy (blurred_preview_url_for() in
-                    main.py bakes the blur into the image itself with
-                    Pillow before it's ever sent), never the real photo -
-                    unlike the old client-side BlurView approach, there's
-                    no runtime blur step on the client left to fail open
-                    (confirmed happening on at least one Android device:
-                    lock icon showed, blur did not, real photo was fully
-                    visible underneath). Alena's reference screenshot shows
-                    an actual blurred photo, not a blank icon, so the
-                    silhouette below is now only the fallback for a row
-                    with no source photo at all (never had one, or
-                    blurring it failed server-side). */}
-                {item.identityHidden && item.avatarUrl ? (
-                  <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
-                ) : item.identityHidden ? (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <Feather name="user" size={22} color={colors.muted} />
-                  </View>
-                ) : item.avatarUrl ? (
-                  <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <Text style={styles.avatarPlaceholderText}>{item.displayName?.[0] ?? "?"}</Text>
-                  </View>
-                )}
+                {/* Alena, again, verbatim: "Нет замыливания!!!" - this
+                    time on the PREMIUM self-test "preview as free" toggle
+                    specifically (item.identityHidden is already false
+                    here, since her own account really is Premium and the
+                    server has no "pretend I'm free" flag to send back
+                    anonymized rows for - it only omits/masks identity for
+                    an account that's ACTUALLY free). That left this one
+                    remaining path still rendering the real avatar/name/
+                    city and relying on a runtime BlurView on top to hide
+                    it - the exact same "lock icon showed, blur did not,
+                    real photo fully visible" Android failure the
+                    identityHidden rework above already worked around for
+                    real free accounts. Folding previewLocked into the
+                    same "nothing real ever gets rendered" check removes
+                    the last place still depending on BlurView actually
+                    working: the preview-as-free toggle now shows the
+                    exact same silhouette+age-only treatment a genuinely
+                    free account already gets, instead of real data plus a
+                    blur that may or may not show up. */}
+                {(() => {
+                  const effectivelyHidden = item.identityHidden || previewLocked;
+                  return effectivelyHidden && item.avatarUrl ? (
+                    <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+                  ) : effectivelyHidden ? (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Feather name="user" size={22} color={colors.muted} />
+                    </View>
+                  ) : item.avatarUrl ? (
+                    <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={styles.avatarPlaceholderText}>{item.displayName?.[0] ?? "?"}</Text>
+                    </View>
+                  );
+                })()}
                 <View style={styles.rowBody}>
-                  {item.identityHidden ? (
+                  {item.identityHidden || previewLocked ? (
                     <Text style={styles.name} numberOfLines={1}>
                       {item.age != null ? t("likes.anonymousAge", { age: item.age }) : t("likes.anonymousAgeUnknown")}
                     </Text>
@@ -500,36 +506,20 @@ export default function LikesScreen({ navigation }: Props) {
                 ) : (
                   <Text style={styles.heart}>♥</Text>
                 )}
-                {/* Frosted-glass overlay over the WHOLE row (photo AND
-                    name/location text) - not just the photo - since the
-                    point is that no part of who this is should be
-                    readable. Only needed when item.identityHidden is
-                    false - i.e. real premium data being shown through the
-                    "previewAsFree" self-test toggle (see isPreviewingFree
-                    above). A genuinely free-tier row (identityHidden=true)
-                    already has nothing real underneath to blur - the
-                    generic silhouette + age rendered above IS the safe
-                    view, no overlay needed, and skipping BlurView there
-                    also sidesteps the Android rendering gap noted below
-                    entirely for real free users (previously the ONLY
-                    protection for a real free user's data was this blur,
-                    which is exactly what silently failed to render on at
-                    least one Android device/version - lock icon showed,
-                    photo and name did not get obscured). */}
-                {previewLocked && !item.identityHidden ? (
-                  <BlurView
-                    intensity={50}
-                    tint="light"
-                    // Android's default BlurView needs API 31+ (RenderEffect)
-                    // to actually blur - on anything older it silently
-                    // renders nothing at all. This library-based method
-                    // works on Android API 21+ too; iOS ignores the prop
-                    // and uses its own native blur regardless.
-                    experimentalBlurMethod="dimezisBlurView"
-                    style={StyleSheet.absoluteFill}
-                    pointerEvents="none"
-                  />
-                ) : null}
+                {/* No BlurView overlay left here at all, on purpose. It
+                    used to be the ONLY thing hiding real data on this row
+                    for the "previewAsFree" self-test toggle, and it's an
+                    unreliable thing to depend on for that: confirmed
+                    failing to render on at least one real Android device
+                    (lock icon showed, blur did not, photo and name were
+                    fully visible underneath) even with the more
+                    compatible "dimezisBlurView" method above. Since
+                    effectivelyHidden above already substitutes the same
+                    generic silhouette+age placeholder a genuinely free
+                    account gets - instead of rendering the real data and
+                    trying to obscure it after the fact - there's nothing
+                    real left under this row for a blur to protect, on any
+                    device, blur-capable or not. */}
               </Pressable>
             );
           }}

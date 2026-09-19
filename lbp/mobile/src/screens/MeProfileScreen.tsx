@@ -136,6 +136,12 @@ export default function MeProfileScreen(_props: Props) {
                 activeUntil: res.status === "ACTIVE" ? res.activeUntil ?? null : prev?.activeUntil ?? null,
                 pendingRequestId: res.status === "PENDING" ? res.requestId ?? null : null,
               }));
+              // Card silently flipping to "pending review" wasn't enough
+              // feedback on its own (Alena: "ничего не выскакивает что
+              // boost отправлен администратору") - confirm the submission
+              // explicitly instead of relying on the user to notice the
+              // subtitle changed.
+              Alert.alert(t("me.boostRequestSentTitle"), t("me.boostRequestSentBody"));
             })
             .catch((err) => {
               Alert.alert(t("common.somethingWrong"), err instanceof ApiError ? err.message : undefined);

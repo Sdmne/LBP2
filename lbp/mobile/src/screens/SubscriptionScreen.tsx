@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { Feather } from "@expo/vector-icons";
@@ -208,9 +208,26 @@ function TierComparison({
   const selectedTierName = selectedTier === "PRO" ? t("subscription.tierNamePro") : t("subscription.tierNameBuilder");
   const selectedTierPrice = selectedTier === "PRO" ? t("subscription.priceProMonthly") : builderPriceLabel(period, t);
   const isCurrentSelected = selectedTier === currentTier;
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Alena: "план не выбирается" / "на builder тоже ничего не происходит".
+  // selectedTier defaults to "BUILDER" (see the useState above), so
+  // whenever that's the only tappable card - a PRO account can only ever
+  // pick BUILDER, since FREE/PRO are itself/info-only - the CTA below the
+  // long comparison table is already showing on first render, and tapping
+  // the already-selected card is a real no-op: no border/CTA change to
+  // see, because there was nothing to change. That reads exactly like a
+  // broken button. Scrolling down to the CTA on every tap of an enabled
+  // card - not just on an actual selection change - means tapping BUILDER
+  // or PRO always visibly does something, whether or not the selection
+  // itself moved.
+  function selectTier(tier: RequestableTier) {
+    setSelectedTier(tier);
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+  }
 
   return (
-    <ScrollView contentContainerStyle={styles.tierScrollContainer}>
+    <ScrollView ref={scrollRef} contentContainerStyle={styles.tierScrollContainer}>
       <View style={styles.hero}>
         <Text style={styles.heroTitle}>{t("subscription.tierNamePro")}</Text>
         <Text style={styles.heroSubtitle}>{t("subscription.heroSubtitle")}</Text>
@@ -242,7 +259,7 @@ function TierComparison({
 
           <Pressable
             style={[styles.tierCard, selectedTier === "BUILDER" && styles.tierCardActive]}
-            onPress={() => currentTier !== "BUILDER" && setSelectedTier("BUILDER")}
+            onPress={() => currentTier !== "BUILDER" && selectTier("BUILDER")}
             disabled={currentTier === "BUILDER"}
           >
             <Text style={styles.tierCardLabel}>{t("subscription.tierNameBuilderShort")}</Text>
@@ -258,7 +275,7 @@ function TierComparison({
 
           <Pressable
             style={[styles.tierCard, styles.tierCardBest, selectedTier === "PRO" && styles.tierCardActive]}
-            onPress={() => currentTier !== "PRO" && setSelectedTier("PRO")}
+            onPress={() => currentTier !== "PRO" && selectTier("PRO")}
             disabled={currentTier === "PRO"}
           >
             <View style={styles.bestValueBadgeWrap}>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { ApiError, downloadAndOpenPrivateFile } from "../api/client";
@@ -60,6 +61,10 @@ export default function PregnancyRoomScreen({ route, navigation }: Props) {
   const [status, setStatus] = useState<"loading" | "ok" | "noMatch" | "error">("loading");
   const [activeCategory, setActiveCategory] = useState<PregnancyEntryCategory>("lab_test");
   const [uploading, setUploading] = useState(false);
+  // Alena: "ничего не выскакивает при нажатии на документ" (Family Room) -
+  // same fix applied here: give the tap immediate visible feedback via a
+  // spinner instead of a silent multi-second wait for the auth'd download.
+  const [openingEntryId, setOpeningEntryId] = useState<number | null>(null);
   // A picked-but-not-yet-saved file, waiting on its date/note before the
   // actual upload fires - see handlePickFile/handleConfirmUpload below.
   const [pendingFile, setPendingFile] = useState<{ uri: string; name: string; type: string } | null>(null);
@@ -127,6 +132,18 @@ export default function PregnancyRoomScreen({ route, navigation }: Props) {
       Alert.alert(t("pregnancyRoom.uploadError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleOpenEntry(entry: PregnancyEntry) {
+    if (openingEntryId) return;
+    setOpeningEntryId(entry.id);
+    try {
+      await downloadAndOpenPrivateFile(entry.contentUrl, displayFileName(entry.displayName), entry.mimeType);
+    } catch (err) {
+      Alert.alert(t("pregnancyRoom.openError"), err instanceof ApiError ? err.message : undefined);
+    } finally {
+      setOpeningEntryId(null);
     }
   }
 
@@ -206,14 +223,17 @@ export default function PregnancyRoomScreen({ route, navigation }: Props) {
               <Pressable
                 key={entry.id}
                 style={styles.entryRow}
-                onPress={() =>
-                  downloadAndOpenPrivateFile(entry.contentUrl, displayFileName(entry.displayName), entry.mimeType).catch((err) =>
-                    Alert.alert(t("pregnancyRoom.openError"), err instanceof ApiError ? err.message : undefined),
-                  )
-                }
+                onPress={() => void handleOpenEntry(entry)}
                 onLongPress={() => handleDeleteEntry(entry)}
+                disabled={openingEntryId === entry.id}
               >
-                <Text style={styles.entryIcon}>{entry.mimeType === "application/pdf" ? "📄" : "🖼️"}</Text>
+                {openingEntryId === entry.id ? (
+                  <View style={styles.entrySpinner}>
+                    <ActivityIndicator size="small" color={colors.pink} />
+                  </View>
+                ) : (
+                  <Text style={styles.entryIcon}>{entry.mimeType === "application/pdf" ? "📄" : "🖼️"}</Text>
+                )}
                 <View style={{ flex: 1 }}>
                   <Text style={styles.entryName} numberOfLines={1}>
                     {displayFileName(entry.displayName)}
@@ -225,6 +245,20 @@ export default function PregnancyRoomScreen({ route, navigation }: Props) {
                     </Text>
                   ) : null}
                 </View>
+                {/* Alena: "нет менюшки чтобы удалить" - long-press-to-delete
+                    (still above, kept as a shortcut) isn't a discoverable
+                    affordance on its own; a visible icon means she doesn't
+                    have to already know the gesture exists. */}
+                <Pressable
+                  style={styles.entryDeleteBtn}
+                  hitSlop={10}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    handleDeleteEntry(entry);
+                  }}
+                >
+                  <Feather name="trash-2" size={17} color={colors.muted} />
+                </Pressable>
               </Pressable>
             ))
           )}
@@ -327,9 +361,11 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
   },
   entryIcon: { fontSize: 22 },
+  entrySpinner: { width: 22, alignItems: "center" },
   entryName: { fontSize: 14.5, fontWeight: "700", color: colors.ink },
   entryMeta: { fontSize: 12, color: colors.muted, marginTop: 2 },
   entryNote: { fontSize: 12.5, color: colors.muted, marginTop: 3, lineHeight: 17 },
+  entryDeleteBtn: { padding: 4 },
   addButton: {
     marginTop: spacing.xs,
     borderWidth: 1,

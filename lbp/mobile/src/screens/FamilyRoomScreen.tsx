@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { ApiError, downloadAndOpenPrivateFile } from "../api/client";
@@ -64,7 +65,24 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
 
   const [newItemText, setNewItemText] = useState<Record<string, string>>({});
   const [addingSection, setAddingSection] = useState<string | null>(null);
+  // Alena: "и тут невозможно отредактировать что внесла в чеклист" - a
+  // checklist row only ever supported tap-to-toggle and long-press-to-
+  // delete, so a typo (her own screenshot: "Ппп") meant deleting the item
+  // and retyping it from scratch instead of just fixing the text.
+  // updateFamilyChecklistItem() already accepts a "label" update (used
+  // nowhere until now) - this just adds a UI path to it.
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [savingItemEdit, setSavingItemEdit] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
+  // Alena: "ничего не выскакивает при нажатии на документ" - between the
+  // tap and either the share sheet appearing or an error Alert, a larger
+  // PDF's download-with-auth-header genuinely takes a couple of seconds,
+  // and the row gave zero feedback during that wait - easy to read as "did
+  // that even register" and tap again (or give up). A spinner on the row
+  // itself means the tap visibly did something immediately, regardless of
+  // how long the download/share-sheet handoff underneath takes.
+  const [openingDocId, setOpeningDocId] = useState<number | null>(null);
   // AI-assisted section drafting (Sept 2026 growth push) - see
   // fetchFamilyPlanAiDraft() in api/familyRoom.ts. Only ever fills the
   // existing draft textarea below; the couple still reviews/edits and taps
@@ -213,6 +231,38 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
     ]);
   }
 
+  function handleStartEditItem(item: FamilyChecklistItem) {
+    setEditingItemId(item.id);
+    setEditingText(item.label);
+  }
+
+  function handleCancelEditItem() {
+    setEditingItemId(null);
+    setEditingText("");
+  }
+
+  async function handleSaveEditItem(item: FamilyChecklistItem) {
+    const label = editingText.trim();
+    if (!label || label === item.label) {
+      handleCancelEditItem();
+      return;
+    }
+    setSavingItemEdit(true);
+    const previousLabel = item.label;
+    setRoom((prev) => (prev ? { ...prev, checklist: prev.checklist.map((i) => (i.id === item.id ? { ...i, label } : i)) } : prev));
+    try {
+      await updateFamilyChecklistItem(item.id, { label });
+      handleCancelEditItem();
+    } catch (err) {
+      setRoom((prev) =>
+        prev ? { ...prev, checklist: prev.checklist.map((i) => (i.id === item.id ? { ...i, label: previousLabel } : i)) } : prev,
+      );
+      Alert.alert(t("familyRoom.checklistEditError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
+    } finally {
+      setSavingItemEdit(false);
+    }
+  }
+
   async function handleAddDocument() {
     const result = await DocumentPicker.getDocumentAsync({
       type: ["application/pdf", "image/jpeg", "image/png", "image/webp"],
@@ -232,6 +282,21 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
       Alert.alert(t("familyRoom.documentsUploadError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
     } finally {
       setUploadingDoc(false);
+    }
+  }
+
+  async function handleOpenDocument(doc: FamilyDocument) {
+    // Alena: "ничего не выскакивает при нажатии на документ" - give the tap
+    // an immediate, visible effect (a spinner on the row) instead of nothing
+    // happening until the auth'd download + share-sheet handoff finishes.
+    if (openingDocId) return;
+    setOpeningDocId(doc.id);
+    try {
+      await downloadAndOpenPrivateFile(doc.contentUrl, displayFileName(doc.displayName), doc.mimeType);
+    } catch (err) {
+      Alert.alert(t("familyRoom.documentsOpenError"), err instanceof ApiError ? err.message : undefined);
+    } finally {
+      setOpeningDocId(null);
     }
   }
 
@@ -498,19 +563,51 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
             {checklistBySection[section].length === 0 ? (
               <Text style={styles.emptyText}>{t("familyRoom.checklistEmpty")}</Text>
             ) : (
-              checklistBySection[section].map((item, index) => (
-                <Pressable key={item.id} style={styles.checklistRow} onPress={() => void handleToggleItem(item)} onLongPress={() => handleDeleteItem(item)}>
-                  {/* Alena's reference: numbered task rows, not bare
-                      checkboxes - the number stays visible until the task
-                      is done, then the badge fills in as a checkmark. */}
-                  <View style={[styles.checklistNumBadge, item.isDone && styles.checklistNumBadgeDone]}>
-                    <Text style={[styles.checklistNumText, item.isDone && styles.checklistNumTextDone]}>
-                      {item.isDone ? "✓" : index + 1}
-                    </Text>
+              checklistBySection[section].map((item, index) =>
+                editingItemId === item.id ? (
+                  // Alena: "невозможно отредактировать что внесла в
+                  // чеклист" - inline edit reusing the same "Add an
+                  // item..." input look, so fixing a typo doesn't mean
+                  // delete-and-retype.
+                  <View key={item.id} style={styles.checklistEditRow}>
+                    <TextInput
+                      style={styles.checklistEditInput}
+                      value={editingText}
+                      onChangeText={setEditingText}
+                      autoFocus
+                      onSubmitEditing={() => void handleSaveEditItem(item)}
+                    />
+                    <Pressable style={styles.checklistEditBtn} onPress={() => void handleSaveEditItem(item)} disabled={savingItemEdit}>
+                      {savingItemEdit ? <ActivityIndicator color={colors.white} size="small" /> : <Feather name="check" size={16} color={colors.white} />}
+                    </Pressable>
+                    <Pressable style={styles.checklistEditCancelBtn} onPress={handleCancelEditItem} disabled={savingItemEdit}>
+                      <Feather name="x" size={16} color={colors.muted} />
+                    </Pressable>
                   </View>
-                  <Text style={[styles.checklistLabel, item.isDone && styles.checklistLabelDone]}>{item.label}</Text>
-                </Pressable>
-              ))
+                ) : (
+                  <Pressable key={item.id} style={styles.checklistRow} onPress={() => void handleToggleItem(item)} onLongPress={() => handleDeleteItem(item)}>
+                    {/* Alena's reference: numbered task rows, not bare
+                        checkboxes - the number stays visible until the task
+                        is done, then the badge fills in as a checkmark. */}
+                    <View style={[styles.checklistNumBadge, item.isDone && styles.checklistNumBadgeDone]}>
+                      <Text style={[styles.checklistNumText, item.isDone && styles.checklistNumTextDone]}>
+                        {item.isDone ? "✓" : index + 1}
+                      </Text>
+                    </View>
+                    <Text style={[styles.checklistLabel, item.isDone && styles.checklistLabelDone]}>{item.label}</Text>
+                    <Pressable
+                      style={styles.checklistEditIconBtn}
+                      hitSlop={10}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        handleStartEditItem(item);
+                      }}
+                    >
+                      <Feather name="edit-2" size={15} color={colors.muted} />
+                    </Pressable>
+                  </Pressable>
+                ),
+              )
             )}
             <View style={styles.addRow}>
               <TextInput
@@ -542,20 +639,37 @@ export default function FamilyRoomScreen({ route, navigation }: Props) {
             <Pressable
               key={doc.id}
               style={styles.documentRow}
-              onPress={() =>
-                downloadAndOpenPrivateFile(doc.contentUrl, displayFileName(doc.displayName), doc.mimeType).catch((err) =>
-                  Alert.alert(t("familyRoom.documentsOpenError"), err instanceof ApiError ? err.message : undefined),
-                )
-              }
+              onPress={() => void handleOpenDocument(doc)}
               onLongPress={() => handleDeleteDocument(doc)}
+              disabled={openingDocId === doc.id}
             >
-              <Text style={styles.documentIcon}>{doc.mimeType === "application/pdf" ? "📄" : "🖼️"}</Text>
+              {openingDocId === doc.id ? (
+                  <View style={styles.documentSpinner}>
+                    <ActivityIndicator size="small" color={colors.pink} />
+                  </View>
+              ) : (
+                <Text style={styles.documentIcon}>{doc.mimeType === "application/pdf" ? "📄" : "🖼️"}</Text>
+              )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.documentName} numberOfLines={1}>
                   {displayFileName(doc.displayName)}
                 </Text>
                 <Text style={styles.documentMeta}>{formatBytes(doc.bytes)}</Text>
               </View>
+              {/* Alena: "нет менюшка чтобы удалить" - long-press-to-delete
+                  (still above, kept as a shortcut) isn't a discoverable
+                  affordance on its own; a visible icon means she doesn't
+                  have to already know the gesture exists. */}
+              <Pressable
+                style={styles.documentDeleteBtn}
+                hitSlop={10}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  handleDeleteDocument(doc);
+                }}
+              >
+                <Feather name="trash-2" size={17} color={colors.muted} />
+              </Pressable>
             </Pressable>
           ))
         )}
@@ -738,6 +852,26 @@ const styles = StyleSheet.create({
   checklistNumTextDone: { color: colors.white },
   checklistLabel: { fontSize: 14, color: colors.text, flex: 1 },
   checklistLabelDone: { color: colors.muted, textDecorationLine: "line-through" },
+  checklistEditIconBtn: { padding: 4 },
+  checklistEditRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingVertical: 6 },
+  checklistEditInput: {
+    flex: 1,
+    backgroundColor: colors.bgSoft,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    fontSize: 14,
+    color: colors.text,
+  },
+  checklistEditBtn: {
+    backgroundColor: colors.blue,
+    borderRadius: radius.md,
+    width: 30,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checklistEditCancelBtn: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
   addRow: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.xs },
   addInput: {
     flex: 1,
@@ -752,8 +886,10 @@ const styles = StyleSheet.create({
   addButtonText: { color: colors.white, fontWeight: "700", fontSize: 13 },
   documentRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.line },
   documentIcon: { fontSize: 22 },
+  documentSpinner: { width: 22, alignItems: "center" },
   documentName: { fontSize: 14, fontWeight: "600", color: colors.text },
   documentMeta: { fontSize: 12, color: colors.muted },
+  documentDeleteBtn: { padding: 4 },
   addDocButton: { marginTop: spacing.sm, borderWidth: 1, borderColor: colors.pink, borderRadius: radius.pill, paddingVertical: 10, alignItems: "center" },
   addDocButtonText: { color: colors.pink, fontWeight: "700", fontSize: 14 },
 });

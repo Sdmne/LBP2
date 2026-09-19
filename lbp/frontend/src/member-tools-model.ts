@@ -44,10 +44,10 @@ export function chooseFlow(a: Flow, step:number, value:string): Flow {
  return next;
 }
 export function flowDraft(a:Matching):Flow {return {...a,lookingFor:[...a.lookingFor],donorType:[...a.donorType],goal:a.lookingFor.length&&a.donorType.length?'both':a.donorType.length?'donor':a.lookingFor.length?'parent':'',desiredDonorContact:a.desiredDonorContact==='CONTACT_BY_AGREEMENT'?'LIMITED_CONTACT':a.desiredDonorContact};}
-export type Photo = {id:string;publicUrl:string;avatarUrl:string;position:number;status:string;moderationStatus:string};
+export type Photo = {id:string;publicUrl:string;avatarUrl:string;position:number;status:string;moderationStatus:string;moderationReason:string};
 export function photosOf(value:unknown): Photo[] {
  const source=Array.isArray(value)?value:[];
- return source.map(v=>{const p=row(v);return {id:text(p.id),publicUrl:text(p.publicUrl||p.publicurl||p.url),avatarUrl:text(p.avatarUrl||p.avatarurl),position:Number(p.position)||0,status:text(p.status||'ACTIVE').toUpperCase(),moderationStatus:text(p.moderationStatus||p.moderationstatus||'APPROVED').toUpperCase()};}).filter(p=>p.id&&['ACTIVE','PENDING','REJECTED'].includes(p.status));
+ return source.map(v=>{const p=row(v);return {id:text(p.id),publicUrl:text(p.publicUrl||p.publicurl||p.url),avatarUrl:text(p.avatarUrl||p.avatarurl),position:Number(p.position)||0,status:text(p.status||'ACTIVE').toUpperCase(),moderationStatus:text(p.moderationStatus||p.moderationstatus||'APPROVED').toUpperCase(),moderationReason:text(p.moderationReason||p.moderationreason)};}).filter(p=>p.id&&['ACTIVE','PENDING','REJECTED'].includes(p.status));
 }
 export function managedPhotos(photos:Photo[]) {
  const rank:Record<string,number>={ACTIVE:0,PENDING:1,REJECTED:2};const map=new Map<number,Photo>();

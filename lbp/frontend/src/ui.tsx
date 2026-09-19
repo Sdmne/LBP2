@@ -63,8 +63,7 @@ const defaultFooterPages = (text: (typeof SITE_TEXT)[CookieLocale]): FooterPageL
   { slug: "terms-of-use", title: text.terms },
   { slug: "privacy-policy", title: text.privacy },
 ];
-const footerPagePath = (locale: CookieLocale, slug: string) =>
-  slug === "delete-account" ? `/${locale}/delete-account` : `/${locale}/pages/${encodeURIComponent(slug)}`;
+const footerPagePath = (locale: CookieLocale, slug: string) => `/${locale}/${encodeURIComponent(slug)}`;
 
 function ScrollToTopOnNavigation() {
   const { pathname, search } = useLocation();
@@ -595,7 +594,7 @@ function CookieConsent() {
             <h2>{text.heading}</h2>
             <p>
               {text.consent}{" "}
-              <Link to={`/${locale}/pages/privacy-policy`} target="_blank">
+              <Link to={`/${locale}/privacy-policy`} target="_blank">
                 {text.privacyPolicy}
               </Link>
             </p>
@@ -669,7 +668,7 @@ function CookieConsent() {
             ))}
             <p>
               {text.learnMore}{" "}
-              <Link to={`/${locale}/pages/privacy-policy`} target="_blank">
+              <Link to={`/${locale}/privacy-policy`} target="_blank">
                 {text.privacyPolicy}
               </Link>
             </p>
@@ -2209,7 +2208,7 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
           </label>
           <label className="auth-terms">
             <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
-            <span>{copy.acceptPrefix} <Link to={`/${locale}/pages/terms-of-use`}>{copy.terms}</Link> {copy.and} <Link to={`/${locale}/pages/privacy-policy`}>{copy.privacy}</Link></span>
+            <span>{copy.acceptPrefix} <Link to={`/${locale}/terms-of-use`}>{copy.terms}</Link> {copy.and} <Link to={`/${locale}/privacy-policy`}>{copy.privacy}</Link></span>
           </label>
           {error && <p className="error">{error}</p>}
           <button className="auth-submit" disabled={busy}>{busy ? copy.creatingAccount : copy.createAccount}</button>
@@ -3694,7 +3693,7 @@ function CatalogCard({
             <button type="button" aria-label={`${copy.message} ${name}`} onClick={() => onMessage(item)}>
               <svg className="catalog-message-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" /></svg>
             </button>
-            <button type="button" className={liked ? "active" : ""} aria-label={`${liked ? copy.liked : copy.like} ${name}`} aria-pressed={liked} onClick={() => { if (!liked) onLike(item); }}>
+            <button type="button" className={liked ? "active" : ""} aria-label={`${liked ? copy.liked : copy.like} ${name}`} aria-pressed={liked} disabled={liked} onClick={() => { if (!liked) onLike(item); }}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /><path d="M7 10v12" /></svg>
             </button>
           </div>
@@ -10473,9 +10472,21 @@ const contactPageCopy: Record<CookieLocale, {
   },
 };
 
+const contactSuccessCopy: Record<CookieLocale, { title: string; intro: string }> = {
+  en: { title: "Message sent", intro: "Thank you for reaching out. We'll reply as soon as we can." },
+  ru: { title: "Сообщение отправлено", intro: "Спасибо за обращение. Мы ответим как можно скорее." },
+  es: { title: "Mensaje enviado", intro: "Gracias por escribirnos. Responderemos lo antes posible." },
+  pt: { title: "Mensagem enviada", intro: "Agradecemos a sua mensagem. Responderemos assim que possível." },
+  fr: { title: "Message envoyé", intro: "Merci de nous avoir contactés. Nous vous répondrons dès que possible." },
+  de: { title: "Nachricht gesendet", intro: "Vielen Dank für Ihre Nachricht. Wir antworten Ihnen so schnell wie möglich." },
+  it: { title: "Messaggio inviato", intro: "Grazie per averci contattato. Ti risponderemo il prima possibile." },
+  pl: { title: "Wiadomość wysłana", intro: "Dziękujemy za kontakt. Odpowiemy tak szybko, jak to możliwe." },
+};
+
 function Contact() {
   const locale = localeOf();
   const copy = contactPageCopy[locale];
+  const successCopy = contactSuccessCopy[locale];
   const [draft, setDraft] = useState({
     name: "",
     email: "",
@@ -10509,6 +10520,12 @@ function Contact() {
         </dl>
       </aside>
       <div className="contact-form-panel">
+        {notice === copy.success ? (
+          <section className="contact-success-card" role="status" aria-live="polite">
+            <h1>{successCopy.title}</h1>
+            <p>{successCopy.intro}</p>
+          </section>
+        ) : <>
         <h1>{copy.title}</h1>
         <p>{copy.intro}</p>
         <form onSubmit={submit}>
@@ -10535,7 +10552,7 @@ function Contact() {
           </label>
           {notice && <p className="notice contact-full">{notice}</p>}
           <button className="contact-submit">{copy.send}</button>
-        </form>
+        </form></>}
       </div>
     </section>
   );
@@ -11105,6 +11122,11 @@ function localizedCategory(cat: ResourceCategoryData, locale: CookieLocale): Res
   const t = RESOURCES_CATEGORIES_I18N[cat.slug]?.[locale];
   if (!t) return cat;
   return { ...cat, eyebrow: t.eyebrow, title: t.title, description: t.description, disclaimer: t.disclaimer ?? cat.disclaimer };
+}
+
+function LegacyLegalPageRedirect({ slug }: { slug: "terms-of-use" | "privacy-policy" }) {
+  const { locale = "en" } = useParams();
+  return <Navigate to={`/${locale}/${slug}`} replace />;
 }
 
 function localizedDownloadUrl(downloadUrl: string | undefined, locale: CookieLocale): string | undefined {
@@ -17184,7 +17206,10 @@ export function WebApp() {
       <Route path="/:locale/resources/:category/:tool" element={content(<ResourceTool />)} />
       <Route path="/:locale/find-your-path/:slug" element={content(<FindYourPath />)} />
       <Route path="/:locale/professionals" element={content(<Professionals />)} />
-      <Route path="/:locale/pages/:slug" element={content(<ContentPage />)} />
+      <Route path="/:locale/terms-of-use" element={content(<ContentPage forcedSlug="terms-of-use" />)} />
+      <Route path="/:locale/privacy-policy" element={content(<ContentPage forcedSlug="privacy-policy" />)} />
+      <Route path="/:locale/pages/terms-of-use" element={<LegacyLegalPageRedirect slug="terms-of-use" />} />
+      <Route path="/:locale/pages/privacy-policy" element={<LegacyLegalPageRedirect slug="privacy-policy" />} />
       <Route path="/:locale/delete-account" element={content(<ContentPage forcedSlug="delete-account" />)} />
       <Route
         path="/:locale/likes"
