@@ -131,7 +131,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSessionToken(res.sessionToken);
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
-        setPendingProfileWizard(false);
+        // A profile can be incomplete when this is the first login after
+        // registration, or after an administrator has reset it. In both
+        // cases the API is authoritative and the navigator must open the
+        // required onboarding flow after email verification.
+        setPendingProfileWizard(res.user.needsProfileWizard === true);
         void syncPushToken();
       },
       async signup(email, password, displayName) {

@@ -9227,7 +9227,7 @@ const PRICING_TEXT = {
         { name: "Boost", body: "Get shown more often in Browse for 24 hours.", price: "≈ €3.99" },
         { name: "Superlike", body: "Stand out immediately - skips the daily like limit.", price: "≈ €1.99" },
         { name: "Rewind", body: "Undo your last swipe.", price: "≈ €1.99" },
-        { name: "See who liked you (48h)", body: "Reveal everyone who's liked you for 48 hours.", price: "≈ €4.99–5.99" },
+      { name: "See who liked you (48h)", body: "Reveal everyone who's liked you for 48 hours.", price: "≈ €4.99" },
         { name: "Full Compatibility Report", body: "Unlock the detailed report for one match.", price: "≈ €2.99" },
         { name: "+10 extra likes", body: "Get 10 extra likes to use today.", price: "≈ €2.99" },
       ],
@@ -9309,7 +9309,7 @@ const PRICING_TEXT = {
         { name: "Буст", body: "Ваша анкета будет чаще показываться в Обзоре в течение 24 часов.", price: "≈ €3.99" },
         { name: "Суперлайк", body: "Выделитесь сразу - лайк не учитывается в дневном лимите.", price: "≈ €1.99" },
         { name: "Rewind", body: "Отмените последний свайп.", price: "≈ €1.99" },
-        { name: "Кто вас лайкнул (48 часов)", body: "Откройте всех, кто вас лайкнул, на 48 часов.", price: "≈ €4.99–5.99" },
+      { name: "Кто вас лайкнул (48 часов)", body: "Откройте всех, кто вас лайкнул, на 48 часов.", price: "≈ €4.99" },
         { name: "Полный отчёт совместимости", body: "Откройте подробный отчёт совместимости для одного мэтча.", price: "≈ €2.99" },
         { name: "+10 лайков", body: "Получите 10 дополнительных лайков на сегодня.", price: "≈ €2.99" },
       ],
@@ -9391,7 +9391,7 @@ const PRICING_TEXT = {
         { name: "Boost", body: "Aparece con más frecuencia en Explorar durante 24 horas.", price: "≈ €3.99" },
         { name: "Superlike", body: "Destaca al instante - tu like no cuenta para el límite diario.", price: "≈ €1.99" },
         { name: "Rewind", body: "Deshaz tu último swipe.", price: "≈ €1.99" },
-        { name: "Ve quién te dio like (48h)", body: "Descubre a todos los que te dieron like durante 48 horas.", price: "≈ €4.99–5.99" },
+      { name: "Ve quién te dio like (48h)", body: "Descubre a todos los que te dieron like durante 48 horas.", price: "≈ €4.99" },
         { name: "Informe de compatibilidad completo", body: "Desbloquea el informe detallado para un match.", price: "≈ €2.99" },
         { name: "+10 likes extra", body: "Obtén 10 likes extra para usar hoy.", price: "≈ €2.99" },
       ],
@@ -10568,6 +10568,7 @@ type AskAiExchange = { question: string; answer?: string; error?: string };
 // see AI_PUBLIC_RATE_LIMITS in backend/main.py for the per-IP daily limit.
 // --- i18n text for Ask AI / Agreement Draft tools (8 locales) ---
 type AskAiLocaleText = {
+  pill: string;
   heading: string;
   intro: string;
   emptyState: string;
@@ -10580,14 +10581,14 @@ type AskAiLocaleText = {
   error: string;
 };
 const ASK_AI_TEXT: Record<CookieLocale, AskAiLocaleText> = {
-  en: {"heading": "Ask AI about donor conception & surrogacy", "intro": "Free, no account needed. Ask about donor conception, surrogacy, co-parenting or family-law basics - this isn't medical, legal or financial advice, and it's general orientation only.", "emptyState": "Ask your first question to get started.", "thinking": "Thinking…", "placeholder": "e.g. What's the difference between known and anonymous donation?", "button": "Ask", "notePrefix": "Want personal guidance and a directory of clinics and lawyers?", "createAccountLink": "Create a free account", "rateLimited": "You've reached today's free limit for this tool - please try again tomorrow.", "error": "Could not get an answer right now. Please try again."},
-  ru: {"heading": "Спроси ИИ о донорском зачатии и суррогатном материнстве", "intro": "Бесплатно, регистрация не нужна. Спрашивайте о донорском зачатии, суррогатном материнстве, совместном родительстве или основах семейного права — это не медицинская, юридическая или финансовая консультация, а только общая ориентировка.", "emptyState": "Задайте первый вопрос, чтобы начать.", "thinking": "Думаю…", "placeholder": "например, в чём разница между известным и анонимным донорством?", "button": "Спросить", "notePrefix": "Нужна личная консультация и каталог клиник и юристов?", "createAccountLink": "Создайте бесплатный аккаунт", "rateLimited": "Вы достигли сегодняшнего бесплатного лимита для этого инструмента — попробуйте завтра.", "error": "Не удалось получить ответ прямо сейчас. Попробуйте ещё раз."},
-  es: {"heading": "Pregunta a la IA sobre donación y gestación subrogada", "intro": "Gratis, no se necesita cuenta. Pregunta sobre donación, gestación subrogada, co-crianza o nociones básicas de derecho de familia - esto no es asesoramiento médico, legal ni financiero, es solo orientación general.", "emptyState": "Haz tu primera pregunta para empezar.", "thinking": "Pensando…", "placeholder": "p. ej., ¿cuál es la diferencia entre donación conocida y anónima?", "button": "Preguntar", "notePrefix": "¿Quieres orientación personal y un directorio de clínicas y abogados?", "createAccountLink": "Crea una cuenta gratuita", "rateLimited": "Has alcanzado el límite gratuito de hoy para esta herramienta - inténtalo de nuevo mañana.", "error": "No se pudo obtener una respuesta en este momento. Inténtalo de nuevo."},
-  pt: {"heading": "Pergunta à IA sobre doação de gâmetas e gestação de substituição", "intro": "Grátis, não é necessária conta. Pergunta sobre doação de gâmetas, gestação de substituição, coparentalidade ou noções básicas de direito da família - isto não é aconselhamento médico, legal ou financeiro, é apenas orientação geral.", "emptyState": "Faz a tua primeira pergunta para começar.", "thinking": "A pensar…", "placeholder": "ex.: qual é a diferença entre doação conhecida e anónima?", "button": "Perguntar", "notePrefix": "Queres orientação pessoal e um diretório de clínicas e advogados?", "createAccountLink": "Cria uma conta gratuita", "rateLimited": "Atingiste o limite gratuito de hoje para esta ferramenta - tenta novamente amanhã.", "error": "Não foi possível obter uma resposta agora. Tenta novamente."},
-  fr: {"heading": "Demander à l'IA sur le don de gamètes et la gestation pour autrui", "intro": "Gratuit, aucun compte nécessaire. Posez vos questions sur le don de gamètes, la gestation pour autrui, la coparentalité ou les bases du droit de la famille - ceci n'est pas un conseil médical, juridique ou financier, seulement une orientation générale.", "emptyState": "Posez votre première question pour commencer.", "thinking": "Réflexion en cours…", "placeholder": "ex. : quelle est la différence entre don connu et don anonyme ?", "button": "Demander", "notePrefix": "Vous voulez un accompagnement personnalisé et un annuaire de cliniques et d'avocats ?", "createAccountLink": "Créez un compte gratuit", "rateLimited": "Vous avez atteint la limite gratuite du jour pour cet outil - veuillez réessayer demain.", "error": "Impossible d'obtenir une réponse pour le moment. Veuillez réessayer."},
-  de: {"heading": "Frag die KI zu Samen-/Eizellspende und Leihmutterschaft", "intro": "Kostenlos, kein Konto nötig. Frag zu Samen-/Eizellspende, Leihmutterschaft, Co-Elternschaft oder den Grundlagen des Familienrechts - das ist keine medizinische, rechtliche oder finanzielle Beratung, sondern nur eine allgemeine Orientierung.", "emptyState": "Stell deine erste Frage, um loszulegen.", "thinking": "Denke nach…", "placeholder": "z. B. Was ist der Unterschied zwischen bekannter und anonymer Spende?", "button": "Fragen", "notePrefix": "Möchtest du persönliche Beratung und ein Verzeichnis von Kliniken und Anwälten?", "createAccountLink": "Erstelle ein kostenloses Konto", "rateLimited": "Du hast das heutige kostenlose Limit für dieses Tool erreicht - bitte versuche es morgen erneut.", "error": "Die Antwort konnte gerade nicht abgerufen werden. Bitte erneut versuchen."},
-  it: {"heading": "Chiedi all'IA di fecondazione da donatore e maternità surrogata", "intro": "Gratuito, non è necessario un account. Chieda informazioni su fecondazione da donatore, maternità surrogata, co-genitorialità o nozioni di base di diritto di famiglia - non si tratta di consulenza medica, legale o finanziaria, ma solo di un orientamento generale.", "emptyState": "Faccia la Sua prima domanda per iniziare.", "thinking": "Sto pensando…", "placeholder": "ad es. Qual è la differenza tra donazione nota e anonima?", "button": "Chiedi", "notePrefix": "Vuoi una guida personalizzata e un elenco di cliniche e avvocati?", "createAccountLink": "Crea un account gratuito", "rateLimited": "Hai raggiunto il limite gratuito di oggi per questo strumento - riprova domani.", "error": "Impossibile ottenere una risposta in questo momento. Riprova."},
-  pl: {"heading": "Zapytaj AI o poczęcie z dawstwa i macierzyństwo zastępcze", "intro": "Bezpłatnie, konto nie jest potrzebne. Zapytaj o poczęcie z dawstwa, macierzyństwo zastępcze, współrodzicielstwo lub podstawy prawa rodzinnego - to nie jest porada medyczna, prawna ani finansowa, a jedynie ogólna orientacja.", "emptyState": "Zadaj swoje pierwsze pytanie, aby zacząć.", "thinking": "Myślę…", "placeholder": "np. jaka jest różnica między dawstwem znanym a anonimowym?", "button": "Zapytaj", "notePrefix": "Chcesz osobistego wsparcia i katalogu klinik oraz prawników?", "createAccountLink": "Załóż darmowe konto", "rateLimited": "Osiągnięto dzisiejszy bezpłatny limit dla tego narzędzia - spróbuj ponownie jutro.", "error": "Nie udało się teraz uzyskać odpowiedzi. Spróbuj ponownie."},
+  en: {"pill": "Free AI tool", "heading": "Ask AI about donor conception & surrogacy", "intro": "Free, no account needed. Ask about donor conception, surrogacy, co-parenting or family-law basics - this isn't medical, legal or financial advice, and it's general orientation only.", "emptyState": "Ask your first question to get started.", "thinking": "Thinking…", "placeholder": "e.g. What's the difference between known and anonymous donation?", "button": "Ask", "notePrefix": "Want personal guidance and a directory of clinics and lawyers?", "createAccountLink": "Create a free account", "rateLimited": "You've reached today's free limit for this tool - please try again tomorrow.", "error": "Could not get an answer right now. Please try again."},
+  ru: {"pill": "Бесплатный ИИ-инструмент", "heading": "Спроси ИИ о донорском зачатии и суррогатном материнстве", "intro": "Бесплатно, регистрация не нужна. Спрашивайте о донорском зачатии, суррогатном материнстве, совместном родительстве или основах семейного права — это не медицинская, юридическая или финансовая консультация, а только общая ориентировка.", "emptyState": "Задайте первый вопрос, чтобы начать.", "thinking": "Думаю…", "placeholder": "например, в чём разница между известным и анонимным донорством?", "button": "Спросить", "notePrefix": "Нужна личная консультация и каталог клиник и юристов?", "createAccountLink": "Создайте бесплатный аккаунт", "rateLimited": "Вы достигли сегодняшнего бесплатного лимита для этого инструмента — попробуйте завтра.", "error": "Не удалось получить ответ прямо сейчас. Попробуйте ещё раз."},
+  es: {"pill": "Herramienta de IA gratuita", "heading": "Pregunta a la IA sobre donación y gestación subrogada", "intro": "Gratis, no se necesita cuenta. Pregunta sobre donación, gestación subrogada, co-crianza o nociones básicas de derecho de familia - esto no es asesoramiento médico, legal ni financiero, es solo orientación general.", "emptyState": "Haz tu primera pregunta para empezar.", "thinking": "Pensando…", "placeholder": "p. ej., ¿cuál es la diferencia entre donación conocida y anónima?", "button": "Preguntar", "notePrefix": "¿Quieres orientación personal y un directorio de clínicas y abogados?", "createAccountLink": "Crea una cuenta gratuita", "rateLimited": "Has alcanzado el límite gratuito de hoy para esta herramienta - inténtalo de nuevo mañana.", "error": "No se pudo obtener una respuesta en este momento. Inténtalo de nuevo."},
+  pt: {"pill": "Ferramenta de IA gratuita", "heading": "Pergunta à IA sobre doação de gâmetas e gestação de substituição", "intro": "Grátis, não é necessária conta. Pergunta sobre doação de gâmetas, gestação de substituição, coparentalidade ou noções básicas de direito da família - isto não é aconselhamento médico, legal ou financeiro, é apenas orientação geral.", "emptyState": "Faz a tua primeira pergunta para começar.", "thinking": "A pensar…", "placeholder": "ex.: qual é a diferença entre doação conhecida e anónima?", "button": "Perguntar", "notePrefix": "Queres orientação pessoal e um diretório de clínicas e advogados?", "createAccountLink": "Cria uma conta gratuita", "rateLimited": "Atingiste o limite gratuito de hoje para esta ferramenta - tenta novamente amanhã.", "error": "Não foi possível obter uma resposta agora. Tenta novamente."},
+  fr: {"pill": "Outil IA gratuit", "heading": "Demander à l'IA sur le don de gamètes et la gestation pour autrui", "intro": "Gratuit, aucun compte nécessaire. Posez vos questions sur le don de gamètes, la gestation pour autrui, la coparentalité ou les bases du droit de la famille - ceci n'est pas un conseil médical, juridique ou financier, seulement une orientation générale.", "emptyState": "Posez votre première question pour commencer.", "thinking": "Réflexion en cours…", "placeholder": "ex. : quelle est la différence entre don connu et don anonyme ?", "button": "Demander", "notePrefix": "Vous voulez un accompagnement personnalisé et un annuaire de cliniques et d'avocats ?", "createAccountLink": "Créez un compte gratuit", "rateLimited": "Vous avez atteint la limite gratuite du jour pour cet outil - veuillez réessayer demain.", "error": "Impossible d'obtenir une réponse pour le moment. Veuillez réessayer."},
+  de: {"pill": "Kostenloses KI-Tool", "heading": "Frag die KI zu Samen-/Eizellspende und Leihmutterschaft", "intro": "Kostenlos, kein Konto nötig. Frag zu Samen-/Eizellspende, Leihmutterschaft, Co-Elternschaft oder den Grundlagen des Familienrechts - das ist keine medizinische, rechtliche oder finanzielle Beratung, sondern nur eine allgemeine Orientierung.", "emptyState": "Stell deine erste Frage, um loszulegen.", "thinking": "Denke nach…", "placeholder": "z. B. Was ist der Unterschied zwischen bekannter und anonymer Spende?", "button": "Fragen", "notePrefix": "Möchtest du persönliche Beratung und ein Verzeichnis von Kliniken und Anwälten?", "createAccountLink": "Erstelle ein kostenloses Konto", "rateLimited": "Du hast das heutige kostenlose Limit für dieses Tool erreicht - bitte versuche es morgen erneut.", "error": "Die Antwort konnte gerade nicht abgerufen werden. Bitte erneut versuchen."},
+  it: {"pill": "Strumento IA gratuito", "heading": "Chiedi all'IA di fecondazione da donatore e maternità surrogata", "intro": "Gratuito, non è necessario un account. Chieda informazioni su fecondazione da donatore, maternità surrogata, co-genitorialità o nozioni di base di diritto di famiglia - non si tratta di consulenza medica, legale o finanziaria, ma solo di un orientamento generale.", "emptyState": "Faccia la Sua prima domanda per iniziare.", "thinking": "Sto pensando…", "placeholder": "ad es. Qual è la differenza tra donazione nota e anonima?", "button": "Chiedi", "notePrefix": "Vuoi una guida personalizzata e un elenco di cliniche e avvocati?", "createAccountLink": "Crea un account gratuito", "rateLimited": "Hai raggiunto il limite gratuito di oggi per questo strumento - riprova domani.", "error": "Impossibile ottenere una risposta in questo momento. Riprova."},
+  pl: {"pill": "Bezpłatne narzędzie AI", "heading": "Zapytaj AI o poczęcie z dawstwa i macierzyństwo zastępcze", "intro": "Bezpłatnie, konto nie jest potrzebne. Zapytaj o poczęcie z dawstwa, macierzyństwo zastępcze, współrodzicielstwo lub podstawy prawa rodzinnego - to nie jest porada medyczna, prawna ani finansowa, a jedynie ogólna orientacja.", "emptyState": "Zadaj swoje pierwsze pytanie, aby zacząć.", "thinking": "Myślę…", "placeholder": "np. jaka jest różnica między dawstwem znanym a anonimowym?", "button": "Zapytaj", "notePrefix": "Chcesz osobistego wsparcia i katalogu klinik oraz prawników?", "createAccountLink": "Załóż darmowe konto", "rateLimited": "Osiągnięto dzisiejszy bezpłatny limit dla tego narzędzia - spróbuj ponownie jutro.", "error": "Nie udało się teraz uzyskać odpowiedzi. Spróbuj ponownie."},
 };
 
 type AgreementDraftLocaleText = {
@@ -10656,12 +10657,20 @@ function AskAiTool() {
   };
 
   return (
-    <section className="advisor-page ask-ai-page">
-      <div className="list-card advisor-card">
-        <div className="message-title">
-          <h1>{text.heading}</h1>
-        </div>
+    // Was just a bare `.advisor-card` floating alone on an otherwise empty
+    // white page (Alena: "надо на всю страницу сделать и красиво" - this is
+    // also very likely what an earlier "на сайте все прилипло" report on
+    // the sibling Agreement Draft tool was really about: not a freeze, just
+    // a page that looks broken/unfinished). Now matches the full-page hero
+    // + white content pattern every other /resources and /tools page uses
+    // (see AgreementDraftTool right below, which already does this).
+    <div className="resources-page ask-ai-page">
+      <section className="resources-hero">
+        <span className="landing-pill resources-pill"><i /><span>{text.pill}</span></span>
+        <h1>{text.heading}</h1>
         <p>{text.intro}</p>
+      </section>
+      <div className="list-card advisor-card ask-ai-card">
         <div className="message-list advisor-list">
           {exchanges.length === 0 ? (
             <p className="notice">{text.emptyState}</p>
@@ -10690,7 +10699,7 @@ function AskAiTool() {
           {text.notePrefix} <Link to={`/${locale}/auth/register`}>{text.createAccountLink}</Link>.
         </p>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -13208,7 +13217,13 @@ function Professionals() {
         </div>
         <div className="professionals-steps-row">
           {t.steps.map(([number, title, description, icon]) => (
-            <article key={number} className="professionals-step-card">
+            <article key={number} className={`professionals-step-card${number === "03" ? " is-soon" : ""}`}>
+              {/* Booking a consultation isn't live yet - only browsing and
+                  signing up are (Alena: "здесь надо написать soon" on this
+                  step). Reuses the same "Coming soon" tag already shown on
+                  the not-yet-available categories above instead of a new
+                  style. */}
+              {number === "03" && <span className="resources-tool-tag soon professionals-soon-tag">{t.comingSoonLabel}</span>}
               <div className="landing-step-icon">{professionalStepIcon(icon)}</div>
               <div className="landing-step-number">{number}</div>
               <h3>{title}</h3>

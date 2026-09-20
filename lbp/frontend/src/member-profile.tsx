@@ -468,7 +468,6 @@ export function PremiumDialog({
                   {tierChoices.map((value) => (
                     <button type="button" key={value} aria-pressed={tier === value}
                       className={`premium-tier${tier === value ? " selected" : ""}`}
-                      disabled={active && ((currentTier === "BUILDER" && value < 1) || (currentTier === "PRO" && value < 2))}
                       onClick={() => { setTier(value); setPlan(value === 2 ? "monthly" : "quarterly"); }}>
                       {pricing.plans[value].name}
                     </button>

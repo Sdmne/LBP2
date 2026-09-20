@@ -3205,7 +3205,12 @@ body {
   gap: 20px;
   width: min(1320px, 100%);
   margin: 0 auto;
-  padding: 0 60px 80px;
+  /* Was "0 60px 80px" - zero top padding meant the card grid butted
+     straight up against the dark photo hero above it with no breathing
+     room (Alena, flagged on several category pages: "здесь нет отступа").
+     The hero's own bottom padding isn't enough on its own since the grid
+     sits on a plain white background right after it. */
+  padding: 56px 60px 80px;
 }
 
 .resources-tool-card {
@@ -3344,7 +3349,10 @@ body {
   gap: 40px;
   width: min(1320px, 100%);
   margin: 0 auto;
-  padding: 0 60px 100px;
+  /* Same fix as .resources-tool-grid above - was "0 60px 100px", zero top
+     padding left the "What's inside" panel butting straight up against the
+     dark hero (Alena: "тут бы отступ" on this exact resource detail page). */
+  padding: 56px 60px 100px;
   align-items: start;
 }
 
@@ -4091,7 +4099,7 @@ button.landing-gradient-button:disabled {
 @media (max-width: 1023px) {
   .resources-tool-layout {
     grid-template-columns: 1fr;
-    padding: 0 24px 80px;
+    padding: 40px 24px 80px;
   }
 
   .resources-tool-sidebar {
@@ -4130,7 +4138,7 @@ button.landing-gradient-button:disabled {
 
   .resources-tool-grid {
     grid-template-columns: 1fr;
-    padding: 0 24px 56px;
+    padding: 40px 24px 56px;
   }
 
   .resources-quiz-strip {
@@ -9944,12 +9952,18 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
 }
 
 .professionals-step-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 32px;
   border-radius: 24px;
   background: #fafafa;
+}
+
+.professionals-step-card.is-soon {
+  background: #fff;
+  border: 1.5px dashed rgba(7, 19, 44, 0.14);
 }
 
 .professionals-step-card h3 {
@@ -10004,10 +10018,17 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
   padding: 0 24px 64px;
 }
 
+/* AskAiTool is now a full page (.resources-page + .resources-hero) rather
+   than a bare card floating on white - see the comment above its JSX.
+   .ask-ai-page just needs the page-level bottom padding; the card's own
+   width/centering lives in .ask-ai-card below. */
 .ask-ai-page {
+  padding-bottom: 64px;
+}
+
+.ask-ai-card {
   width: min(760px, 100%);
-  margin: 0 auto;
-  padding: 48px 24px 96px;
+  margin: 56px auto 96px;
 }
 
 .ask-ai-exchange {
@@ -10035,7 +10056,11 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
 
 @media (max-width: 767px) {
   .ask-ai-page {
-    padding: 32px 16px 72px;
+    padding-bottom: 40px;
+  }
+
+  .ask-ai-card {
+    margin: 32px auto 72px;
   }
 
   .agreement-draft-result {

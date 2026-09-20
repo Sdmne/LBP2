@@ -4854,6 +4854,14 @@ def auth_signup(payload: SignupPayload, response: Response, request: Request):
             (user_id,),
         )
         user = cursor.fetchone()
+        # Build the response payload while the cursor is still open - it runs
+        # its own DB queries (fetch_profile) internally. Doing this after the
+        # `with db_cursor()` block closes uses an already-closed cursor/
+        # connection and raises, which previously turned a fully successful
+        # signup (account created + committed + verification email/code
+        # already sent below) into a 500 response to the client. See
+        # auth_login()'s equivalent call above for the same, correct pattern.
+        user_payload = auth_user_payload(cursor, user)
     email_sent = send_auth_action_email(
         user_id,
         email,
@@ -4867,7 +4875,7 @@ def auth_signup(payload: SignupPayload, response: Response, request: Request):
         token,
         expires_at,
         user,
-        user_payload=auth_user_payload(cursor, user),
+        user_payload=user_payload,
         emailVerificationRequired=True,
         emailSent=email_sent,
     )
@@ -4948,14 +4956,24 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
             if user:
                 if user["status"] != "ACTIVE":
                     raise HTTPException(status_code=403, detail="ACCOUNT_INACTIVE")
-                if bool(user.get("password_login_enabled")):
-                    raise HTTPException(status_code=409, detail="SOCIAL_ACCOUNT_CONFLICT")
+                # Google has verified control of this same email address.
+                # Link its first social identity to the existing account so
+                # Google and password sign-in use the same member record.
                 cursor.execute(
-                    "SELECT id FROM firebase_identities WHERE user_id = %s LIMIT 1",
+                    "SELECT id, provider, email FROM firebase_identities WHERE user_id = %s LIMIT 1",
                     (user["id"],),
                 )
-                if cursor.fetchone():
-                    raise HTTPException(status_code=409, detail="SOCIAL_ACCOUNT_CONFLICT")
+                existing_identity = cursor.fetchone()
+                if existing_identity:
+                    identity_email = normalize_email(str(existing_identity.get("email") or ""))
+                    identity_provider = str(existing_identity.get("provider") or "").strip()
+                    if identity_email != email or identity_provider != provider:
+                        raise HTTPException(status_code=409, detail="SOCIAL_ACCOUNT_CONFLICT")
+                    # Firebase project migration creates a new Firebase UID for
+                    # the same verified Google identity. Replace only that
+                    # matching legacy link; the canonical insert below then
+                    # records the UID from the active Firebase project.
+                    cursor.execute("DELETE FROM firebase_identities WHERE id = %s", (existing_identity["id"],))
                 user_id = user["id"]
                 cursor.execute(
                     "UPDATE local_users SET email_verified_at = COALESCE(email_verified_at, UTC_TIMESTAMP()) WHERE id = %s",
@@ -6558,7 +6576,16 @@ def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = 
     if not updates.get("city"):
         raise HTTPException(status_code=422, detail="City is required")
     if not updates.get("cityPlaceId"):
-        raise HTTPException(status_code=422, detail="Select a city from the list")
+        # Older profiles stored a free-text city before the Google Places
+        # identifier existed.  They must still be able to change unrelated
+        # profile fields (for example, languages).  A place ID is required
+        # only when the city itself is changed.
+        with db_cursor() as (_, cursor):
+            current_profile = fetch_profile(cursor, profile_id)
+        current_data = as_dict(current_profile.get("data")) if current_profile else {}
+        current_city = str(current_data.get("city") or "").strip()
+        if updates["city"] != current_city:
+            raise HTTPException(status_code=422, detail="Select a city from the list")
     if not updates.get("profileType"):
         raise HTTPException(status_code=422, detail="Profile type is required")
     looking_for = updates.get("lookingFor") if isinstance(updates.get("lookingFor"), list) else []
