@@ -82,7 +82,7 @@ body {
   display: flex;
   align-items: center;
   gap: 48px;
-  padding: 0 max(16px, calc((100vw - 1280px) / 2 + 16px));
+  padding: 0 max(16px, calc((100vw - 1536px) / 2 + 16px));
   background: #fff;
 }
 .logo {
@@ -121,17 +121,22 @@ body {
 
 .member-counter-links a {
   position: relative;
+  display: inline-grid;
+  place-items: center;
 }
 
 .member-counter-links b {
+  position: absolute;
+  top: -0.48rem;
+  right: -0.62rem;
   display: inline-grid;
-  min-width: 1.15rem;
-  height: 1.15rem;
-  margin-left: 0.28rem;
-  padding: 0 0.25rem;
+  min-width: 1.18rem;
+  height: 1.18rem;
+  padding: 0 0.28rem;
   place-items: center;
   border-radius: 999px;
   background: var(--pink);
+  box-shadow: 0 0 0 3px #fff;
   color: #fff;
   font-size: 0.68rem;
   line-height: 1;
@@ -152,16 +157,17 @@ body {
   cursor: pointer;
 }
 .web-main {
-  width: min(1280px, calc(100% - 32px));
+  width: 100%;
+  max-width: var(--site-container-max);
   margin: 0 auto;
-  padding: 56px 0 72px;
+  padding: 56px 16px 72px;
   flex: 1;
 }
 .web-footer {
   background: #050505;
   color: #fff;
   min-height: 190px;
-  padding: 48px max(16px, calc((100vw - 1280px) / 2 + 16px)) 32px;
+  padding: 48px max(16px, calc((100vw - 1536px) / 2 + 16px)) 32px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -191,7 +197,7 @@ body {
 .locale-switcher {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   font-size: 13px;
   color: #b5becb;
 }
@@ -322,6 +328,11 @@ body {
   font-weight: 800;
   flex: 0 0 64px;
 }
+.user-avatar-initials {
+  font-size: 24px;
+  line-height: 1;
+  text-align: center;
+}
 .web-pager {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -366,15 +377,23 @@ body {
 .profile-card .primary {
   margin-top: auto;
 }
+/* Member-account "card" shell (Profile, Compatibility, AI Advisor, Photos,
+   Verification, Messages, Referral, Boost, Premium, Safety Check-in, etc.)
+   - Alena: "все это надо посимпотичнее и на весь экран бы наверное". These
+   pages used to sit in a narrow 760px column pinned to the left with a lot
+   of dead space on wide screens, plain hairline border, no shadow - one
+   shared redesign here lifts every page built on these classes at once. */
 .access-card,
 .detail-card,
 .member-form,
 .list-card {
-  border: 1px solid #e1e7f0;
-  border-radius: 16px;
+  border: 1px solid #e9edf4;
+  border-radius: 20px;
   background: #fff;
-  padding: 28px;
-  max-width: 760px;
+  padding: 32px clamp(24px, 4vw, 40px);
+  max-width: 1080px;
+  margin: 0 auto 24px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03), 0 16px 40px -24px rgba(15, 23, 42, 0.16);
 }
 .list-card {
   max-width: none;
@@ -385,30 +404,159 @@ body {
   color: #63758e;
   line-height: 1.55;
 }
+/* Tool-page gradient icon badge, before the <h1> - Alena: "переделай все в
+   красивый вид" + the style reference she sent (the "What's new" cards on
+   the homepage: .landing-whatsnew-icon, gradient(135deg,#4e9bff,#f070a9)
+   squares). Reuses that exact gradient/shape so Boost, Referral, Safety
+   Check-in, Video Verification and the cost calculator read as the same
+   brand, not a plain text heading. Add className="tool-page tool-page-<key>"
+   next to the existing "member-form" class on a page's <section> to pick up
+   an icon; the base .member-form look is unchanged for pages that don't. */
+.tool-page > h1 {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.tool-page > h1::before {
+  content: "";
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #4e9bff, #f070a9);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 24px;
+  mask-size: 24px;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.tool-page-boost > h1::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z'/%3E%3C/svg%3E");
+}
+.tool-page-referral > h1::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='4' x='3' y='8' rx='1'/%3E%3Cpath d='M12 8v13'/%3E%3Cpath d='M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7'/%3E%3Cpath d='M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='18' height='4' x='3' y='8' rx='1'/%3E%3Cpath d='M12 8v13'/%3E%3Cpath d='M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7'/%3E%3Cpath d='M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5'/%3E%3C/svg%3E");
+}
+.tool-page-safety > h1::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E");
+}
+.tool-page-video > h1::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z'/%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3C/svg%3E");
+}
+.tool-page-calculator > h1::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='16' height='20' x='4' y='2' rx='2'/%3E%3Cline x1='8' x2='16' y1='6' y2='6'/%3E%3Cline x1='16' x2='16' y1='14' y2='18'/%3E%3Cpath d='M16 10h.01'/%3E%3Cpath d='M12 10h.01'/%3E%3Cpath d='M8 10h.01'/%3E%3Cpath d='M12 14h.01'/%3E%3Cpath d='M8 14h.01'/%3E%3Cpath d='M12 18h.01'/%3E%3Cpath d='M8 18h.01'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='16' height='20' x='4' y='2' rx='2'/%3E%3Cline x1='8' x2='16' y1='6' y2='6'/%3E%3Cline x1='16' x2='16' y1='14' y2='18'/%3E%3Cpath d='M16 10h.01'/%3E%3Cpath d='M12 10h.01'/%3E%3Cpath d='M8 10h.01'/%3E%3Cpath d='M12 14h.01'/%3E%3Cpath d='M8 14h.01'/%3E%3Cpath d='M12 18h.01'/%3E%3Cpath d='M8 18h.01'/%3E%3C/svg%3E");
+}
+.tool-page-community > h1::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E");
+}
+/* Community groups grid - same landing-whatsnew-card recipe as the tool
+   pages above, replacing the plain <ul> link list Alena flagged
+   ("оформить в стиле главной страницы"). */
+.community-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+.community-group-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 24px;
+  border: 1px solid #ececec;
+  border-radius: 20px;
+  background: #fafafa;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 150ms, background 150ms, transform 150ms;
+}
+.community-group-card:hover {
+  border-color: #4e9bff;
+  background: #fff;
+  transform: translateY(-2px);
+}
+.community-group-card-icon {
+  display: block;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #6366f1, #f51161);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M23 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E") center / 22px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M23 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E") center / 22px no-repeat;
+}
+.community-group-card h3 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.4;
+}
+.community-group-card p {
+  margin: 0;
+  color: #63758e !important;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.community-group-card-count {
+  margin-top: auto;
+  padding-top: 4px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+}
+/* Alena: "тут вообще криво и вылезло за рамку" - 15 tabs (Profile, ...,
+   Settings) never fit in one row on any screen, so this bar has always
+   scrolled sideways - but with a hard-clipped right edge and no scrollbar
+   it read as broken (a tab name chopped mid-word) rather than as a
+   deliberately scrollable strip. A trailing fade + hidden scrollbar reads
+   as "there's more" the way native app tab bars do, without changing the
+   underlying scroll behaviour. */
 .member-tabs,
 .member-links {
   display: flex;
-  gap: 8px;
-  border-bottom: 1px solid #e3e9f1;
-  margin: 20px 0 28px;
+  gap: 4px;
+  background: #f4f6fa;
+  border: 1px solid #eaeef5;
+  border-radius: 999px;
+  padding: 5px;
+  margin: 20px auto 28px;
+  max-width: 1080px;
   overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+.member-tabs::-webkit-scrollbar,
+.member-links::-webkit-scrollbar {
+  display: none;
 }
 .member-tabs button,
 .member-links a {
   background: transparent;
   border: 0;
+  border-radius: 999px;
   color: #63758e;
   font: inherit;
   font-weight: 750;
-  padding: 12px 16px;
+  padding: 10px 18px;
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
+  transition: background 150ms ease, color 150ms ease;
 }
 .member-tabs button.active,
-.member-links a:hover {
+.member-links a.active {
+  color: #fff;
+  background: #f51161;
+}
+.member-tabs button:hover:not(.active),
+.member-links a:hover:not(.active) {
   color: #f51161;
-  border-bottom: 2px solid #f51161;
+  background: #fff;
 }
 .auth-page {
   display: grid;
@@ -513,6 +661,7 @@ body {
 }
 .photo-card img {
   width: 100%;
+  height: auto;
   aspect-ratio: 1;
   object-fit: cover;
   border-radius: 10px;
@@ -582,7 +731,7 @@ body {
 }
 .message-pane form {
   display: flex;
-  gap: 10px;
+  gap: 9px;
 }
 .message-pane form input {
   flex: 1;
@@ -766,6 +915,16 @@ body {
   gap: 6px;
 }
 
+.link-button {
+  background: transparent;
+  border: 0;
+  color: #bf2742;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
 .danger-zone form {
   display: grid;
   gap: 16px;
@@ -826,17 +985,56 @@ body {
   height: 110px;
   flex-basis: 110px;
 }
+.profile-summary .user-avatar-initials {
+  font-size: 40px;
+}
 .catalog-profile {
   max-width: 880px;
 }
+/* Custom file-upload button - Alena: "как-то надо посимпотичнее" re: Video
+   Verification's upload, which was a raw unstyled OS file picker + "no file
+   chosen" text (browser-default input[type=file] rendering). The <input>
+   itself is kept (still keyboard/screen-reader operable, still what
+   receives the click since it's the label's only interactive child) but
+   made visually invisible and stretched over the label, which is now
+   styled as a proper dashed dropzone-style button. Shared by Video
+   Verification and both Photos upload buttons (all three use .upload-control). */
 .upload-control {
-  display: inline-grid;
+  position: relative;
+  display: grid;
+  place-items: center;
   gap: 8px;
+  text-align: center;
+  min-height: 96px;
+  border: 1.5px dashed #d7deea;
+  border-radius: 16px;
+  background: #f8f9fc;
+  color: #37455a;
   font-weight: 750;
-  margin: 0 0 18px;
+  padding: 20px;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+.upload-control:hover {
+  border-color: #f51161;
+  background: #fff5f8;
+}
+.upload-control::before {
+  content: "";
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: #f51161;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='17 8 12 3 7 8'/%3E%3Cline x1='12' y1='3' x2='12' y2='15'/%3E%3C/svg%3E") center / 20px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='17 8 12 3 7 8'/%3E%3Cline x1='12' y1='3' x2='12' y2='15'/%3E%3C/svg%3E") center / 20px no-repeat;
 }
 .upload-control input {
-  font: inherit;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 .photo-actions {
   display: flex;
@@ -860,7 +1058,7 @@ body {
   border-radius: 12px;
   padding: 16px;
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 .notification-settings legend {
   font-weight: 800;
@@ -890,12 +1088,56 @@ body {
   display: grid;
   gap: 5px;
 }
+.message-bubble.mine {
+  align-self: flex-end;
+  background: #eaf6fd;
+}
+.message-bubble.theirs {
+  align-self: flex-start;
+}
 .message-bubble a {
   color: #0b68d8;
   font-weight: 700;
 }
 .advisor-page {
-  max-width: 760px;
+  max-width: 960px;
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+.advisor-card .message-title h1 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* Same pink circle + chat-bubble glyph as the site-wide .ai-advisor-fab, so
+   the dedicated AI Advisor page reads as the same feature, not a plain
+   generic form - Alena: "это надо посимпотичнее". */
+.advisor-card .message-title h1::before {
+  content: "";
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #f51161;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z'/%3E%3C/svg%3E") center / 18px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z'/%3E%3C/svg%3E") center / 18px no-repeat;
+}
+.weekly-insight-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+}
+.weekly-insight-card h2::before {
+  content: "";
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #6366f1, #f51161);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83'/%3E%3C/svg%3E") center / 15px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83'/%3E%3C/svg%3E") center / 15px no-repeat;
 }
 .advisor-list {
   display: flex;
@@ -904,14 +1146,136 @@ body {
   max-height: 480px;
   overflow-y: auto;
   margin: 16px 0;
+  padding: 4px 2px;
+}
+/* Small corner avatar on every bubble (CSS-only, no markup change needed on
+   AiAdvisor/AskAiTool/AgreementDraftTool) - Alena confirmed she wants both
+   brand styling AND a chat-app bubble/avatar treatment for the AI screens,
+   not just colored bubbles. */
+.advisor-bubble-user,
+.advisor-bubble-assistant {
+  position: relative;
+}
+.advisor-bubble-user::before,
+.advisor-bubble-assistant::before {
+  content: "";
+  position: absolute;
+  bottom: -4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 13px;
+  mask-size: 13px;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.15);
 }
 .advisor-bubble-user {
   align-self: flex-end;
-  background: #f31260;
+  background: #f51161;
   color: #fff;
+  border-bottom-right-radius: 4px;
+  margin-right: 30px;
+}
+.advisor-bubble-user::before {
+  right: -30px;
+  background: linear-gradient(135deg, #4e9bff, #7b6ef6);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E");
 }
 .advisor-bubble-assistant {
   align-self: flex-start;
+  background: #f1f5fa;
+  border-bottom-left-radius: 4px;
+  margin-left: 30px;
+}
+.advisor-bubble-assistant::before {
+  left: -30px;
+  background: linear-gradient(135deg, #6366f1, #f51161);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83'/%3E%3C/svg%3E");
+}
+@media (max-width: 480px) {
+  .advisor-bubble-user,
+  .advisor-bubble-assistant {
+    max-width: calc(100% - 30px);
+  }
+}
+/* Composer: rounded pill input + circular pink send button, mirrors the
+   .ai-advisor-fab / chat-composer look elsewhere instead of a plain
+   text input + rectangular button. */
+.advisor-card form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.advisor-card form input {
+  flex: 1;
+  border: 1px solid #dbe3ed;
+  border-radius: 999px;
+  padding: 13px 20px;
+  font: inherit;
+  background: #f8f9fc;
+}
+.advisor-card form input:focus {
+  outline: none;
+  border-color: #f51161;
+  background: #fff;
+}
+.advisor-card form button.primary {
+  flex: 0 0 auto;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+}
+/* Premium/subscription status card - current-tier callout + upgrade offer
+   (Alena: "как мне перейти на тариф выше тогда?" - there used to be no
+   way to see your tier or upgrade once already Premium). */
+.premium-current-tier {
+  font-size: 15px;
+}
+.premium-current-tier strong {
+  color: #f51161;
+}
+.premium-upgrade {
+  margin: 12px 0 20px;
+  padding: 20px;
+  border: 1px solid #ffd7e3;
+  border-radius: 16px;
+  background: #fff8fa;
+}
+.premium-upgrade p {
+  margin: 0 0 12px;
+}
+/* Referral: shareable link (Alena: "почему нельзя прислать ссылку просто
+   для регистрации") in place of a bare code the friend had to type in. */
+.referral-code-card {
+  display: grid;
+  gap: 10px;
+}
+.referral-link-row {
+  display: flex;
+  gap: 10px;
+}
+.referral-link-field {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+  color: #37455a;
+}
+.referral-code-fallback {
+  font-size: 14px;
+  color: #63758e;
 }
 .pregnancy-upload-row {
   display: flex;
@@ -942,6 +1306,18 @@ body {
 
 
 
+.advisor-form {
+  display: flex;
+  gap: 9px;
+}
+.advisor-form input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  padding: 10px 13px;
+}
 .attachment-control {
   display: inline-flex;
   align-items: center;
@@ -967,12 +1343,18 @@ body {
     min-width: 0;
     flex: 1 1 180px;
   }
+  .advisor-form {
+    flex-wrap: wrap;
+  }
+  .advisor-form input {
+    flex: 1 1 180px;
+  }
 }
 .social-login {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 9px;
   flex-wrap: wrap;
   padding-top: 4px;
 }
@@ -1204,7 +1586,7 @@ body {
 .cookie-category-toggle > span {
   display: inline-grid;
   min-width: 20px;
-  height: 20px;
+  height: 16px;
   place-items: center;
   border-radius: 999px;
   background: #f1f5f9;
@@ -1217,7 +1599,7 @@ body {
   position: relative;
   display: inline-flex;
   width: 36px;
-  height: 20px;
+  height: 16px;
   flex: 0 0 auto;
   cursor: pointer;
 }
@@ -1528,7 +1910,7 @@ body {
   display: flex;
   align-items: center;
   width: 100%;
-  max-width: 1280px;
+  max-width: var(--site-container-max);
   height: 80px;
   margin: 0 auto;
   padding: 0 16px;
@@ -1597,7 +1979,7 @@ body {
 }
 
 .header-actions .sign-in {
-  min-height: 40px;
+  min-height: 28px;
   padding: 8px 16px;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
@@ -1609,7 +1991,7 @@ body {
 }
 
 .header-actions .sign-up {
-  min-height: 40px;
+  min-height: 28px;
   padding: 8px 16px;
   border-radius: 6px;
   background: #f31260 !important;
@@ -1654,9 +2036,10 @@ body {
 }
 
 .web-main {
-  width: min(1536px, calc(100% - 32px));
+  width: 100%;
+  max-width: var(--site-container-max);
   margin: 0 auto;
-  padding: 56px 0 72px;
+  padding: 56px 16px 72px;
   flex: 1;
 }
 
@@ -1802,7 +2185,7 @@ body {
      strength so the white heading/pill/paragraph contrast is unchanged.
      Alena sent a different photo for this page specifically (kids playing
      with alphabet blocks) rather than reusing the Resources one. */
-  background-image: linear-gradient(180deg, rgba(6, 6, 8, 0.72), rgba(6, 6, 8, 0.82)), url("/web-static/images/landing/trust-safety-hero.jpg");
+  background-image: linear-gradient(180deg, rgba(6, 6, 8, 0.72), rgba(6, 6, 8, 0.82)), url("/web-static/images/landing/trust-safety-hero-b4382c5d.jpg");
   background-size: cover;
   background-position: center;
   background-color: #0a0a0a;
@@ -1861,7 +2244,7 @@ body {
 
 .trust-check-icon svg {
   width: 24px;
-  height: 24px;
+  height: 19px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -2095,7 +2478,7 @@ body {
 .pricing-features li {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   color: #404040;
   font-size: 14px;
   line-height: 1.5;
@@ -2233,8 +2616,8 @@ body {
 }
 
 .pricing-matrix-cell svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: #4e9bff;
   stroke-width: 2.4;
@@ -2253,7 +2636,63 @@ body {
   font-weight: 600;
 }
 
+/* Item 19, 2026-09-15 - one-time purchases showcase on the Pricing page
+   (mobile-app-only checkout, informational here - see the "Payments /
+   business" note about why there's no buy button on this page). Reuses
+   the same card look as .pricing-card (border/radius/bg tokens) but as a
+   compact 3-up grid, since these are small add-ons, not full plans. */
+.pricing-onetime {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+  padding: 0 60px 72px;
+}
+
+.pricing-onetime-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.pricing-onetime-card {
+  padding: 24px;
+  border: 1px solid #ececec;
+  border-radius: 20px;
+  background: #fafafa;
+}
+
+.pricing-onetime-card h4 {
+  margin: 0 0 8px;
+  color: #171717;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pricing-onetime-card p {
+  margin: 0 0 12px;
+  color: #737373;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.pricing-onetime-card strong {
+  color: #4e9bff;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pricing-onetime-note {
+  margin: 24px 0 0;
+  color: #a3a3a3;
+  font-size: 13px;
+  text-align: center;
+}
+
 @media (max-width: 767px) {
+  .pricing-onetime-grid {
+    grid-template-columns: 1fr;
+  }
+
   .pricing-hero {
     padding: 64px 24px 48px;
   }
@@ -2288,7 +2727,7 @@ body {
      затемненную фото") - dark overlay gradient over the photo keeps the
      white heading/pill/paragraph text at the same contrast as the old flat
      #0a0a0a background, so nothing else on the page needed to change. */
-  background-image: linear-gradient(180deg, rgba(6, 6, 8, 0.72), rgba(6, 6, 8, 0.82)), url("/web-static/images/landing/resources-hero.jpg");
+  background-image: linear-gradient(180deg, rgba(6, 6, 8, 0.72), rgba(6, 6, 8, 0.82)), url("/web-static/images/landing/resources-hero-50778c9e.jpg");
   background-size: cover;
   background-position: center;
   background-color: #0a0a0a;
@@ -2517,7 +2956,7 @@ body {
 .resources-category-card li {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 10px 0;
   border-bottom: 1px solid rgba(7, 19, 44, 0.08);
 }
@@ -2601,8 +3040,8 @@ body {
 }
 
 .resources-routes-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -2698,8 +3137,8 @@ body {
 }
 
 .resources-pro-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -2766,7 +3205,12 @@ body {
   gap: 20px;
   width: min(1320px, 100%);
   margin: 0 auto;
-  padding: 0 60px 80px;
+  /* Was "0 60px 80px" - zero top padding meant the card grid butted
+     straight up against the dark photo hero above it with no breathing
+     room (Alena, flagged on several category pages: "здесь нет отступа").
+     The hero's own bottom padding isn't enough on its own since the grid
+     sits on a plain white background right after it. */
+  padding: 56px 60px 80px;
 }
 
 .resources-tool-card {
@@ -2799,8 +3243,8 @@ body {
 }
 
 .resources-tool-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -2905,7 +3349,10 @@ body {
   gap: 40px;
   width: min(1320px, 100%);
   margin: 0 auto;
-  padding: 0 60px 100px;
+  /* Same fix as .resources-tool-grid above - was "0 60px 100px", zero top
+     padding left the "What's inside" panel butting straight up against the
+     dark hero (Alena: "тут бы отступ" on this exact resource detail page). */
+  padding: 56px 60px 100px;
   align-items: start;
 }
 
@@ -2970,7 +3417,7 @@ body {
 .resources-tool-samples {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
   margin-top: 24px;
   padding-top: 24px;
   border-top: 1px solid #ececec;
@@ -3020,7 +3467,7 @@ body {
 .resources-tool-related {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
   padding: 24px;
   border-radius: 20px;
   border: 1px solid #ececec;
@@ -3554,7 +4001,7 @@ button.landing-gradient-button:disabled {
 
 .fyp-hero-icon svg {
   width: 24px;
-  height: 24px;
+  height: 19px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -3652,7 +4099,7 @@ button.landing-gradient-button:disabled {
 @media (max-width: 1023px) {
   .resources-tool-layout {
     grid-template-columns: 1fr;
-    padding: 0 24px 80px;
+    padding: 40px 24px 80px;
   }
 
   .resources-tool-sidebar {
@@ -3691,7 +4138,7 @@ button.landing-gradient-button:disabled {
 
   .resources-tool-grid {
     grid-template-columns: 1fr;
-    padding: 0 24px 56px;
+    padding: 40px 24px 56px;
   }
 
   .resources-quiz-strip {
@@ -3752,12 +4199,20 @@ button.landing-gradient-button:disabled {
 
 .contact-page {
   display: grid;
-  grid-template-columns: 300px 668px;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
   gap: 64px;
   width: 100%;
   max-width: 1080px;
   margin: 0 auto;
   padding: 80px 24px;
+}
+
+.contact-page > * {
+  min-width: 0;
+}
+
+.contact-details {
+  overflow-wrap: anywhere;
 }
 
 .contact-details > p {
@@ -3871,7 +4326,7 @@ button.landing-gradient-button:disabled {
 .contact-form-panel textarea {
   height: 137.142857px;
   padding: 8px 12px;
-  resize: both;
+  resize: vertical;
 }
 
 .contact-submit {
@@ -4125,11 +4580,27 @@ button.landing-gradient-button:disabled {
   margin: 0 auto;
 }
 
+.article-preview-banner {
+  display: block;
+  width: 100%;
+  max-width: 1504px;
+  margin: 0 auto 24px;
+  padding: 8px 16px;
+  border: 1px solid #fde047;
+  border-radius: 8px;
+  background: #fefce8;
+  color: #854d0e;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+}
+
 .article-back {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
+  height: 19px;
   margin-bottom: 24px;
   color: #64748b;
   font-size: 14px;
@@ -4473,8 +4944,8 @@ button.landing-gradient-button:disabled {
 }
 
 .landing-gradient-button svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -4652,8 +5123,8 @@ button.landing-gradient-button:disabled {
 }
 
 .landing-path-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -4675,8 +5146,8 @@ button.landing-gradient-button:disabled {
   align-self: flex-end;
   order: 3;
   margin-top: 12px;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: rgba(255, 255, 255, 0.85);
   fill: none;
   stroke: currentColor;
@@ -4744,7 +5215,7 @@ button.landing-gradient-button:disabled {
 /* Catalog parity with the original HTML member directory. */
 .web-main.catalog-main {
   width: 100%;
-  max-width: 1280px;
+  max-width: var(--site-container-max);
   padding: 32px 16px 40px;
 }
 
@@ -4823,6 +5294,15 @@ button.landing-gradient-button:disabled {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+.member-avatar-initials {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+  text-align: center;
 }
 
 .member-avatar-dropdown {
@@ -4923,6 +5403,7 @@ button.landing-gradient-button:disabled {
   align-items: center;
   justify-content: center;
   gap: 4px;
+  min-width: max-content;
   padding: 0 18px;
   border: 0;
   border-radius: 999px;
@@ -4977,13 +5458,13 @@ button.landing-gradient-button:disabled {
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.8;
+  stroke-width: 2;
 }
 
 .catalog-reference-filter-button b {
   display: grid;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #fff;
   color: #f31260;
@@ -5043,7 +5524,7 @@ button.landing-gradient-button:disabled {
 .catalog-photo-fallback {
   display: grid;
   background: linear-gradient(135deg, #dfe7f1, #f5f7fb);
-  color: #fff;
+  color: #334155;
   font-size: 56px;
   font-weight: 950;
   place-items: center;
@@ -5150,7 +5631,7 @@ button.landing-gradient-button:disabled {
   top: 50%;
   display: grid;
   width: 24px;
-  height: 24px;
+  height: 19px;
   padding: 4px;
   border: 0;
   border-radius: 50%;
@@ -5194,7 +5675,7 @@ button.landing-gradient-button:disabled {
 }
 
 .catalog-card-dots.empty {
-  visibility: hidden;
+  display: none;
 }
 
 .catalog-card-dots button {
@@ -5258,6 +5739,7 @@ button.landing-gradient-button:disabled {
 }
 
 .catalog-verified-icon.is-unverified {
+  display: none;
   stroke: #c4cedb;
 }
 
@@ -5351,7 +5833,7 @@ button.landing-gradient-button:disabled {
 }
 
 .catalog-reference-loading span {
-  width: 42px;
+  width: 34px;
   height: 42px;
   border: 4px solid #fce7ef;
   border-top-color: #f31260;
@@ -5491,11 +5973,12 @@ body.catalog-filter-open {
 .catalog-filter-select {
   display: flex;
   width: 100%;
-  min-height: 40px;
+  min-height: 28px;
   align-items: center;
   justify-content: space-between;
+  position: relative;
   gap: 8px;
-  padding: 8px 36px 8px 12px;
+  padding: 8px 40px 8px 12px;
   border: 1px solid #dce4ef;
   border-radius: 8px;
   background: #fff;
@@ -5520,47 +6003,104 @@ body.catalog-filter-open {
   color: #94a3b8;
 }
 
-.catalog-filter-select em {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: #f31260;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 600;
+.catalog-filter-value {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.catalog-filter-select em svg {
+
+.catalog-filter-value.placeholder {
+  color: #66758d;
+  font-weight: 500;
+}
+.catalog-filter-select.premium {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  padding: 6px 42px 6px 12px;
+  border-color: #f3f6f9;
+  color: #c1c7d1;
+}
+
+.catalog-filter-select.premium > .catalog-filter-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+.catalog-filter-value.placeholder {
+  color: #66758d;
+  font-weight: 500;
+}
+.catalog-filter-premium-badge {
+  display: inline-flex;
+  pointer-events: none;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  justify-self: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fee7ef;
+  color: #f31260;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.catalog-filter-premium-badge svg {
   width: 13px;
   height: 13px;
+  flex: 0 0 13px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
 }
 
+.catalog-filter-select.premium > .catalog-filter-chevron {
+  justify-self: end;
+}
+
 .catalog-filter-chevron {
+  position: absolute;
+  top: 50%;
+  right: 10px;
   width: 16px;
   height: 16px;
   flex: 0 0 16px;
   fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
+  stroke: #94a3b8;
+  stroke-width: 2.4;
+  transform: translateY(-50%);
 }
 
 .catalog-filter-chip-list {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  max-width: 100%;
+  flex-wrap: nowrap;
   gap: 4px;
+  overflow: hidden;
 }
 
 .catalog-filter-chip-list b {
-  padding: 2px 6px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 8px;
   border-radius: 999px;
-  background: #fce7ef;
-  color: #c80d50;
-  font-size: 10px;
+  background: #f1f5f9;
+  color: #111827;
+  font-size: 12px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .catalog-filter-dropdown {
@@ -5577,41 +6117,45 @@ body.catalog-filter-open {
 }
 
 .catalog-filter-dropdown > div {
-  padding: 8px;
+  padding: 10px 10px 12px;
   border-bottom: 1px solid #e2e8f0;
 }
 
 .catalog-filter-dropdown input {
   width: 100%;
-  height: 34px;
-  padding: 6px 9px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #d5deea;
+  border-radius: 8px;
+  color: #020817;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .catalog-filter-dropdown section {
-  max-height: 190px;
+  max-height: 384px;
   overflow: auto;
-  padding: 4px;
+  padding: 4px 10px 6px;
 }
 
 .catalog-filter-dropdown section > button {
   display: flex;
   width: 100%;
-  min-height: 34px;
+  min-height: 28px;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 9px;
+  overflow: hidden;
+  padding: 3px 4px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
-  color: #334155;
+  color: #020817;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 20px;
   text-align: left;
+  white-space: nowrap;
 }
 
 .catalog-filter-dropdown section > button:hover {
@@ -5619,17 +6163,36 @@ body.catalog-filter-open {
 }
 
 .catalog-filter-dropdown section > button i {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
   border: 1px solid #cbd5e1;
-  border-radius: 3px;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.catalog-filter-dropdown section > button.selected {
+  background: #fff;
+  color: #020817;
+  font-weight: 600;
 }
 
 .catalog-filter-dropdown section > button.selected i {
   border-color: #f31260;
   background: #f31260;
-  box-shadow: inset 0 0 0 3px #fff;
+}
+
+.catalog-filter-dropdown section > button.selected i::after {
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  width: 4px;
+  height: 9px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  content: "";
+  transform: rotate(45deg);
 }
 
 .catalog-filter-dropdown section > p {
@@ -5640,9 +6203,12 @@ body.catalog-filter-open {
 
 .catalog-filter-field > p {
   margin: 6px 0 0;
+  overflow: hidden;
   color: #94a3b8;
   font-size: 12px;
   line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .catalog-filter-field.looking-field {
@@ -5653,20 +6219,20 @@ body.catalog-filter-open {
 
 .catalog-filter-switch-row {
   display: flex;
-  min-height: 64px;
+  min-height: 51px;
   align-items: center;
   justify-content: space-between;
   align-self: end;
   padding-bottom: 4px;
   color: #020817;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 400;
 }
 
 .catalog-filter-switch-row button {
-  width: 42px;
-  height: 24px;
-  padding: 2px;
+  width: 34px;
+  height: 19px;
+  padding: 1.5px;
   border: 0;
   border-radius: 999px;
   background: #cbd5e1;
@@ -5675,8 +6241,8 @@ body.catalog-filter-open {
 
 .catalog-filter-switch-row button span {
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
@@ -5688,7 +6254,7 @@ body.catalog-filter-open {
 }
 
 .catalog-filter-switch-row button.active span {
-  transform: translateX(18px);
+  transform: translateX(15px);
 }
 
 .catalog-age-range {
@@ -5727,7 +6293,7 @@ body.catalog-filter-open {
 }
 
 .catalog-filter-sheet > footer button {
-  min-height: 40px;
+  min-height: 28px;
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
@@ -5762,8 +6328,8 @@ body.catalog-filter-open {
   }
 
   .catalog-card-actions svg {
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
   }
 
   .catalog-card-actions .catalog-message-icon {
@@ -5774,7 +6340,7 @@ body.catalog-filter-open {
 
 @media (min-width: 1536px) {
   .web-main.catalog-main {
-    max-width: 1536px;
+    max-width: var(--site-container-max);
   }
 }
 
@@ -5792,7 +6358,7 @@ body.catalog-filter-open {
   .catalog-reference-controls {
     position: static;
     width: 100%;
-    min-height: 64px;
+    min-height: 51px;
     gap: 12px;
     margin-bottom: 22px;
     padding: 0;
@@ -5805,36 +6371,38 @@ body.catalog-filter-open {
   .catalog-reference-periods {
     width: auto;
     min-width: 0;
-    min-height: 64px;
+    min-height: 51px;
     height: 64px;
     flex: 1 1 auto;
     padding: 4px;
   }
 
   .catalog-reference-periods button {
-    min-width: 0;
+    min-width: max-content;
     min-height: 56px;
     height: 56px;
-    flex: 1 1 0;
-    flex-direction: column;
-    gap: 0;
-    padding: 8px 4px;
+    flex: 1 1 auto;
+    flex-direction: row;
+    gap: 4px;
+    padding: 8px 8px;
     font-weight: 600;
-    white-space: normal;
+    white-space: nowrap;
   }
 
   .catalog-reference-filter-button {
-    width: 64px;
-    min-width: 64px;
-    height: 64px;
-    flex: 0 0 64px;
-    padding: 0;
-    border-radius: 50%;
+    width: 68px;
+    min-width: 68px;
+    height: 44px;
+    flex: 0 0 68px;
+    gap: 8px;
+    padding: 0 10px;
+    border-radius: 999px;
   }
 
   .catalog-reference-filter-button > svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
   }
 
   .catalog-reference-filter-button > span {
@@ -5842,9 +6410,14 @@ body.catalog-filter-open {
   }
 
   .catalog-reference-filter-button b {
-    position: absolute;
-    top: 17px;
-    right: 9px;
+    position: static;
+    min-width: 20px;
+    width: auto;
+    height: 16px;
+    flex: 0 0 auto;
+    padding: 0 5px;
+    font-size: 12px;
+    font-weight: 600;
   }
 
   .catalog-reference-grid {
@@ -5938,8 +6511,9 @@ body.catalog-filter-open {
   }
 
   .catalog-reference-periods button {
-    flex: 1;
-    padding: 8px 4px;
+    flex: 1 1 auto;
+    padding: 8px 6px;
+    white-space: nowrap;
   }
 
   .catalog-reference-grid {
@@ -6030,6 +6604,30 @@ body.catalog-filter-open {
   background: #fff;
   color: #18181b;
   font: inherit;
+}
+
+.standalone-auth-form-card .standalone-auth-code {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.standalone-auth-resend {
+  display: block;
+  margin: 14px auto 0;
+  border: 0;
+  background: transparent;
+  color: #2f6fe0;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.standalone-auth-resend:disabled {
+  color: #94a3b8;
+  cursor: default;
 }
 
 .standalone-auth-primary {
@@ -6206,6 +6804,106 @@ body.catalog-filter-open {
   line-height: 22.5px;
 }
 
+.landing-whatsnew {
+  padding: 100px 60px;
+  background: #fff;
+}
+
+.landing-whatsnew-intro {
+  max-width: min(620px, 100%);
+  margin: 0;
+  color: #737373;
+  font-size: 16px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.landing-whatsnew-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  width: min(1320px, 100%);
+  margin: 0 auto;
+}
+
+.landing-whatsnew-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid #ececec;
+  border-radius: 24px;
+  background: #fafafa;
+  text-decoration: none;
+  transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), background 150ms cubic-bezier(0.4, 0, 0.2, 1), transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.landing-whatsnew-card:hover {
+  border-color: #4e9bff;
+  background: #fff;
+  transform: translateY(-2px);
+}
+
+.landing-whatsnew-icon {
+  display: grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #4e9bff, #f070a9);
+  color: #fff;
+}
+
+.landing-whatsnew-icon svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.landing-whatsnew-tier {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.landing-whatsnew-tier-free {
+  background: #e7f6ec;
+  color: #1e8a4c;
+}
+
+.landing-whatsnew-tier-builder {
+  background: #e8f1ff;
+  color: #2b6fd6;
+}
+
+.landing-whatsnew-tier-pro {
+  background: #fde8f1;
+  color: #c23c78;
+}
+
+.landing-whatsnew-card h3 {
+  margin: 0;
+  color: #171717;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.landing-whatsnew-card p {
+  margin: 0;
+  color: #737373;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 .landing-trust-line {
   display: flex;
   align-items: center;
@@ -6218,7 +6916,7 @@ body.catalog-filter-open {
 .landing-trust-line a {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   color: #404040;
   font-size: 15px;
   font-weight: 500;
@@ -6227,8 +6925,8 @@ body.catalog-filter-open {
 }
 
 .landing-trust-line svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
   fill: none;
   stroke: currentColor;
@@ -6396,7 +7094,7 @@ body.catalog-filter-open {
 
 .footer-column nav {
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 
 .footer-column a,
@@ -6471,8 +7169,8 @@ body.catalog-filter-open {
 
 .social-link {
   display: grid;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   place-items: center;
   padding: 0 !important;
   color: rgba(255, 255, 255, 0.3) !important;
@@ -6485,13 +7183,55 @@ body.catalog-filter-open {
 }
 
 .social-link svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* Persistent "AI Family Advisor" shortcut - mirrors the mobile app's own
+   floating round FAB (MainTabs.tsx's AiAdvisorFab: 52px pink circle,
+   bottom-right, Feather "message-circle" icon) so the feature reads the
+   same way on both platforms, per Alena's request. Fixed to the viewport
+   (not the footer), visible on every page once signed in, hidden on the
+   AI Advisor page itself since you're already there. */
+.ai-advisor-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  background: #f51161;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 4px 10px rgba(2, 8, 23, 0.25);
+  z-index: 40;
+  transition: transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.ai-advisor-fab:hover {
+  transform: scale(1.06);
+}
+
+.ai-advisor-fab svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (max-width: 640px) {
+  .ai-advisor-fab {
+    right: 16px;
+    bottom: 16px;
+  }
 }
 
 @media (min-width: 768px) {
@@ -6729,7 +7469,7 @@ body.catalog-filter-open {
 
   .landing-step-icon svg {
     width: 24px;
-    height: 24px;
+    height: 19px;
   }
 
   .landing-step-number {
@@ -6791,7 +7531,7 @@ body.catalog-filter-open {
   .landing-feature-copy li i {
     flex-basis: 24px;
     width: 24px;
-    height: 24px;
+    height: 19px;
   }
 
   .landing-feature-copy li i svg {
@@ -6818,6 +7558,38 @@ body.catalog-filter-open {
   .landing-stats span {
     font-size: 13px;
     line-height: 20px;
+  }
+
+  .landing-whatsnew {
+    padding: 64px 24px;
+  }
+
+  .landing-whatsnew-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .landing-whatsnew-card {
+    padding: 20px;
+  }
+
+  .landing-whatsnew-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .landing-whatsnew-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .landing-whatsnew-card h3 {
+    font-size: 15px;
+  }
+
+  .landing-whatsnew-card p {
+    font-size: 13px;
+    line-height: 1.55;
   }
 
   .landing-trust-line {
@@ -6888,7 +7660,7 @@ body.catalog-filter-open {
 
   .footer-column nav {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: 9px;
   }
 
   .footer-bottom {
@@ -6910,7 +7682,7 @@ body.catalog-filter-open {
 .call-media {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
+  gap: 9px;
   min-height: 100px;
   margin: 14px 0;
   overflow: hidden;
@@ -6928,13 +7700,13 @@ body.catalog-filter-open {
 /* Public directories mirror the deployed legacy HTML reference. */
 .web-main.directory-main {
   width: 100%;
-  max-width: 1280px;
+  max-width: var(--site-container-max);
   padding: 32px 16px 40px;
 }
 
 @media (min-width: 1536px) {
   .web-main.directory-main {
-    max-width: 1536px;
+    max-width: var(--site-container-max);
   }
 }
 
@@ -6983,7 +7755,7 @@ body.catalog-filter-open {
   display: flex;
   height: 40px;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 0 12px;
   border: 1px solid var(--directory-line);
   border-radius: 6px;
@@ -7490,7 +8262,7 @@ body.catalog-filter-open {
 .reference-load-more {
   display: flex;
   min-width: 128px;
-  min-height: 40px;
+  min-height: 28px;
   align-items: center;
   justify-content: center;
   margin: 24px auto 0;
@@ -7642,7 +8414,7 @@ body.catalog-filter-open {
     position: static;
     display: grid;
     min-width: 24px;
-    height: 24px;
+    height: 19px;
     padding: 0 6px;
     border: 0;
     border-radius: 999px;
@@ -7680,7 +8452,7 @@ body.catalog-filter-open {
 
   .reference-mobile-filter-header {
     display: grid;
-    min-height: 40px;
+    min-height: 28px;
     grid-template-columns: minmax(0, 1fr) auto 40px;
     align-items: center;
     gap: 8px;
@@ -7767,7 +8539,7 @@ body.reference-filters-open {
 /* Directory detail pages mirror the deployed HTML reference. */
 .web-main.directory-detail-main {
   width: 100%;
-  max-width: 1280px;
+  max-width: var(--site-container-max);
   min-height: 0;
   flex: 0 0 auto;
   margin: 0 auto;
@@ -7776,7 +8548,7 @@ body.reference-filters-open {
 
 @media (min-width: 1536px) {
   .web-main.directory-detail-main {
-    max-width: 1536px;
+    max-width: var(--site-container-max);
   }
 }
 
@@ -8081,8 +8853,8 @@ a.detail-location:hover {
 }
 
 .detail-socials svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 @media (max-width: 767px) {
@@ -8388,8 +9160,8 @@ a.detail-location:hover {
 }
 
 .password-input svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -8463,8 +9235,8 @@ a.detail-location:hover {
 }
 
 .auth-socials svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   fill: #000;
 }
 
@@ -8669,6 +9441,379 @@ a.detail-location:hover {
   }
 }
 
+.catalog-premium-backdrop {
+  position: fixed;
+  z-index: 72;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.24);
+}
+
+.catalog-premium-popup {
+  position: relative;
+  width: min(420px, 100%);
+  padding: 28px;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.22);
+  color: #020817;
+  text-align: center;
+}
+
+.catalog-premium-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: #f8fafc;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.catalog-premium-close svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.catalog-premium-icon {
+  display: inline-grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: #fee7ef;
+  color: #f31260;
+}
+
+.catalog-premium-icon svg {
+  width: 24px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.catalog-premium-popup h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 28px;
+}
+
+.catalog-premium-popup p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.catalog-premium-actions {
+  display: flex;
+  gap: 9px;
+  margin-top: 22px;
+}
+
+.catalog-premium-actions button {
+  flex: 1;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #f31260;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.catalog-premium-popup .notice {
+  margin-top: 14px;
+  color: #020817;
+}
+
+@media (max-width: 480px) {
+  .catalog-premium-popup {
+    padding: 26px 18px 20px;
+  }
+
+  .catalog-premium-actions {
+    flex-direction: column;
+  }
+}
+
+/* Stable page body: loading and empty states must not make the footer jump. */
+.web-app {
+  min-height: 100vh;
+  min-height: 100svh;
+}
+.web-main {
+  flex: 1 0 auto;
+  min-height: calc(100svh - 80px - 252px);
+}
+.web-footer {
+  flex: 0 0 auto;
+}
+.web-main > .loading,
+.web-main .loading-page,
+.web-main .catalog-reference-loading,
+.web-main .catalog-reference-empty,
+.web-main .reference-directory-loading,
+.web-main .reference-directory-empty,
+.web-main .directory-detail-loader,
+.web-main .account-loading,
+.web-main .member-likes-empty,
+.web-main .empty-chat-list,
+.web-main .chat-search-empty {
+  min-height: clamp(360px, calc(100svh - 80px - 252px), 720px);
+}
+.web-main > .loading,
+.web-main .catalog-reference-loading,
+.web-main .reference-directory-loading,
+.web-main .directory-detail-loader,
+.web-main .account-loading {
+  display: grid;
+  place-items: center;
+}
+.web-main .catalog-reference-empty,
+.web-main .reference-directory-empty,
+.web-main .member-likes-empty,
+.web-main .empty-chat-list,
+.web-main .chat-search-empty {
+  display: grid;
+  place-content: center;
+}
+body:has(.catalog-filter-overlay) .member-profile-surface .premium-paywall,
+body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
+  z-index: 1300;
+}
+.catalog-filter-chip-list b {
+  font-weight: 600;
+}
+
+.catalog-city-autocomplete {
+  width: 100%;
+  height: 44px;
+  padding: 8px 16px;
+  border: 1px solid #d5deea;
+  border-radius: 8px;
+  background: #fff;
+  color: #020817;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  outline: 0;
+}
+
+.catalog-city-autocomplete::placeholder {
+  color: #66758d;
+  opacity: 1;
+}
+
+.catalog-city-autocomplete:focus {
+  border-color: #f31260;
+  box-shadow: 0 0 0 3px rgba(243, 18, 96, 0.12);
+}
+
+.catalog-filter-field.disabled .catalog-city-autocomplete {
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.catalog-city-dropdown {
+  top: calc(100% + 4px);
+}
+
+.catalog-city-dropdown section {
+  max-height: 304px;
+  padding: 8px 10px 10px;
+}
+
+.catalog-city-dropdown section > button {
+  min-height: 36px;
+  padding: 7px 8px;
+  gap: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.catalog-city-dropdown section > button.selected {
+  color: #020817;
+}
+
+.catalog-city-option-name {
+  color: #020817;
+}
+
+.catalog-city-option-country {
+  color: #66758d;
+  font-weight: 600;
+}
+.catalog-city-dropdown section > button.active {
+  background: #f8fafc;
+}
+.catalog-filter-dropdown section > button.active {
+  background: #f8fafc;
+}
+
+.catalog-filter-select-wrap,
+.catalog-filter-select,
+.catalog-filter-dropdown,
+.catalog-filter-dropdown *,
+.catalog-city-autocomplete {
+  box-sizing: border-box;
+}
+
+.catalog-filter-select-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.catalog-filter-dropdown {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  scrollbar-gutter: stable;
+}
+
+.catalog-filter-dropdown section {
+  scrollbar-gutter: stable;
+}
+
+.catalog-filter-dropdown section > button,
+.catalog-filter-dropdown section > button.selected,
+.catalog-filter-dropdown section > button.active {
+  width: 100%;
+  max-width: 100%;
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.catalog-filter-dropdown section > button > span:last-child,
+.catalog-city-option-name,
+.catalog-city-option-country {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catalog-reference-periods {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(max-content, 1fr));
+  overflow: hidden;
+}
+
+.catalog-reference-periods::before {
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / 4);
+  border-radius: 999px;
+  background: #f31260;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+  content: "";
+  transform: translateX(calc(var(--catalog-period-index, 0) * 100%));
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.catalog-reference-periods button {
+  position: relative;
+  z-index: 1;
+  background: transparent !important;
+  transition: color 180ms ease;
+}
+
+.catalog-reference-periods button.active {
+  box-shadow: none;
+}
+.catalog-reference-loading span,
+.catalog-reference-sentinel span,
+.account-loading > span,
+.chat-loading span {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #fbd0df;
+  border-top-color: #f51161;
+  border-radius: 50%;
+}
+.catalog-carousel-arrow {
+  width: 24px;
+  height: 24px;
+  aspect-ratio: 1 / 1;
+  padding: 4px;
+  border-radius: 999px;
+}
+
+.catalog-carousel-arrow svg {
+  width: 14px;
+  height: 14px;
+}
+.catalog-reference-periods,
+.member-likes-tabs {
+  height: 44px;
+  min-height: 44px;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: #fce7ef;
+}
+
+.catalog-reference-periods button,
+.member-likes-tabs button {
+  height: 36px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-radius: 999px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.catalog-reference-periods button.active,
+.member-likes-tabs button[aria-selected="true"] {
+  color: #fff;
+}
+
+.catalog-reference-periods::before,
+.member-likes-tabs::before {
+  top: 4px;
+  bottom: 4px;
+  border-radius: 999px;
+  background: #f31260;
+}
+
+.header-actions.pending-header-actions {
+  min-width: 144px;
+  height: 40px;
+  visibility: hidden;
+}
+
 
 /* Professionals directory (/professionals) */
 .professionals-hero {
@@ -8678,7 +9823,15 @@ a.detail-location:hover {
   gap: 20px;
   padding: 96px 24px 72px;
   text-align: center;
-  background: #0a0a0a;
+  /* Same treatment as .resources-hero / .trust-hero (Alena: "и сюда добавить
+     фото") - dark overlay gradient over a photo instead of a flat #0a0a0a,
+     same overlay strength so the white heading/pill/paragraph contrast is
+     unchanged. Photo Alena sent for this page (pregnant belly + baby
+     booties). */
+  background-image: linear-gradient(180deg, rgba(6, 6, 8, 0.72), rgba(6, 6, 8, 0.82)), url("/web-static/images/landing/professionals-hero-51c65b2a.jpg");
+  background-size: cover;
+  background-position: center;
+  background-color: #0a0a0a;
 }
 
 .professionals-hero h1 {
@@ -8799,12 +9952,18 @@ a.detail-location:hover {
 }
 
 .professionals-step-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 32px;
   border-radius: 24px;
   background: #fafafa;
+}
+
+.professionals-step-card.is-soon {
+  background: #fff;
+  border: 1.5px dashed rgba(7, 19, 44, 0.14);
 }
 
 .professionals-step-card h3 {
@@ -8837,4 +9996,105 @@ a.detail-location:hover {
   .professionals-steps-row {
     grid-template-columns: 1fr;
   }
+}
+
+/* AI growth features (Sept 2026): quiz personalized reflection, public
+   Ask AI tool, public Agreement Draft tool, Resources "Free AI tools"
+   section. New class names only - everything else reuses existing rules
+   (.quiz-result-card, .advisor-page/.advisor-card/.message-bubble,
+   .contact-form-panel/.contact-submit, .resources-start-grid/-card). */
+.quiz-ai-insight {
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+.quiz-ai-insight .quiz-result-card {
+  text-align: left;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.resources-ai-tools {
+  padding: 0 24px 64px;
+}
+
+/* AskAiTool is now a full page (.resources-page + .resources-hero) rather
+   than a bare card floating on white - see the comment above its JSX.
+   .ask-ai-page just needs the page-level bottom padding; the card's own
+   width/centering lives in .ask-ai-card below. */
+.ask-ai-page {
+  padding-bottom: 64px;
+}
+
+.ask-ai-card {
+  width: min(760px, 100%);
+  margin: 56px auto 96px;
+}
+
+.ask-ai-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.agreement-draft-page {
+  padding-bottom: 64px;
+}
+
+.agreement-draft-result {
+  width: min(760px, 100%);
+  margin: 24px auto 64px;
+}
+
+.agreement-draft-result .message-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 767px) {
+  .ask-ai-page {
+    padding-bottom: 40px;
+  }
+
+  .ask-ai-card {
+    margin: 32px auto 72px;
+  }
+
+  .agreement-draft-result {
+    margin: 20px auto 48px;
+  }
+}
+
+.contact-success-card {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 24px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #fff;
+  text-align: center;
+}
+
+.contact-form-panel .contact-success-card h1 {
+  margin: 0;
+  color: #020817;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+}
+
+.contact-form-panel .contact-success-card p {
+  max-width: 480px;
+  margin: 8px 0 0;
+  color: #667085;
+  font-size: 14px;
+  line-height: 20px;
 }

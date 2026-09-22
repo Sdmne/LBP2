@@ -109,17 +109,23 @@ export default function LoginScreen({ navigation }: Props) {
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Pressable style={styles.primaryButton} onPress={handleSubmit} disabled={submitting}>
-            {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{t("login.submit")}</Text>}
+            {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText} numberOfLines={1}>{t("login.submit")}</Text>}
           </Pressable>
 
           <Pressable onPress={() => navigation.navigate("ForgotPassword")} style={styles.outlineButton}>
-            <Text style={styles.outlineButtonText}>{t("login.forgotPassword")}</Text>
+            <Text style={styles.outlineButtonText} numberOfLines={1}>{t("login.forgotPassword")}</Text>
           </Pressable>
 
           <Pressable onPress={() => navigation.navigate("Signup")} style={styles.secondaryLink}>
             <Text style={styles.secondaryLinkText}>{t("login.noAccount")}</Text>
           </Pressable>
 
+          {/* Alena: "or continue with надо прижать к нижней границе окна" -
+              this spacer only does anything when the form is shorter than
+              the screen (nothing to push against once content needs to
+              scroll), which is the same "pin to bottom inside a
+              ScrollView" trick as elsewhere in this app. */}
+          <View style={styles.bottomSpacer} />
           <SocialAuthButtons intent="login" />
         </View>
       </ScrollView>
@@ -147,9 +153,15 @@ function describeAuthError(err: ApiError, t: (key: string) => string): string {
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   container: { flexGrow: 1, padding: spacing.lg, paddingTop: spacing.xl },
-  logoWrap: { alignItems: "center", marginBottom: spacing.md },
-  // Prototype's .auth-logo img is 190px wide - this was 84px.
-  logo: { width: 230, height: 160 }, // logo-full.png is 900x625 - keep that aspect ratio
+  // Alena: "отступ перед названием страницы отсутствует" - a bit more air
+  // between the logo and the "Welcome back"/"Create your account" title
+  // below it.
+  logoWrap: { alignItems: "center", marginBottom: spacing.lg },
+  // Alena: "огромное лого" - this was bumped up to 230x160 in an earlier
+  // round (see the removed comment citing the prototype's 190px), which
+  // read as too big once seen on a real device. Scaled back down, still
+  // above the original 84px this whole thing started from.
+  logo: { width: 148, height: 103 }, // logo-full.png is 900x625 - keep that aspect ratio
   // Prototype's .ob-back: a floating 38x38 circular white pill with a
   // subtle shadow (scr-login/scr-forgot-password in
   // "Claude outputs/app-prototype-inline.html") - this screen had no back
@@ -171,8 +183,17 @@ const styles = StyleSheet.create({
   backText: { fontSize: 22, color: colors.ink, marginTop: -2 },
   title: { fontSize: 25, fontWeight: "800", color: colors.ink, textAlign: "center", marginBottom: 8 },
   subtitle: { fontSize: 14, color: colors.muted, textAlign: "center", lineHeight: 20, marginBottom: spacing.lg, paddingHorizontal: spacing.sm },
-  form: { gap: spacing.sm },
-  label: { fontSize: 14.5, fontWeight: "700", color: colors.ink, marginBottom: spacing.xs * 2 },
+  // Alena: "labels ближе к предыдущему полю, чем к своему" - this used a
+  // uniform `gap: spacing.sm` between every direct child PLUS label's own
+  // marginBottom, so a label ended up 8px from the field above it (just
+  // the parent gap) but 16px from its own field below it (gap + its
+  // marginBottom) - the reverse of what a form label should do. Explicit
+  // margins on the label itself instead of a parent gap: more space
+  // before it (separating from the previous field), less after (binding
+  // it to its own input).
+  form: { flexGrow: 1 },
+  label: { fontSize: 14.5, fontWeight: "700", color: colors.ink, marginTop: spacing.md, marginBottom: 6 },
+  bottomSpacer: { flexGrow: 1, minHeight: spacing.lg },
   input: {
     height: 52,
     borderWidth: 1,

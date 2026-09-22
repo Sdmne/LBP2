@@ -185,7 +185,22 @@ export default function KnowledgeHubScreen() {
           sections!.map((section) => (
             <View key={section.category} style={styles.section}>
               <Text style={styles.sectionTitle}>{categoryLabel(t, section.category)}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sectionRow}>
+              {/* Alena: "пока статьи из одной категории двигаются, статьи
+                  их другой категории листать нельзя" - each category is
+                  its own horizontal ScrollView nested inside this screen's
+                  vertical one. nestedScrollEnabled mainly matters on
+                  Android (nested scrollables don't cooperate by default
+                  there); nothing here should be blocking a DIFFERENT row
+                  on iOS since they're sibling views, not parent/child, so
+                  if this persists on her device it's worth a quick screen
+                  recording - that'd point at something more specific than
+                  a generic nested-scroll conflict. */}
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.sectionRow}
+              >
                 {section.items.map((item) => (
                   <ArticleCoverCard
                     key={item.id}
@@ -303,7 +318,11 @@ function SearchResultRow({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "transparent" },
-  content: { padding: spacing.lg },
+  // Alena: "сверху избыточное кажется пустое пространство, над хедером" -
+  // same double-top-padding issue as ExploreScreen (see its own comment on
+  // this same style key) - `padding: spacing.lg` stacked with AppHeader's
+  // own insets.top handling.
+  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
   center: { paddingVertical: spacing.xl * 2, alignItems: "center", justifyContent: "center" },
   errorText: { color: colors.danger },
   searchBar: {

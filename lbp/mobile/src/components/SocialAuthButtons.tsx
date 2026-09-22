@@ -53,13 +53,16 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   const [appleBusy, setAppleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
+  const googleClientId = Platform.select({
+    ios: GOOGLE_OAUTH_CLIENT_IDS.ios || GOOGLE_OAUTH_CLIENT_IDS.web,
+    android: GOOGLE_OAUTH_CLIENT_IDS.android || GOOGLE_OAUTH_CLIENT_IDS.web,
+    default: GOOGLE_OAUTH_CLIENT_IDS.web || GOOGLE_OAUTH_CLIENT_IDS.ios || GOOGLE_OAUTH_CLIENT_IDS.android,
+  });
 
   // Whether Google sign-in is actually usable - computed from the REAL
   // config values, before the placeholder fallback below. Drives the
   // button's disabled state; the placeholder is never reachable through it.
-  const googleConfigured = Boolean(
-    GOOGLE_OAUTH_CLIENT_IDS.ios || GOOGLE_OAUTH_CLIENT_IDS.android || GOOGLE_OAUTH_CLIENT_IDS.web
-  );
+  const googleConfigured = Boolean(googleClientId);
 
   // Confirmed on a real device run: contrary to this file's original
   // assumption, Google.useAuthRequest() doesn't quietly return a null
@@ -97,7 +100,7 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
     iosClientId: GOOGLE_OAUTH_CLIENT_IDS.ios || undefined,
     androidClientId: GOOGLE_OAUTH_CLIENT_IDS.android || undefined,
     webClientId: GOOGLE_OAUTH_CLIENT_IDS.web || undefined,
-    clientId: "not-configured",
+    clientId: googleClientId || "not-configured",
   });
 
   useEffect(() => {
@@ -225,8 +228,21 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      {/* Alena: "вход с гугл не работает" - most likely cause given this
+          screen's own comments: googleConfigured comes from
+          EXPO_PUBLIC_GOOGLE_*_CLIENT_ID env vars read at BUILD time (see
+          config.ts) - if those weren't set for whatever build she's
+          testing, this button was always silently disabled with no visual
+          difference at all, so tapping it just does nothing with zero
+          feedback. Dimming it when that's the case at least makes "this
+          isn't set up yet" visible instead of looking broken - see the
+          README for what to actually check (the env vars themselves, not
+          this code). */}
       <Pressable
-        style={variant === "sheet" ? styles.googleButtonSheet : styles.googleButton}
+        style={[
+          variant === "sheet" ? styles.googleButtonSheet : styles.googleButton,
+          !googleConfigured && styles.socialButtonDisabled,
+        ]}
         onPress={handleGoogle}
         // TEMPORARY DIAGNOSTIC (2026-09-21): was `!request || !googleConfigured
         // || !firebaseAuth || googleBusy || appleBusy` - blocking the tap
@@ -302,6 +318,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgSoft,
   },
   googleButtonText: { color: colors.text, fontSize: 15, fontWeight: "700" },
+  socialButtonDisabled: { opacity: 0.45 },
   appleButton: { height: 48 },
   appleButtonLoading: { backgroundColor: "#000", borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
 });

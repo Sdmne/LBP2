@@ -75,7 +75,7 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
           <View style={styles.form}>
             <Text style={styles.successText}>{t("forgotPassword.success")}</Text>
             <Pressable style={styles.primaryButton} onPress={() => navigation.goBack()}>
-              <Text style={styles.primaryButtonText}>{t("forgotPassword.back")}</Text>
+              <Text style={styles.primaryButtonText} numberOfLines={1}>{t("forgotPassword.back")}</Text>
             </Pressable>
           </View>
         ) : (
@@ -94,7 +94,7 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
             <Pressable style={styles.primaryButton} onPress={handleSubmit} disabled={submitting}>
-              {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{t("forgotPassword.submit")}</Text>}
+              {submitting ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText} numberOfLines={1}>{t("forgotPassword.submit")}</Text>}
             </Pressable>
           </View>
         )}

@@ -136,6 +136,12 @@ export default function MeProfileScreen(_props: Props) {
                 activeUntil: res.status === "ACTIVE" ? res.activeUntil ?? null : prev?.activeUntil ?? null,
                 pendingRequestId: res.status === "PENDING" ? res.requestId ?? null : null,
               }));
+              // Card silently flipping to "pending review" wasn't enough
+              // feedback on its own (Alena: "ничего не выскакивает что
+              // boost отправлен администратору") - confirm the submission
+              // explicitly instead of relying on the user to notice the
+              // subtitle changed.
+              Alert.alert(t("me.boostRequestSentTitle"), t("me.boostRequestSentBody"));
             })
             .catch((err) => {
               Alert.alert(t("common.somethingWrong"), err instanceof ApiError ? err.message : undefined);
@@ -216,7 +222,7 @@ export default function MeProfileScreen(_props: Props) {
 
   return (
     <GradientBackground variant="soft">
-    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
       {/* Was the only tab still relying on the native headerShown:true
           title bar (a plain white "Profile" bar, no brand mark) while
           Explore/Catalog/Messages all build this same in-content header -
@@ -250,7 +256,7 @@ export default function MeProfileScreen(_props: Props) {
           </View>
         </Pressable>
         <View style={styles.nameRow}>
-          <Text style={styles.name}>{user?.displayName}</Text>
+          <Text style={styles.name} numberOfLines={1}>{user?.displayName}</Text>
           {user?.profileVerified ? <Text style={styles.verifiedBadge}>✓</Text> : null}
         </View>
         <Text style={styles.email}>{user?.email}</Text>
@@ -350,6 +356,24 @@ export default function MeProfileScreen(_props: Props) {
         </Pressable>
       ) : null}
 
+      {/* Item 19 - one-time RevenueCat purchases. Alena: "И где здесь можно
+          посмотреть что можно купить руководство и цена... нигде нет
+          информации" (screenshot of this exact screen) / "Так сейчас
+          создай экраны сам для приложения и сайта" - this card is the fix:
+          a direct, visible entry point to the Purchases screen right next
+          to the plan card and Boost card, the two other "spend money here"
+          spots on this screen. */}
+      <Pressable style={styles.storeCard} onPress={() => rootNav.navigate("Purchases")}>
+        <View style={styles.storeIconWrap}>
+          <Feather name="shopping-bag" size={18} color={colors.blue} />
+        </View>
+        <View style={styles.boostTextWrap}>
+          <Text style={styles.boostTitle}>{t("me.storeCardTitle")}</Text>
+          <Text style={styles.boostSubtitle}>{t("me.storeCardSubtitle")}</Text>
+        </View>
+        <Feather name="chevron-right" size={18} color={colors.muted} />
+      </Pressable>
+
       <View style={styles.card}>
         {rows.map((row, i) => (
           <Pressable
@@ -408,7 +432,7 @@ const styles = StyleSheet.create({
   },
   avatarEditIcon: { fontSize: 13, color: colors.white },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  name: { fontSize: 19, fontWeight: "600", color: colors.ink },
+  name: { fontSize: 19, fontWeight: "600", color: colors.ink, flexShrink: 1 },
   verifiedBadge: {
     fontSize: 11,
     color: colors.white,
@@ -490,6 +514,29 @@ const styles = StyleSheet.create({
   boostSubtitle: { fontSize: 12, color: colors.muted, marginTop: 2 },
   boostSubtitleActive: { color: "rgba(255,255,255,0.85)" },
   boostCta: { fontSize: 13, color: colors.pink, fontWeight: "700" },
+  // Store card (item 19) - same row shape as boostCard above, but a
+  // neutral light-blue tint (not pink/gold, both already used by the plan
+  // and Boost cards above it) with a plain chevron instead of a CTA label,
+  // since this just navigates to a list rather than performing an action
+  // itself.
+  storeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    marginBottom: spacing.md,
+    backgroundColor: colors.tint,
+    gap: spacing.sm,
+  },
+  storeIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   card: {
     backgroundColor: colors.card,
     borderWidth: 1,

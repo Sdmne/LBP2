@@ -95,7 +95,7 @@ type WizStep = "role" | "goal" | "childway" | "basic" | "appearance" | "about" |
 //   read-only with no edit path yet) - out of scope for "get a fresh
 //   signup to a complete profile," not silently dropped.
 export default function ProfileWizardScreen({ navigation }: Props) {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
 
@@ -113,6 +113,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
   const [dobYear, setDobYear] = useState("");
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
+  const [cityPlaceId, setCityPlaceId] = useState("");
   const [countries, setCountries] = useState<CatalogFilterOptionRow[]>([]);
   const [cities, setCities] = useState<CatalogFilterOptionRow[]>([]);
   const [loadingCountries, setLoadingCountries] = useState(false);
@@ -217,8 +218,10 @@ export default function ProfileWizardScreen({ navigation }: Props) {
   }
 
   function validateBasic(): string | null {
-    if (!name.trim()) return t("editProfile.nameRequired");
-    if (!dobDay || !dobMonth || !dobYear) return t("editProfile.dobRequired");
+  if (!name.trim()) return t("editProfile.nameRequired");
+  if (!dobDay || !dobMonth || !dobYear) return t("editProfile.dobRequired");
+  if (!country) return t("filters.selectCountryFirst");
+  if (!city || !cityPlaceId) return t("editProfile.selectCity");
     const day = parseInt(dobDay, 10);
     const month = parseInt(dobMonth, 10);
     const year = parseInt(dobYear, 10);
@@ -307,6 +310,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         dateOfBirth,
         country,
         city,
+        cityPlaceId,
         ethnicity,
         about,
         languages,
@@ -324,6 +328,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         ...(drinking ? { drinkingStatus: drinking } : {}),
         unitPreference: unit,
       });
+      await refreshUser();
       navigation.goBack();
     } catch (err2) {
       setSaveError(err2 instanceof ApiError ? err2.message : t("common.somethingWrong"));
@@ -539,11 +544,11 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         <Text style={styles.recapHint}>{t("editProfile.matchingHint")}</Text>
         <View style={styles.recapRow}>
           <Text style={styles.recapKey}>{t("editProfile.youAre")}</Text>
-          <Text style={styles.recapValue}>{catalogOptionLabel("profileTypes", role)}</Text>
+          <Text style={styles.recapValue} numberOfLines={1}>{catalogOptionLabel("profileTypes", role)}</Text>
         </View>
         <View style={styles.recapRow}>
           <Text style={styles.recapKey}>{t("filters.lookingFor")}</Text>
-          <Text style={styles.recapValue}>{lookingForLabel}</Text>
+          <Text style={styles.recapValue} numberOfLines={1}>{lookingForLabel}</Text>
         </View>
         <Pressable onPress={() => setStep(0)}>
           <Text style={styles.recapEdit}>{"✏️ "}{t("wizard.editAnswers")}</Text>
@@ -859,7 +864,10 @@ export default function ProfileWizardScreen({ navigation }: Props) {
           selected={country ? [country] : []}
           multi={false}
           onToggle={(value) => {
-            if (value !== country) setCity("");
+            if (value !== country) {
+              setCity("");
+              setCityPlaceId("");
+            }
             setCountry(value);
             setPicker(null);
           }}
@@ -870,11 +878,12 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         <OptionListPicker
           title={t("filters.city")}
           loading={loadingCities}
-          options={cities.map((c): OptionRow => ({ value: c.value, label: c.label }))}
+          options={cities.map((c): OptionRow => ({ value: c.value, label: c.label, placeId: c.placeId }))}
           selected={city ? [city] : []}
           multi={false}
-          onToggle={(value) => {
+          onToggle={(value, option) => {
             setCity(value);
+            setCityPlaceId(option.placeId || "");
             setPicker(null);
           }}
           onClose={() => setPicker(null)}
@@ -1071,9 +1080,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   recapHint: { fontSize: 12, color: colors.muted, marginBottom: 10, lineHeight: 17 },
-  recapRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5 },
-  recapKey: { fontSize: 13.5, color: colors.muted },
-  recapValue: { fontSize: 13.5, color: colors.ink, fontWeight: "600" },
+  recapRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, gap: 8 },
+  recapKey: { fontSize: 13.5, color: colors.muted, flexShrink: 0 },
+  recapValue: { fontSize: 13.5, color: colors.ink, fontWeight: "600", flex: 1, textAlign: "right" },
   recapEdit: { fontSize: 12.5, fontWeight: "700", color: colors.pink, marginTop: 6 },
   label: { fontSize: 14, fontWeight: "700", color: colors.ink, marginTop: 13, marginBottom: 7 },
   labelFirst: { marginTop: 0 },

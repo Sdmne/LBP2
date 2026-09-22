@@ -25,7 +25,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { createApiClient } from "./api";
+import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
@@ -198,6 +198,20 @@ const nav: ReadonlyArray<{
     icon: "flag",
     badge: "pending_reports",
   },
+  {
+    path: "/boosts",
+    title: "Boost Requests",
+    view: "boosts",
+    icon: "trendingUp",
+    badge: "pending_boosts",
+  },
+  {
+    path: "/video-verifications",
+    title: "Video Verifications",
+    view: "video-verifications",
+    icon: "video",
+    badge: "pending_video_verifications",
+  },
   { path: "/livekit", title: "LiveKit Calls", view: "livekit", icon: "phone" },
   { path: "/monitoring", title: "Monitoring", icon: "activity" },
   { path: "/storage", title: "Storage", icon: "drive" },
@@ -274,9 +288,11 @@ function settingBoolean(value: unknown) {
 }
 function countryName(value: unknown) {
   const code = String(value ?? "").trim();
-  if (!code) return "";
-  if (code.length !== 2) return code;
-  try {
+if (!code) return "";
+if (code.length !== 2) return code;
+if (code.toUpperCase() === "CZ") return "Czech Republic";
+if (code.toUpperCase() === "GB" || code.toUpperCase() === "UK") return "UK";
+try {
     return (
       new Intl.DisplayNames(["en"], { type: "region" }).of(
         code === "UK" ? "GB" : code.toUpperCase(),
@@ -4774,6 +4790,7 @@ function Support() {
   const [detail, setDetail] = useState<RecordValue | null>(null);
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
+  const [resolving, setResolving] = useState(false);
   const [unanswered, setUnanswered] = useState(true);
   const messageListRef = useRef<HTMLDivElement>(null);
   const loadSequenceRef = useRef(0);
@@ -4856,10 +4873,30 @@ function Support() {
       setError("Could not send the support response.");
     }
   };
+  const resolveThread = async () => {
+    if (!active?.id || resolving) return;
+    setResolving(true);
+    try {
+      await api.post(`/admin/support/${encodeURIComponent(String(active.id))}/resolve`, {});
+      const updated = await api.get<RecordValue>(
+        `/admin/support/${encodeURIComponent(String(active.id))}`,
+      );
+      setDetail(updated);
+      setActive((updated.conversation as RecordValue) ?? active);
+      load();
+      setError("");
+    } catch {
+      setError("Could not resolve support conversation.");
+    } finally {
+      setResolving(false);
+    }
+  };
   const items = result?.items ?? [];
   const total = result?.total ?? 0;
   const selectedConversation =
     (detail?.conversation as RecordValue | undefined) ?? active ?? {};
+  const selectedResolved =
+    String(selectedConversation.status ?? "").toUpperCase() === "RESOLVED";
   const selectedName = rowName(selectedConversation);
   const selectedEmail = valueOf(selectedConversation.email);
   const selectedType = supportProfileType(selectedConversation.profileType);
@@ -5003,10 +5040,21 @@ function Support() {
                 <Link
                   className="support-view-profile"
                   to={`/users/${encodeURIComponent(String(selectedConversation.userId))}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
                   <AdminIcon name="externalLink" /> View Profile
                 </Link>
               )}
+              <button
+                className="support-resolve-button"
+                type="button"
+                disabled={selectedResolved || resolving}
+                onClick={() => void resolveThread()}
+              >
+                <AdminIcon name="badgeCheck" />
+                {selectedResolved ? "Resolved" : resolving ? "Resolving..." : "Resolve"}
+              </button>
             </header>
             <div className="message-list" ref={messageListRef}>
               {messages.map((message, index) => {
@@ -5062,6 +5110,7 @@ function Support() {
               <textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
+                disabled={selectedResolved}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
@@ -5080,7 +5129,7 @@ function Support() {
                 className="support-send"
                 type="submit"
                 aria-label="Send reply"
-                disabled={!body.trim()}
+                disabled={selectedResolved || !body.trim()}
               >
                 <AdminIcon name="send" />
               </button>
@@ -5128,7 +5177,9 @@ function ModerationPhotos() {
       setNotice("Could not update this photo.");
     }
   };
-  const items = result?.items ?? [];
+  const items = (result?.items ?? []).filter((row) =>
+    status === "PENDING" ? !settingBoolean(row.isDeleted) && !settingBoolean(row.isUnavailable) : true,
+  );
   return (
     <>
       <header className="page-heading">
@@ -5195,9 +5246,13 @@ function ModerationPhotos() {
                 </div>
                 <div className="moderation-photo-details">
                   {profileId ? (
-                    <Link to={`/users/${encodeURIComponent(String(profileId))}`}>
-                      {rowName(row)}
-                    </Link>
+              <Link
+                to={`/users/${encodeURIComponent(String(profileId))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {rowName(row)}
+              </Link>
                   ) : (
                     <b>{rowName(row)}</b>
                   )}
@@ -5248,6 +5303,224 @@ function ModerationPhotos() {
               </p>
             </div>
           )}
+        </section>
+      )}
+    </>
+  );
+}
+
+// Boost requests + Video Verification requests - Alena: "где это смотреть
+// в админке??" / "и да все новые функции где добавлены в админке?". Both
+// entities (backend/main.py's ADMIN_ENTITY_VIEWS: "boosts" -> "boost",
+// "video-verifications" -> "video_verification") already had working
+// list + approve/decline endpoints with nobody able to reach them from
+// here - members could submit a Boost or a verification video and it
+// would just sit there forever. Kept as their own small components
+// (mirrors ModerationPhotos above) rather than wedged into the big
+// generic table component used by Users/Subscriptions/Verifications,
+// since their data shape (a handful of fields in `data`, no bulk table
+// columns) doesn't need that machinery.
+function AdminBoosts() {
+  const [status, setStatus] = useState("PENDING");
+  const [result, setResult] = useState<ListResponse | null>(null);
+  const [notice, setNotice] = useState("");
+  const [hoursByRow, setHoursByRow] = useState<Record<string, string>>({});
+  const limit = 100;
+  const load = () => {
+    setResult(null);
+    api
+      .get<ListResponse>(`/admin/list/boosts?limit=${limit}&offset=0&status=${encodeURIComponent(status)}`)
+      .then(setResult)
+      .catch(() => setNotice("Could not load Boost requests."));
+  };
+  useEffect(load, [status]);
+  const review = async (row: RecordValue, next: "APPROVED" | "DECLINED") => {
+    const rowId = String(row.id);
+    const data = (row.data as RecordValue) || {};
+    try {
+      const hoursRaw = (hoursByRow[rowId] || "").trim();
+      const body: RecordValue = { status: next };
+      if (next === "APPROVED" && hoursRaw) body.hours = Number(hoursRaw);
+      await api.post(`/admin/boosts/${encodeURIComponent(rowId)}/review`, body);
+      setNotice(next === "APPROVED" ? `Boost approved for ${valueOf(data.profileName)}.` : "Boost request declined.");
+      load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not update this Boost request.");
+    }
+  };
+  const items = result?.items ?? [];
+  return (
+    <>
+      <header className="page-heading">
+        <h1>Boost Requests</h1>
+      </header>
+      <nav className="moderation-tabs">
+        {[
+          ["PENDING", "Pending"],
+          ["ACTIVE", "Active"],
+          ["DECLINED", "Declined"],
+        ].map(([key, title]) => (
+          <button
+            type="button"
+            key={key}
+            className={status === key ? "active" : ""}
+            aria-pressed={status === key}
+            onClick={() => setStatus(key)}
+          >
+            <AdminIcon name={key === "PENDING" ? "clock" : key === "ACTIVE" ? "circleCheck" : "circleX"} /> {title}
+          </button>
+        ))}
+      </nav>
+      {notice && <p className={notice.includes("Could not") ? "error" : "notice"}>{notice}</p>}
+      {!result ? (
+        <p className="loading-inline">Loading Boost requests…</p>
+      ) : !items.length ? (
+        <div className="moderation-empty">
+          <b>No Boost requests {status === "PENDING" ? "pending review" : `in the ${status.toLowerCase()} queue`}</b>
+        </div>
+      ) : (
+        <section className="generic-request-list">
+          {items.map((row) => {
+            const data = (row.data as RecordValue) || {};
+            const profileId = data.profileId;
+            const rowId = String(row.id);
+            return (
+              <article key={rowId} className="generic-request-row">
+                <div>
+                  {profileId ? (
+                <Link
+                  to={`/users/${encodeURIComponent(String(profileId))}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {valueOf(data.profileName) || `Profile #${String(profileId)}`}
+                </Link>
+                  ) : (
+                    <b>{valueOf(data.profileName) || "No profile"}</b>
+                  )}
+                  <p>{valueOf(data.email)}</p>
+                  <p>Requested {verificationDate(data.requestedAt ?? row.createdAt)}</p>
+                  {status === "ACTIVE" && Boolean(data.expiresAt) && <p>Active until {verificationDate(data.expiresAt)}</p>}
+                </div>
+                {status === "PENDING" && (
+                  <div className="row-actions">
+                    <label className="boost-hours-field">
+                      Hours
+                      <input
+                        type="number"
+                        min={1}
+                        max={168}
+                        placeholder="default"
+                        value={hoursByRow[rowId] || ""}
+                        onChange={(event) => setHoursByRow((prev) => ({ ...prev, [rowId]: event.target.value }))}
+                      />
+                    </label>
+                    <button className="primary" onClick={() => void review(row, "APPROVED")}>
+                      Approve
+                    </button>
+                    <button className="danger" onClick={() => void review(row, "DECLINED")}>
+                      Decline
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      )}
+    </>
+  );
+}
+
+function AdminVideoVerifications() {
+  const [status, setStatus] = useState("PENDING");
+  const [result, setResult] = useState<ListResponse | null>(null);
+  const [notice, setNotice] = useState("");
+  const limit = 100;
+  const load = () => {
+    setResult(null);
+    api
+      .get<ListResponse>(`/admin/list/video-verifications?limit=${limit}&offset=0&status=${encodeURIComponent(status)}`)
+      .then(setResult)
+      .catch(() => setNotice("Could not load video verification requests."));
+  };
+  useEffect(load, [status]);
+  const review = async (row: RecordValue, next: "APPROVED" | "DECLINED") => {
+    try {
+      await api.post(`/admin/video-verifications/${encodeURIComponent(String(row.id))}/review`, { status: next });
+      setNotice(next === "APPROVED" ? "Video verification approved." : "Video verification declined.");
+      load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not update this request.");
+    }
+  };
+  const items = result?.items ?? [];
+  return (
+    <>
+      <header className="page-heading">
+        <h1>Video Verifications</h1>
+      </header>
+      <nav className="moderation-tabs">
+        {[
+          ["PENDING", "Pending"],
+          ["APPROVED", "Approved"],
+          ["DECLINED", "Declined"],
+        ].map(([key, title]) => (
+          <button
+            type="button"
+            key={key}
+            className={status === key ? "active" : ""}
+            aria-pressed={status === key}
+            onClick={() => setStatus(key)}
+          >
+            <AdminIcon name={key === "PENDING" ? "clock" : key === "APPROVED" ? "circleCheck" : "circleX"} /> {title}
+          </button>
+        ))}
+      </nav>
+      {notice && <p className={notice.includes("Could not") ? "error" : "notice"}>{notice}</p>}
+      {!result ? (
+        <p className="loading-inline">Loading video verification requests…</p>
+      ) : !items.length ? (
+        <div className="moderation-empty">
+          <b>No requests {status === "PENDING" ? "pending review" : `in the ${status.toLowerCase()} queue`}</b>
+        </div>
+      ) : (
+        <section className="generic-request-list">
+          {items.map((row) => {
+            const data = (row.data as RecordValue) || {};
+            const profileId = data.profileId;
+            const rowId = String(row.id);
+            return (
+              <article key={rowId} className="generic-request-row video-verification-row">
+                <video controls preload="none" src={`/admin/api/admin/video-verifications/${encodeURIComponent(rowId)}/content`} />
+                <div>
+                  {profileId ? (
+                    <Link
+                      to={`/users/${encodeURIComponent(String(profileId))}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {valueOf(data.profileName) || `Profile #${String(profileId)}`}
+                    </Link>
+                  ) : (
+                    <b>{valueOf(data.profileName) || "No profile"}</b>
+                  )}
+                  <p>{valueOf(data.email)}</p>
+                  <p>Submitted {verificationDate(data.requestedAt ?? row.createdAt)}</p>
+                  {status === "PENDING" && (
+                    <div className="row-actions">
+                      <button className="primary" onClick={() => void review(row, "APPROVED")}>
+                        Approve
+                      </button>
+                      <button className="danger" onClick={() => void review(row, "DECLINED")}>
+                        Decline
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </section>
       )}
     </>
@@ -5361,6 +5634,8 @@ function ReportPerson({
     <Link
       className="moderation-report-person"
       to={`/users/${encodeURIComponent(String(profileId))}`}
+      target="_blank"
+      rel="noopener noreferrer"
     >
       {content}
     </Link>
@@ -6371,6 +6646,11 @@ function StaticPageEditor({
               ["en", "English"],
               ["ru", "Russian"],
               ["es", "Spanish"],
+              ["pt", "Portuguese"],
+              ["fr", "French"],
+              ["de", "German"],
+              ["it", "Italian"],
+              ["pl", "Polish"],
             ].map(([code, name]) => (
               <button
                 type="button"
@@ -6741,7 +7021,7 @@ function GenericList({ view }: { view: string }) {
   } | null>(null);
   const [userAction, setUserAction] = useState<{
     row: RecordValue;
-    kind: "ban" | "delete";
+    kind: "ban" | "delete" | "restore";
   } | null>(null);
   const [openUserMenu, setOpenUserMenu] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -6928,9 +7208,10 @@ function GenericList({ view }: { view: string }) {
     const linkedProfileId =
       row.profileSourceId ?? row.profileId ?? data?.profileId;
     const clinicId = data?.id ?? row.id;
-    if (view === "users" && userId) navigate(`/users/${userId}`);
+    if (view === "users" && userId)
+      window.open(`/users/${encodeURIComponent(String(userId))}`, "_blank", "noopener,noreferrer");
     if (view === "subscriptions" && linkedProfileId)
-      navigate(`/users/${linkedProfileId}`);
+      window.open(`/users/${encodeURIComponent(String(linkedProfileId))}`, "_blank", "noopener,noreferrer");
     if (view === "verifications") {
       const verificationId = verificationRouteId(row);
       if (verificationId)
@@ -7078,15 +7359,30 @@ function GenericList({ view }: { view: string }) {
         await api.delete(
           `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
         );
-      else {
-        const data = (
-          userAction.row.data && typeof userAction.row.data === "object"
-            ? userAction.row.data
-            : {}
-        ) as RecordValue;
-        await api.patch(
-          `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
-          {
+    else {
+      const data = (
+      userAction.row.data && typeof userAction.row.data === "object"
+      ? userAction.row.data
+      : {}
+      ) as RecordValue;
+      if (userAction.kind === "restore") {
+      await api.patch(
+      `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
+      {
+      values: {
+      status: "ACTIVE",
+      data: {
+      ...data,
+      deletionRestoredAt: new Date().toISOString(),
+      restoredAt: new Date().toISOString(),
+      },
+      },
+      },
+      );
+      } else {
+      await api.patch(
+      `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
+      {
             values: {
               status: "BANNED",
               data: {
@@ -7095,10 +7391,11 @@ function GenericList({ view }: { view: string }) {
                 banDetails: values.details,
                 bannedAt: new Date().toISOString(),
               },
-            },
-          },
-        );
+      },
+      },
+      );
       }
+    }
       setUserAction(null);
       setOpenUserMenu(null);
       refreshList();
@@ -7853,12 +8150,23 @@ function GenericList({ view }: { view: string }) {
                                       onClick={() =>
                                         setUserAction({ row, kind: "ban" })
                                       }
-                                    >
-                                      Ban
-                                    </button>
-                                    <button
-                                      className="danger-text"
-                                      type="button"
+                  >
+                    Ban
+                  </button>
+                  {String(row.status ?? "").toUpperCase() === "PENDING_DELETION" && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() =>
+                      setUserAction({ row, kind: "restore" })
+                    }
+                  >
+                    Restore account
+                  </button>
+                  )}
+                  <button
+                    className="danger-text"
+                    type="button"
                                       role="menuitem"
                                       onClick={() =>
                                         setUserAction({ row, kind: "delete" })
@@ -8168,10 +8476,12 @@ function GenericList({ view }: { view: string }) {
           userAction
             ? {
                 kind: userAction.kind,
-                title:
+                  title:
                   userAction.kind === "ban"
-                    ? "Ban user"
-                    : "Permanently Delete User",
+                  ? "Ban user"
+                  : userAction.kind === "restore"
+                  ? "Restore User"
+                  : "Permanently Delete User",
               }
             : null
         }
@@ -9193,6 +9503,11 @@ function ArticleEditor({
               ["en", "English"],
               ["ru", "Russian"],
               ["es", "Spanish"],
+              ["pt", "Portuguese"],
+              ["fr", "French"],
+              ["de", "German"],
+              ["it", "Italian"],
+              ["pl", "Polish"],
             ].map(([code, name]) => (
               <button
                 type="button"
@@ -10901,7 +11216,7 @@ function EntityModal({
 }
 
 type ModalState = {
-  kind: "ban" | "grant" | "shadow" | "delete";
+  kind: "ban" | "grant" | "shadow" | "delete" | "restore";
   title: string;
 } | null;
 function ConfirmModal({
@@ -11211,7 +11526,12 @@ function UserTabContent({
         row.id,
     );
     return id ? (
-      <Link className="user-mini-link" to={`/users/${id}`}>
+      <Link
+        className="user-mini-link"
+        to={`/users/${id}`}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         <PersonAvatar
           row={{ ...row, ...item }}
           name={name}
@@ -13151,10 +13471,23 @@ export function AdminApp() {
   const location = useLocation();
   const navigate = useNavigate();
   useEffect(() => {
-    api
+    const requireAuthentication = () => {
+      setSession(null);
+      setContentTransitioning(false);
+      setContentTransitionBounds(null);
+      if (transitionTimer.current !== null) {
+        window.clearTimeout(transitionTimer.current);
+        transitionTimer.current = null;
+      }
+    };
+    window.addEventListener(ADMIN_AUTH_REQUIRED_EVENT, requireAuthentication);
+    void api
       .get<Session>("/admin/session")
       .then(setSession)
       .catch(() => setSession(null));
+    return () => {
+      window.removeEventListener(ADMIN_AUTH_REQUIRED_EVENT, requireAuthentication);
+    };
   }, []);
   const handleDashboardStatsLoaded = useCallback((payload: RecordValue) => {
     setNavCounts((payload.counts ?? {}) as RecordValue);
@@ -13363,6 +13696,8 @@ export function AdminApp() {
             <Route path="/photo-moderation" element={<ModerationPhotos />} />
             <Route path="/moderation/photos" element={<ModerationPhotos />} />
             <Route path="/moderation/reports" element={<ModerationReports />} />
+            <Route path="/boosts" element={<AdminBoosts />} />
+            <Route path="/video-verifications" element={<AdminVideoVerifications />} />
             <Route path="/livekit" element={<LiveKitCalls />} />
             <Route path="/static-pages" element={<StaticPages />} />
             <Route

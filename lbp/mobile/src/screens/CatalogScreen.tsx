@@ -36,6 +36,7 @@ import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
+import { countryName } from "../utils/countryNames";
 
 const PAGE_SIZE = 24;
 // Start pulling the next page once this many cards are left in the deck,
@@ -81,6 +82,14 @@ export default function CatalogScreen({ navigation, route }: Props) {
   const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Alena: the "verify your profile" message used to be an inline banner
+  // stuck right under the header (crowding the filter/avatar buttons), it
+  // never changed wording between "you tried to like someone" and "you
+  // tried to message someone", and it had no direct way to act on it other
+  // than tapping the banner text itself. Now a real popup with its own
+  // "Complete verification" button, and the copy matches which action
+  // actually triggered it.
+  const [verifyPrompt, setVerifyPrompt] = useState<"like" | "message" | null>(null);
   // "It's a Match!" overlay (#scr-matched) - POST /api/member/likes/{id}
   // already returns matched/conversationId (see api/catalog.ts's LikeResult),
   // it just wasn't being read anywhere. myPhotoUrl is prefetched once so
@@ -230,6 +239,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
 
   async function advance(direction: "like" | "pass", profile: CatalogProfile) {
     setActionError(null);
+    setVerifyPrompt(null);
     setIndex((i) => i + 1);
     if (direction === "pass") {
       setLastSwipe({ profile, direction: "pass" });
@@ -253,7 +263,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
       // zero feedback.
       setLastSwipe(null);
       if (err instanceof ApiError && err.status === 403) {
-        setActionError(t("catalog.messageNeedsVerification"));
+        setVerifyPrompt("like");
       } else if (err instanceof ApiError && err.status === 429) {
         setActionError(err.message || t("common.somethingWrong"));
       } else if (err instanceof ApiError) {
@@ -287,6 +297,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
 
   async function handleMessage(profile: CatalogProfile) {
     setActionError(null);
+    setVerifyPrompt(null);
     try {
       const res = await createConversation(profile.id);
       rootNav.navigate("Chat", { conversationId: res.conversationId, title: profile.displayName });
@@ -296,7 +307,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
       } else if (err instanceof ApiError && err.status === 429) {
         setActionError(t("catalog.messageRateLimited"));
       } else if (err instanceof ApiError && err.status === 403) {
-        setActionError(t("catalog.messageNeedsVerification"));
+        setVerifyPrompt("message");
       } else {
         setActionError(t("common.somethingWrong"));
       }
@@ -346,7 +357,14 @@ export default function CatalogScreen({ navigation, route }: Props) {
           >
             <Feather name="sliders" size={16} color={colors.ink} />
           </Pressable>
-          <Pressable hitSlop={8} onPress={() => navigation.navigate("Me")}>
+          {/* Alena: "фильтр и аватар разного размера" - both circles were
+              already the same 44x44/borderRadius 22 numerically, but
+              avatarButton (the filter button) carries a drop shadow that
+              gives it visible weight/halo the plain gradient avatar never
+              had, so side by side they read as two different sizes even
+              though neither's box actually changed. Wrapping the avatar in
+              the same shadow style (avatarButtonShadow) makes them match. */}
+          <Pressable hitSlop={8} onPress={() => navigation.navigate("Me")} style={styles.avatarButtonShadow}>
             <LinearGradient
               colors={["#4e9bff", "#f070a9"]}
               start={{ x: 0, y: 0 }}
@@ -359,13 +377,17 @@ export default function CatalogScreen({ navigation, route }: Props) {
         </View>
       </View>
 
+      {/* Verification is its own dedicated popup now (below, outside this
+          flow) - this banner is left for the other action errors only
+          (premium required, rate limited, generic failure), which stay as
+          a dismissible inline banner. */}
       {actionError ? (
         <Pressable style={styles.actionErrorBanner} onPress={() => setActionError(null)}>
           <Text style={styles.actionErrorText}>{actionError}</Text>
         </Pressable>
       ) : null}
 
-      <View style={[styles.deck, { paddingBottom: spacing.md + tabBarClearance + insets.bottom }]}>
+      <View style={[styles.deck, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
         {!current ? (
           <View style={styles.center}>
             <Text style={styles.emptyText}>{t("catalog.empty")}</Text>
@@ -486,6 +508,38 @@ export default function CatalogScreen({ navigation, route }: Props) {
           </View>
         </LinearGradient>
       </Modal>
+
+      {/* Alena: the old inline banner ("verify your profile to start
+          messaging people") stuck to the header and never changed wording
+          between a failed like and a failed message. Real popup now, with
+          copy that matches which action actually triggered it and a
+          direct button into Verification instead of making the person
+          find Settings themselves. */}
+      <Modal visible={!!verifyPrompt} animationType="fade" transparent onRequestClose={() => setVerifyPrompt(null)}>
+        <View style={styles.verifyOverlay}>
+          <View style={styles.verifySheet}>
+            <View style={styles.verifyIconWrap}>
+              <Feather name="shield" size={26} color={colors.pink} />
+            </View>
+            <Text style={styles.verifyTitle}>{t("catalog.verifyPromptTitle")}</Text>
+            <Text style={styles.verifyBody}>
+              {verifyPrompt === "like" ? t("catalog.likeNeedsVerification") : t("catalog.messageNeedsVerification")}
+            </Text>
+            <Pressable
+              style={styles.verifyPrimaryBtn}
+              onPress={() => {
+                setVerifyPrompt(null);
+                rootNav.navigate("Verification");
+              }}
+            >
+              <Text style={styles.verifyPrimaryBtnText}>{t("catalog.verifyPromptCta")}</Text>
+            </Pressable>
+            <Pressable style={styles.verifySecondaryBtn} onPress={() => setVerifyPrompt(null)}>
+              <Text style={styles.verifySecondaryBtnText}>{t("paywall.notNow")}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
     </GradientBackground>
   );
@@ -502,7 +556,7 @@ function SwipeCard({
   onSwiped?: (direction: "like" | "pass") => void;
   onOpenProfile?: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const insets = useSafeAreaInsets();
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -539,7 +593,10 @@ function SwipeCard({
     () => (profile.donorType?.[0] ? "\ud83e\uddec " + catalogOptionLabel("donorTypes", profile.donorType[0]) : null),
     [profile.donorType],
   );
-  const location = [profile.city, profile.country].filter(Boolean).join(", ");
+  // Alena: "страна написана не полностью" - profile.country is the raw
+  // ISO alpha-2 code (e.g. "ME"), not a display name; countryName() is the
+  // same lookup LikesScreen already uses to turn that into "Montenegro".
+  const location = [profile.city, profile.country ? countryName(profile.country, locale) : null].filter(Boolean).join(", ");
 
   function finishSwipe(direction: "like" | "pass") {
     onSwiped?.(direction);
@@ -598,7 +655,15 @@ function SwipeCard({
   // (💬/👍) to real Feather icons, matching LikesScreen's row buttons.
   const cardInner = (
     <Animated.View style={[styles.card, isTop ? cardStyle : styles.cardUnder]}>
-      <View style={styles.photoWrap}>
+      {/* Alena: "можно сделать просмотр по тапу на фото" - the grey "^^"
+          pill (expandBtn, removed) was the only way to open the full
+          profile besides the name/location text itself. Tapping anywhere
+          on the photo now does the same thing as tapping that text - the
+          nested overlayInfo Pressable below still gets its own tap first
+          (nested Pressables don't bubble here, already relied on
+          elsewhere in this file for the carousel arrows), so this is
+          purely additive. */}
+      <Pressable style={styles.photoWrap} onPress={onOpenProfile} disabled={!isTop || !onOpenProfile}>
         {photoUrl && !photoFailed ? (
           <Image source={{ uri: photoUrl }} style={styles.cardPhoto} onError={() => setPhotoFailed(true)} />
         ) : (
@@ -675,9 +740,12 @@ function SwipeCard({
             ) : null}
           </View>
           {location ? (
-            <Text style={styles.cardLoc} numberOfLines={1}>
-              {"📍 " + location}
-            </Text>
+            <View style={styles.cardLocRow}>
+              <Feather name="map-pin" size={11} color="rgba(255,255,255,0.85)" />
+              <Text style={styles.cardLoc} numberOfLines={1}>
+                {location}
+              </Text>
+            </View>
           ) : null}
 
           {profile.lookingFor?.length ? (
@@ -691,6 +759,13 @@ function SwipeCard({
             </View>
           ) : null}
 
+          {/* Alena: "стрелки и буллеты карусели наползают на инфо" - this
+              used to be position:absolute against overlayInfo (itself
+              absolute), so it visually sat on top of whichever content
+              (name/looking-for) happened to be there rather than reserving
+              its own space. Now a normal flow sibling below lookingForBlock
+              - it just takes its own row underneath the text instead of
+              floating over it. */}
           {photos.length > 1 ? (
             <View style={styles.carouselRow}>
               <Pressable hitSlop={10} onPress={showPrevPhoto} disabled={!isTop}>
@@ -707,15 +782,7 @@ function SwipeCard({
             </View>
           ) : null}
         </Pressable>
-
-        {/* Reference mockup's double-chevron expand affordance, centered
-            over the card's bottom edge. */}
-        {isTop && onOpenProfile ? (
-          <Pressable style={styles.expandBtn} onPress={onOpenProfile} hitSlop={8}>
-            <Feather name="chevrons-down" size={16} color="#fff" />
-          </Pressable>
-        ) : null}
-      </View>
+      </Pressable>
     </Animated.View>
   );
 
@@ -746,10 +813,10 @@ function ExpandedProfileCard({
   error: string | null;
   onCollapse: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const photos = profile.photos?.length ? profile.photos : profile.avatarUrl ? [profile.avatarUrl] : [];
   const photoUrl = photos[0] || null;
-  const location = [profile.city, profile.country].filter(Boolean).join(", ");
+  const location = [profile.city, profile.country ? countryName(profile.country, locale) : null].filter(Boolean).join(", ");
   const badgeLabel = profile.profileType
     ? catalogOptionLabel("profileTypes", profile.profileType)
     : profile.donorType?.[0]
@@ -768,7 +835,16 @@ function ExpandedProfileCard({
             never received that same treatment. Ported it here so both
             states - collapsed swipe card and expanded in-place card - look
             like the same design. */}
-        <View style={styles.expandedPhotoWrap}>
+        {/* Alena: "что за кнопка серая с двумя стрелочками, можно сделать
+            просмотр по тапу на фото" plus "ещё и серая полоса появляется" -
+            the grey collapseBtn pill (removed) sat in normal flow between
+            expandedPhotoWrap and the ScrollView content below it, and its
+            negative marginTop pulled it up over the photo's bottom edge,
+            leaving a sliver of the card's own grey backgroundColor
+            (styles.card) visible through the gap it created - that sliver
+            was the stripe. Tapping the photo itself now collapses the card
+            instead, so there's no separate button/gap to create that seam. */}
+        <Pressable style={styles.expandedPhotoWrap} onPress={onCollapse}>
           {photoUrl ? (
             <Image source={{ uri: photoUrl }} style={styles.cardPhoto} />
           ) : (
@@ -805,7 +881,12 @@ function ExpandedProfileCard({
                 </View>
               ) : null}
             </View>
-            {location ? <Text style={styles.cardLoc} numberOfLines={1}>{"\ud83d\udccd " + location}</Text> : null}
+            {location ? (
+              <View style={styles.cardLocRow}>
+                <Feather name="map-pin" size={11} color="rgba(255,255,255,0.85)" />
+                <Text style={styles.cardLoc} numberOfLines={1}>{location}</Text>
+              </View>
+            ) : null}
 
             {profile.lookingFor?.length ? (
               <View style={styles.lookingForBlock}>
@@ -818,10 +899,6 @@ function ExpandedProfileCard({
               </View>
             ) : null}
           </View>
-        </View>
-
-        <Pressable style={styles.collapseBtn} onPress={onCollapse} hitSlop={8}>
-          <Feather name="chevron-down" size={16} color="#fff" />
         </Pressable>
 
         {loading ? (
@@ -853,11 +930,11 @@ const styles = StyleSheet.create({
   headerBrand: { flexDirection: "row", alignItems: "center", gap: 8 },
   headerLogo: { width: 24, height: 24 },
   headerTitle: { fontSize: 15, fontWeight: "600", color: colors.ink },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
   avatarButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.card,
     alignItems: "center",
     justifyContent: "center",
@@ -868,12 +945,31 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   avatarButtonText: { fontSize: 16 },
+  // Same shadow as avatarButton (the filter circle) so the two header
+  // circles read as the same size/weight - see the comment above this
+  // Pressable in the JSX.
+  avatarButtonShadow: {
+    borderRadius: 22,
+    shadowColor: "#020817",
+    shadowOpacity: 0.14,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
   // Same gradient-initial avatar AppHeader uses elsewhere - Alena's
   // "Browse profiles" reference has the same right-side avatar shape here.
-  profileAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
-  profileAvatarText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  actionErrorBanner: { marginHorizontal: spacing.md, marginBottom: spacing.xs, backgroundColor: colors.tintPink, borderRadius: radius.md, padding: spacing.sm },
-  actionErrorText: { color: colors.pink, fontSize: 12.5, fontWeight: "600", textAlign: "center" },
+  profileAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  profileAvatarText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  actionErrorBanner: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.tintPink,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  actionErrorText: { color: colors.pink, fontSize: 12.5, fontWeight: "700", textAlign: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg, gap: spacing.md },
   errorText: { color: colors.danger, textAlign: "center" },
   emptyText: { color: colors.textMuted, textAlign: "center" },
@@ -916,8 +1012,22 @@ const styles = StyleSheet.create({
   // pills (profile type + donor type) right-aligned and stacked, not
   // side by side top-left like the first redesign pass.
   badgeRow: { position: "absolute", top: spacing.md, right: spacing.md, alignItems: "flex-end", gap: 6 },
-  badge: { backgroundColor: colors.pink, paddingHorizontal: 13, paddingVertical: 6, borderRadius: radius.pill },
-  badgeText: { color: "#fff", fontSize: 11.5, fontWeight: "700" },
+  // Alena: "single man, sperm donor и тд на белом фоне должны быть" - was a
+  // solid pink pill with white text, which didn't read as a badge/icon
+  // against the pink brand color used everywhere else on the card (like
+  // buttons). White fill with pink text instead.
+  badge: {
+    backgroundColor: "#fff",
+    paddingHorizontal: 13,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    shadowColor: "#020817",
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  badgeText: { color: colors.pink, fontSize: 11.5, fontWeight: "700" },
   // Was borderWidth-only with no fill - a hollow box with a colored
   // border/text and nothing behind it reads fine over a dark photo, but
   // over a light photo (or the white/light area of most photos - sky,
@@ -961,14 +1071,12 @@ const styles = StyleSheet.create({
   // All of the card's text content, floating directly over the photo/
   // scrim instead of a panel below it. Bottom offset clears expandBtn.
   overlayInfo: { position: "absolute", left: spacing.md, right: spacing.md, bottom: 34 },
-  // Carousel dots moved onto the photo itself (bottom edge, over a subtle
-  // scrim-free area) since the name/location panel below no longer shares
-  // space with the photo.
+  // UPDATE: no longer absolutely positioned - see the comment where this
+  // is rendered in SwipeCard. Normal flow row underneath the looking-for
+  // chip (or the name/location block, if there's no looking-for chip)
+  // instead of floating over whatever text happens to be there.
   carouselRow: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: spacing.sm,
+    marginTop: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -1019,33 +1127,9 @@ const styles = StyleSheet.create({
   // kept as its own key in case that changes again rather than hardcoding
   // one style for all four.
   actionBtnFilled: {},
-  // Small grey "^^" pill - the reference mockup's expand/collapse
-  // affordance, straddling the card's bottom edge (collapsed, over the
-  // photo) or sitting just under the header info (expanded, over the white
-  // detail panel) - one visual so it reads as the same control in both
-  // states.
-  expandBtn: {
-    position: "absolute",
-    bottom: 8,
-    alignSelf: "center",
-    width: 36,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#9ca3af",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  collapseBtn: {
-    alignSelf: "center",
-    marginTop: -14,
-    marginBottom: 8,
-    width: 36,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#9ca3af",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  // UPDATE: the grey "^^" expand/collapse pill is gone (Alena didn't like
+  // its look) - tapping the photo itself now expands/collapses (see the
+  // Pressable wrapping photoWrap/expandedPhotoWrap above).
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   verifiedBadge: {
     width: 18,
@@ -1064,7 +1148,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   cardName: { fontSize: 20, fontWeight: "700", color: "#fff" },
-  cardLoc: { fontSize: 12, color: "rgba(255,255,255,0.85)", marginTop: 2 },
+  // Was a "📍 " emoji glyph prefix - swapped for a real Feather icon
+  // (Alena: "иконка стрёмная") in its own row alongside the text.
+  cardLocRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  cardLoc: { fontSize: 12, color: "rgba(255,255,255,0.85)" },
   lookingForBlock: { marginTop: 12 },
   cardLookingForLabel: { fontSize: 12.5, fontWeight: "600", color: "rgba(255,255,255,0.9)", marginBottom: 6 },
   lookingForChip: {
@@ -1120,4 +1207,41 @@ const styles = StyleSheet.create({
   matchBtnPrimaryText: { color: "#fff", fontSize: 14.5, fontWeight: "700" },
   matchBtnSecondary: { backgroundColor: "rgba(255,255,255,0.9)" },
   matchBtnSecondaryText: { color: colors.ink, fontSize: 14.5, fontWeight: "700" },
+  verifyOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(2,8,23,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  verifySheet: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#fff",
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    alignItems: "center",
+  },
+  verifyIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.tintPink,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.sm,
+  },
+  verifyTitle: { fontSize: 17, fontWeight: "700", color: colors.ink, textAlign: "center" },
+  verifyBody: { fontSize: 13.5, color: colors.textMuted, textAlign: "center", marginTop: 6, marginBottom: spacing.md, lineHeight: 19 },
+  verifyPrimaryBtn: {
+    width: "100%",
+    height: 50,
+    borderRadius: radius.pill,
+    backgroundColor: colors.pink,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  verifyPrimaryBtnText: { color: "#fff", fontSize: 14.5, fontWeight: "700" },
+  verifySecondaryBtn: { marginTop: spacing.sm, paddingVertical: 8 },
+  verifySecondaryBtnText: { color: colors.textMuted, fontSize: 13.5, fontWeight: "600" },
 });

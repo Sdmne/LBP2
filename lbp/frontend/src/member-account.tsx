@@ -22,6 +22,16 @@ export type MemberRow = Record<string, unknown>;
 export type MemberLocale = keyof typeof ACCOUNT_COPY;
 type Session = { user: MemberRow } | null;
 const api = createApiClient("/api");
+const LANGUAGE_OPTIONS = [
+  ["en", "English"],
+  ["ru", "Русский"],
+  ["es", "Español"],
+  ["pt", "Português"],
+  ["fr", "Français"],
+  ["de", "Deutsch"],
+  ["it", "Italiano"],
+  ["pl", "Polski"],
+] as const;
 export const memberText = (...values: unknown[]) =>
   firstAvatarText(
     ...values.map((value) =>
@@ -39,7 +49,7 @@ export const memberBoolean = (value: unknown) =>
   value === true ||
   value === 1 ||
   ["true", "1", "yes"].includes(String(value).toLowerCase());
-const COPY = {
+const COPY_BASE = {
   en: {
     loading: "Loading…",
     loadError: "Could not load this page.",
@@ -95,6 +105,104 @@ const COPY = {
       "Premium es para miembros verificados. Verifica la foto de tu perfil para continuar: es gratis, rápido y no requiere documentos, solo un selfie rápido.",
     verify: "Verificar ahora",
     later: "Ahora no",
+  },
+};
+const COPY = {
+  ...COPY_BASE,
+  pt: {
+    loading: "Carregando…",
+    loadError: "Não foi possível carregar esta página.",
+    saveError: "Não foi possível salvar as alterações. Tente novamente.",
+    retry: "Tentar novamente",
+    saved: "Alterações salvas.",
+    deleteTitle: "Tem certeza de que deseja excluir sua conta?",
+    deleteBody:
+      "O acesso termina imediatamente. Sua conta, perfil, fotos, matches e conversas serão excluídos permanentemente após 30 dias.",
+    deleteDone:
+      "O acesso foi encerrado. Sua conta será excluída permanentemente em 30 dias.",
+    reason: "Selecione um motivo",
+    back: "Voltar",
+    premiumTitle: "Verifique-se para acessar o Premium",
+    premiumBody:
+      "O Premium é para membros verificados. Verifique a foto do seu perfil para continuar — é grátis, rápido e não exige documentos, apenas uma selfie rápida.",
+    verify: "Verificar agora",
+    later: "Agora não",
+  },
+  fr: {
+    loading: "Chargement…",
+    loadError: "Impossible de charger cette page.",
+    saveError: "Impossible d'enregistrer les modifications. Réessayez.",
+    retry: "Réessayer",
+    saved: "Modifications enregistrées.",
+    deleteTitle: "Voulez-vous vraiment supprimer votre compte ?",
+    deleteBody:
+      "L'accès prend fin immédiatement. Votre compte, profil, photos, matchs et conversations seront définitivement supprimés après 30 jours.",
+    deleteDone:
+      "L'accès a pris fin. Votre compte sera définitivement supprimé dans 30 jours.",
+    reason: "Sélectionnez un motif",
+    back: "Retour",
+    premiumTitle: "Vérifiez-vous pour passer au Premium",
+    premiumBody:
+      "Premium est réservé aux membres vérifiés. Vérifiez la photo de votre profil pour continuer — c'est gratuit, rapide et sans document, juste un selfie rapide.",
+    verify: "Vérifier maintenant",
+    later: "Pas maintenant",
+  },
+  de: {
+    loading: "Wird geladen…",
+    loadError: "Diese Seite konnte nicht geladen werden.",
+    saveError: "Änderungen konnten nicht gespeichert werden. Versuchen Sie es erneut.",
+    retry: "Erneut versuchen",
+    saved: "Änderungen gespeichert.",
+    deleteTitle: "Möchten Sie Ihr Konto wirklich löschen?",
+    deleteBody:
+      "Der Zugriff endet sofort. Ihr Konto, Profil, Fotos, Matches und Gespräche werden nach 30 Tagen endgültig gelöscht.",
+    deleteDone:
+      "Der Zugriff wurde beendet. Ihr Konto wird in 30 Tagen endgültig gelöscht.",
+    reason: "Wählen Sie einen Grund",
+    back: "Zurück",
+    premiumTitle: "Verifizieren Sie sich für Premium",
+    premiumBody:
+      "Premium ist für verifizierte Mitglieder. Verifizieren Sie Ihr Profilfoto, um fortzufahren — es ist kostenlos, schnell und ohne Dokumente, nur ein kurzes Selfie.",
+    verify: "Jetzt verifizieren",
+    later: "Nicht jetzt",
+  },
+  it: {
+    loading: "Caricamento…",
+    loadError: "Impossibile caricare questa pagina.",
+    saveError: "Impossibile salvare le modifiche. Riprova.",
+    retry: "Riprova",
+    saved: "Modifiche salvate.",
+    deleteTitle: "Sei sicuro di voler eliminare il tuo account?",
+    deleteBody:
+      "L'accesso termina immediatamente. Il tuo account, profilo, foto, match e conversazioni verranno eliminati definitivamente dopo 30 giorni.",
+    deleteDone:
+      "L'accesso è terminato. Il tuo account verrà eliminato definitivamente tra 30 giorni.",
+    reason: "Seleziona un motivo",
+    back: "Indietro",
+    premiumTitle: "Verificati per passare a Premium",
+    premiumBody:
+      "Premium è riservato ai membri verificati. Verifica la foto del tuo profilo per continuare — è gratis, veloce e non richiede documenti, solo un selfie veloce.",
+    verify: "Verifica ora",
+    later: "Non ora",
+  },
+  pl: {
+    loading: "Ładowanie…",
+    loadError: "Nie udało się załadować tej strony.",
+    saveError: "Nie udało się zapisać zmian. Spróbuj ponownie.",
+    retry: "Spróbuj ponownie",
+    saved: "Zmiany zapisane.",
+    deleteTitle: "Czy na pewno chcesz usunąć swoje konto?",
+    deleteBody:
+      "Dostęp kończy się natychmiast. Twoje konto, profil, zdjęcia, dopasowania i rozmowy zostaną trwale usunięte po 30 dniach.",
+    deleteDone:
+      "Dostęp został zakończony. Twoje konto zostanie trwale usunięte za 30 dni.",
+    reason: "Wybierz powód",
+    back: "Wstecz",
+    premiumTitle: "Zweryfikuj się, aby przejść na Premium",
+    premiumBody:
+      "Premium jest dla zweryfikowanych użytkowników. Zweryfikuj zdjęcie profilowe, aby kontynuować — to bezpłatne, szybkie i nie wymaga dokumentów, wystarczy krótkie selfie.",
+    verify: "Zweryfikuj teraz",
+    later: "Nie teraz",
   },
 };
 
@@ -362,13 +470,7 @@ function LanguageDialog({
         <MemberLoading locale={locale} />
       ) : (
         <div className="account-language-options">
-          {(
-            [
-              ["en", "English"],
-              ["ru", "Русский"],
-              ["es", "Español"],
-            ] as const
-          ).map(([code, label]) => (
+          {LANGUAGE_OPTIONS.map(([code, label]) => (
             <button
               key={code}
               type="button"
@@ -532,7 +634,7 @@ function Overview({
   );
   const age = profileAge(profile),
     completion = profileCompletion(profile, name);
-  const verified = memberBoolean(profile.isVerified ?? data.isVerified);
+  const verified = memberBoolean(profile.isVerified);
   const location = [text(data.city), profileCountry(data.country, locale)]
     .filter(Boolean)
     .join(", ");
@@ -737,7 +839,16 @@ function Overview({
               undefined,
               () => setDialog("language"),
               (
-                { en: "English", ru: "Русский", es: "Español" } as Record<
+                {
+                  en: "English",
+                  ru: "Русский",
+                  es: "Español",
+                  pt: "Português",
+                  fr: "Français",
+                  de: "Deutsch",
+                  it: "Italiano",
+                  pl: "Polski",
+                } as Record<
                   string,
                   string
                 >

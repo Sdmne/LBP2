@@ -1,7 +1,10 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { Feather } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/RootNavigator";
 import { fetchSubscriptionStatus, requestSubscription } from "../api/subscription";
 import type { SubscriptionPlan, RequestableTier } from "../api/subscription";
 import { ApiError } from "../api/client";
@@ -47,6 +50,7 @@ function proPriceNote(period: SubscriptionPlan, t: Translate): string | null {
 
 export default function SubscriptionScreen() {
   const { t, locale } = useI18n();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<SubscriptionPlan>("monthly");
@@ -70,6 +74,20 @@ export default function SubscriptionScreen() {
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // Alena: "сразу должен быть переход на верификацию и окно с выбором
+  // тарифа, это лишнее" - an unverified viewer used to land here (e.g. from
+  // FiltersScreen's "See Premium" upsell) and see a dead-end static
+  // message instead of the plan picker, with no way forward except backing
+  // out and finding Settings -> Verification themselves. Now this screen
+  // just forwards straight to Verification for that case - no intermediate
+  // plan-selection screen at all. replace() (not navigate()) so backing out
+  // of Verification doesn't land the person right back on this dead end.
+  useEffect(() => {
+    if (status?.status === "VERIFICATION_REQUIRED") {
+      navigation.replace("Verification");
+    }
+  }, [status, navigation]);
 
   async function handleRequest(tier: RequestableTier) {
     setRequesting(tier);
@@ -103,10 +121,12 @@ export default function SubscriptionScreen() {
   }
 
   if (status.status === "VERIFICATION_REQUIRED") {
+    // The useEffect above already fires navigation.replace("Verification")
+    // for this case - this is just the brief frame before that navigation
+    // completes, so a spinner instead of the old static dead-end message.
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{t("subscription.verificationRequiredTitle")}</Text>
-        <Text style={styles.body}>{t("subscription.verificationRequiredBody")}</Text>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.pink} />
       </View>
     );
   }
@@ -208,9 +228,26 @@ function TierComparison({
   const selectedTierName = selectedTier === "PRO" ? t("subscription.tierNamePro") : t("subscription.tierNameBuilder");
   const selectedTierPrice = selectedTier === "PRO" ? t("subscription.priceProMonthly") : builderPriceLabel(period, t);
   const isCurrentSelected = selectedTier === currentTier;
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Alena: "план не выбирается" / "на builder тоже ничего не происходит".
+  // selectedTier defaults to "BUILDER" (see the useState above), so
+  // whenever that's the only tappable card - a PRO account can only ever
+  // pick BUILDER, since FREE/PRO are itself/info-only - the CTA below the
+  // long comparison table is already showing on first render, and tapping
+  // the already-selected card is a real no-op: no border/CTA change to
+  // see, because there was nothing to change. That reads exactly like a
+  // broken button. Scrolling down to the CTA on every tap of an enabled
+  // card - not just on an actual selection change - means tapping BUILDER
+  // or PRO always visibly does something, whether or not the selection
+  // itself moved.
+  function selectTier(tier: RequestableTier) {
+    setSelectedTier(tier);
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+  }
 
   return (
-    <ScrollView contentContainerStyle={styles.tierScrollContainer}>
+    <ScrollView ref={scrollRef} contentContainerStyle={styles.tierScrollContainer}>
       <View style={styles.hero}>
         <Text style={styles.heroTitle}>{t("subscription.tierNamePro")}</Text>
         <Text style={styles.heroSubtitle}>{t("subscription.heroSubtitle")}</Text>
@@ -221,7 +258,14 @@ function TierComparison({
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <View style={styles.tierRow}>
-          <View style={[styles.tierCard, styles.tierCardFree]}>
+          <Pressable
+            style={[styles.tierCard, styles.tierCardFree]}
+            onPress={() =>
+              currentTier !== "EXPLORE"
+                ? Alert.alert(t("subscription.freeCardInfoTitle"), t("subscription.freeCardInfoBody"))
+                : undefined
+            }
+          >
             <Text style={styles.tierCardLabel}>{t("subscription.tierNameExploreShort")}</Text>
             <Text style={styles.tierCardPrice}>{t("subscription.priceZero")}</Text>
             <Text style={styles.tierCardNote}>{t("subscription.forever")}</Text>
@@ -231,11 +275,11 @@ function TierComparison({
                 <Text style={styles.currentBadgeText}>{t("subscription.currentPlanBadge")}</Text>
               </View>
             ) : null}
-          </View>
+          </Pressable>
 
           <Pressable
             style={[styles.tierCard, selectedTier === "BUILDER" && styles.tierCardActive]}
-            onPress={() => currentTier !== "BUILDER" && setSelectedTier("BUILDER")}
+            onPress={() => currentTier !== "BUILDER" && selectTier("BUILDER")}
             disabled={currentTier === "BUILDER"}
           >
             <Text style={styles.tierCardLabel}>{t("subscription.tierNameBuilderShort")}</Text>
@@ -251,7 +295,7 @@ function TierComparison({
 
           <Pressable
             style={[styles.tierCard, styles.tierCardBest, selectedTier === "PRO" && styles.tierCardActive]}
-            onPress={() => currentTier !== "PRO" && setSelectedTier("PRO")}
+            onPress={() => currentTier !== "PRO" && selectTier("PRO")}
             disabled={currentTier === "PRO"}
           >
             <View style={styles.bestValueBadgeWrap}>
@@ -313,16 +357,36 @@ function TierComparison({
             <TableRow label={t("subscription.proFeature2")} pro />
           </TableGroup>
 
+          {/* FIX (Sept 2026): Alena compared this screen against today's
+              website pricing-matrix update (HANDOFF-homepage-pricing-
+              2026-09-14.md) and found this table hadn't been kept in sync
+              - missing the new "Stand out & stay safe" group entirely, the
+              new message-starters/weekly-insight/agreement/community rows,
+              and still showing AI Family Advisor as Pro-only (the site
+              moved it to Builder+, matching what member_ai_advisor_*
+              already gates on in main.py - profile_is_premium(), not
+              profile_is_pro()). This block mirrors that update exactly. */}
+          <TableGroup title={t("subscription.groupStandOut")}>
+            <TableRow label={t("subscription.standOutFeature1")} free builder pro />
+            <TableRow label={t("subscription.standOutFeature2")} free builder pro />
+            <TableRow label={t("subscription.standOutFeature3")} free builder pro />
+            <TableRow label={t("subscription.standOutFeature4")} free builder pro />
+          </TableGroup>
+
           <TableGroup title={t("subscription.groupConnect")}>
             <TableRow label={t("subscription.connectRowLabel")} builder pro />
             <TableRow label={t("subscription.builderFeature4")} builder pro />
+            <TableRow label={t("subscription.messageStartersFeature")} builder pro />
           </TableGroup>
 
           <TableGroup title={t("subscription.groupFamily")}>
             <TableRow label={t("subscription.proFeature3")} pro />
             <TableRow label={t("subscription.proFeature4")} pro />
             <TableRow label={t("subscription.proFeature5")} pro />
-            <TableRow label={t("subscription.proFeature6")} pro />
+            <TableRow label={t("subscription.proFeature6")} builder pro />
+            <TableRow label={t("subscription.weeklyInsightFeature")} builder pro />
+            <TableRow label={t("subscription.coParentingAgreementFeature")} pro />
+            <TableRow label={t("subscription.communityFeature")} pro />
           </TableGroup>
         </View>
 

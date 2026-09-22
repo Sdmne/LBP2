@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { ActivityIndicator, View } from "react-native";
 import {
   NavigationContainer,
@@ -27,6 +27,7 @@ import CommunityGroupScreen from "../screens/CommunityGroupScreen";
 import CommunityPostScreen from "../screens/CommunityPostScreen";
 import SubscriptionScreen from "../screens/SubscriptionScreen";
 import LikesPaywallScreen from "../screens/LikesPaywallScreen";
+import PurchasesScreen from "../screens/PurchasesScreen";
 import AiAdvisorScreen from "../screens/AiAdvisorScreen";
 import PrivacyScreen from "../screens/PrivacyScreen";
 import BlockedUsersScreen from "../screens/BlockedUsersScreen";
@@ -56,7 +57,9 @@ import VerifyCodeScreen from "../screens/VerifyCodeScreen";
 import DeleteAccountScreen from "../screens/DeleteAccountScreen";
 import ProfileWizardScreen from "../screens/ProfileWizardScreen";
 import ReferralScreen from "../screens/ReferralScreen";
+import WhatsNewScreen from "../screens/WhatsNewScreen";
 import MainTabs, { type MainTabsParamList } from "./MainTabs";
+import { hasSeenWhatsNew } from "../utils/whatsNew";
 import type { CatalogFilters } from "../api/catalogFilters";
 import type { CommunityPost } from "../api/community";
 
@@ -81,6 +84,7 @@ export type RootStackParamList = {
   CommunityGroup: { groupId: number; groupName: string };
   CommunityPost: { post: CommunityPost; groupId: number };
   Subscription: undefined;
+  Purchases: undefined;
   LikesPaywall: undefined;
   AiAdvisor: undefined;
   Privacy: undefined;
@@ -166,6 +170,10 @@ export type RootStackParamList = {
   // Premium roadmap step 4 - "Invite friends" (MeProfileScreen's new row).
   // No params - reads/writes GET/POST /api/member/referral(/redeem).
   Referral: undefined;
+  // One-shot "what's new" screen (see screens/WhatsNewScreen.tsx) - pushed
+  // automatically once per device, right after ProfileWizard/VerifyCode
+  // clear, by the effect below. No params.
+  WhatsNew: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -180,6 +188,7 @@ export default function RootNavigator() {
   } = useAuth();
   const { t } = useI18n();
   const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const needsProfileWizard = pendingProfileWizard || user?.needsProfileWizard === true;
 
   // One-shot post-signup push for the profile wizard. Guarded against the
   // blocking VerifyCode gate (user signed in but !user.emailVerified) -
@@ -188,12 +197,32 @@ export default function RootNavigator() {
   // once the person clears verification this effect's own re-run (user
   // changes on confirmEmailCode) picks the wizard back up.
   useEffect(() => {
-    if (!isAuthenticated || !pendingProfileWizard) return;
+    if (!isAuthenticated || !needsProfileWizard) return;
     if (user && !user.emailVerified) return;
     if (!navigationRef.isReady()) return;
+    if (navigationRef.getCurrentRoute()?.name === "ProfileWizard") return;
     navigationRef.navigate("ProfileWizard");
     clearPendingProfileWizard();
-  }, [isAuthenticated, pendingProfileWizard, user, navigationRef, clearPendingProfileWizard]);
+  }, [isAuthenticated, needsProfileWizard, user, navigationRef, clearPendingProfileWizard]);
+
+  // One-shot "what's new" push (Alena: "в приложении надо какой-то экран
+  // создать при входе первый раз что появилось на сайте") - shown once per
+  // device to every signed-in, verified user (existing or new), same
+  // AsyncStorage-flag mechanism as ChatScreen's wallpaper choice. Waits on
+  // !pendingProfileWizard so it never races the post-signup wizard push
+  // above; whatsNewChecked guards against firing twice while the async
+  // AsyncStorage read is in flight.
+  const whatsNewChecked = useRef(false);
+  useEffect(() => {
+    if (!isAuthenticated || needsProfileWizard) return;
+    if (user && !user.emailVerified) return;
+    if (!navigationRef.isReady()) return;
+    if (whatsNewChecked.current) return;
+    whatsNewChecked.current = true;
+    hasSeenWhatsNew().then((seen) => {
+      if (!seen) navigationRef.navigate("WhatsNew");
+    });
+  }, [isAuthenticated, needsProfileWizard, user, navigationRef]);
 
   if (isLoading) {
     return (
@@ -291,6 +320,14 @@ export default function RootNavigator() {
                 ),
               })}
             />
+            {/* Item 19 - one-time RevenueCat purchases (Boost/Superlike/
+                Rewind/Likes-unlock/Compat-report-unlock/Extra-likes),
+                reached from the Me tab's "Boosts & extras" row. */}
+            <Stack.Screen
+              name="Purchases"
+              component={PurchasesScreen}
+              options={{ headerShown: true, title: t("nav.purchasesTitle") }}
+            />
             {/* Item 0(b) - polished paywall reachable from the Likes
                 screen's upgrade entry points. Modal presentation + its
                 own in-screen close (X) button, no native header. */}
@@ -321,6 +358,7 @@ export default function RootNavigator() {
             />
             <Stack.Screen name="Favourites" component={FavouritesScreen} options={{ headerShown: true, title: t("nav.savedTitle") }} />
             <Stack.Screen name="Referral" component={ReferralScreen} options={{ headerShown: true, title: t("nav.referralTitle") }} />
+            <Stack.Screen name="WhatsNew" component={WhatsNewScreen} options={{ headerShown: false }} />
             <Stack.Screen name="Resources" component={ResourcesScreen} options={{ headerShown: true, title: t("nav.resourcesTitle") }} />
             <Stack.Screen
               name="ResourceCategory"
@@ -401,7 +439,10 @@ export default function RootNavigator() {
             />
             <Stack.Screen name="Terms" component={TermsScreen} options={{ headerShown: true, title: t("nav.termsTitle") }} />
             <Stack.Screen name="TrustSafety" component={TrustSafetyScreen} options={{ headerShown: true, title: t("nav.trustSafetyTitle") }} />
-            <Stack.Screen name="Filters" component={FiltersScreen} options={{ headerShown: true, title: t("nav.filtersTitle") }} />
+            {/* headerShown: false - FiltersScreen builds its own transparent/
+                blurred header now (Alena: no circles/shadow on back+reset,
+                no solid header background) instead of the native-stack one. */}
+            <Stack.Screen name="Filters" component={FiltersScreen} options={{ headerShown: false }} />
             <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: true, title: t("nav.editProfileTitle") }} />
             <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} options={{ headerShown: true, title: t("nav.deleteAccountTitle") }} />
             {/* headerShown: false - the wizard builds its own in-content header

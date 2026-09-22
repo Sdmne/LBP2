@@ -1,14 +1,17 @@
 import {
   FormEvent,
+  type CSSProperties,
   type ReactNode,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { Room, RoomEvent } from "livekit-client";
+import { MemberChatCalls } from "./member-chat-calls";
+import type { ChatLocale } from "./member-chat-model";
 import {
   Link,
+  NavLink,
   Navigate,
   Route,
   Routes,
@@ -18,20 +21,26 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { ApiError, createApiClient } from "./api";
+import { loadKnowledgeArticles, normalizeArticle } from "./articles";
+import { firstAvatarText, userInitials, UserAvatar } from "./user-avatar";
+import { MemberProfile, profileAge, profileCountry } from "./member-profile";
+import { AccountPremium, MemberAccount, ownProfileData } from "./member-account";
+import { MemberLikes } from "./member-likes";
+import { SlidingTabs } from "./sliding-tabs";
+import { MemberChat, ChatLegacyRedirect } from "./member-chat";
+import { MemberProfileEdit } from "./member-profile-edit";
+import { MemberProfilePhotos, MemberProfileVerification } from "./member-profile-tools";
 import {
   signInWithSocial,
   socialErrorMessage,
   type SocialProvider,
 } from "./firebase-auth";
-import {
-  referenceArticleMeta,
-  referenceArticleNavigation,
-  referenceKnowledgeArticles,
-} from "./reference-article-meta";
+import { NotFoundPage } from "./not-found";
 
 const api = createApiClient("/api");
 type Row = Record<string, unknown>;
 type Session = { user: Row } | null;
+type FooterPageLink = { slug: string; title: string };
 type Page<T> = {
   items: T[];
   total: number;
@@ -41,7 +50,20 @@ type Page<T> = {
 };
 const asText = (value: unknown) =>
   value === null || value === undefined || value === "" ? "—" : String(value);
-type CookieLocale = "en" | "ru" | "es";
+type CookieLocale = "en" | "ru" | "es" | "pt" | "fr" | "de" | "it" | "pl";
+type LegacyLocale = "en" | "ru" | "es";
+const legacyLocaleOf = (locale: CookieLocale): LegacyLocale => (locale === "ru" || locale === "es" ? locale : "en");
+const memberLocaleOf = (locale: CookieLocale): ChatLocale => locale;
+// 2026-09-15: extended from en/ru/es to add pt/fr/de/it/pl (machine-translated,
+// same batch as mobile/src/i18n/translations.ts) - kept as one shared array so
+// localeOf()/switchLocale() below can't silently drift out of sync with
+// CookieLocale again the way the original 3-locale version did.
+const SUPPORTED_SITE_LOCALES: CookieLocale[] = ["en", "ru", "es", "pt", "fr", "de", "it", "pl"];
+const defaultFooterPages = (text: (typeof SITE_TEXT)[CookieLocale]): FooterPageLink[] => [
+  { slug: "terms-of-use", title: text.terms },
+  { slug: "privacy-policy", title: text.privacy },
+];
+const footerPagePath = (locale: CookieLocale, slug: string) => `/${locale}/${encodeURIComponent(slug)}`;
 
 function ScrollToTopOnNavigation() {
   const { pathname, search } = useLocation();
@@ -60,7 +82,7 @@ type CookieDefinition = { name: string; duration: string; description: string };
 
 const localeOf = (): CookieLocale => {
   const locale = window.location.pathname.split("/").filter(Boolean)[0] || "en";
-  return (["en", "ru", "es"] as string[]).includes(locale) ? (locale as CookieLocale) : "en";
+  return (SUPPORTED_SITE_LOCALES as string[]).includes(locale) ? (locale as CookieLocale) : "en";
 };
 const refreshSession = async (fallback: Session): Promise<Session> => {
   try {
@@ -69,6 +91,11 @@ const refreshSession = async (fallback: Session): Promise<Session> => {
     return fallback;
   }
 };
+
+const userNeedsProfileWizard = (session: Session | undefined | null): boolean =>
+  session?.user?.emailVerified !== false && session?.user?.needsProfileWizard === true;
+
+const profileWizardPath = (locale: CookieLocale): string => `/${locale}/profile/edit`;
 
 const COOKIE_MAX_AGE = 180 * 24 * 60 * 60;
 const COOKIE_LOCALE_MAX_AGE = 365 * 24 * 60 * 60;
@@ -121,8 +148,7 @@ const saveConsentCookies = (
         : "necessary";
   writeCookie("lbp_consent", level, COOKIE_MAX_AGE);
   writeCookie("lbp_consent_id", consentId, COOKIE_MAX_AGE);
-  if (preferences) writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
-  else writeCookie("NEXT_LOCALE", "", 0);
+  writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
 };
 
 const COOKIE_TEXT = {
@@ -144,20 +170,19 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 days", description: "Remembers how you first reached us (first touch), used to understand where new members come from." },
         { name: "lbp_attr_last", duration: "90 days", description: "Remembers how you most recently reached us (last touch), used to understand where new members come from." },
         { name: "lbp_consent_id", duration: "180 days", description: "Anonymous consent reference id, kept as proof of the consent choice you made here (GDPR Art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 year", description: "Remembers the interface language for the localized site." },
       ],
-      preferences: [
-        { name: "NEXT_LOCALE", duration: "1 year", description: "Remembers your selected interface language." },
-      ],
+      preferences: [],
       statistics: [
         { name: "AMP_*", duration: "Up to 1 year", description: "Product analytics — measures usage to improve the product." },
         { name: "AMP_MKTG_*", duration: "Up to 1 year", description: "Product analytics — measures how visitors first reached the app." },
       ],
     },
     about: [
-      "Cookies are small text files that websites can use to make a user's experience more efficient.",
-      "The law states that we can store cookies on your device if they are strictly necessary for the operation of this site. For all other types of cookies, we need your permission. Necessary cookies are processed under Art. 6(1)(f) GDPR; all other categories only with your consent under Art. 6(1)(a) GDPR.",
-      "This site uses different types of cookies. Some cookies are placed by third-party services that appear on our pages.",
-      "You can change or withdraw your consent at any time from the Cookie settings link at the bottom of the page.",
+      "Cookies are small text files that websites use to make a user's experience more efficient.",
+      "The law lets us store cookies that are strictly necessary for this site to work; for everything else we need your permission. Necessary cookies are used on the basis of GDPR Art. 6(1)(f); all other categories are used only with your consent (GDPR Art. 6(1)(a)).",
+      "This site uses different types of cookies; some are set by third-party services that appear on our pages.",
+      "You can change or withdraw your consent at any time using the \"Cookie settings\" link in the footer of the page.",
     ],
     learnMore: "Learn more about how we process personal data in our Privacy Policy.",
     rejectAll: "Reject all",
@@ -183,8 +208,9 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 дней", description: "Запоминает, как вы впервые попали к нам (первое посещение), чтобы понимать, откуда приходят новые участники." },
         { name: "lbp_attr_last", duration: "90 дней", description: "Запоминает, как вы попали к нам в последний раз (последнее посещение), чтобы понимать, откуда приходят новые участники." },
         { name: "lbp_consent_id", duration: "180 дней", description: "Анонимный идентификатор согласия, хранится как подтверждение сделанного вами здесь выбора (GDPR ст. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 год", description: "Запоминает язык интерфейса для локализованного сайта." },
       ],
-      preferences: [{ name: "NEXT_LOCALE", duration: "1 год", description: "Запоминает выбранный язык интерфейса." }],
+      preferences: [],
       statistics: [
         { name: "AMP_*", duration: "До 1 года", description: "Продуктовая аналитика — измеряет использование для улучшения продукта." },
         { name: "AMP_MKTG_*", duration: "До 1 года", description: "Продуктовая аналитика — измеряет, как посетители впервые попали в приложение." },
@@ -220,8 +246,9 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 días", description: "Recuerda cómo llegaste a nosotros por primera vez (primer contacto), para entender de dónde vienen los nuevos miembros." },
         { name: "lbp_attr_last", duration: "90 días", description: "Recuerda cómo llegaste a nosotros la última vez (último contacto), para entender de dónde vienen los nuevos miembros." },
         { name: "lbp_consent_id", duration: "180 días", description: "Identificador de consentimiento anónimo, conservado como prueba de la elección de consentimiento que hizo aquí (RGPD art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 año", description: "Recuerda el idioma de interfaz para el sitio localizado." },
       ],
-      preferences: [{ name: "NEXT_LOCALE", duration: "1 año", description: "Recuerda el idioma de interfaz que has seleccionado." }],
+      preferences: [],
       statistics: [
         { name: "AMP_*", duration: "Hasta 1 año", description: "Análisis de producto — mide el uso para mejorar el producto." },
         { name: "AMP_MKTG_*", duration: "Hasta 1 año", description: "Análisis de producto — mide cómo llegaron los visitantes a la app por primera vez." },
@@ -238,6 +265,196 @@ const COOKIE_TEXT = {
     customize: "Personalizar",
     allowSelection: "Permitir selección",
     acceptAll: "Aceptar todo",
+  },
+  pt: {
+    heading: "Este site utiliza cookies",
+    tabs: { consent: "Consentimento", details: "Detalhes", about: "Sobre" },
+    consent: "Utilizamos cookies para manter a aplicação a funcionar, personalizar a sua experiência e analisar o nosso tráfego. Também partilhamos informações sobre a sua utilização do site com os nossos parceiros de análise, que podem combiná-las com outras informações que lhes tenha fornecido ou que tenham recolhido através da sua utilização dos respetivos serviços.",
+    privacyPolicy: "Política de Privacidade",
+    categories: { necessary: "Necessários", preferences: "Preferências", statistics: "Estatísticas" },
+    descriptions: {
+      necessary: "Os cookies necessários ajudam a tornar o site utilizável, permitindo funções básicas como a gestão de sessão e início de sessão, segurança e a memorização da escolha de consentimento que faz aqui. O site não pode funcionar corretamente sem estes cookies.",
+      preferences: "Os cookies de preferências permitem ao site memorizar informações que alteram o seu comportamento ou aspeto, como o seu idioma preferido.",
+      statistics: "Os cookies estatísticos ajudam-nos a compreender como os visitantes interagem com a aplicação, recolhendo e comunicando informações.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 dias", description: "Guarda a sua escolha de consentimento de cookies." },
+        { name: "authjs.session-token", duration: "Sessão / 7 dias", description: "Mantém a sua sessão iniciada (sessão e proteção CSRF). Com o prefixo __Secure- em HTTPS." },
+        { name: "lbp_attr_first", duration: "90 dias", description: "Recorda como nos encontrou pela primeira vez (primeiro contacto), usado para perceber de onde vêm os novos membros." },
+        { name: "lbp_attr_last", duration: "90 dias", description: "Recorda como nos encontrou mais recentemente (último contacto), usado para perceber de onde vêm os novos membros." },
+        { name: "lbp_consent_id", duration: "180 dias", description: "Identificador de consentimento anónimo, guardado como prova da escolha de consentimento que fez aqui (RGPD art. 7.º(1))." },
+        { name: "NEXT_LOCALE", duration: "1 ano", description: "Recorda o idioma da interface do site localizado." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Até 1 ano", description: "Análise de produto — mede a utilização para melhorar o produto." },
+        { name: "AMP_MKTG_*", duration: "Até 1 ano", description: "Análise de produto — mede como os visitantes chegaram pela primeira vez à aplicação." },
+      ],
+    },
+    about: [
+      "Os cookies são pequenos ficheiros de texto que os sites utilizam para tornar a experiência do utilizador mais eficiente.",
+      "A lei permite-nos guardar cookies estritamente necessários para o funcionamento deste site; para tudo o resto precisamos da sua autorização. Os cookies necessários são utilizados com base no art. 6.º(1)(f) do RGPD; todas as outras categorias são utilizadas apenas com o seu consentimento (art. 6.º(1)(a) do RGPD).",
+      "Este site utiliza diferentes tipos de cookies; alguns são definidos por serviços de terceiros presentes nas nossas páginas.",
+      "Pode alterar ou retirar o seu consentimento a qualquer momento através da ligação «Definições de cookies» no rodapé da página.",
+    ],
+    learnMore: "Saiba mais sobre como tratamos os dados pessoais na nossa Política de Privacidade.",
+    rejectAll: "Rejeitar tudo",
+    customize: "Personalizar",
+    allowSelection: "Permitir seleção",
+    acceptAll: "Aceitar tudo",
+  },
+  fr: {
+    heading: "Ce site utilise des cookies",
+    tabs: { consent: "Consentement", details: "Détails", about: "À propos" },
+    consent: "Nous utilisons des cookies pour faire fonctionner l'application, personnaliser votre expérience et analyser notre trafic. Nous partageons également des informations sur votre utilisation du site avec nos partenaires d'analyse, qui peuvent les combiner avec d'autres informations que vous leur avez fournies ou qu'ils ont collectées lors de votre utilisation de leurs services.",
+    privacyPolicy: "Politique de confidentialité",
+    categories: { necessary: "Nécessaires", preferences: "Préférences", statistics: "Statistiques" },
+    descriptions: {
+      necessary: "Les cookies nécessaires contribuent à rendre le site utilisable en activant des fonctions de base telles que la gestion de session et de connexion, la sécurité et la mémorisation du choix de consentement que vous faites ici. Le site ne peut pas fonctionner correctement sans ces cookies.",
+      preferences: "Les cookies de préférences permettent au site de mémoriser des informations qui modifient son comportement ou son apparence, comme votre langue préférée.",
+      statistics: "Les cookies statistiques nous aident à comprendre comment les visiteurs interagissent avec l'application, en collectant et en communiquant des informations.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 jours", description: "Enregistre votre choix de consentement aux cookies." },
+        { name: "authjs.session-token", duration: "Session / 7 jours", description: "Vous maintient connecté (session et protection CSRF). Préfixé par __Secure- en HTTPS." },
+        { name: "lbp_attr_first", duration: "90 jours", description: "Mémorise comment vous nous avez trouvés pour la première fois (premier contact), utilisé pour comprendre d'où viennent les nouveaux membres." },
+        { name: "lbp_attr_last", duration: "90 jours", description: "Mémorise comment vous nous avez trouvés le plus récemment (dernier contact), utilisé pour comprendre d'où viennent les nouveaux membres." },
+        { name: "lbp_consent_id", duration: "180 jours", description: "Identifiant de consentement anonyme, conservé comme preuve du choix de consentement que vous avez fait ici (RGPD art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 an", description: "Mémorise la langue de l'interface pour le site localisé." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Jusqu'à 1 an", description: "Analyse produit — mesure l'utilisation pour améliorer le produit." },
+        { name: "AMP_MKTG_*", duration: "Jusqu'à 1 an", description: "Analyse produit — mesure comment les visiteurs ont découvert l'application pour la première fois." },
+      ],
+    },
+    about: [
+      "Les cookies sont de petits fichiers texte que les sites web utilisent pour rendre l'expérience utilisateur plus efficace.",
+      "La loi nous permet de stocker les cookies strictement nécessaires au fonctionnement de ce site ; pour tout le reste, nous avons besoin de votre autorisation. Les cookies nécessaires sont utilisés sur la base de l'art. 6(1)(f) du RGPD ; toutes les autres catégories ne sont utilisées qu'avec votre consentement (art. 6(1)(a) du RGPD).",
+      "Ce site utilise différents types de cookies ; certains sont définis par des services tiers présents sur nos pages.",
+      "Vous pouvez modifier ou retirer votre consentement à tout moment via le lien « Paramètres des cookies » dans le pied de page.",
+    ],
+    learnMore: "En savoir plus sur la façon dont nous traitons les données personnelles dans notre Politique de confidentialité.",
+    rejectAll: "Tout refuser",
+    customize: "Personnaliser",
+    allowSelection: "Autoriser la sélection",
+    acceptAll: "Tout accepter",
+  },
+  de: {
+    heading: "Diese Website verwendet Cookies",
+    tabs: { consent: "Zustimmung", details: "Details", about: "Über Cookies" },
+    consent: "Wir verwenden Cookies, damit die App funktioniert, um Ihr Erlebnis zu personalisieren und unseren Traffic zu analysieren. Wir teilen außerdem Informationen über Ihre Nutzung der Website mit unseren Analysepartnern, die diese mit anderen Informationen kombinieren können, die Sie ihnen zur Verfügung gestellt haben oder die sie durch Ihre Nutzung ihrer Dienste gesammelt haben.",
+    privacyPolicy: "Datenschutzrichtlinie",
+    categories: { necessary: "Notwendig", preferences: "Präferenzen", statistics: "Statistik" },
+    descriptions: {
+      necessary: "Notwendige Cookies tragen dazu bei, die Website nutzbar zu machen, indem sie grundlegende Funktionen wie Sitzungs- und Anmeldeverwaltung, Sicherheit und das Speichern Ihrer hier getroffenen Zustimmungsentscheidung ermöglichen. Ohne diese Cookies kann die Website nicht ordnungsgemäß funktionieren.",
+      preferences: "Präferenz-Cookies ermöglichen es der Website, Informationen zu speichern, die ihr Verhalten oder Erscheinungsbild verändern, wie z. B. Ihre bevorzugte Sprache.",
+      statistics: "Statistik-Cookies helfen uns zu verstehen, wie Besucher mit der App interagieren, indem sie Informationen sammeln und melden.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 Tage", description: "Speichert Ihre Cookie-Zustimmungsentscheidung." },
+        { name: "authjs.session-token", duration: "Sitzung / 7 Tage", description: "Hält Sie angemeldet (Sitzung und CSRF-Schutz). Bei HTTPS mit dem Präfix __Secure- versehen." },
+        { name: "lbp_attr_first", duration: "90 Tage", description: "Merkt sich, wie Sie uns zum ersten Mal gefunden haben (First Touch), um zu verstehen, woher neue Mitglieder kommen." },
+        { name: "lbp_attr_last", duration: "90 Tage", description: "Merkt sich, wie Sie uns zuletzt gefunden haben (Last Touch), um zu verstehen, woher neue Mitglieder kommen." },
+        { name: "lbp_consent_id", duration: "180 Tage", description: "Anonyme Zustimmungs-Kennung, aufbewahrt als Nachweis Ihrer hier getroffenen Zustimmungsentscheidung (DSGVO Art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 Jahr", description: "Merkt sich die Interfacesprache für die lokalisierte Website." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Bis zu 1 Jahr", description: "Produktanalyse — misst die Nutzung zur Verbesserung des Produkts." },
+        { name: "AMP_MKTG_*", duration: "Bis zu 1 Jahr", description: "Produktanalyse — misst, wie Besucher die App zum ersten Mal gefunden haben." },
+      ],
+    },
+    about: [
+      "Cookies sind kleine Textdateien, die Websites verwenden, um die Nutzererfahrung effizienter zu gestalten.",
+      "Das Gesetz erlaubt uns, Cookies zu speichern, die für den Betrieb dieser Website unbedingt erforderlich sind; für alles andere benötigen wir Ihre Erlaubnis. Notwendige Cookies werden auf Grundlage von Art. 6(1)(f) DSGVO verwendet; alle anderen Kategorien nur mit Ihrer Zustimmung (Art. 6(1)(a) DSGVO).",
+      "Diese Website verwendet verschiedene Arten von Cookies; einige werden von Drittanbieter-Diensten gesetzt, die auf unseren Seiten erscheinen.",
+      "Sie können Ihre Zustimmung jederzeit über den Link „Cookie-Einstellungen“ in der Fußzeile der Seite ändern oder widerrufen.",
+    ],
+    learnMore: "Erfahren Sie mehr darüber, wie wir personenbezogene Daten verarbeiten, in unserer Datenschutzrichtlinie.",
+    rejectAll: "Alle ablehnen",
+    customize: "Anpassen",
+    allowSelection: "Auswahl erlauben",
+    acceptAll: "Alle akzeptieren",
+  },
+  it: {
+    heading: "Questo sito utilizza i cookie",
+    tabs: { consent: "Consenso", details: "Dettagli", about: "Informazioni" },
+    consent: "Utilizziamo i cookie per far funzionare l'app, personalizzare la tua esperienza e analizzare il nostro traffico. Condividiamo inoltre informazioni sul tuo utilizzo del sito con i nostri partner di analisi, che potrebbero combinarle con altre informazioni che hai fornito loro o che hanno raccolto attraverso il tuo utilizzo dei loro servizi.",
+    privacyPolicy: "Informativa sulla privacy",
+    categories: { necessary: "Necessari", preferences: "Preferenze", statistics: "Statistiche" },
+    descriptions: {
+      necessary: "I cookie necessari contribuiscono a rendere il sito utilizzabile abilitando funzioni di base come la gestione della sessione e dell'accesso, la sicurezza e la memorizzazione della scelta di consenso effettuata qui. Il sito non può funzionare correttamente senza questi cookie.",
+      preferences: "I cookie di preferenza consentono al sito di ricordare informazioni che ne modificano il comportamento o l'aspetto, come la lingua preferita.",
+      statistics: "I cookie statistici ci aiutano a capire come i visitatori interagiscono con l'app, raccogliendo e segnalando informazioni.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 giorni", description: "Memorizza la tua scelta di consenso ai cookie." },
+        { name: "authjs.session-token", duration: "Sessione / 7 giorni", description: "Mantiene l'accesso effettuato (sessione e protezione CSRF). Con prefisso __Secure- su HTTPS." },
+        { name: "lbp_attr_first", duration: "90 giorni", description: "Ricorda come ci hai trovato per la prima volta (primo contatto), usato per capire da dove arrivano i nuovi membri." },
+        { name: "lbp_attr_last", duration: "90 giorni", description: "Ricorda come ci hai trovato più di recente (ultimo contatto), usato per capire da dove arrivano i nuovi membri." },
+        { name: "lbp_consent_id", duration: "180 giorni", description: "Identificativo di consenso anonimo, conservato come prova della scelta di consenso effettuata qui (GDPR art. 7(1))." },
+        { name: "NEXT_LOCALE", duration: "1 anno", description: "Ricorda la lingua dell'interfaccia per il sito localizzato." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Fino a 1 anno", description: "Analisi di prodotto — misura l'utilizzo per migliorare il prodotto." },
+        { name: "AMP_MKTG_*", duration: "Fino a 1 anno", description: "Analisi di prodotto — misura come i visitatori hanno raggiunto l'app per la prima volta." },
+      ],
+    },
+    about: [
+      "I cookie sono piccoli file di testo che i siti web utilizzano per rendere l'esperienza dell'utente più efficiente.",
+      "La legge ci consente di memorizzare i cookie strettamente necessari al funzionamento di questo sito; per tutto il resto abbiamo bisogno del tuo permesso. I cookie necessari sono utilizzati sulla base dell'art. 6(1)(f) del GDPR; tutte le altre categorie sono utilizzate solo con il tuo consenso (art. 6(1)(a) del GDPR).",
+      "Questo sito utilizza diversi tipi di cookie; alcuni sono impostati da servizi di terze parti presenti nelle nostre pagine.",
+      "Puoi modificare o revocare il tuo consenso in qualsiasi momento tramite il link «Impostazioni cookie» nel piè di pagina.",
+    ],
+    learnMore: "Scopri di più su come trattiamo i dati personali nella nostra Informativa sulla privacy.",
+    rejectAll: "Rifiuta tutto",
+    customize: "Personalizza",
+    allowSelection: "Consenti selezione",
+    acceptAll: "Accetta tutto",
+  },
+  pl: {
+    heading: "Ta strona korzysta z plików cookie",
+    tabs: { consent: "Zgoda", details: "Szczegóły", about: "O plikach cookie" },
+    consent: "Używamy plików cookie, aby aplikacja działała, personalizować Twoje doświadczenia i analizować nasz ruch. Udostępniamy również informacje o korzystaniu przez Ciebie z witryny naszym partnerom analitycznym, którzy mogą łączyć je z innymi informacjami, które im przekazałeś/aś lub które zebrali podczas korzystania z ich usług.",
+    privacyPolicy: "Polityka prywatności",
+    categories: { necessary: "Niezbędne", preferences: "Preferencje", statistics: "Statystyczne" },
+    descriptions: {
+      necessary: "Niezbędne pliki cookie pomagają uczynić stronę użyteczną, umożliwiając podstawowe funkcje, takie jak obsługa sesji i logowania, bezpieczeństwo oraz zapamiętywanie dokonanego tutaj wyboru zgody. Bez tych plików cookie strona nie może działać prawidłowo.",
+      preferences: "Pliki cookie preferencji umożliwiają stronie zapamiętywanie informacji zmieniających jej działanie lub wygląd, np. preferowanego języka.",
+      statistics: "Statystyczne pliki cookie pomagają nam zrozumieć, w jaki sposób odwiedzający korzystają z aplikacji, zbierając i raportując informacje.",
+    },
+    cookies: {
+      necessary: [
+        { name: "lbp_consent", duration: "180 dni", description: "Przechowuje Twój wybór dotyczący zgody na pliki cookie." },
+        { name: "authjs.session-token", duration: "Sesja / 7 dni", description: "Utrzymuje Twoje zalogowanie (sesja i ochrona CSRF). Z prefiksem __Secure- w HTTPS." },
+        { name: "lbp_attr_first", duration: "90 dni", description: "Zapamiętuje, w jaki sposób trafiłeś/aś do nas po raz pierwszy (pierwsze odwiedziny), używane do zrozumienia, skąd pochodzą nowi członkowie." },
+        { name: "lbp_attr_last", duration: "90 dni", description: "Zapamiętuje, w jaki sposób trafiłeś/aś do nas ostatnio (ostatnie odwiedziny), używane do zrozumienia, skąd pochodzą nowi członkowie." },
+        { name: "lbp_consent_id", duration: "180 dni", description: "Anonimowy identyfikator zgody, przechowywany jako dowód dokonanego tutaj wyboru zgody (RODO art. 7 ust. 1)." },
+        { name: "NEXT_LOCALE", duration: "1 rok", description: "Zapamiętuje język interfejsu dla zlokalizowanej wersji strony." },
+      ],
+      preferences: [],
+      statistics: [
+        { name: "AMP_*", duration: "Do 1 roku", description: "Analiza produktu — mierzy sposób użytkowania w celu ulepszenia produktu." },
+        { name: "AMP_MKTG_*", duration: "Do 1 roku", description: "Analiza produktu — mierzy, w jaki sposób odwiedzający po raz pierwszy trafili do aplikacji." },
+      ],
+    },
+    about: [
+      "Pliki cookie to małe pliki tekstowe, których strony internetowe używają, aby zwiększyć efektywność korzystania z nich przez użytkownika.",
+      "Prawo pozwala nam przechowywać pliki cookie ściśle niezbędne do działania tej strony; na wszystko inne potrzebujemy Twojej zgody. Niezbędne pliki cookie są wykorzystywane na podstawie art. 6 ust. 1 lit. f) RODO; wszystkie pozostałe kategorie są wykorzystywane wyłącznie za Twoją zgodą (art. 6 ust. 1 lit. a) RODO).",
+      "Ta strona wykorzystuje różne rodzaje plików cookie; niektóre z nich są ustawiane przez usługi stron trzecich obecne na naszych stronach.",
+      "Możesz w każdej chwili zmienić lub wycofać swoją zgodę za pomocą linku „Ustawienia plików cookie” w stopce strony.",
+    ],
+    learnMore: "Dowiedz się więcej o tym, jak przetwarzamy dane osobowe, w naszej Polityce prywatności.",
+    rejectAll: "Odrzuć wszystkie",
+    customize: "Dostosuj",
+    allowSelection: "Zezwól na wybrane",
+    acceptAll: "Zaakceptuj wszystkie",
   },
 } satisfies Record<CookieLocale, {
   heading: string;
@@ -271,6 +488,7 @@ function CookieConsent() {
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let live = true;
+    writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
     const browserChoice = readConsentCookie();
     const browserConsentId = ensureConsentId();
     setConsentId(browserConsentId);
@@ -334,8 +552,8 @@ function CookieConsent() {
     checked: boolean;
     cookies: CookieDefinition[];
   }> = [
-    { key: "necessary", count: 5, disabled: true, checked: true, cookies: text.cookies.necessary },
-    { key: "preferences", count: 1, checked: preferences, cookies: text.cookies.preferences },
+    { key: "necessary", count: text.cookies.necessary.length, disabled: true, checked: true, cookies: text.cookies.necessary },
+    { key: "preferences", count: text.cookies.preferences.length, checked: preferences, cookies: text.cookies.preferences },
     { key: "statistics", count: 2, checked: statistics, cookies: text.cookies.statistics },
   ];
   const setCategory = (key: CookieCategoryKey, checked: boolean) => {
@@ -376,7 +594,7 @@ function CookieConsent() {
             <h2>{text.heading}</h2>
             <p>
               {text.consent}{" "}
-              <Link to={`/${locale}/pages/privacy-policy`} target="_blank">
+              <Link to={`/${locale}/privacy-policy`} target="_blank">
                 {text.privacyPolicy}
               </Link>
             </p>
@@ -450,7 +668,7 @@ function CookieConsent() {
             ))}
             <p>
               {text.learnMore}{" "}
-              <Link to={`/${locale}/pages/privacy-policy`} target="_blank">
+              <Link to={`/${locale}/privacy-policy`} target="_blank">
                 {text.privacyPolicy}
               </Link>
             </p>
@@ -487,170 +705,7 @@ function CookieConsent() {
   );
 }
 
-function CallManager({ session }: { session: Session }) {
-  const [incoming, setIncoming] = useState<Row | null>(null);
-  const [active, setActive] = useState<Row | null>(null);
-  const [state, setState] = useState("");
-  const media = useRef<HTMLDivElement | null>(null);
-  const roomRef = useRef<Room | null>(null);
-
-  useEffect(() => {
-    if (!session || active) return;
-    let alive = true;
-    const poll = () => {
-      void api
-        .get<{ items: Row[] }>("/member/calls/incoming")
-        .then((result) => alive && setIncoming(result.items?.[0] || null))
-        .catch(() => undefined);
-    };
-    poll();
-    const timer = window.setInterval(poll, 3000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, [session, active]);
-
-  useEffect(() => {
-    if (!active) return;
-    const serverUrl = asText(active.serverUrl);
-    const token = asText(active.token);
-    if (serverUrl === "—" || token === "—") return;
-    let cancelled = false;
-    const room = new Room();
-    roomRef.current = room;
-    room.on(RoomEvent.TrackSubscribed, (track) => {
-      const element = track.attach();
-      element.autoplay = true;
-      if (element instanceof HTMLVideoElement) element.playsInline = true;
-      media.current?.append(element);
-    });
-    room.on(RoomEvent.TrackUnsubscribed, (track) =>
-      track.detach().forEach((element) => element.remove()),
-    );
-    room.on(RoomEvent.Disconnected, () => {
-      if (!cancelled) {
-        setState("Call ended.");
-        setActive(null);
-      }
-    });
-    void (async () => {
-      try {
-        setState("Connecting…");
-        await room.connect(serverUrl, token);
-        await room.localParticipant.setMicrophoneEnabled(true);
-        if (asText(active.callType).toUpperCase() === "VIDEO")
-          await room.localParticipant.setCameraEnabled(true);
-        if (!cancelled) setState("Connected");
-      } catch {
-        if (!cancelled) {
-          setState("Unable to connect the call.");
-          setActive(null);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      room.disconnect();
-      if (roomRef.current === room) roomRef.current = null;
-      media.current?.replaceChildren();
-    };
-  }, [active]);
-
-  useEffect(() => {
-    const start = (event: Event) => {
-      const call = (event as CustomEvent<Row>).detail;
-      if (call) setActive(call);
-    };
-    window.addEventListener("lbp-call-start", start);
-    return () => window.removeEventListener("lbp-call-start", start);
-  }, []);
-
-  const decline = async () => {
-    if (!incoming?.id) return;
-    const call = incoming;
-    setIncoming(null);
-    try {
-      await api.post(
-        `/member/calls/${encodeURIComponent(asText(call.id))}/decline`,
-      );
-    } catch {
-      setState("Could not decline the call.");
-    }
-  };
-  const accept = async () => {
-    if (!incoming?.id) return;
-    const call = incoming;
-    setIncoming(null);
-    try {
-      const result = await api.post<{ call: Row }>(
-        `/member/calls/${encodeURIComponent(asText(call.id))}/accept`,
-      );
-      setActive(result.call);
-    } catch {
-      setState("This call is no longer available.");
-    }
-  };
-  const end = async () => {
-    if (!active?.id) return;
-    const call = active;
-    setActive(null);
-    roomRef.current?.disconnect();
-    try {
-      await api.post(
-        `/member/calls/${encodeURIComponent(asText(call.id))}/end`,
-      );
-    } catch {
-      setState("The call was closed locally.");
-    }
-  };
-
-  return (
-    <>
-      {incoming && (
-        <div
-          className="call-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Incoming call"
-        >
-          <section>
-            <p className="eyebrow">
-              Incoming {asText(incoming.callType).toLowerCase()} call
-            </p>
-            <h2>{asText(incoming.peerName)}</h2>
-            <div className="actions">
-              <button className="secondary" onClick={() => void decline()}>
-                Decline
-              </button>
-              <button className="primary" onClick={() => void accept()}>
-                Accept
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
-      {active && (
-        <div
-          className="call-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Active call"
-        >
-          <section>
-            <p className="eyebrow">{asText(active.callType)} call</p>
-            <h2>{asText(active.peerName)}</h2>
-            <p className="notice">{state || "Calling…"}</p>
-            <div className="call-media" ref={media} />
-            <button className="secondary" onClick={() => void end()}>
-              End call
-            </button>
-          </section>
-        </div>
-      )}
-    </>
-  );
-}
+function CallManager({session}:{session:Session}) { return <MemberChatCalls session={session} locale={memberLocaleOf(localeOf())} />; }
 
 const SITE_TEXT = {
   en: {
@@ -660,6 +715,7 @@ const SITE_TEXT = {
     tagline: "Helping every family find their way.", platform: "Platform", company: "Company",
     contact: "Contact us", terms: "Terms of Use", privacy: "Privacy Policy",
     rights: "© 2026 LetsBeParents. All rights reserved.", cookies: "Cookie settings", language: "Language",
+    aiAdvisorFabLabel: "AI Family Advisor",
   },
   ru: {
     knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы", resources: "Ресурсы", professionals: "Специалисты", safety: "Безопасность", pricing: "Цены",
@@ -668,6 +724,7 @@ const SITE_TEXT = {
     tagline: "Помогаем каждой семье найти свой путь.", platform: "Платформа", company: "Компания",
     contact: "Связаться с нами", terms: "Условия использования", privacy: "Политика конфиденциальности",
     rights: "© 2026 LetsBeParents. Все права защищены.", cookies: "Настройки cookies", language: "Язык",
+    aiAdvisorFabLabel: "AI-советник по семье",
   },
   es: {
     knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados", resources: "Recursos", professionals: "Profesionales", safety: "Seguridad", pricing: "Precios",
@@ -676,22 +733,69 @@ const SITE_TEXT = {
     tagline: "Ayudamos a cada familia a encontrar su camino.", platform: "Plataforma", company: "Empresa",
     contact: "Contáctanos", terms: "Términos de uso", privacy: "Política de privacidad",
     rights: "© 2026 LetsBeParents. Todos los derechos reservados.", cookies: "Preferencias de cookies", language: "Idioma",
+    aiAdvisorFabLabel: "Asesor familiar con IA",
+  },
+  pt: {
+    knowledge: "Centro de Conhecimento", match: "Encontrar um match", clinics: "Clínicas", lawyers: "Advogados", resources: "Recursos", professionals: "Profissionais", safety: "Segurança", pricing: "Preços",
+    profile: "Perfil", signOut: "Sair", signIn: "Entrar", signUp: "Registar",
+    likes: "Gostos", messages: "Mensagens", notifications: "Notificações de membro",
+    tagline: "Ajudamos cada família a encontrar o seu caminho.", platform: "Plataforma", company: "Empresa",
+    contact: "Contacte-nos", terms: "Termos de Utilização", privacy: "Política de Privacidade",
+    rights: "© 2026 LetsBeParents. Todos os direitos reservados.", cookies: "Definições de cookies", language: "Idioma",
+    aiAdvisorFabLabel: "Consultor familiar com IA",
+  },
+  fr: {
+    knowledge: "Centre de connaissances", match: "Trouver un match", clinics: "Cliniques", lawyers: "Avocats", resources: "Ressources", professionals: "Professionnels", safety: "Sécurité", pricing: "Tarifs",
+    profile: "Profil", signOut: "Se déconnecter", signIn: "Se connecter", signUp: "S'inscrire",
+    likes: "J'aime", messages: "Messages", notifications: "Notifications des membres",
+    tagline: "Nous aidons chaque famille à trouver sa voie.", platform: "Plateforme", company: "Entreprise",
+    contact: "Nous contacter", terms: "Conditions d'utilisation", privacy: "Politique de confidentialité",
+    rights: "© 2026 LetsBeParents. Tous droits réservés.", cookies: "Paramètres des cookies", language: "Langue",
+    aiAdvisorFabLabel: "Conseiller familial IA",
+  },
+  de: {
+    knowledge: "Wissenszentrum", match: "Match finden", clinics: "Kliniken", lawyers: "Anwälte", resources: "Ressourcen", professionals: "Fachleute", safety: "Sicherheit", pricing: "Preise",
+    profile: "Profil", signOut: "Abmelden", signIn: "Anmelden", signUp: "Registrieren",
+    likes: "Likes", messages: "Nachrichten", notifications: "Mitgliederbenachrichtigungen",
+    tagline: "Wir helfen jeder Familie, ihren Weg zu finden.", platform: "Plattform", company: "Unternehmen",
+    contact: "Kontaktieren Sie uns", terms: "Nutzungsbedingungen", privacy: "Datenschutzrichtlinie",
+    rights: "© 2026 LetsBeParents. Alle Rechte vorbehalten.", cookies: "Cookie-Einstellungen", language: "Sprache",
+    aiAdvisorFabLabel: "KI-Familienberater",
+  },
+  it: {
+    knowledge: "Centro di conoscenza", match: "Trova un match", clinics: "Cliniche", lawyers: "Avvocati", resources: "Risorse", professionals: "Professionisti", safety: "Sicurezza", pricing: "Prezzi",
+    profile: "Profilo", signOut: "Esci", signIn: "Accedi", signUp: "Registrati",
+    likes: "Mi piace", messages: "Messaggi", notifications: "Notifiche membro",
+    tagline: "Aiutiamo ogni famiglia a trovare la propria strada.", platform: "Piattaforma", company: "Azienda",
+    contact: "Contattaci", terms: "Termini di utilizzo", privacy: "Informativa sulla privacy",
+    rights: "© 2026 LetsBeParents. Tutti i diritti riservati.", cookies: "Impostazioni cookie", language: "Lingua",
+    aiAdvisorFabLabel: "Consulente familiare IA",
+  },
+  pl: {
+    knowledge: "Centrum wiedzy", match: "Znajdź dopasowanie", clinics: "Kliniki", lawyers: "Prawnicy", resources: "Zasoby", professionals: "Specjaliści", safety: "Bezpieczeństwo", pricing: "Cennik",
+    profile: "Profil", signOut: "Wyloguj się", signIn: "Zaloguj się", signUp: "Zarejestruj się",
+    likes: "Polubienia", messages: "Wiadomości", notifications: "Powiadomienia dla członków",
+    tagline: "Pomagamy każdej rodzinie znaleźć swoją drogę.", platform: "Platforma", company: "Firma",
+    contact: "Skontaktuj się z nami", terms: "Warunki korzystania", privacy: "Polityka prywatności",
+    rights: "© 2026 LetsBeParents. Wszelkie prawa zastrzeżone.", cookies: "Ustawienia plików cookie", language: "Język",
+    aiAdvisorFabLabel: "Doradca rodzinny AI",
   },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
 function MemberCounters({
   session,
-  onLogout,
+  menu = false,
+  onNavigate,
 }: {
   session: Session;
-  onLogout: () => Promise<void>;
+  menu?: boolean;
+  onNavigate?: () => void;
 }) {
   const locale = localeOf();
   const text = SITE_TEXT[locale];
   const [counts, setCounts] = useState<Row>({});
-  const [member, setMember] = useState<Row>({});
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [memberState, setMemberState] = useState<{ userId: unknown; value: Row } | null>(null);
+  const member = memberState?.userId === session?.user.id ? memberState?.value || {} : {};
   useEffect(() => {
     if (!session) {
       setCounts({});
@@ -705,29 +809,25 @@ function MemberCounters({
         .catch(() => alive && setCounts({}));
     };
     load();
+    window.addEventListener("lbp-member-changed", load);
     const timer = window.setInterval(load, 30_000);
     return () => {
       alive = false;
+      window.removeEventListener("lbp-member-changed", load);
       window.clearInterval(timer);
     };
   }, [session]);
   useEffect(() => {
     if (!session) return;
     let alive = true;
-    void api
+    const load = () => { void api
       .get<Row>("/member/me")
-      .then((result) => alive && setMember(result || {}))
-      .catch(() => alive && setMember({}));
-    return () => { alive = false; };
+      .then((result) => alive && setMemberState({ userId: session.user.id, value: result || {} }))
+      .catch(() => alive && setMemberState(null)); };
+    load();
+    window.addEventListener("lbp-member-changed", load);
+    return () => { alive = false; window.removeEventListener("lbp-member-changed", load); };
   }, [session]);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menuOpen]);
   if (!session) return null;
   const likes = Number(counts.likesYou ?? counts.likesyou ?? member.likesYou ?? member.likesyou ?? 0);
   const messages = Number(counts.unreadMessages ?? counts.unreadmessages ?? member.unreadMessages ?? member.unreadmessages ?? 0);
@@ -735,28 +835,23 @@ function MemberCounters({
   const data = profile.data && typeof profile.data === "object" ? profile.data as Row : {};
   const photos = Array.isArray(member.photos) ? member.photos : [];
   const firstPhoto = photos[0] && typeof photos[0] === "object" ? photos[0] as Row : {};
-  const avatar = String(profile.avatarUrl ?? data.avatarUrl ?? firstPhoto.publicUrl ?? firstPhoto.url ?? "");
-  const displayName = String(session.user.displayName ?? profile.displayName ?? data.displayName ?? "Member");
-  const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  const avatar = firstAvatarText(profile.avatarUrl, profile.avatar_url, data.avatarUrl, data.avatar_url, firstPhoto.publicUrl, firstPhoto.url);
+  const displayName = firstAvatarText(profile.displayName, profile.display_name, data.displayName, data.display_name, session.user.displayName, session.user.display_name, "Member");
   return (
-    <div className="member-header-actions" aria-label={text.notifications}>
-      <Link className="member-icon-link" to={`/${locale}/likes`} aria-label={text.likes}>
+    <div className={menu ? "member-menu-counters" : "member-header-actions"} aria-label={text.notifications}>
+      <Link className={menu ? "member-menu-action" : "member-icon-link"} role={menu ? "menuitem" : undefined} onClick={onNavigate} to={`/${locale}/likes`} aria-label={text.likes} aria-current={window.location.pathname === `/${locale}/likes` ? "page" : undefined}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /><path d="M7 10v12" /></svg>
+        {menu && <span>{text.likes}</span>}
         {likes > 0 ? <b>{likes > 99 ? "99+" : likes}</b> : null}
       </Link>
-      <Link className="member-icon-link" to={`/${locale}/messages`} aria-label={text.messages}>
+      <Link className={menu ? "member-menu-action" : "member-icon-link"} role={menu ? "menuitem" : undefined} onClick={onNavigate} to={`/${locale}/chat`} aria-label={text.messages} aria-current={new RegExp(`^/${locale}/(?:messages|chat)(?:/|$)`).test(window.location.pathname) ? "page" : undefined}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /></svg>
+        {menu && <span>{text.messages}</span>}
         {messages > 0 ? <b>{messages > 99 ? "99+" : messages}</b> : null}
       </Link>
-      <div className="member-avatar-menu" ref={menuRef}>
-        <button type="button" className="member-avatar-button" aria-label={text.profile} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}>
-          {avatar ? <img src={avatar} alt="" /> : <span>{initials}</span>}
-        </button>
-        {menuOpen ? <div className="member-avatar-dropdown">
-          <Link onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
-          <button type="button" onClick={() => void onLogout()}>{text.signOut}</button>
-        </div> : null}
-      </div>
+      {!menu && <Link className="member-avatar-button" aria-label={text.profile} to={`/${locale}/profile`}>
+          <UserAvatar src={avatar} name={displayName} fallbackClassName="member-avatar-initials" />
+      </Link>}
     </div>
   );
 }
@@ -765,35 +860,96 @@ function Shell({
   session,
   onLogout,
   children,
+  pendingSession = false,
 }: {
   session: Session;
   onLogout: () => Promise<void>;
   children: React.ReactNode;
+  pendingSession?: boolean;
 }) {
+  const { pathname } = useLocation();
   const locale = localeOf();
   const text = SITE_TEXT[locale];
+  const [footerPages, setFooterPages] = useState<FooterPageLink[]>(() => defaultFooterPages(text));
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const navigationRef = useRef<HTMLElement>(null);
+  const focusMenuOnOpen = useRef<"first" | "last" | null>(null);
   const [headerScrolled, setHeaderScrolled] = useState(() => window.scrollY > 24);
-  const isLanding = new RegExp(`^/${locale}/?$`).test(window.location.pathname);
-  const isAuth = new RegExp(`^/${locale}/auth/`).test(window.location.pathname);
-  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(window.location.pathname);
-  const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(window.location.pathname);
-  const isCatalog = new RegExp(`^/${locale}/catalog(?:/|$)`).test(window.location.pathname);
-  const isClinics = new RegExp(`^/${locale}/clinics(?:/|$)`).test(window.location.pathname);
-  const isLawyers = new RegExp(`^/${locale}/lawyers(?:/|$)`).test(window.location.pathname);
+  const isLanding = new RegExp(`^/${locale}/?$`).test(pathname);
+  const isAuth = new RegExp(`^/${locale}/auth/`).test(pathname);
+  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(pathname);
+  const isChat = new RegExp(`^/${locale}/(?:chat|messages)(?:/|$)`).test(pathname);
+  const isProfileTool = new RegExp(`^/${locale}/(?:profile/(?:edit|photos|verification)|photos|verification)/?$`).test(pathname);
+  const hasMemberMenu = Boolean(session);
+  const isAccount = new RegExp(`^/${locale}/(?:profile(?:/(?:notifications|blocked))?|likes)/?$`).test(pathname);
+  const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(pathname);
+  const isCatalog = !isProfileTool && new RegExp(`^/${locale}/(?:catalog(?:/|$)|profile/[^/]+/?$)`).test(pathname);
+  const isMemberDetail = !isProfileTool && new RegExp(`^/${locale}/(?:catalog|profile)/[^/]+/?$`).test(pathname);
+  const isClinics = new RegExp(`^/${locale}/clinics(?:/|$)`).test(pathname);
+  const isLawyers = new RegExp(`^/${locale}/lawyers(?:/|$)`).test(pathname);
   const isDirectory = isClinics || isLawyers;
-  const isDirectoryDetail = new RegExp(`^/${locale}/(?:clinics|lawyers)/[^/]+/?$`).test(window.location.pathname);
-  const isArticle = new RegExp(`^/${locale}/knowledge-hub/[^/]+/?$`).test(window.location.pathname);
-  const isContact = new RegExp(`^/${locale}/contact/?$`).test(window.location.pathname);
-  const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(window.location.pathname);
-  const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(window.location.pathname);
-  const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(window.location.pathname);
-  const isProfessionals = new RegExp(`^/${locale}/professionals(?:/|$)`).test(window.location.pathname);
-  const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(window.location.pathname);
-  const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(window.location.pathname);
+  const isDirectoryDetail = new RegExp(`^/${locale}/(?:clinics|lawyers)/[^/]+/?$`).test(pathname);
+  const isArticle = new RegExp(`^/${locale}/knowledge-hub/[^/]+/?$`).test(pathname);
+  const isContact = new RegExp(`^/${locale}/contact/?$`).test(pathname);
+  const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(pathname);
+  const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(pathname);
+  const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(pathname);
+  const isProfessionals = new RegExp(`^/${locale}/professionals(?:/|$)`).test(pathname);
+  const isAiAdvisor = new RegExp(`^/${locale}/ai-advisor(?:/|$)`).test(pathname);
+  const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(pathname);
+  const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(pathname);
+  const menuItems = () => Array.from(navigationRef.current?.querySelectorAll<HTMLElement>("a, button") || [])
+    .filter((item) => item.getClientRects().length > 0 && !item.hasAttribute("disabled"));
+  const focusMenuEdge = (edge: "first" | "last") => {
+    const items = menuItems();
+    (edge === "last" ? items[items.length - 1] : items[0])?.focus();
+  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    if (focusMenuOnOpen.current) {
+      focusMenuEdge(focusMenuOnOpen.current);
+      focusMenuOnOpen.current = null;
+    }
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest(".mobile-menu, .web-header nav")) setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      menuTriggerRef.current?.focus();
+    };
+    const closeOnDesktop = () => {
+      if (window.innerWidth >= 1280) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnDesktop);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnDesktop);
+    };
+  }, [hasMemberMenu, menuOpen]);
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<{ items: FooterPageLink[] }>(`/public/footer-pages/${encodeURIComponent(locale)}`)
+      .then((result) => {
+        if (!alive) return;
+        const items = Array.isArray(result.items) ? result.items : [];
+        setFooterPages(items.length ? items : defaultFooterPages(text));
+      })
+      .catch(() => {
+        if (alive) setFooterPages(defaultFooterPages(text));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [locale, text]);
   useEffect(() => {
     let scrolled = window.scrollY > 24;
     let frame = 0;
@@ -816,70 +972,94 @@ function Shell({
   }, []);
   const switchLocale = (nextLocale: string) => {
     const parts = window.location.pathname.split("/").filter(Boolean);
-    if (["en", "ru", "es"].includes(parts[0] || "")) parts[0] = nextLocale;
+    if ((SUPPORTED_SITE_LOCALES as string[]).includes(parts[0] || "")) parts[0] = nextLocale;
     else parts.unshift(nextLocale);
     window.location.assign(`/${parts.join("/")}${window.location.search}${window.location.hash}`);
   };
   const navigation = (
-    <nav className={menuOpen ? "open" : ""}>
-      <Link className={isKnowledge ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/knowledge-hub`}>
+    <nav ref={navigationRef} id="public-site-navigation" className={menuOpen ? "open" : ""} role={menuOpen ? "menu" : undefined} aria-label={locale === "ru" ? "Основная навигация" : locale === "es" ? "Navegación principal" : "Primary navigation"}
+      onKeyDown={(event) => {
+        if (!menuOpen || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const items = menuItems();
+        const current = items.findIndex((item) => item === document.activeElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+          : event.key === "ArrowDown" ? (current + 1) % items.length
+          : current <= 0 ? items.length - 1 : current - 1;
+        items[next]?.focus();
+      }}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isKnowledge ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/knowledge-hub`}>
         {text.knowledge}
       </Link>
-      <Link className={isClinics ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/clinics`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isCatalog ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/catalog`}>
+        {text.match}
+      </Link>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isClinics ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/clinics`}>
         {text.clinics}
       </Link>
-      <Link className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
         {text.lawyers}
       </Link>
-      <Link className={isResources ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isResources || isFindYourPath ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
         {text.resources}
       </Link>
-      <Link className={isProfessionals ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/professionals`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isProfessionals ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/professionals`}>
         {text.professionals}
       </Link>
-      <Link className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
         {text.safety}
       </Link>
-      <Link className={isPricing ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/pricing`}>
+      <Link role={menuOpen ? "menuitem" : undefined} className={isPricing ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/pricing`}>
         {text.pricing}
       </Link>
       <div className="mobile-nav-actions">
-        {session ? (
+        {pendingSession ? null : session && hasMemberMenu ? (menuOpen && <MemberCounters session={session} menu onNavigate={() => setMenuOpen(false)} />) : session ? (
           <>
-            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
-            <button className="plain-button" onClick={() => void onLogout()}>{text.signOut}</button>
+            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
+            <button role={menuOpen ? "menuitem" : undefined} className="plain-button" onClick={() => void onLogout()}>{text.signOut}</button>
           </>
         ) : (
           <>
-            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/auth/login`}>{text.signIn}</Link>
-            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/auth/register`}>{text.signUp}</Link>
+            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/auth/login`}>{text.signIn}</Link>
+            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/auth/register`}>{text.signUp}</Link>
           </>
         )}
       </div>
     </nav>
   );
   return (
-    <div className="web-app">
-      {!isStandaloneAuth && <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
+    <div className={`web-app${isChat ? " chat-app" : ""}${isProfileTool ? " profile-tools-app" : ""}`}>
+      <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
         <div className="web-header-inner">
           <Link className="logo" to={`/${locale}`} aria-label="LetsBeParents">
             <img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" />
           </Link>
           {navigation}
           <button
-            className={`mobile-menu${session ? " has-member-actions" : ""}`}
+            ref={menuTriggerRef}
+            className={`mobile-menu${session || pendingSession ? " has-member-actions" : ""}`}
             type="button"
             aria-label="Toggle menu"
             aria-expanded={menuOpen}
+            aria-controls="public-site-navigation"
+            aria-haspopup="menu"
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+              event.preventDefault();
+              const edge = event.key === "ArrowUp" ? "last" : "first";
+              if (menuOpen) focusMenuEdge(edge);
+              else {
+                focusMenuOnOpen.current = edge;
+                setMenuOpen(true);
+              }
+            }}
             onClick={() => setMenuOpen((value) => !value)}
           >
-            <span />
-            <span />
-            <span />
+            {hasMemberMenu ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" /></svg> : <><span /><span /><span /></>}
           </button>
-          {session ? (
+          {pendingSession ? <div className="header-actions pending-header-actions" aria-hidden="true" /> : session ? (
             <div className="header-actions member-header-actions-wrap">
-              <MemberCounters session={session} onLogout={onLogout} />
+              <MemberCounters session={session} />
             </div>
           ) : (
             <div className="header-actions">
@@ -892,8 +1072,8 @@ function Shell({
             </div>
           )}
         </div>
-      </header>}
-      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isProfessionals ? " professionals-main" : ""}${isStaticPage ? " static-main" : ""}`}>{children}</main>
+      </header>
+      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isMemberDetail ? " member-profile-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isProfessionals ? " professionals-main" : ""}${isStaticPage ? " static-main" : ""}${isAccount ? " account-main" : ""}`}>{children}</main>
       <footer className="web-footer">
         <div className="web-footer-inner">
           <div className="footer-brand">
@@ -926,8 +1106,10 @@ function Shell({
             <h3>{text.company}</h3>
             <nav>
               <Link to={`/${locale}/contact`}>{text.contact}</Link>
-              <Link to={`/${locale}/pages/terms-of-use`}>{text.terms}</Link>
-              <Link to={`/${locale}/pages/privacy-policy`}>{text.privacy}</Link>
+              <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
+              {footerPages.map((page) => (
+                <Link key={page.slug} to={footerPagePath(locale, page.slug)}>{page.title}</Link>
+              ))}
             </nav>
           </div>
           <div className="footer-bottom">
@@ -940,6 +1122,11 @@ function Shell({
                   <option value="en">English</option>
                   <option value="ru">Русский</option>
                   <option value="es">Español</option>
+                  <option value="pt">Português</option>
+                  <option value="fr">Français</option>
+                  <option value="de">Deutsch</option>
+                  <option value="it">Italiano</option>
+                  <option value="pl">Polski</option>
                 </select>
               </label>
               <a className="social-link" href="https://www.instagram.com/letsbeparents.app/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
@@ -958,6 +1145,18 @@ function Shell({
           </div>
         </div>
       </footer>
+      {session && !isAiAdvisor ? (
+        <Link
+          to={`/${locale}/ai-advisor`}
+          className="ai-advisor-fab"
+          aria-label={text.aiAdvisorFabLabel}
+          title={text.aiAdvisorFabLabel}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+          </svg>
+        </Link>
+      ) : null}
       <CallManager session={session} />
       <CookieConsent />
     </div>
@@ -1028,6 +1227,25 @@ const LANDING_TEXT = {
       { label: "FOR CLINICS & LAWYERS", title: "Grow your practice, reach more families", copy: "Join our professional directory and connect with thousands of potential clients. Get your own partner dashboard to manage appointments, communicate with patients through secure chat and video calls, run promotional campaigns, and build your reputation in the reproductive health community.", points: ["Personal partner dashboard with analytics", "Secure chat and video consultations with clients", "Promotional tools and targeted email campaigns"] },
     ],
     stats: [["15.1K", "Members worldwide"], ["7.3K", "Donors"], ["4.5K", "Partner clinics"], ["369", "Lawyers"]],
+    whatsNew: {
+      label: "NEW ON LETSBEPARENTS", title: "More ways to match, connect and stay safe",
+      intro: "We keep shipping - here's what's new since you last looked.",
+      tiers: { free: "Free", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Profile Boost", copy: "Get more visibility in the catalog for a limited time.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Invite & earn a Boost", copy: "Invite a friend - when they join and verify, you both get a free Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Share your meeting plan with someone you trust before meeting a match in person.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Video Verification badge", copy: "Add an extra layer of trust with a video-verified badge on your profile.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "AI-drafted message starters", copy: "Get 3 tailored opening messages for any match, powered by AI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Weekly AI Advisor insight", copy: "A fresh, personalized tip from your AI Family Advisor every week.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Co-Parenting Agreement sign-off", copy: "Turn your shared Family Plan into a mutual record you both sign.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Community groups & discussions", copy: "Join topic groups and discussions with others on the same path.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "AI-powered quiz reflection", copy: "Get a personalized, written reflection on your Compatibility Quiz answers.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "Ask AI", copy: "Free answers to your questions about donor conception, surrogacy and family-law basics - no account needed.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "AI Agreement Draft", copy: "Get a free first-draft co-parenting or donor agreement to discuss with a lawyer.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "AI-assisted Family Plan", copy: "Get an AI-suggested draft for any Family Plan section, ready to review and edit together.", href: "/pricing" },
+      ],
+    },
     ctaTitle: "Ready to start your family?", ctaCopy: "Join thousands of future parents. Create your free account today.",
     ctaButton: "Create free account", appLabel: "Also available as a free mobile app",
   },
@@ -1064,6 +1282,25 @@ const LANDING_TEXT = {
       { label: "ДЛЯ КЛИНИК И ЮРИСТОВ", title: "Развивайте практику, охватите больше семей", copy: "Присоединяйтесь к нашему профессиональному каталогу и связывайтесь с тысячами потенциальных клиентов. Получите собственный партнёрский кабинет для управления записями, общения с пациентами через безопасный чат и видеосвязь, проведения промо-кампаний и укрепления репутации в сфере репродуктивного здоровья.", points: ["Персональный партнёрский кабинет с аналитикой", "Безопасный чат и видеоконсультации с клиентами", "Инструменты продвижения и целевые email-рассылки"] },
     ],
     stats: [["15.1K", "Участников по всему миру"], ["7.3K", "Доноров"], ["4.5K", "Партнёрских клиник"], ["369", "Юристов"]],
+    whatsNew: {
+      label: "НОВОЕ НА LETSBEPARENTS", title: "Больше возможностей находить пару, общаться и оставаться в безопасности",
+      intro: "Мы продолжаем развивать платформу - вот что появилось нового.",
+      tiers: { free: "Бесплатно", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost профиля", copy: "Больше видимости в каталоге на ограниченное время.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Приглашай и получай Boost", copy: "Пригласите друга - когда он присоединится и пройдёт верификацию, вы оба получите бесплатный Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Поделитесь планом встречи с тем, кому доверяете, прежде чем увидеться с совпадением лично.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Значок Video Verification", copy: "Добавьте профилю дополнительный уровень доверия с помощью видео-верификации.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "AI-подсказки для первого сообщения", copy: "Получите 3 персональных варианта первого сообщения для любого совпадения - их предлагает AI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Еженедельный совет от AI Advisor", copy: "Новый персональный совет от вашего AI Family Advisor каждую неделю.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Подписание Co-Parenting Agreement", copy: "Превратите общий Family Plan в совместную договорённость, которую подписываете вы оба.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Группы и обсуждения Community", copy: "Присоединяйтесь к тематическим группам и обсуждениям с теми, кто на похожем пути.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "ИИ-отклик на результаты квиза", copy: "Получите персональный письменный отклик на ваши ответы в Compatibility Quiz.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "Спроси ИИ", copy: "Бесплатные ответы на вопросы о донорстве, суррогатном материнстве и основах семейного права - без регистрации.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "Черновик соглашения от ИИ", copy: "Получите бесплатный черновик соглашения о совместном воспитании или с донором, чтобы обсудить с юристом.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "ИИ-помощь в Family Plan", copy: "Получите предложенный ИИ черновик для любого раздела Family Plan, готовый для совместного обсуждения и редактирования.", href: "/pricing" },
+      ],
+    },
     ctaTitle: "Готовы создать семью?", ctaCopy: "Присоединяйтесь к тысячам будущих родителей. Создайте бесплатный аккаунт сегодня.",
     ctaButton: "Создать бесплатный аккаунт", appLabel: "Также доступно как бесплатное мобильное приложение",
   },
@@ -1100,8 +1337,302 @@ const LANDING_TEXT = {
       { label: "PARA CLÍNICAS Y ABOGADOS", title: "Haz crecer tu práctica, llega a más familias", copy: "Únete a nuestro directorio profesional y conecta con miles de potenciales clientes. Accede a tu panel de partner para gestionar citas, comunicarte con pacientes por chat seguro y videollamadas, lanzar campañas y construir tu reputación en la comunidad de salud reproductiva.", points: ["Panel de partner personal con analíticas", "Chat seguro y videoconsultas con clientes", "Herramientas promocionales y campañas de email segmentadas"] },
     ],
     stats: [["15.1K", "Miembros en el mundo"], ["7.3K", "Donantes"], ["4.5K", "Clínicas partner"], ["369", "Abogados"]],
+    whatsNew: {
+      label: "NUEVO EN LETSBEPARENTS", title: "Más formas de encontrar match, conectar y mantenerte seguro",
+      intro: "Seguimos mejorando la plataforma - esto es lo nuevo.",
+      tiers: { free: "Gratis", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost de perfil", copy: "Más visibilidad en el catálogo durante un tiempo limitado.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Invita y gana un Boost", copy: "Invita a alguien - cuando se una y se verifique, ambos recibiréis un Boost gratis.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Comparte tu plan de encuentro con alguien de confianza antes de ver a un match en persona.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Insignia Video Verification", copy: "Añade una capa extra de confianza con una insignia de verificación por vídeo.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Mensajes iniciales sugeridos por IA", copy: "Recibe 3 mensajes de apertura personalizados para cualquier match, generados por IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Consejo semanal del AI Advisor", copy: "Un consejo nuevo y personalizado de tu AI Family Advisor cada semana.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Firma del Co-Parenting Agreement", copy: "Convierte vuestro Family Plan compartido en un acuerdo mutuo que firmáis los dos.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Grupos y debates de Community", copy: "Únete a grupos temáticos y debates con quienes están en un camino parecido.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "Reflexión del quiz con IA", copy: "Obtén una reflexión personalizada y escrita sobre tus respuestas del Compatibility Quiz.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "Pregunta a la IA", copy: "Respuestas gratuitas a tus preguntas sobre donación, gestación subrogada y nociones básicas de derecho de familia - sin necesidad de cuenta.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "Borrador de acuerdo con IA", copy: "Obtén un primer borrador gratuito de un acuerdo de co-crianza o con donante para hablarlo con un abogado.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "Family Plan con ayuda de IA", copy: "Obtén un borrador sugerido por IA para cualquier sección del Family Plan, listo para revisar y editar juntos.", href: "/pricing" },
+      ],
+    },
     ctaTitle: "¿Listo para formar tu familia?", ctaCopy: "Únete a miles de futuros padres y madres. Crea tu cuenta gratis hoy.",
     ctaButton: "Crear cuenta gratis", appLabel: "También disponible como app móvil gratuita",
+  },
+  pt: {
+    pill: "Plataforma de formação de família",
+    title: "Seu caminho para a parentalidade começa aqui",
+    intro: "Encontre um doador, co-pai/co-mãe ou parceiro para formar uma família - depois dê os próximos passos com clínicas de confiança, especialistas jurídicos e orientação prática.",
+    start: "Encontre seu caminho", how: "COMO FUNCIONA", stepsTitle: "Cinco passos para sua família",
+    trustLine: "Cada perfil tem a identidade verificada - veja o que verificamos.",
+    steps: [
+      ["01", "Crie seu perfil", "Conte-nos sobre você, suas preferências e que tipo de família você sonha em construir.", "profile"],
+      ["02", "Encontre seu match", "Veja perfis de doadores, co-pais e parceiros para formar uma família. Filtre por valores e conecte-se.", "match"],
+      ["03", "Entenda sua compatibilidade", "Veja sua pontuação de compatibilidade e o que vale a pena conversar antes de decidir.", "compatibility"],
+      ["04", "Planeje sua família juntos", "Crie um Family Plan compartilhado - criação dos filhos, finanças, etapas legais - tudo em um só lugar.", "plan"],
+      ["05", "Conte com apoio especializado", "Conecte-se com clínicas de fertilidade e especialistas em direito reprodutivo verificados sempre que precisar.", "support"],
+    ],
+    pathSelector: {
+      label: "ENCONTRE SEU CAMINHO", title: "O que te trouxe até aqui?",
+      intro: "Cada família começa de um jeito diferente. Escolha o caminho que mais combina com você - você sempre pode explorar outras opções depois.",
+      options: [
+        ["coparent", "Estou procurando um co-pai ou co-mãe"],
+        ["donor", "Estou procurando um doador"],
+        ["partner", "Estou procurando um parceiro para formar uma família"],
+        ["couple-donor", "Somos um casal procurando um doador"],
+        ["exploring", "Estou explorando minhas opções"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Encontre seu doador, co-pai ou parceiro", copy: "Nosso sistema de compatibilização cuidadoso ajuda você a se conectar com a pessoa certa. Filtre por localização, valores e preferências. Curta perfis, faça matches e depois converse por chat e videochamada - tudo em um espaço seguro e privado.", points: ["Filtros avançados por localização, tipo e preferências", "Mensagens integradas e videochamadas em HD", "Privacidade em primeiro lugar: controle quem vê seu perfil"] },
+      { label: "CLÍNICAS", title: "Clínicas de fertilidade de padrão mundial, a um clique de distância", copy: "Veja clínicas verificadas em mais de 20 países. Leia perfis detalhados, compare serviços e inicie uma videoconsulta - tudo sem sair de casa. Cada clínica é avaliada quanto à qualidade e à inclusão.", points: ["Videoconsultas com os melhores especialistas", "Clínicas verificadas quanto à inclusão de casais LGBTQ+ e pais solo", "Preços transparentes e avaliações reais de pacientes"] },
+      { label: "ADVOGADOS", title: "Orientação jurídica em quem você pode confiar", copy: "Acordos com doadores, direitos parentais - o direito reprodutivo é complexo. Nosso diretório com mais de 350 advogados verificados em mais de 20 países garante o suporte jurídico especializado que se adapta à sua estrutura familiar.", points: ["Especialistas em direito de doadores e direito de família", "Filtre por país, idioma e área de atuação", "Salve favoritos e compare profissionais jurídicos"] },
+      { label: "PLANEJAMENTO FAMILIAR", title: "Planeje sua família, juntos", copy: "Depois de dar match, continuem construindo juntos. Veja seu Relatório de Compatibilidade, conversem sobre o que importa e criem um Family Plan compartilhado cobrindo criação dos filhos, finanças e etapas legais - tudo em um só lugar.", points: ["Relatório de Compatibilidade com pontos reais para conversar, não apenas uma nota de aprovado/reprovado", "Family Plan compartilhado para criação dos filhos, finanças e etapas legais", "Um só lugar para continuar planejando depois do match, não apenas um chat"] },
+      { label: "TORNE-SE DOADOR", title: "Dê o presente da parentalidade", copy: "Você tem o poder de mudar a vida de alguém para sempre. Se você está pensando em doar óvulos ou esperma - nossa plataforma conecta você com pessoas que sonham em formar uma família. Crie seu perfil, defina suas condições e ajude a tornar a parentalidade possível.", points: ["Compatibilização segura e verificada com pais pretendidos", "Controle total sobre seu perfil, condições e privacidade", "Chat e videochamadas integrados para se conhecerem"] },
+      { label: "PARA CLÍNICAS E ADVOGADOS", title: "Faça sua prática crescer, alcance mais famílias", copy: "Junte-se ao nosso diretório profissional e conecte-se com milhares de clientes em potencial. Tenha seu próprio painel de parceiro para gerenciar consultas, se comunicar com pacientes por chat seguro e videochamadas, realizar campanhas promocionais e construir sua reputação na comunidade de saúde reprodutiva.", points: ["Painel de parceiro pessoal com análises", "Chat seguro e videoconsultas com clientes", "Ferramentas promocionais e campanhas de e-mail segmentadas"] },
+    ],
+    stats: [["15.1K", "Membros no mundo todo"], ["7.3K", "Doadores"], ["4.5K", "Clínicas parceiras"], ["369", "Advogados"]],
+    whatsNew: {
+      label: "NOVIDADES NO LETSBEPARENTS", title: "Mais formas de encontrar matches, se conectar e ficar seguro",
+      intro: "Continuamos evoluindo a plataforma - veja o que há de novo desde sua última visita.",
+      tiers: { free: "Grátis", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost de perfil", copy: "Ganhe mais visibilidade no catálogo por tempo limitado.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Indique e ganhe um Boost", copy: "Convide um amigo - quando ele entrar e verificar a conta, vocês dois ganham um Boost gratuito.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Compartilhe seu plano de encontro com alguém de confiança antes de conhecer um match pessoalmente.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Selo de Verificação em Vídeo", copy: "Adicione uma camada extra de confiança com um selo de verificação em vídeo no seu perfil.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Mensagens iniciais geradas por IA", copy: "Receba 3 mensagens de abertura personalizadas para qualquer match, geradas por IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Dica semanal do AI Advisor", copy: "Uma dica nova e personalizada do seu AI Family Advisor toda semana.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Assinatura do Co-Parenting Agreement", copy: "Transforme seu Family Plan compartilhado em um registro mútuo que vocês dois assinam.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Grupos e discussões da Community", copy: "Participe de grupos temáticos e discussões com outras pessoas no mesmo caminho.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "Reflexão do quiz com IA", copy: "Receba uma reflexão personalizada e escrita sobre suas respostas do Compatibility Quiz.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "Pergunte à IA", copy: "Respostas gratuitas para suas perguntas sobre doação, barriga solidária e noções básicas de direito de família - sem necessidade de conta.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "Rascunho de acordo com IA", copy: "Receba um primeiro rascunho gratuito de um acordo de coparentalidade ou com doador para discutir com um advogado.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "Family Plan com ajuda de IA", copy: "Receba um rascunho sugerido por IA para qualquer seção do Family Plan, pronto para revisar e editar juntos.", href: "/pricing" },
+      ],
+    },
+    ctaTitle: "Pronto para começar sua família?", ctaCopy: "Junte-se a milhares de futuros pais. Crie sua conta gratuita hoje.",
+    ctaButton: "Criar conta gratuita", appLabel: "Também disponível como aplicativo móvel gratuito",
+  },
+  fr: {
+    pill: "Plateforme de fondation familiale",
+    title: "Votre chemin vers la parentalité commence ici",
+    intro: "Trouvez un donneur, un co-parent ou un partenaire de fondation familiale - puis passez à l'étape suivante avec des cliniques de confiance, des experts juridiques et des conseils pratiques.",
+    start: "Trouvez votre voie", how: "COMMENT ÇA MARCHE", stepsTitle: "Cinq étapes vers votre famille",
+    trustLine: "Chaque profil fait l'objet d'une vérification d'identité - découvrez ce que nous vérifions.",
+    steps: [
+      ["01", "Créez votre profil", "Parlez-nous de vous, de vos préférences et du type de famille que vous rêvez de fonder.", "profile"],
+      ["02", "Trouvez votre match", "Parcourez les profils de donneurs, co-parents et partenaires de fondation familiale. Filtrez selon vos valeurs et entrez en contact.", "match"],
+      ["03", "Comprenez votre compatibilité", "Découvrez votre score de compatibilité et les sujets à aborder avant de vous décider.", "compatibility"],
+      ["04", "Planifiez votre famille ensemble", "Construisez un Family Plan partagé - éducation, finances, démarches juridiques - en un seul endroit.", "plan"],
+      ["05", "Bénéficiez d'un accompagnement expert", "Contactez des cliniques de fertilité et des spécialistes du droit de la reproduction vérifiés, dès que vous en avez besoin.", "support"],
+    ],
+    pathSelector: {
+      label: "TROUVEZ VOTRE VOIE", title: "Qu'est-ce qui vous amène ici ?",
+      intro: "Chaque famille commence différemment. Choisissez le chemin qui vous correspond le mieux - vous pourrez toujours explorer d'autres options plus tard.",
+      options: [
+        ["coparent", "Je cherche un co-parent"],
+        ["donor", "Je cherche un donneur"],
+        ["partner", "Je cherche un partenaire de fondation familiale"],
+        ["couple-donor", "Nous sommes un couple à la recherche d'un donneur"],
+        ["exploring", "J'explore mes options"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Trouvez votre donneur, co-parent ou partenaire", copy: "Notre système de mise en relation attentif vous aide à trouver la bonne personne. Filtrez par lieu, valeurs et préférences. Aimez des profils, obtenez un match, puis discutez par chat et appel vidéo - le tout dans un espace sûr et privé.", points: ["Filtres avancés par lieu, type et préférences", "Messagerie intégrée et appels vidéo HD", "La confidentialité avant tout : contrôlez qui voit votre profil"] },
+      { label: "CLINIQUES", title: "Des cliniques de fertilité de renommée mondiale, à portée de clic", copy: "Parcourez des cliniques vérifiées dans plus de 20 pays. Consultez des profils détaillés, comparez les services et démarrez une consultation vidéo - le tout depuis votre salon. Chaque clinique est contrôlée pour sa qualité et son inclusivité.", points: ["Consultations vidéo avec des spécialistes de premier plan", "Cliniques vérifiées pour leur inclusivité envers les personnes LGBTQ+ et les parents solos", "Tarifs transparents et avis de patients authentiques"] },
+      { label: "AVOCATS", title: "Un accompagnement juridique en qui vous pouvez avoir confiance", copy: "Accords avec les donneurs, droits parentaux - le droit de la reproduction est complexe. Notre annuaire de plus de 350 avocats vérifiés dans plus de 20 pays vous garantit un accompagnement juridique expert adapté à votre structure familiale.", points: ["Spécialistes du droit des donneurs et du droit de la famille", "Filtrez par pays, langue et domaine de pratique", "Enregistrez vos favoris et comparez les professionnels du droit"] },
+      { label: "PLANIFICATION FAMILIALE", title: "Planifiez votre famille, ensemble", copy: "Une fois le match établi, continuez à construire ensemble. Consultez votre Rapport de compatibilité, discutez de ce qui compte vraiment et créez un Family Plan partagé couvrant l'éducation, les finances et les démarches juridiques - le tout en un seul endroit.", points: ["Un Rapport de compatibilité avec de vrais sujets de discussion, pas seulement un score réussite/échec", "Un Family Plan partagé pour l'éducation, les finances et les démarches juridiques", "Un seul endroit pour continuer à planifier après le match, pas seulement un chat"] },
+      { label: "DEVENIR DONNEUR", title: "Offrez le cadeau de la parentalité", copy: "Vous avez le pouvoir de changer la vie de quelqu'un pour toujours. Que vous envisagiez un don d'ovocytes ou de sperme - notre plateforme vous met en relation avec des personnes qui rêvent de fonder une famille. Créez votre profil, fixez vos conditions et aidez à rendre la parentalité possible.", points: ["Mise en relation sûre et vérifiée avec des parents d'intention", "Contrôle total sur votre profil, vos conditions et votre confidentialité", "Chat et appels vidéo intégrés pour apprendre à vous connaître"] },
+      { label: "POUR LES CLINIQUES ET LES AVOCATS", title: "Développez votre activité, touchez plus de familles", copy: "Rejoignez notre annuaire professionnel et entrez en contact avec des milliers de clients potentiels. Bénéficiez de votre propre tableau de bord partenaire pour gérer les rendez-vous, communiquer avec les patients par chat sécurisé et appels vidéo, lancer des campagnes promotionnelles et bâtir votre réputation dans la communauté de la santé reproductive.", points: ["Tableau de bord partenaire personnel avec statistiques", "Chat sécurisé et consultations vidéo avec les clients", "Outils promotionnels et campagnes email ciblées"] },
+    ],
+    stats: [["15.1K", "Membres dans le monde"], ["7.3K", "Donneurs"], ["4.5K", "Cliniques partenaires"], ["369", "Avocats"]],
+    whatsNew: {
+      label: "NOUVEAU SUR LETSBEPARENTS", title: "Encore plus de façons de matcher, échanger et rester en sécurité",
+      intro: "Nous continuons à faire évoluer la plateforme - voici les nouveautés depuis votre dernière visite.",
+      tiers: { free: "Gratuit", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost de profil", copy: "Gagnez en visibilité dans le catalogue pendant une durée limitée.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Parrainez et gagnez un Boost", copy: "Invitez un ami - quand il rejoint la plateforme et se vérifie, vous obtenez tous les deux un Boost gratuit.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Partagez votre plan de rencontre avec une personne de confiance avant de rencontrer un match en personne.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Badge de vérification vidéo", copy: "Ajoutez une couche de confiance supplémentaire grâce à un badge de vérification vidéo sur votre profil.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Messages d'accroche rédigés par l'IA", copy: "Recevez 3 messages d'ouverture personnalisés pour chaque match, générés par l'IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Conseil hebdomadaire de l'AI Advisor", copy: "Un conseil personnalisé de votre AI Family Advisor chaque semaine.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Signature du Co-Parenting Agreement", copy: "Transformez votre Family Plan partagé en un accord mutuel que vous signez tous les deux.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Groupes et discussions de la Community", copy: "Rejoignez des groupes thématiques et des discussions avec d'autres personnes sur un chemin similaire.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "Réflexion IA sur le quiz", copy: "Obtenez une réflexion personnalisée et rédigée sur vos réponses au Compatibility Quiz.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "Demandez à l'IA", copy: "Réponses gratuites à vos questions sur le don, la gestation pour autrui et les bases du droit de la famille - sans compte nécessaire.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "Brouillon d'accord par IA", copy: "Obtenez un premier brouillon gratuit d'un accord de coparentalité ou avec un donneur à discuter avec un avocat.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "Family Plan assisté par IA", copy: "Obtenez un brouillon suggéré par l'IA pour n'importe quelle section du Family Plan, prêt à être révisé et modifié ensemble.", href: "/pricing" },
+      ],
+    },
+    ctaTitle: "Prêt à fonder votre famille ?", ctaCopy: "Rejoignez des milliers de futurs parents. Créez votre compte gratuit dès aujourd'hui.",
+    ctaButton: "Créer un compte gratuit", appLabel: "Également disponible sous forme d'application mobile gratuite",
+  },
+  de: {
+    pill: "Plattform für Familiengründung",
+    title: "Ihr Weg zur Elternschaft beginnt hier",
+    intro: "Finden Sie eine Spenderin oder einen Spender, eine Co-Elternschaft oder einen Partner für die Familiengründung - und gehen Sie dann die nächsten Schritte mit vertrauenswürdigen Kliniken, Rechtsexperten und praktischer Beratung.",
+    start: "Finden Sie Ihren Weg", how: "SO FUNKTIONIERT ES", stepsTitle: "Fünf Schritte zu Ihrer Familie",
+    trustLine: "Jedes Profil ist identitätsgeprüft - erfahren Sie, was wir prüfen.",
+    steps: [
+      ["01", "Erstellen Sie Ihr Profil", "Erzählen Sie uns von sich, Ihren Vorlieben und von der Familie, die Sie sich erträumen.", "profile"],
+      ["02", "Finden Sie Ihr Match", "Durchsuchen Sie Profile von Spendern, Co-Eltern und Partnern für die Familiengründung. Filtern Sie nach Werten und nehmen Sie Kontakt auf.", "match"],
+      ["03", "Verstehen Sie Ihre Kompatibilität", "Sehen Sie Ihren Kompatibilitäts-Score und worüber Sie vor einer Entscheidung sprechen sollten.", "compatibility"],
+      ["04", "Planen Sie Ihre Familie gemeinsam", "Erstellen Sie einen gemeinsamen Family Plan - Erziehung, Finanzen, rechtliche Schritte - alles an einem Ort.", "plan"],
+      ["05", "Holen Sie sich fachkundige Unterstützung", "Nehmen Sie jederzeit Kontakt zu geprüften Kinderwunschkliniken und Spezialisten für Fortpflanzungsrecht auf.", "support"],
+    ],
+    pathSelector: {
+      label: "FINDEN SIE IHREN WEG", title: "Was führt Sie hierher?",
+      intro: "Jede Familie beginnt anders. Wählen Sie den Weg, der am besten zu Ihnen passt - Sie können später jederzeit weitere Optionen erkunden.",
+      options: [
+        ["coparent", "Ich suche eine Co-Elternschaft"],
+        ["donor", "Ich suche eine Spenderin oder einen Spender"],
+        ["partner", "Ich suche einen Partner für die Familiengründung"],
+        ["couple-donor", "Wir sind ein Paar und suchen eine Spenderin oder einen Spender"],
+        ["exploring", "Ich informiere mich über meine Möglichkeiten"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Finden Sie Ihre Spenderin, Ihren Spender, Ihre Co-Elternschaft oder Ihren Partner", copy: "Unser durchdachtes Matching-System hilft Ihnen, die richtige Person zu finden. Filtern Sie nach Standort, Werten und Vorlieben. Liken Sie Profile, erhalten Sie Matches und chatten oder telefonieren Sie dann per Video - alles in einem sicheren, privaten Raum.", points: ["Erweiterte Filter nach Standort, Typ und Vorlieben", "Integrierte Nachrichten und HD-Videoanrufe", "Datenschutz an erster Stelle: Bestimmen Sie, wer Ihr Profil sieht"] },
+      { label: "KLINIKEN", title: "Erstklassige Kinderwunschkliniken, nur einen Klick entfernt", copy: "Durchsuchen Sie geprüfte Kliniken in über 20 Ländern. Lesen Sie ausführliche Profile, vergleichen Sie Leistungen und starten Sie eine Videoberatung - ganz bequem von zu Hause aus. Jede Klinik wird auf Qualität und Inklusivität geprüft.", points: ["Videoberatungen mit Top-Spezialisten", "Kliniken geprüft auf Inklusivität für LGBTQ+ und Alleinerziehende", "Transparente Preise und echte Patientenbewertungen"] },
+      { label: "ANWÄLTE", title: "Rechtsberatung, der Sie vertrauen können", copy: "Spendervereinbarungen, Elternrechte - das Fortpflanzungsrecht ist komplex. Unser Verzeichnis mit über 350 geprüften Anwälten in über 20 Ländern sichert Ihnen fachkundige rechtliche Unterstützung, zugeschnitten auf Ihre Familienstruktur.", points: ["Spezialisten für Spender- und Familienrecht", "Filtern Sie nach Land, Sprache und Praxisgebiet", "Favoriten speichern und Rechtsexperten vergleichen"] },
+      { label: "FAMILIENPLANUNG", title: "Planen Sie Ihre Familie gemeinsam", copy: "Sobald Sie ein Match gefunden haben, bauen Sie gemeinsam weiter auf. Sehen Sie sich Ihren Kompatibilitätsbericht an, sprechen Sie über das Wesentliche und erstellen Sie einen gemeinsamen Family Plan für Erziehung, Finanzen und rechtliche Schritte - alles an einem Ort.", points: ["Kompatibilitätsbericht mit echten Gesprächspunkten statt einer Bestehen/Nicht-bestehen-Bewertung", "Gemeinsamer Family Plan für Erziehung, Finanzen und rechtliche Schritte", "Ein zentraler Ort zum Weiterplanen nach dem Match - nicht nur ein Chat"] },
+      { label: "SPENDER WERDEN", title: "Schenken Sie das Geschenk der Elternschaft", copy: "Sie haben die Möglichkeit, das Leben eines anderen Menschen für immer zu verändern. Ob Sie eine Eizell- oder Samenspende in Betracht ziehen - unsere Plattform verbindet Sie mit Menschen, die von einer eigenen Familie träumen. Erstellen Sie Ihr Profil, legen Sie Ihre Bedingungen fest und helfen Sie, Elternschaft möglich zu machen.", points: ["Sichere, geprüfte Vermittlung mit Wunscheltern", "Volle Kontrolle über Ihr Profil, Ihre Bedingungen und Ihre Privatsphäre", "Integrierter Chat und Videoanrufe zum Kennenlernen"] },
+      { label: "FÜR KLINIKEN & ANWÄLTE", title: "Erweitern Sie Ihre Praxis, erreichen Sie mehr Familien", copy: "Treten Sie unserem Fachverzeichnis bei und vernetzen Sie sich mit Tausenden potenziellen Klienten. Nutzen Sie Ihr eigenes Partner-Dashboard, um Termine zu verwalten, mit Patienten per sicherem Chat und Videoanruf zu kommunizieren, Werbekampagnen durchzuführen und Ihren Ruf in der Reproduktionsmedizin-Community aufzubauen.", points: ["Persönliches Partner-Dashboard mit Analysen", "Sicherer Chat und Videoberatungen mit Klienten", "Werbetools und gezielte E-Mail-Kampagnen"] },
+    ],
+    stats: [["15.1K", "Mitglieder weltweit"], ["7.3K", "Spender"], ["4.5K", "Partnerkliniken"], ["369", "Anwälte"]],
+    whatsNew: {
+      label: "NEU BEI LETSBEPARENTS", title: "Mehr Möglichkeiten zum Matchen, Vernetzen und Sicherbleiben",
+      intro: "Wir entwickeln die Plattform stetig weiter - das ist neu seit Ihrem letzten Besuch.",
+      tiers: { free: "Kostenlos", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Profil-Boost", copy: "Erhalten Sie für begrenzte Zeit mehr Sichtbarkeit im Katalog.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Einladen & einen Boost verdienen", copy: "Laden Sie einen Freund ein - sobald er beitritt und sich verifiziert, erhalten Sie beide einen kostenlosen Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Teilen Sie Ihren Treffplan mit jemandem, dem Sie vertrauen, bevor Sie ein Match persönlich treffen.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Video-Verifizierungs-Abzeichen", copy: "Verleihen Sie Ihrem Profil mit einem videoverifizierten Abzeichen zusätzliche Vertrauenswürdigkeit.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "KI-generierte Gesprächseinstiege", copy: "Erhalten Sie 3 passende Eröffnungsnachrichten für jedes Match, erstellt von KI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Wöchentlicher Tipp vom AI Advisor", copy: "Jede Woche ein frischer, persönlicher Tipp von Ihrem AI Family Advisor.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Unterzeichnung der Co-Parenting Agreement", copy: "Verwandeln Sie Ihren gemeinsamen Family Plan in eine verbindliche Vereinbarung, die Sie beide unterschreiben.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Community-Gruppen & Diskussionen", copy: "Treten Sie Themengruppen und Diskussionen mit anderen auf demselben Weg bei.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "KI-Reflexion zum Quiz", copy: "Erhalten Sie eine persönliche, schriftliche Reflexion zu Ihren Antworten im Compatibility Quiz.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "KI fragen", copy: "Kostenlose Antworten auf Ihre Fragen zu Samen-/Eizellspende, Leihmutterschaft und familienrechtlichen Grundlagen - ohne Konto.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "KI-Vereinbarungsentwurf", copy: "Erhalten Sie einen kostenlosen ersten Entwurf einer Co-Parenting- oder Spendervereinbarung zur Besprechung mit einem Anwalt.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "KI-unterstützter Family Plan", copy: "Erhalten Sie einen von der KI vorgeschlagenen Entwurf für jeden Abschnitt des Family Plans, bereit zum gemeinsamen Überprüfen und Bearbeiten.", href: "/pricing" },
+      ],
+    },
+    ctaTitle: "Bereit, Ihre Familie zu gründen?", ctaCopy: "Schließen Sie sich Tausenden zukünftiger Eltern an. Erstellen Sie noch heute Ihr kostenloses Konto.",
+    ctaButton: "Kostenloses Konto erstellen", appLabel: "Auch als kostenlose mobile App verfügbar",
+  },
+  it: {
+    pill: "Piattaforma per la formazione della famiglia",
+    title: "Il tuo percorso verso la genitorialità inizia qui",
+    intro: "Trova un donatore, un co-genitore o un partner per formare una famiglia - poi compi i prossimi passi con cliniche di fiducia, esperti legali e indicazioni pratiche.",
+    start: "Trova il tuo percorso", how: "COME FUNZIONA", stepsTitle: "Cinque passi verso la tua famiglia",
+    trustLine: "Ogni profilo ha l'identità verificata - scopri cosa controlliamo.",
+    steps: [
+      ["01", "Crea il tuo profilo", "Raccontaci di te, delle tue preferenze e del tipo di famiglia che sogni di costruire.", "profile"],
+      ["02", "Trova il tuo match", "Sfoglia i profili di donatori, co-genitori e partner per formare una famiglia. Filtra per valori e mettiti in contatto.", "match"],
+      ["03", "Scopri la tua compatibilità", "Guarda il tuo punteggio di compatibilità e ciò di cui vale la pena parlare prima di decidere.", "compatibility"],
+      ["04", "Pianifica la tua famiglia insieme", "Crea un Family Plan condiviso - crescita dei figli, finanze, passaggi legali - tutto in un unico posto.", "plan"],
+      ["05", "Ricevi supporto da esperti", "Mettiti in contatto con cliniche della fertilità e specialisti di diritto riproduttivo verificati ogni volta che ne hai bisogno.", "support"],
+    ],
+    pathSelector: {
+      label: "TROVA IL TUO PERCORSO", title: "Cosa ti porta qui?",
+      intro: "Ogni famiglia nasce in modo diverso. Scegli il percorso più adatto a te - potrai sempre esplorare altre opzioni più avanti.",
+      options: [
+        ["coparent", "Sto cercando un co-genitore"],
+        ["donor", "Sto cercando un donatore"],
+        ["partner", "Sto cercando un partner per formare una famiglia"],
+        ["couple-donor", "Siamo una coppia in cerca di un donatore"],
+        ["exploring", "Sto esplorando le mie opzioni"],
+      ],
+    },
+    features: [
+      { label: "MATCHMAKING", title: "Trova il tuo donatore, co-genitore o partner", copy: "Il nostro attento sistema di abbinamento ti aiuta a entrare in contatto con la persona giusta. Filtra per posizione, valori e preferenze. Metti mi piace ai profili, ottieni match, poi chatta e fai videochiamate - tutto in uno spazio sicuro e privato.", points: ["Filtri avanzati per posizione, tipo e preferenze", "Messaggistica integrata e videochiamate HD", "Privacy al primo posto: controlla chi vede il tuo profilo"] },
+      { label: "CLINICHE", title: "Cliniche della fertilità di livello mondiale, a un clic di distanza", copy: "Sfoglia cliniche verificate in oltre 20 paesi. Leggi profili dettagliati, confronta i servizi e avvia una videoconsulenza - tutto dal tuo salotto. Ogni clinica è verificata per qualità e inclusività.", points: ["Videoconsulenze con i migliori specialisti", "Cliniche verificate per l'inclusività verso persone LGBTQ+ e genitori single", "Prezzi trasparenti e recensioni reali dei pazienti"] },
+      { label: "AVVOCATI", title: "Assistenza legale di cui puoi fidarti", copy: "Accordi con i donatori, diritti genitoriali - il diritto riproduttivo è complesso. Il nostro elenco di oltre 350 avvocati verificati in oltre 20 paesi ti garantisce un supporto legale esperto su misura per la tua struttura familiare.", points: ["Specialisti in diritto dei donatori e diritto di famiglia", "Filtra per paese, lingua e area di pratica", "Salva i preferiti e confronta i professionisti legali"] },
+      { label: "PIANIFICAZIONE FAMILIARE", title: "Pianifica la tua famiglia, insieme", copy: "Una volta trovato il match, continuate a costruire insieme. Consulta il tuo Report di Compatibilità, parlate di ciò che conta davvero e create un Family Plan condiviso che copra crescita dei figli, finanze e passaggi legali - tutto in un unico posto.", points: ["Report di Compatibilità con veri spunti di conversazione, non un punteggio promosso/bocciato", "Family Plan condiviso per crescita dei figli, finanze e passaggi legali", "Un unico posto per continuare a pianificare dopo il match, non solo una chat"] },
+      { label: "DIVENTA DONATORE", title: "Fai il dono della genitorialità", copy: "Hai il potere di cambiare per sempre la vita di qualcuno. Che tu stia considerando la donazione di ovociti o di seme - la nostra piattaforma ti mette in contatto con persone che sognano di formare una famiglia. Crea il tuo profilo, stabilisci le tue condizioni e aiuta a rendere possibile la genitorialità.", points: ["Abbinamento sicuro e verificato con genitori intenzionali", "Pieno controllo sul tuo profilo, sulle tue condizioni e sulla tua privacy", "Chat e videochiamate integrate per conoscervi"] },
+      { label: "PER CLINICHE E AVVOCATI", title: "Fai crescere la tua attività, raggiungi più famiglie", copy: "Unisciti al nostro elenco professionale e mettiti in contatto con migliaia di potenziali clienti. Ottieni la tua dashboard partner personale per gestire gli appuntamenti, comunicare con i pazienti tramite chat sicura e videochiamate, lanciare campagne promozionali e costruire la tua reputazione nella comunità della salute riproduttiva.", points: ["Dashboard partner personale con analisi", "Chat sicura e videoconsulenze con i clienti", "Strumenti promozionali e campagne email mirate"] },
+    ],
+    stats: [["15.1K", "Membri nel mondo"], ["7.3K", "Donatori"], ["4.5K", "Cliniche partner"], ["369", "Avvocati"]],
+    whatsNew: {
+      label: "NOVITÀ SU LETSBEPARENTS", title: "Più modi per trovare match, connettersi e restare al sicuro",
+      intro: "Continuiamo a migliorare la piattaforma - ecco le novità dall'ultima volta che sei stato/a qui.",
+      tiers: { free: "Gratis", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost del profilo", copy: "Ottieni più visibilità nel catalogo per un periodo di tempo limitato.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Invita e guadagna un Boost", copy: "Invita un amico - quando si iscrive e verifica il profilo, ricevete entrambi un Boost gratuito.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Condividi il tuo piano d'incontro con qualcuno di fiducia prima di vedere un match di persona.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Badge di Verifica Video", copy: "Aggiungi un ulteriore livello di fiducia con un badge di verifica video sul tuo profilo.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Messaggi d'apertura generati dall'IA", copy: "Ricevi 3 messaggi d'apertura su misura per ogni match, generati dall'IA.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Consiglio settimanale dell'AI Advisor", copy: "Un consiglio nuovo e personalizzato dal tuo AI Family Advisor ogni settimana.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Firma del Co-Parenting Agreement", copy: "Trasforma il tuo Family Plan condiviso in un accordo reciproco che firmate entrambi.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Gruppi e discussioni della Community", copy: "Unisciti a gruppi tematici e discussioni con altre persone sul tuo stesso percorso.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "Riflessione IA sul quiz", copy: "Ricevi una riflessione personalizzata e scritta sulle tue risposte al Compatibility Quiz.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "Chiedi all'IA", copy: "Risposte gratuite alle tue domande su donazione, gestazione per altri e nozioni base di diritto di famiglia - senza bisogno di account.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "Bozza di accordo con IA", copy: "Ricevi una prima bozza gratuita di un accordo di co-genitorialità o con un donatore da discutere con un avvocato.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "Family Plan assistito dall'IA", copy: "Ricevi una bozza suggerita dall'IA per qualsiasi sezione del Family Plan, pronta da rivedere e modificare insieme.", href: "/pricing" },
+      ],
+    },
+    ctaTitle: "Pronto/a a formare la tua famiglia?", ctaCopy: "Unisciti a migliaia di futuri genitori. Crea oggi il tuo account gratuito.",
+    ctaButton: "Crea account gratuito", appLabel: "Disponibile anche come app mobile gratuita",
+  },
+  pl: {
+    pill: "Platforma budowania rodziny",
+    title: "Twoja droga do rodzicielstwa zaczyna się tutaj",
+    intro: "Znajdź dawcę, współrodzica lub partnera do budowania rodziny - a potem zrób kolejne kroki z zaufanymi klinikami, ekspertami prawnymi i praktycznymi wskazówkami.",
+    start: "Znajdź swoją drogę", how: "JAK TO DZIAŁA", stepsTitle: "Pięć kroków do twojej rodziny",
+    trustLine: "Każdy profil ma zweryfikowaną tożsamość - sprawdź, co weryfikujemy.",
+    steps: [
+      ["01", "Stwórz swój profil", "Opowiedz nam o sobie, swoich preferencjach i o tym, o jakiej rodzinie marzysz.", "profile"],
+      ["02", "Znajdź swoje dopasowanie", "Przeglądaj profile dawców, współrodziców i partnerów do budowania rodziny. Filtruj według wartości i nawiązuj kontakt.", "match"],
+      ["03", "Poznaj swoją kompatybilność", "Zobacz swój wynik kompatybilności i to, o czym warto porozmawiać, zanim podejmiesz decyzję.", "compatibility"],
+      ["04", "Zaplanujcie rodzinę razem", "Stwórzcie wspólny Family Plan - wychowanie, finanse, kroki prawne - wszystko w jednym miejscu.", "plan"],
+      ["05", "Skorzystaj ze wsparcia ekspertów", "Skontaktuj się ze zweryfikowanymi klinikami leczenia niepłodności i specjalistami prawa reprodukcyjnego, kiedy tylko będziesz tego potrzebować.", "support"],
+    ],
+    pathSelector: {
+      label: "ZNAJDŹ SWOJĄ DROGĘ", title: "Co cię tu sprowadza?",
+      intro: "Każda rodzina zaczyna się inaczej. Wybierz drogę, która pasuje do ciebie najbardziej - później zawsze możesz poznać inne opcje.",
+      options: [
+        ["coparent", "Szukam współrodzica"],
+        ["donor", "Szukam dawcy"],
+        ["partner", "Szukam partnera do budowania rodziny"],
+        ["couple-donor", "Jesteśmy parą szukającą dawcy"],
+        ["exploring", "Poznaję swoje możliwości"],
+      ],
+    },
+    features: [
+      { label: "DOPASOWANIE", title: "Znajdź swojego dawcę, współrodzica lub partnera", copy: "Nasz przemyślany system dopasowywania pomaga ci połączyć się z odpowiednią osobą. Filtruj według lokalizacji, wartości i preferencji. Polub profile, uzyskaj dopasowanie, a potem rozmawiaj na czacie i przez wideorozmowę - wszystko w bezpiecznej, prywatnej przestrzeni.", points: ["Zaawansowane filtry według lokalizacji, typu i preferencji", "Wbudowane wiadomości i wideorozmowy HD", "Prywatność przede wszystkim: sam decydujesz, kto widzi twój profil"] },
+      { label: "KLINIKI", title: "Światowej klasy kliniki leczenia niepłodności, o jedno kliknięcie", copy: "Przeglądaj zweryfikowane kliniki w ponad 20 krajach. Czytaj szczegółowe profile, porównuj usługi i rozpocznij konsultację wideo - wszystko z domu. Każda klinika jest weryfikowana pod kątem jakości i otwartości na różnorodność.", points: ["Konsultacje wideo z czołowymi specjalistami", "Kliniki zweryfikowane pod kątem otwartości na osoby LGBTQ+ i samotnych rodziców", "Przejrzyste ceny i prawdziwe opinie pacjentów"] },
+      { label: "PRAWNICY", title: "Pomoc prawna, której możesz zaufać", copy: "Umowy z dawcami, prawa rodzicielskie - prawo reprodukcyjne jest złożone. Nasz katalog ponad 350 zweryfikowanych prawników w ponad 20 krajach zapewnia ci fachowe wsparcie prawne dopasowane do struktury twojej rodziny.", points: ["Specjaliści od prawa dawców i prawa rodzinnego", "Filtruj według kraju, języka i obszaru praktyki", "Zapisuj ulubionych i porównuj prawników"] },
+      { label: "PLANOWANIE RODZINY", title: "Zaplanujcie rodzinę razem", copy: "Gdy już się dopasujecie, budujcie dalej razem. Zobacz swój Raport Kompatybilności, porozmawiajcie o tym, co ważne, i stwórzcie wspólny Family Plan obejmujący wychowanie, finanse i kroki prawne - wszystko w jednym miejscu.", points: ["Raport Kompatybilności z prawdziwymi tematami do rozmowy, a nie oceną zdał/nie zdał", "Wspólny Family Plan na wychowanie, finanse i kroki prawne", "Jedno miejsce do dalszego planowania po dopasowaniu, a nie tylko czat"] },
+      { label: "ZOSTAŃ DAWCĄ", title: "Podaruj dar rodzicielstwa", copy: "Masz moc, by na zawsze zmienić czyjeś życie. Niezależnie od tego, czy rozważasz oddanie komórek jajowych czy nasienia - nasza platforma łączy cię z osobami, które marzą o założeniu rodziny. Stwórz profil, ustal swoje warunki i pomóż uczynić rodzicielstwo możliwym.", points: ["Bezpieczne, zweryfikowane dopasowanie z przyszłymi rodzicami", "Pełna kontrola nad profilem, warunkami i prywatnością", "Wbudowany czat i wideorozmowy, by się poznać"] },
+      { label: "DLA KLINIK I PRAWNIKÓW", title: "Rozwijaj swoją praktykę, docieraj do większej liczby rodzin", copy: "Dołącz do naszego katalogu profesjonalistów i połącz się z tysiącami potencjalnych klientów. Otrzymaj własny panel partnera do zarządzania wizytami, komunikacji z pacjentami przez bezpieczny czat i wideorozmowy, prowadzenia kampanii promocyjnych i budowania reputacji w społeczności zdrowia reprodukcyjnego.", points: ["Osobisty panel partnera z analizami", "Bezpieczny czat i konsultacje wideo z klientami", "Narzędzia promocyjne i ukierunkowane kampanie e-mail"] },
+    ],
+    stats: [["15.1K", "Członków na całym świecie"], ["7.3K", "Dawców"], ["4.5K", "Klinik partnerskich"], ["369", "Prawników"]],
+    whatsNew: {
+      label: "NOWOŚCI NA LETSBEPARENTS", title: "Więcej sposobów na dopasowanie, kontakt i bezpieczeństwo",
+      intro: "Wciąż rozwijamy platformę - oto co nowego od twojej ostatniej wizyty.",
+      tiers: { free: "Za darmo", builder: "Family Builder+", pro: "Family Builder Pro" },
+      items: [
+        { icon: "boost", tier: "free", title: "Boost profilu", copy: "Zyskaj większą widoczność w katalogu przez ograniczony czas.", href: "/boost" },
+        { icon: "referral", tier: "free", title: "Zaproś i zdobądź Boost", copy: "Zaproś znajomego - gdy dołączy i zweryfikuje konto, oboje otrzymacie darmowy Boost.", href: "/referral" },
+        { icon: "safety", tier: "free", title: "Safety Check-In", copy: "Podziel się planem spotkania z kimś, komu ufasz, zanim spotkasz się z dopasowaną osobą osobiście.", href: "/safety-checkin" },
+        { icon: "video", tier: "free", title: "Odznaka weryfikacji wideo", copy: "Dodaj dodatkową warstwę zaufania dzięki odznace weryfikacji wideo na swoim profilu.", href: "/video-verification" },
+        { icon: "message", tier: "builder", title: "Wiadomości na początek rozmowy tworzone przez AI", copy: "Otrzymuj 3 dopasowane wiadomości powitalne dla każdego dopasowania, tworzone przez AI.", href: "/messages" },
+        { icon: "insight", tier: "builder", title: "Cotygodniowa wskazówka od AI Advisor", copy: "Świeża, spersonalizowana wskazówka od twojego AI Family Advisor co tydzień.", href: "/ai-advisor" },
+        { icon: "agreement", tier: "pro", title: "Podpisanie Co-Parenting Agreement", copy: "Zamień wspólny Family Plan we wzajemne porozumienie, które oboje podpisujecie.", href: "/pricing" },
+        { icon: "community", tier: "pro", title: "Grupy i dyskusje Community", copy: "Dołącz do grup tematycznych i dyskusji z innymi osobami na podobnej drodze.", href: "/community" },
+        { icon: "sparkle", tier: "free", title: "Refleksja z quizu tworzona przez AI", copy: "Otrzymaj spersonalizowaną, pisemną refleksję na temat odpowiedzi w Compatibility Quiz.", href: "/resources/co-parenting/compatibility-quiz" },
+        { icon: "message", tier: "free", title: "Zapytaj AI", copy: "Darmowe odpowiedzi na pytania o dawstwo, macierzyństwo zastępcze i podstawy prawa rodzinnego - bez konta.", href: "/tools/ask-ai" },
+        { icon: "agreement", tier: "free", title: "Szkic porozumienia od AI", copy: "Otrzymaj darmowy pierwszy szkic porozumienia o współrodzicielstwie lub z dawcą do omówienia z prawnikiem.", href: "/tools/agreement-draft" },
+        { icon: "sparkle", tier: "pro", title: "Family Plan wspierany przez AI", copy: "Otrzymaj sugerowany przez AI szkic dla dowolnej sekcji Family Plan, gotowy do wspólnego przejrzenia i edycji.", href: "/pricing" },
+      ],
+    },
+    ctaTitle: "Gotowy, by założyć rodzinę?", ctaCopy: "Dołącz do tysięcy przyszłych rodziców. Załóż darmowe konto już dziś.",
+    ctaButton: "Załóż darmowe konto", appLabel: "Dostępne również jako darmowa aplikacja mobilna",
   },
 } as const;
 
@@ -1142,11 +1673,22 @@ function Home() {
     return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>;
   };
   const pathImage = (key: string) => {
-    if (key === "donor") return "/web-static/images/landing/path-donor.jpg";
-    if (key === "partner") return "/web-static/images/landing/path-partner.jpg";
-    if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor.jpg";
-    if (key === "exploring") return "/web-static/images/landing/path-exploring.jpg";
-    return "/web-static/images/landing/path-coparent.jpg";
+    if (key === "donor") return "/web-static/images/landing/path-donor-0dd2f3af.jpg";
+    if (key === "partner") return "/web-static/images/landing/path-partner-1df6d179.jpg";
+    if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor-bb85903a.jpg";
+    if (key === "exploring") return "/web-static/images/landing/path-exploring-607ba1f7.jpg";
+    return "/web-static/images/landing/path-coparent-b940550d.jpg";
+  };
+  const whatsNewIcon = (key: string) => {
+    if (key === "boost") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>;
+    if (key === "referral") return <svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="4" x="3" y="8" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>;
+    if (key === "safety") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>;
+    if (key === "video") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></svg>;
+    if (key === "message") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
+    if (key === "insight") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.2 1 2.05V18h6v-1.25c0-.86.38-1.55 1-2.05A7 7 0 0 0 12 2Z"/></svg>;
+    if (key === "agreement") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m3 15 2 2 4-4"/></svg>;
+    if (key === "sparkle") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m5.6 5.6 2.8 2.8"/><path d="m15.6 15.6 2.8 2.8"/><path d="m18.4 5.6-2.8 2.8"/><path d="m8.4 15.6-2.8 2.8"/></svg>;
+    return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
   };
   const features = text.features.map((feature, index) => ({ ...feature, image: LANDING_FEATURE_IMAGES[index] }));
   return (
@@ -1172,6 +1714,24 @@ function Home() {
             {text.start}
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
           </a>
+        </div>
+      </section>
+
+      <section className="landing-whatsnew">
+        <div className="landing-section-intro">
+          <span>{text.whatsNew.label}</span>
+          <h2>{text.whatsNew.title}</h2>
+          <p className="landing-whatsnew-intro">{text.whatsNew.intro}</p>
+        </div>
+        <div className="landing-whatsnew-grid">
+          {text.whatsNew.items.map((item) => (
+            <Link key={item.title} className="landing-whatsnew-card" to={`/${locale}${item.href}`}>
+              <span className="landing-whatsnew-icon">{whatsNewIcon(item.icon)}</span>
+              <span className={`landing-whatsnew-tier landing-whatsnew-tier-${item.tier}`}>{text.whatsNew.tiers[item.tier as keyof typeof text.whatsNew.tiers]}</span>
+              <h3>{item.title}</h3>
+              <p>{item.copy}</p>
+            </Link>
+          ))}
         </div>
       </section>
 
@@ -1346,6 +1906,86 @@ const authPageCopy: Record<CookieLocale, {
     resetSent: "Si existe una cuenta activa con este correo, hemos enviado un enlace para restablecer la contraseña.",
     resetError: "No se pudo enviar la solicitud. Inténtalo de nuevo.",
   },
+  pt: {
+    loginTitle: "Bem-vindo de volta", loginLead: "Sentimos sua falta! Faça login na sua conta.",
+    email: "Email", password: "Senha", emailPlaceholder: "Digite seu email", passwordPlaceholder: "Digite sua senha",
+    showPassword: "Mostrar senha", hidePassword: "Ocultar senha", forgot: "Esqueceu a senha?", signIn: "Entrar",
+    signingIn: "Entrando…", signInError: "Falha ao entrar. Verifique seu email e senha.", loginDivider: "Ou continue com",
+    noAccount: "Não tem uma conta?", createAccountLink: "Criar conta", registerTitle: "Criar conta",
+    registerLead: "Junte-se à nossa comunidade e comece sua jornada", confirmPassword: "Confirmar senha",
+    confirmPlaceholder: "Confirme sua senha", acceptPrefix: "Eu aceito os", terms: "Termos de Uso", and: "e a",
+    privacy: "Política de Privacidade", createAccount: "Criar conta", creatingAccount: "Criando conta…",
+    registerDivider: "Ou continue com", alreadyAccount: "Já tem uma conta?", signInLink: "Entrar",
+    mismatch: "As senhas não coincidem.", createError: "Não foi possível criar a conta. Use um email exclusivo e uma senha com pelo menos 8 caracteres.",
+    forgotTitle: "Esqueceu a senha", forgotLead: "Digite seu email e enviaremos um link para redefinir sua senha.",
+    forgotPlaceholder: "Digite seu email", sendLink: "Enviar link", sending: "Enviando…", backToSignIn: "Voltar ao login",
+    resetSent: "Se existir uma conta ativa para este email, enviamos um link de redefinição de senha.",
+    resetError: "Não foi possível enviar a solicitação. Tente novamente.",
+  },
+  fr: {
+    loginTitle: "Bon retour", loginLead: "Vous nous avez manqué ! Connectez-vous à votre compte.",
+    email: "Email", password: "Mot de passe", emailPlaceholder: "Entrez votre email", passwordPlaceholder: "Entrez votre mot de passe",
+    showPassword: "Afficher le mot de passe", hidePassword: "Masquer le mot de passe", forgot: "Mot de passe oublié ?", signIn: "Se connecter",
+    signingIn: "Connexion…", signInError: "Échec de la connexion. Vérifiez votre email et votre mot de passe.", loginDivider: "Ou continuer avec",
+    noAccount: "Vous n'avez pas de compte ?", createAccountLink: "Créer un compte", registerTitle: "Créer un compte",
+    registerLead: "Rejoignez notre communauté et commencez votre parcours", confirmPassword: "Confirmer le mot de passe",
+    confirmPlaceholder: "Confirmez votre mot de passe", acceptPrefix: "J'accepte les", terms: "Conditions d'utilisation", and: "et la",
+    privacy: "Politique de confidentialité", createAccount: "Créer un compte", creatingAccount: "Création du compte…",
+    registerDivider: "Ou continuer avec", alreadyAccount: "Vous avez déjà un compte ?", signInLink: "Se connecter",
+    mismatch: "Les mots de passe ne correspondent pas.", createError: "Impossible de créer le compte. Utilisez un email unique et un mot de passe d'au moins 8 caractères.",
+    forgotTitle: "Mot de passe oublié", forgotLead: "Entrez votre email et nous vous enverrons un lien pour réinitialiser votre mot de passe.",
+    forgotPlaceholder: "Entrez votre email", sendLink: "Envoyer le lien", sending: "Envoi…", backToSignIn: "Retour à la connexion",
+    resetSent: "Si un compte actif existe pour cet email, nous avons envoyé un lien de réinitialisation du mot de passe.",
+    resetError: "Impossible d'envoyer la demande. Veuillez réessayer.",
+  },
+  de: {
+    loginTitle: "Willkommen zurück", loginLead: "Wir haben Sie vermisst! Bitte melden Sie sich bei Ihrem Konto an.",
+    email: "E-Mail", password: "Passwort", emailPlaceholder: "Geben Sie Ihre E-Mail ein", passwordPlaceholder: "Geben Sie Ihr Passwort ein",
+    showPassword: "Passwort anzeigen", hidePassword: "Passwort verbergen", forgot: "Passwort vergessen?", signIn: "Anmelden",
+    signingIn: "Anmeldung läuft…", signInError: "Anmeldung fehlgeschlagen. Überprüfen Sie Ihre E-Mail und Ihr Passwort.", loginDivider: "Oder fortfahren mit",
+    noAccount: "Noch kein Konto?", createAccountLink: "Konto erstellen", registerTitle: "Konto erstellen",
+    registerLead: "Treten Sie unserer Community bei und beginnen Sie Ihre Reise", confirmPassword: "Passwort bestätigen",
+    confirmPlaceholder: "Bestätigen Sie Ihr Passwort", acceptPrefix: "Ich akzeptiere die", terms: "Nutzungsbedingungen", and: "und die",
+    privacy: "Datenschutzrichtlinie", createAccount: "Konto erstellen", creatingAccount: "Konto wird erstellt…",
+    registerDivider: "Oder fortfahren mit", alreadyAccount: "Sie haben bereits ein Konto?", signInLink: "Anmelden",
+    mismatch: "Die Passwörter stimmen nicht überein.", createError: "Das Konto konnte nicht erstellt werden. Verwenden Sie eine eindeutige E-Mail-Adresse und ein Passwort mit mindestens 8 Zeichen.",
+    forgotTitle: "Passwort vergessen", forgotLead: "Geben Sie Ihre E-Mail ein und wir senden Ihnen einen Link zum Zurücksetzen Ihres Passworts.",
+    forgotPlaceholder: "Geben Sie Ihre E-Mail ein", sendLink: "Link senden", sending: "Senden…", backToSignIn: "Zurück zur Anmeldung",
+    resetSent: "Falls ein aktives Konto für diese E-Mail existiert, haben wir einen Link zum Zurücksetzen des Passworts gesendet.",
+    resetError: "Die Anfrage konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+  },
+  it: {
+    loginTitle: "Bentornato", loginLead: "Ci sei mancato! Accedi al tuo account.",
+    email: "Email", password: "Password", emailPlaceholder: "Inserisci la tua email", passwordPlaceholder: "Inserisci la tua password",
+    showPassword: "Mostra password", hidePassword: "Nascondi password", forgot: "Password dimenticata?", signIn: "Accedi",
+    signingIn: "Accesso in corso…", signInError: "Accesso non riuscito. Controlla email e password.", loginDivider: "Oppure continua con",
+    noAccount: "Non hai un account?", createAccountLink: "Crea account", registerTitle: "Crea account",
+    registerLead: "Unisciti alla nostra community e inizia il tuo percorso", confirmPassword: "Conferma password",
+    confirmPlaceholder: "Conferma la tua password", acceptPrefix: "Accetto i", terms: "Termini di utilizzo", and: "e la",
+    privacy: "Informativa sulla privacy", createAccount: "Crea account", creatingAccount: "Creazione account…",
+    registerDivider: "Oppure continua con", alreadyAccount: "Hai già un account?", signInLink: "Accedi",
+    mismatch: "Le password non coincidono.", createError: "Impossibile creare l'account. Usa un'email univoca e una password di almeno 8 caratteri.",
+    forgotTitle: "Password dimenticata", forgotLead: "Inserisci la tua email e ti invieremo un link per reimpostare la password.",
+    forgotPlaceholder: "Inserisci la tua email", sendLink: "Invia link", sending: "Invio…", backToSignIn: "Torna all'accesso",
+    resetSent: "Se esiste un account attivo per questa email, abbiamo inviato un link per reimpostare la password.",
+    resetError: "Non è stato possibile inviare la richiesta. Riprova.",
+  },
+  pl: {
+    loginTitle: "Witaj ponownie", loginLead: "Tęskniliśmy za Tobą! Zaloguj się do swojego konta.",
+    email: "Email", password: "Hasło", emailPlaceholder: "Wpisz swój email", passwordPlaceholder: "Wpisz swoje hasło",
+    showPassword: "Pokaż hasło", hidePassword: "Ukryj hasło", forgot: "Nie pamiętasz hasła?", signIn: "Zaloguj się",
+    signingIn: "Logowanie…", signInError: "Logowanie nie powiodło się. Sprawdź email i hasło.", loginDivider: "Lub kontynuuj z",
+    noAccount: "Nie masz konta?", createAccountLink: "Utwórz konto", registerTitle: "Utwórz konto",
+    registerLead: "Dołącz do naszej społeczności i rozpocznij swoją podróż", confirmPassword: "Potwierdź hasło",
+    confirmPlaceholder: "Potwierdź swoje hasło", acceptPrefix: "Akceptuję", terms: "Warunki korzystania", and: "oraz",
+    privacy: "Politykę prywatności", createAccount: "Utwórz konto", creatingAccount: "Tworzenie konta…",
+    registerDivider: "Lub kontynuuj z", alreadyAccount: "Masz już konto?", signInLink: "Zaloguj się",
+    mismatch: "Hasła nie są zgodne.", createError: "Nie udało się utworzyć konta. Użyj unikalnego adresu email i hasła zawierającego co najmniej 8 znaków.",
+    forgotTitle: "Nie pamiętasz hasła", forgotLead: "Wpisz swój email, a wyślemy Ci link do zresetowania hasła.",
+    forgotPlaceholder: "Wpisz swój email", sendLink: "Wyślij link", sending: "Wysyłanie…", backToSignIn: "Powrót do logowania",
+    resetSent: "Jeśli dla tego adresu email istnieje aktywne konto, wysłaliśmy link do zresetowania hasła.",
+    resetError: "Nie udało się wysłać żądania. Spróbuj ponownie.",
+  },
 };
 
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
@@ -1366,8 +2006,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         email,
         password,
       });
-      onLogin(await refreshSession({ user: response.user }));
-      navigate(`/${locale}/catalog`);
+      const nextSession = await refreshSession({ user: response.user });
+      onLogin(nextSession);
+      navigate(nextSession?.user.emailVerified === false ? `/${locale}/auth/verify-email` : userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
     } catch {
       setError(copy.signInError);
     } finally {
@@ -1379,8 +2020,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     setError("");
     try {
       const response = await signInWithSocial(provider, "login");
-      onLogin(await refreshSession(response));
-      navigate(`/${locale}/${response.isNewUser ? "profile" : "catalog"}`);
+      const nextSession = await refreshSession(response);
+      onLogin(nextSession);
+      navigate(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
     } catch (error) {
       setError(socialErrorMessage(error));
     } finally {
@@ -1444,6 +2086,16 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
   const locale = localeOf();
   const copy = authPageCopy[locale];
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Referral link support (Alena: "а почему нельзя прислать ссылку просто
+  // для регистрации") - Referral's "Copy link" button builds a
+  // /auth/register?invite=CODE link. Redeeming still requires an
+  // authenticated member (see /member/referral/redeem in main.py), so this
+  // can only happen right after signup, not at signup time itself - kept
+  // best-effort/silent (same pattern as AiAdvisor's clear()) so a redeem
+  // hiccup never blocks the new member from reaching their account; worst
+  // case they paste the code by hand on the Referral page afterwards.
+  const inviteCode = (searchParams.get("invite") || "").trim();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -1461,14 +2113,21 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
     setBusy(true);
     setError("");
     try {
-      const response = await api.post<{ user: Row }>("/auth/signup", {
+      const response = await api.post<{ user: Row; emailSent?: boolean }>("/auth/signup", {
         displayName: email.split("@")[0] || email,
         email,
         password,
         locale,
       });
       onLogin(await refreshSession({ user: response.user }));
-      navigate(`/${locale}/profile`);
+      if (inviteCode) {
+        try {
+          await api.post("/member/referral/redeem", { code: inviteCode });
+        } catch {
+          // Silent - worst case they enter the code by hand later.
+        }
+      }
+      navigate(`/${locale}/auth/verify-email${response.emailSent === false ? "?delivery=failed" : ""}`);
     } catch {
       setError(
         copy.createError,
@@ -1482,8 +2141,9 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
     setError("");
     try {
       const response = await signInWithSocial(provider, "register");
-      onLogin(await refreshSession(response));
-      navigate(`/${locale}/profile`);
+      const nextSession = await refreshSession(response);
+      onLogin(nextSession);
+      navigate(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/profile`);
     } catch (error) {
       setError(socialErrorMessage(error));
     } finally {
@@ -1548,7 +2208,7 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
           </label>
           <label className="auth-terms">
             <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
-            <span>{copy.acceptPrefix} <Link to={`/${locale}/pages/terms-of-use`}>{copy.terms}</Link> {copy.and} <Link to={`/${locale}/pages/privacy-policy`}>{copy.privacy}</Link></span>
+            <span>{copy.acceptPrefix} <Link to={`/${locale}/terms-of-use`}>{copy.terms}</Link> {copy.and} <Link to={`/${locale}/privacy-policy`}>{copy.privacy}</Link></span>
           </label>
           {error && <p className="error">{error}</p>}
           <button className="auth-submit" disabled={busy}>{busy ? copy.creatingAccount : copy.createAccount}</button>
@@ -1630,10 +2290,14 @@ const standaloneAuthCopy = {
     resetDone: "Password updated. You can now sign in.",
     wait: "Please wait...",
     verifyTitle: "Confirm your email",
-    verifyLead: "Open the link in your email, or request a new confirmation message.",
+    verifyLead: "Enter the 6-digit code from your email. The confirmation link in the same message also works.",
     resend: "Resend email",
     verifySent: "We sent a confirmation link to your email.",
     verifyDone: "Email confirmed. You can continue to LetsBeParents.",
+    verifyCode: "6-digit code",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verify email",
+    invalidCode: "The code is invalid or has expired.",
     alreadyVerified: "Your email is already confirmed.",
     recentlySent: "A confirmation email was sent recently. Check your inbox.",
     deliveryFailed: "The email could not be delivered. Please try again later.",
@@ -1652,10 +2316,14 @@ const standaloneAuthCopy = {
     resetDone: "Пароль изменён. Теперь можно войти.",
     wait: "Подождите...",
     verifyTitle: "Подтвердите email",
-    verifyLead: "Откройте ссылку из письма или запросите новое письмо для подтверждения.",
+    verifyLead: "Введите 6-значный код из письма. Ссылка для подтверждения в том же письме тоже работает.",
     resend: "Отправить повторно",
     verifySent: "Мы отправили ссылку для подтверждения на вашу почту.",
     verifyDone: "Email подтверждён. Можно продолжить работу с LetsBeParents.",
+    verifyCode: "6-значный код",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Подтвердить email",
+    invalidCode: "Код неверен или срок его действия истёк.",
     alreadyVerified: "Ваш email уже подтверждён.",
     recentlySent: "Письмо уже было недавно отправлено. Проверьте почту.",
     deliveryFailed: "Не удалось доставить письмо. Повторите попытку позже.",
@@ -1674,15 +2342,149 @@ const standaloneAuthCopy = {
     resetDone: "Contraseña actualizada. Ya puedes iniciar sesión.",
     wait: "Espera...",
     verifyTitle: "Confirma tu correo",
-    verifyLead: "Abre el enlace del correo o solicita un nuevo mensaje de confirmación.",
+    verifyLead: "Introduce el código de 6 dígitos del correo. El enlace del mismo mensaje también funciona.",
     resend: "Reenviar correo",
     verifySent: "Hemos enviado un enlace de confirmación a tu correo.",
     verifyDone: "Correo confirmado. Ya puedes continuar en LetsBeParents.",
+    verifyCode: "Código de 6 dígitos",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verificar correo",
+    invalidCode: "El código no es válido o ha caducado.",
     alreadyVerified: "Tu correo ya está confirmado.",
     recentlySent: "El correo de confirmación se envió hace poco. Revisa tu bandeja de entrada.",
     deliveryFailed: "No se pudo enviar el correo. Inténtalo de nuevo más tarde.",
     generic: "No se pudo completar la solicitud. Inténtalo de nuevo.",
     continue: "Continuar",
+  },
+  pt: {
+    resetTitle: "Escolha uma nova senha",
+    resetLead: "O link de uso único só pode ser usado uma vez.",
+    password: "Nova senha",
+    confirmPassword: "Confirmar senha",
+    savePassword: "Salvar nova senha",
+    back: "Voltar ao login",
+    mismatch: "As senhas não coincidem.",
+    invalid: "Este link é inválido, expirou ou já foi usado.",
+    resetDone: "Senha atualizada. Agora você pode entrar.",
+    wait: "Aguarde...",
+    verifyTitle: "Confirme seu email",
+    verifyLead: "Digite o código de 6 dígitos do seu email. O link de confirmação na mesma mensagem também funciona.",
+    resend: "Reenviar email",
+    verifySent: "Enviamos um link de confirmação para o seu email.",
+    verifyDone: "Email confirmado. Você já pode continuar no LetsBeParents.",
+    verifyCode: "Código de 6 dígitos",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verificar email",
+    invalidCode: "O código é inválido ou expirou.",
+    alreadyVerified: "Seu email já está confirmado.",
+    recentlySent: "Um email de confirmação foi enviado recentemente. Verifique sua caixa de entrada.",
+    deliveryFailed: "Não foi possível entregar o email. Tente novamente mais tarde.",
+    generic: "Algo deu errado. Tente novamente.",
+    continue: "Continuar",
+  },
+  fr: {
+    resetTitle: "Choisissez un nouveau mot de passe",
+    resetLead: "Le lien à usage unique ne peut être utilisé qu'une seule fois.",
+    password: "Nouveau mot de passe",
+    confirmPassword: "Confirmer le mot de passe",
+    savePassword: "Enregistrer le nouveau mot de passe",
+    back: "Retour à la connexion",
+    mismatch: "Les mots de passe ne correspondent pas.",
+    invalid: "Ce lien est invalide, expiré ou a déjà été utilisé.",
+    resetDone: "Mot de passe mis à jour. Vous pouvez maintenant vous connecter.",
+    wait: "Veuillez patienter...",
+    verifyTitle: "Confirmez votre email",
+    verifyLead: "Entrez le code à 6 chiffres reçu par email. Le lien de confirmation dans le même message fonctionne aussi.",
+    resend: "Renvoyer l'email",
+    verifySent: "Nous avons envoyé un lien de confirmation à votre email.",
+    verifyDone: "Email confirmé. Vous pouvez maintenant continuer sur LetsBeParents.",
+    verifyCode: "Code à 6 chiffres",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Vérifier l'email",
+    invalidCode: "Le code est invalide ou a expiré.",
+    alreadyVerified: "Votre email est déjà confirmé.",
+    recentlySent: "Un email de confirmation a été envoyé récemment. Vérifiez votre boîte de réception.",
+    deliveryFailed: "L'email n'a pas pu être livré. Veuillez réessayer plus tard.",
+    generic: "Une erreur s'est produite. Veuillez réessayer.",
+    continue: "Continuer",
+  },
+  de: {
+    resetTitle: "Wählen Sie ein neues Passwort",
+    resetLead: "Der einmalige Link kann nur einmal verwendet werden.",
+    password: "Neues Passwort",
+    confirmPassword: "Passwort bestätigen",
+    savePassword: "Neues Passwort speichern",
+    back: "Zurück zur Anmeldung",
+    mismatch: "Die Passwörter stimmen nicht überein.",
+    invalid: "Dieser Link ist ungültig, abgelaufen oder wurde bereits verwendet.",
+    resetDone: "Passwort aktualisiert. Sie können sich jetzt anmelden.",
+    wait: "Bitte warten...",
+    verifyTitle: "Bestätigen Sie Ihre E-Mail",
+    verifyLead: "Geben Sie den 6-stelligen Code aus Ihrer E-Mail ein. Der Bestätigungslink in derselben Nachricht funktioniert ebenfalls.",
+    resend: "E-Mail erneut senden",
+    verifySent: "Wir haben einen Bestätigungslink an Ihre E-Mail gesendet.",
+    verifyDone: "E-Mail bestätigt. Sie können nun mit LetsBeParents fortfahren.",
+    verifyCode: "6-stelliger Code",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "E-Mail verifizieren",
+    invalidCode: "Der Code ist ungültig oder abgelaufen.",
+    alreadyVerified: "Ihre E-Mail ist bereits bestätigt.",
+    recentlySent: "Kürzlich wurde bereits eine Bestätigungs-E-Mail gesendet. Überprüfen Sie Ihren Posteingang.",
+    deliveryFailed: "Die E-Mail konnte nicht zugestellt werden. Bitte versuchen Sie es später erneut.",
+    generic: "Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.",
+    continue: "Weiter",
+  },
+  it: {
+    resetTitle: "Scegli una nuova password",
+    resetLead: "Il link monouso può essere utilizzato una sola volta.",
+    password: "Nuova password",
+    confirmPassword: "Conferma password",
+    savePassword: "Salva nuova password",
+    back: "Torna all'accesso",
+    mismatch: "Le password non coincidono.",
+    invalid: "Questo link non è valido, è scaduto o è già stato utilizzato.",
+    resetDone: "Password aggiornata. Ora puoi accedere.",
+    wait: "Attendere prego...",
+    verifyTitle: "Conferma la tua email",
+    verifyLead: "Inserisci il codice a 6 cifre ricevuto via email. Funziona anche il link di conferma nello stesso messaggio.",
+    resend: "Invia di nuovo l'email",
+    verifySent: "Abbiamo inviato un link di conferma alla tua email.",
+    verifyDone: "Email confermata. Ora puoi continuare su LetsBeParents.",
+    verifyCode: "Codice a 6 cifre",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Verifica email",
+    invalidCode: "Il codice non è valido o è scaduto.",
+    alreadyVerified: "La tua email è già confermata.",
+    recentlySent: "Un'email di conferma è stata inviata di recente. Controlla la tua casella di posta.",
+    deliveryFailed: "Non è stato possibile consegnare l'email. Riprova più tardi.",
+    generic: "Qualcosa è andato storto. Riprova.",
+    continue: "Continua",
+  },
+  pl: {
+    resetTitle: "Wybierz nowe hasło",
+    resetLead: "Jednorazowy link można wykorzystać tylko raz.",
+    password: "Nowe hasło",
+    confirmPassword: "Potwierdź hasło",
+    savePassword: "Zapisz nowe hasło",
+    back: "Powrót do logowania",
+    mismatch: "Hasła nie są zgodne.",
+    invalid: "Ten link jest nieprawidłowy, wygasł lub został już użyty.",
+    resetDone: "Hasło zaktualizowane. Możesz teraz się zalogować.",
+    wait: "Proszę czekać...",
+    verifyTitle: "Potwierdź swój email",
+    verifyLead: "Wpisz 6-cyfrowy kod z wiadomości email. Link potwierdzający w tej samej wiadomości również działa.",
+    resend: "Wyślij ponownie email",
+    verifySent: "Wysłaliśmy link potwierdzający na Twój email.",
+    verifyDone: "Email potwierdzony. Możesz teraz kontynuować w LetsBeParents.",
+    verifyCode: "6-cyfrowy kod",
+    verifyCodePlaceholder: "000000",
+    verifyCodeButton: "Zweryfikuj email",
+    invalidCode: "Kod jest nieprawidłowy lub wygasł.",
+    alreadyVerified: "Twój email jest już potwierdzony.",
+    recentlySent: "Wiadomość potwierdzająca została niedawno wysłana. Sprawdź swoją skrzynkę odbiorczą.",
+    deliveryFailed: "Nie udało się dostarczyć wiadomości email. Spróbuj ponownie później.",
+    generic: "Coś poszło nie tak. Spróbuj ponownie.",
+    continue: "Kontynuuj",
   },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
@@ -1747,28 +2549,36 @@ function ResetPassword() {
 
 function VerifyEmail() {
   const locale = localeOf();
-  const copy = standaloneAuthCopy[locale];
-  const navigate = useNavigate();
-  const token = new URLSearchParams(window.location.search).get("token") || "";
-  const [status, setStatus] = useState(
-    token
-      ? copy.wait
-      : copy.verifySent,
-  );
+ const copy = standaloneAuthCopy[locale];
+ const navigate = useNavigate();
+ const search = new URLSearchParams(window.location.search);
+ const token = search.get("token") || "";
+ const initialDeliveryFailed = search.get("delivery") === "failed";
+ const [status, setStatus] = useState(
+  token
+  ? copy.wait
+  : initialDeliveryFailed
+  ? copy.deliveryFailed
+  : copy.verifySent,
+ );
   const [busy, setBusy] = useState(Boolean(token));
   const [confirmed, setConfirmed] = useState(false);
+  const [continuePath, setContinuePath] = useState(`/${locale}/catalog`);
+  const [code, setCode] = useState("");
   useEffect(() => {
     if (!token) return;
     window.history.replaceState(null, "", window.location.pathname);
     api
       .post("/auth/email-verification/confirm", { token })
-      .then(() => {
+      .then(async () => {
+        const nextSession = await refreshSession(null);
+        setContinuePath(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
         setConfirmed(true);
         setStatus(copy.verifyDone);
       })
       .catch(() => setStatus(copy.invalid))
       .finally(() => setBusy(false));
-  }, [copy.invalid, copy.verifyDone, token]);
+  }, [copy.invalid, copy.verifyDone, locale, token]);
   const resend = async () => {
     setBusy(true);
     try {
@@ -1791,6 +2601,25 @@ function VerifyEmail() {
       setBusy(false);
     }
   };
+  const confirmCode = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!/^\d{6}$/.test(code)) {
+      setStatus(copy.invalidCode);
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await api.post<{ user: Row }>("/auth/email-verification/code/confirm", { code });
+      const nextSession = await refreshSession({ user: response.user });
+      setContinuePath(userNeedsProfileWizard(nextSession) ? profileWizardPath(locale) : `/${locale}/catalog`);
+      setConfirmed(true);
+      setStatus(copy.verifyDone);
+    } catch {
+      setStatus(copy.invalidCode);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section className="standalone-auth-page">
       <div className="standalone-auth-visual"><img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" /></div>
@@ -1798,10 +2627,29 @@ function VerifyEmail() {
         <div className="standalone-auth-form-card">
           <h1>{copy.verifyTitle}</h1>
           <p>{copy.verifyLead}</p>
-          <form onSubmit={(event) => { event.preventDefault(); if (confirmed) navigate(`/${locale}/catalog`); else void resend(); }}>
-            <button className="standalone-auth-primary" disabled={busy}>{busy ? copy.wait : confirmed ? copy.continue : copy.resend}</button>
-          </form>
-          <p className="standalone-auth-message" data-kind={status === copy.invalid || status === copy.deliveryFailed || status === copy.generic ? "error" : "info"}>{status}</p>
+          {confirmed ? (
+          <form onSubmit={(event) => { event.preventDefault(); navigate(continuePath); }}>
+              <button className="standalone-auth-primary">{copy.continue}</button>
+            </form>
+          ) : (
+            <form onSubmit={confirmCode}>
+              <label htmlFor="verify-email-code">{copy.verifyCode}</label>
+              <input
+                id="verify-email-code"
+                className="standalone-auth-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder={copy.verifyCodePlaceholder}
+                maxLength={6}
+                autoFocus={!token}
+              />
+              <button className="standalone-auth-primary" disabled={busy || code.length !== 6}>{busy ? copy.wait : copy.verifyCodeButton}</button>
+            </form>
+          )}
+          {!confirmed && <button className="standalone-auth-resend" type="button" disabled={busy} onClick={() => void resend()}>{copy.resend}</button>}
+          <p className="standalone-auth-message" data-kind={status === copy.invalid || status === copy.invalidCode || status === copy.deliveryFailed || status === copy.generic ? "error" : "info"}>{status}</p>
           <StandaloneAuthBackLink locale={locale} label={copy.back} />
         </div>
       </div>
@@ -1854,7 +2702,7 @@ function Pager({
 }
 
 function Directory({ kind }: { kind: "clinics" | "lawyers" }) {
-  const locale = localeOf();
+ const locale = localeOf();
   const navigate = useNavigate();
   const stateKey = `lbpDirectory:${locale}:${kind}`;
   const stored = (() => {
@@ -1914,46 +2762,86 @@ function Directory({ kind }: { kind: "clinics" | "lawyers" }) {
       apply: "Aplicar filtros", loadMore: "Mostrar más", loading: "Cargando ...", like: "Me gusta", liked: "Guardado",
       website: "Visitar sitio web", noLawyers: "No se encontraron abogados", noClinics: "No se encontraron clínicas", error: "No se pudo cargar el directorio.",
     },
-  }[locale];
+    pt: {
+      lawyersTitle: "Advogados de família", lawyersLead: "Encontra um advogado experiente para adoção e formação familiar",
+      clinicsTitle: "Clínicas de fertilidade", clinicsLead: "Encontra a clínica de fertilidade certa para a tua jornada",
+      searchLawyers: "Buscar advogados...", searchClinics: "Buscar clínicas...", filters: "Filtros", country: "País",
+      anyCountry: "Qualquer país", practice: "Áreas de atuação", services: "Serviços", language: "Idioma", anyLanguage: "Qualquer idioma", clear: "Limpar tudo",
+      apply: "Aplicar filtros", loadMore: "Carregar mais", loading: "Carregando ...", like: "Curtir", liked: "Salvo",
+      website: "Visitar site", noLawyers: "Nenhum advogado encontrado", noClinics: "Nenhuma clínica encontrada", error: "Não foi possível carregar o diretório. Tenta novamente.",
+    },
+    fr: {
+      lawyersTitle: "Avocats en droit de la famille", lawyersLead: "Trouve un avocat expérimenté pour l'adoption et la formation de ta famille",
+      clinicsTitle: "Cliniques de fertilité", clinicsLead: "Trouve la clinique de fertilité adaptée à ton parcours",
+      searchLawyers: "Rechercher des avocats...", searchClinics: "Rechercher des cliniques...", filters: "Filtres", country: "Pays",
+      anyCountry: "Tout pays", practice: "Domaines de pratique", services: "Services", language: "Langue", anyLanguage: "Toute langue", clear: "Tout effacer",
+      apply: "Appliquer les filtres", loadMore: "Charger plus", loading: "Chargement ...", like: "J'aime", liked: "Enregistré",
+      website: "Visiter le site web", noLawyers: "Aucun avocat trouvé", noClinics: "Aucune clinique trouvée", error: "Impossible de charger l'annuaire. Réessaie.",
+    },
+    de: {
+      lawyersTitle: "Familienanwälte", lawyersLead: "Finde einen erfahrenen Anwalt für Adoption und Familiengründung",
+      clinicsTitle: "Kinderwunschkliniken", clinicsLead: "Finde die richtige Kinderwunschklinik für deinen Weg",
+      searchLawyers: "Anwälte suchen...", searchClinics: "Kliniken suchen...", filters: "Filter", country: "Land",
+      anyCountry: "Beliebiges Land", practice: "Rechtsgebiete", services: "Leistungen", language: "Sprache", anyLanguage: "Beliebige Sprache", clear: "Alles löschen",
+      apply: "Filter anwenden", loadMore: "Mehr laden", loading: "Wird geladen ...", like: "Gefällt mir", liked: "Gespeichert",
+      website: "Website besuchen", noLawyers: "Keine Anwälte gefunden", noClinics: "Keine Kliniken gefunden", error: "Das Verzeichnis konnte nicht geladen werden. Versuch es bitte noch einmal.",
+    },
+    it: {
+      lawyersTitle: "Avvocati di famiglia", lawyersLead: "Trovi un avvocato esperto in adozione e formazione della famiglia",
+      clinicsTitle: "Cliniche per la fertilità", clinicsLead: "Trovi la clinica per la fertilità adatta al Suo percorso",
+      searchLawyers: "Cerca avvocati...", searchClinics: "Cerca cliniche...", filters: "Filtri", country: "Paese",
+      anyCountry: "Qualsiasi paese", practice: "Aree di competenza", services: "Servizi", language: "Lingua", anyLanguage: "Qualsiasi lingua", clear: "Cancella tutto",
+      apply: "Applica filtri", loadMore: "Carica altro", loading: "Caricamento ...", like: "Mi piace", liked: "Salvato",
+      website: "Visitare il sito web", noLawyers: "Nessun avvocato trovato", noClinics: "Nessuna clinica trovata", error: "Non è stato possibile caricare l'elenco. Riprovi.",
+    },
+    pl: {
+      lawyersTitle: "Prawnicy rodzinni", lawyersLead: "Znajdź doświadczonego prawnika ds. adopcji i budowania rodziny",
+      clinicsTitle: "Kliniki leczenia niepłodności", clinicsLead: "Znajdź odpowiednią klinikę leczenia niepłodności dla swojej drogi do rodzicielstwa",
+      searchLawyers: "Szukaj prawników...", searchClinics: "Szukaj klinik...", filters: "Filtry", country: "Kraj",
+      anyCountry: "Dowolny kraj", practice: "Obszary praktyki", services: "Usługi", language: "Język", anyLanguage: "Dowolny język", clear: "Wyczyść wszystko",
+      apply: "Zastosuj filtry", loadMore: "Załaduj więcej", loading: "Ładowanie ...", like: "Polub", liked: "Zapisano",
+      website: "Odwiedź stronę", noLawyers: "Nie znaleziono prawników", noClinics: "Nie znaleziono klinik", error: "Nie udało się załadować katalogu. Spróbuj ponownie.",
+    },
+ }[locale];
 
   const referenceLanguageCodes = ["en", "ar", "af", "be", "bn", "bg", "hu", "vi", "el", "ka", "da", "he", "id", "es", "it", "ca", "zh", "ko", "lv", "lt", "ms", "de", "nl", "no", "fa", "pl", "pt", "ro", "ru", "sr", "sk", "sl", "th", "tr", "uk", "fi", "fr", "hi", "hr", "cs", "sv", "et", "ja"];
   const clinicCardServicePriority = new Map(["hiv_positive_male", "hiv_positive_female", "icsi_ivf", "hepatitis_bc_male", "hepatitis_bc_female"].map((value, index) => [value, index]));
 
   const tagTranslations: Record<string, Record<CookieLocale, string>> = {
-    assisted_reproduction: { en: "Assisted Reproduction", ru: "Вспомогательная репродукция", es: "Reproducción asistida" },
-    contested_adoption: { en: "Contested Adoption", ru: "Оспариваемое усыновление", es: "Adopción impugnada" },
-    domestic_adoption: { en: "Domestic Adoption", ru: "Внутреннее усыновление", es: "Adopción nacional" },
-    icpc_adoption: { en: "Interstate (ICPC) Adoption", ru: "Межштатное (ICPC) усыновление", es: "Adopción interestatal (ICPC)" },
-    intercountry_adoption: { en: "Intercountry Adoption", ru: "Международное усыновление", es: "Adopción internacional" },
-    lgbtq_family_formation: { en: "LGBTQ Family Formation", ru: "Создание ЛГБТК+ семей", es: "Formación de familias LGBTQ" },
-    private_networking: { en: "Private Networking", ru: "Частный нетворкинг", es: "Red privada" },
-    egg_donation: { en: "Egg Donation", ru: "Донорство яйцеклеток", es: "Donación de óvulos" },
-    embryo_donation: { en: "Embryo Donation", ru: "Донорство эмбрионов", es: "Donación de embriones" },
-    sperm_donation: { en: "Sperm Donation", ru: "Донорство спермы", es: "Donación de esperma" },
-    surrogacy: { en: "Surrogacy", ru: "Суррогатное материнство", es: "Gestación subrogada" },
-    grandparent_representation: { en: "Grandparent Representation", ru: "Представительство бабушек и дедушек", es: "Representación de abuelos" },
-    special_needs_children: { en: "Special Needs Children", ru: "Дети с особыми потребностями", es: "Niños con necesidades especiales" },
-    mediation: { en: "Mediation", ru: "Медиация", es: "Mediación" },
-    ivf: { en: "IVF", ru: "ЭКО", es: "FIV" },
-    icsi_ivf: { en: "ICSI IVF", ru: "ИКСИ ЭКО", es: "FIV ICSI" },
-    own_egg_sperm_ivf: { en: "Own Egg & Sperm IVF", ru: "ЭКО с собственными клетками", es: "FIV con óvulos y esperma propios" },
-    egg_donation_ivf: { en: "Egg Donation IVF", ru: "ЭКО с донорской яйцеклеткой", es: "FIV con óvulos donados" },
-    sperm_donations_ivf: { en: "Sperm Donation IVF", ru: "ЭКО с донорской спермой", es: "FIV con esperma donado" },
-    embryo_donations_ivf: { en: "Embryo Donation IVF", ru: "ЭКО с донорским эмбрионом", es: "FIV con embriones donados" },
-    genetic_testing_ivf: { en: "Genetic Testing IVF", ru: "Генетическое тестирование ЭКО", es: "Pruebas genéticas FIV" },
-    freezing: { en: "Freezing", ru: "Криоконсервация", es: "Criopreservación" },
-    egg_freezing: { en: "Egg Freezing", ru: "Заморозка яйцеклеток", es: "Congelación de óvulos" },
-    sperm_freezing: { en: "Sperm Freezing", ru: "Заморозка спермы", es: "Congelación de esperma" },
-    embryo_freezing: { en: "Embryo Freezing", ru: "Заморозка эмбрионов", es: "Congelación de embriones" },
-    iui_intrauterine: { en: "IUI - Intrauterine", ru: "ВМИ — внутриматочная", es: "Inseminación intrauterina" },
-    ici_intracervical: { en: "ICI - Intracervical", ru: "ИЦИ — интрацервикальная", es: "Inseminación intracervical" },
-    iutpi_tuboperitoneal: { en: "IUTPI - Tuboperitoneal", ru: "ИУТПИ — тубоперитонеальная", es: "Inseminación tuboperitoneal" },
-    iti_intratubal: { en: "ITI - Intratubal", ru: "ИТИ — интратубарная", es: "Inseminación intratubárica" },
-    women_over_46: { en: "Women over 46", ru: "Женщины старше 46 лет", es: "Mujeres mayores de 46 años" },
-    hiv_positive_female: { en: "HIV+ Female", ru: "ВИЧ+ женщина", es: "Mujer VIH+" },
-    hiv_positive_male: { en: "HIV+ Male", ru: "ВИЧ+ мужчина", es: "Hombre VIH+" },
-    hepatitis_bc_female: { en: "Hepatitis B/C Female", ru: "Гепатит B/C женщина", es: "Mujer con hepatitis B/C" },
-    hepatitis_bc_male: { en: "Hepatitis B/C Male", ru: "Гепатит B/C мужчина", es: "Hombre con hepatitis B/C" },
+    assisted_reproduction: { en: "Assisted Reproduction", ru: "Вспомогательная репродукция", es: "Reproducción asistida", pt: "Reprodução Assistida", fr: "Procréation médicalement assistée", de: "Assistierte Reproduktion", it: "Riproduzione assistita", pl: "Wspomagana prokreacja" },
+    contested_adoption: { en: "Contested Adoption", ru: "Оспариваемое усыновление", es: "Adopción impugnada", pt: "Adoção contestada", fr: "Adoption contestée", de: "Angefochtene Adoption", it: "Adozione contestata", pl: "Sporna adopcja" },
+    domestic_adoption: { en: "Domestic Adoption", ru: "Внутреннее усыновление", es: "Adopción nacional", pt: "Adoção nacional", fr: "Adoption nationale", de: "Inländische Adoption", it: "Adozione nazionale", pl: "Adopcja krajowa" },
+    icpc_adoption: { en: "Interstate (ICPC) Adoption", ru: "Межштатное (ICPC) усыновление", es: "Adopción interestatal (ICPC)", pt: "Adoção interestadual (ICPC)", fr: "Adoption interétatique (ICPC)", de: "Zwischenstaatliche Adoption (ICPC)", it: "Adozione interstatale (ICPC)", pl: "Adopcja międzystanowa (ICPC)" },
+    intercountry_adoption: { en: "Intercountry Adoption", ru: "Международное усыновление", es: "Adopción internacional", pt: "Adoção internacional", fr: "Adoption internationale", de: "Internationale Adoption", it: "Adozione internazionale", pl: "Adopcja międzynarodowa" },
+    lgbtq_family_formation: { en: "LGBTQ Family Formation", ru: "Создание ЛГБТК+ семей", es: "Formación de familias LGBTQ", pt: "Formação de família LGBTQ", fr: "Formation de famille LGBTQ", de: "LGBTQ-Familiengründung", it: "Formazione familiare LGBTQ", pl: "Zakładanie rodziny LGBTQ" },
+    private_networking: { en: "Private Networking", ru: "Частный нетворкинг", es: "Red privada", pt: "Networking privado", fr: "Réseau privé", de: "Privates Netzwerken", it: "Rete privata", pl: "Prywatny networking" },
+    egg_donation: { en: "Egg Donation", ru: "Донорство яйцеклеток", es: "Donación de óvulos", pt: "Doação de óvulos", fr: "Don d'ovocytes", de: "Eizellspende", it: "Donazione di ovociti", pl: "Dawstwo komórek jajowych" },
+    embryo_donation: { en: "Embryo Donation", ru: "Донорство эмбрионов", es: "Donación de embriones", pt: "Doação de embriões", fr: "Don d'embryons", de: "Embryonenspende", it: "Donazione di embrioni", pl: "Dawstwo zarodków" },
+    sperm_donation: { en: "Sperm Donation", ru: "Донорство спермы", es: "Donación de esperma", pt: "Doação de esperma", fr: "Don de sperme", de: "Samenspende", it: "Donazione di sperma", pl: "Dawstwo nasienia" },
+    surrogacy: { en: "Surrogacy", ru: "Суррогатное материнство", es: "Gestación subrogada", pt: "Gestação de substituição", fr: "Gestation pour autrui (GPA)", de: "Leihmutterschaft", it: "Maternità surrogata", pl: "Surogacja" },
+    grandparent_representation: { en: "Grandparent Representation", ru: "Представительство бабушек и дедушек", es: "Representación de abuelos", pt: "Representação de avós", fr: "Représentation des grands-parents", de: "Vertretung von Großeltern", it: "Rappresentanza dei nonni", pl: "Reprezentacja dziadków" },
+    special_needs_children: { en: "Special Needs Children", ru: "Дети с особыми потребностями", es: "Niños con necesidades especiales", pt: "Crianças com necessidades especiais", fr: "Enfants à besoins particuliers", de: "Kinder mit besonderen Bedürfnissen", it: "Bambini con bisogni speciali", pl: "Dzieci ze specjalnymi potrzebami" },
+    mediation: { en: "Mediation", ru: "Медиация", es: "Mediación", pt: "Mediação", fr: "Médiation", de: "Mediation", it: "Mediazione", pl: "Mediacja" },
+    ivf: { en: "IVF", ru: "ЭКО", es: "FIV", pt: "FIV", fr: "FIV", de: "IVF", it: "FIVET", pl: "In vitro" },
+    icsi_ivf: { en: "ICSI IVF", ru: "ИКСИ ЭКО", es: "FIV ICSI", pt: "FIV com ICSI", fr: "FIV avec ICSI", de: "IVF mit ICSI", it: "FIVET con ICSI", pl: "In vitro z ICSI" },
+    own_egg_sperm_ivf: { en: "Own Egg & Sperm IVF", ru: "ЭКО с собственными клетками", es: "FIV con óvulos y esperma propios", pt: "FIV com óvulos e esperma próprios", fr: "FIV avec ovocytes et sperme propres", de: "IVF mit eigenen Eizellen und eigenem Sperma", it: "FIVET con ovociti e sperma propri", pl: "In vitro z własnymi komórkami jajowymi i nasieniem" },
+    egg_donation_ivf: { en: "Egg Donation IVF", ru: "ЭКО с донорской яйцеклеткой", es: "FIV con óvulos donados", pt: "FIV com doação de óvulos", fr: "FIV avec don d'ovocytes", de: "IVF mit Eizellspende", it: "FIVET con donazione di ovociti", pl: "In vitro z dawstwem komórek jajowych" },
+    sperm_donations_ivf: { en: "Sperm Donation IVF", ru: "ЭКО с донорской спермой", es: "FIV con esperma donado", pt: "FIV com doação de esperma", fr: "FIV avec don de sperme", de: "IVF mit Samenspende", it: "FIVET con donazione di sperma", pl: "In vitro z dawstwem nasienia" },
+    embryo_donations_ivf: { en: "Embryo Donation IVF", ru: "ЭКО с донорским эмбрионом", es: "FIV con embriones donados", pt: "FIV com doação de embriões", fr: "FIV avec don d'embryons", de: "IVF mit Embryonenspende", it: "FIVET con donazione di embrioni", pl: "In vitro z dawstwem zarodków" },
+    genetic_testing_ivf: { en: "Genetic Testing IVF", ru: "Генетическое тестирование ЭКО", es: "Pruebas genéticas FIV", pt: "FIV com teste genético", fr: "FIV avec test génétique", de: "IVF mit Gentest", it: "FIVET con test genetico", pl: "In vitro z badaniem genetycznym" },
+    freezing: { en: "Freezing", ru: "Криоконсервация", es: "Criopreservación", pt: "Congelamento", fr: "Congélation", de: "Einfrieren", it: "Congelamento", pl: "Mrożenie" },
+    egg_freezing: { en: "Egg Freezing", ru: "Заморозка яйцеклеток", es: "Congelación de óvulos", pt: "Congelamento de óvulos", fr: "Congélation d'ovocytes", de: "Einfrieren von Eizellen", it: "Congelamento degli ovociti", pl: "Mrożenie komórek jajowych" },
+    sperm_freezing: { en: "Sperm Freezing", ru: "Заморозка спермы", es: "Congelación de esperma", pt: "Congelamento de esperma", fr: "Congélation de sperme", de: "Einfrieren von Spermien", it: "Congelamento dello sperma", pl: "Mrożenie nasienia" },
+    embryo_freezing: { en: "Embryo Freezing", ru: "Заморозка эмбрионов", es: "Congelación de embriones", pt: "Congelamento de embriões", fr: "Congélation d'embryons", de: "Einfrieren von Embryonen", it: "Congelamento degli embrioni", pl: "Mrożenie zarodków" },
+    iui_intrauterine: { en: "IUI - Intrauterine", ru: "ВМИ — внутриматочная", es: "Inseminación intrauterina", pt: "IIU - Intrauterina", fr: "IIU - Intra-utérine", de: "IUI - Intrauterin", it: "IUI - Intrauterina", pl: "IUI - Domaciczna" },
+    ici_intracervical: { en: "ICI - Intracervical", ru: "ИЦИ — интрацервикальная", es: "Inseminación intracervical", pt: "ICI - Intracervical", fr: "ICI - Intracervicale", de: "ICI - Intrazervikal", it: "ICI - Intracervicale", pl: "ICI - Doszyjkowa" },
+    iutpi_tuboperitoneal: { en: "IUTPI - Tuboperitoneal", ru: "ИУТПИ — тубоперитонеальная", es: "Inseminación tuboperitoneal", pt: "IUTPI - Tuboperitoneal", fr: "IUTPI - Tubopéritonéale", de: "IUTPI - Tuboperitoneal", it: "IUTPI - Tuboperitoneale", pl: "IUTPI - Jajowodowo-otrzewnowa" },
+    iti_intratubal: { en: "ITI - Intratubal", ru: "ИТИ — интратубарная", es: "Inseminación intratubárica", pt: "ITI - Intratubária", fr: "ITI - Intratubaire", de: "ITI - Intratubar", it: "ITI - Intratubarica", pl: "ITI - Dojajowodowa" },
+    women_over_46: { en: "Women over 46", ru: "Женщины старше 46 лет", es: "Mujeres mayores de 46 años", pt: "Mulheres acima de 46 anos", fr: "Femmes de plus de 46 ans", de: "Frauen über 46", it: "Donne oltre i 46 anni", pl: "Kobiety powyżej 46 roku życia" },
+    hiv_positive_female: { en: "HIV+ Female", ru: "ВИЧ+ женщина", es: "Mujer VIH+", pt: "Mulher HIV+", fr: "Femme VIH+", de: "HIV-positive Frau", it: "Donna HIV+", pl: "Kobieta HIV+" },
+    hiv_positive_male: { en: "HIV+ Male", ru: "ВИЧ+ мужчина", es: "Hombre VIH+", pt: "Homem HIV+", fr: "Homme VIH+", de: "HIV-positiver Mann", it: "Uomo HIV+", pl: "Mężczyzna HIV+" },
+    hepatitis_bc_female: { en: "Hepatitis B/C Female", ru: "Гепатит B/C женщина", es: "Mujer con hepatitis B/C", pt: "Mulher com hepatite B/C", fr: "Femme avec hépatite B/C", de: "Frau mit Hepatitis B/C", it: "Donna con epatite B/C", pl: "Kobieta z WZW B/C" },
+    hepatitis_bc_male: { en: "Hepatitis B/C Male", ru: "Гепатит B/C мужчина", es: "Hombre con hepatitis B/C", pt: "Homem com hepatite B/C", fr: "Homme avec hépatite B/C", de: "Mann mit Hepatitis B/C", it: "Uomo con epatite B/C", pl: "Mężczyzna z WZW B/C" },
   };
   const practiceOrder = ["assisted_reproduction", "contested_adoption", "domestic_adoption", "icpc_adoption", "intercountry_adoption", "lgbtq_family_formation", "private_networking", "egg_donation", "embryo_donation", "sperm_donation", "surrogacy", "grandparent_representation", "special_needs_children", "mediation"];
   const rowData = (item: Row) => item.data && typeof item.data === "object" ? item.data as Row : {};
@@ -1990,11 +2878,13 @@ function Directory({ kind }: { kind: "clinics" | "lawyers" }) {
     const contact = item.contact && typeof item.contact === "object" ? item.contact as Row : {};
     return cleanText(contact.website ?? item.website ?? data.website);
   };
-  const countryName = (code: unknown) => {
-    const value = cleanText(code).toUpperCase();
-    if (!value) return "";
-    try { return new Intl.DisplayNames([locale], { type: "region" }).of(value) || value; } catch { return value; }
-  };
+const countryName = (code: unknown) => {
+const value = cleanText(code).toUpperCase();
+if (!value) return "";
+if (locale === "en" && value === "CZ") return "Czech Republic";
+if (locale === "en" && value === "GB") return "UK";
+try { return new Intl.DisplayNames([locale], { type: "region" }).of(value) || value; } catch { return value; }
+};
   const locationCountryName = (code: unknown) => ({ US: "USA", GB: "UK", AE: "UAE" }[cleanText(code).toUpperCase()] || countryName(code));
   const itemLocation = (item: Row) => {
     const data = rowData(item);
@@ -2296,9 +3186,10 @@ function DirectoryDetailIcon({ name }: { name: DirectoryDetailIconName }) {
 }
 
 function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
-  const { slug = "" } = useParams();
-  const locale = localeOf();
-  const [item, setItem] = useState<Row | null>(null);
+ const { slug = "" } = useParams();
+ const locale = localeOf();
+ const directoryCopyLocale = legacyLocaleOf(locale);
+ const [item, setItem] = useState<Row | null>(null);
   const [error, setError] = useState("");
   const copy = {
     en: {
@@ -2319,7 +3210,37 @@ function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
       practice: "Áreas de práctica", website: "Visitar sitio web", fax: "Fax", otherServices: "Otros servicios",
       error: "No se pudo cargar el directorio.",
     },
-  }[locale];
+    pt: {
+      backLawyers: "Voltar aos advogados", backClinics: "Voltar às clínicas", contacts: "Contatos", about: "Sobre",
+      clinicAbout: "Sobre a clínica", hours: "Horário de funcionamento", languages: "Idiomas", services: "Serviços",
+      practice: "Áreas de atuação", website: "Visitar site", fax: "Fax", otherServices: "Outros serviços",
+      error: "Não foi possível carregar o diretório. Tenta novamente.",
+    },
+    fr: {
+      backLawyers: "Retour aux avocats", backClinics: "Retour aux cliniques", contacts: "Contacts", about: "À propos",
+      clinicAbout: "À propos de la clinique", hours: "Horaires d'ouverture", languages: "Langues", services: "Services",
+      practice: "Domaines de pratique", website: "Visiter le site web", fax: "Fax", otherServices: "Autres services",
+      error: "Impossible de charger l'annuaire. Réessaie.",
+    },
+    de: {
+      backLawyers: "Zurück zu den Anwälten", backClinics: "Zurück zu den Kliniken", contacts: "Kontakt", about: "Über",
+      clinicAbout: "Über die Klinik", hours: "Öffnungszeiten", languages: "Sprachen", services: "Leistungen",
+      practice: "Rechtsgebiete", website: "Website besuchen", fax: "Fax", otherServices: "Weitere Leistungen",
+      error: "Das Verzeichnis konnte nicht geladen werden. Versuch es bitte noch einmal.",
+    },
+    it: {
+      backLawyers: "Torni agli avvocati", backClinics: "Torni alle cliniche", contacts: "Contatti", about: "Informazioni",
+      clinicAbout: "Informazioni sulla clinica", hours: "Orari di apertura", languages: "Lingue", services: "Servizi",
+      practice: "Aree di competenza", website: "Visitare il sito web", fax: "Fax", otherServices: "Altri servizi",
+      error: "Non è stato possibile caricare l'elenco. Riprovi.",
+    },
+    pl: {
+      backLawyers: "Powrót do prawników", backClinics: "Powrót do klinik", contacts: "Kontakt", about: "O nas",
+      clinicAbout: "O klinice", hours: "Godziny pracy", languages: "Języki", services: "Usługi",
+      practice: "Obszary praktyki", website: "Odwiedź stronę", fax: "Faks", otherServices: "Inne usługi",
+      error: "Nie udało się załadować katalogu. Spróbuj ponownie.",
+    },
+ }[locale];
   useEffect(() => {
     let active = true;
     setItem(null);
@@ -2348,11 +3269,13 @@ function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
     .map(text)
     .find((value) => value && !/^(?:null|none|undefined)$/i.test(value)) || "";
   const countryCode = text(item.country ?? data.country).toUpperCase();
-  const displayCountry = (code: string, displayLocale = locale) => {
-    if (!code) return "";
-    if (displayLocale === "en" && code === "US") return "USA";
-    try { return new Intl.DisplayNames([displayLocale], { type: "region" }).of(code) || code; } catch { return code; }
-  };
+const displayCountry = (code: string, displayLocale = locale) => {
+if (!code) return "";
+if (displayLocale === "en" && code === "US") return "USA";
+if (displayLocale === "en" && code === "CZ") return "Czech Republic";
+if (displayLocale === "en" && code === "GB") return "UK";
+try { return new Intl.DisplayNames([displayLocale], { type: "region" }).of(code) || code; } catch { return code; }
+};
   const locationLabel = kind === "clinics"
     ? [text(item.city ?? data.city), text(item.region ?? data.region), displayCountry(countryCode, "en")].filter(Boolean).join(", ")
     : text(item.location ?? data.location) || [text(item.city ?? data.city), text(item.state ?? data.state), displayCountry(countryCode)].filter(Boolean).join(", ");
@@ -2404,7 +3327,7 @@ function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
     en: { ivf_treatments: "IVF treatments", fertility_preservation: "Fertility preservation", artificial_insemination: "Artificial insemination", special_situations: "Special situations" },
     ru: { ivf_treatments: "ЭКО процедуры", fertility_preservation: "Сохранение фертильности", artificial_insemination: "Искусственная инсеминация", special_situations: "Особые случаи" },
     es: { ivf_treatments: "Tratamientos de FIV", fertility_preservation: "Preservación de la fertilidad", artificial_insemination: "Inseminación artificial", special_situations: "Situaciones especiales" },
-  }[locale];
+ }[directoryCopyLocale];
   const remainingTags = new Map(tags.map((tag) => [tagKey(tag), tag]));
   const groupedServices = serviceGroups.map((group) => {
     const groupTags = group.slugs.map((serviceSlug) => remainingTags.get(serviceSlug)).filter((tag): tag is unknown => Boolean(tag));
@@ -2511,35 +3434,106 @@ const CATALOG_COPY = {
   en: {
     browse: "Browse profiles", collections: "Collections", all: "All", day: "day", days: "days", month: "month",
     filters: "Filters", allFilters: "All filters", closeFilters: "Close filters", clear: "Clear all", apply: "Apply filters",
-    country: "Country", city: "City", anyCountry: "Any country", cityFirst: "Select a single country to filter by city",
+    country: "Country", city: "City", anyCountry: "Any country", cityFirst: "Select a single country to filter by city", cityPlaceholder: "Start typing a city name...",
     profileType: "Profile type", donor: "Donor", lookingFor: "Looking for", allTypes: "All types",
     matches: "Matches profiles that fit any of these options", verified: "Verified only", age: "Age", from: "From", to: "To",
     ethnicity: "Ethnicity", hair: "Hair color", eye: "Eye color", education: "Education", religion: "Religion",
-    premium: "Premium only", search: "Search...", none: "No options found", noProfiles: "No profiles found", noProfilesHelp: "Try changing or clearing the filters.",
+    premium: "Premium only", premiumTitle: "Premium filters", premiumText: "Choose Premium to unlock advanced filters and find more compatible profiles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Close Premium offer", search: "Search...", none: "No options found", noProfiles: "No profiles found", noProfilesHelp: "Try changing or clearing the filters.",
     loadMore: "Load more", loading: "Loading ...", locationHidden: "Location hidden", message: "Message", like: "Like", liked: "Liked",
     ageError: "Minimum age cannot be greater than maximum age.", failed: "Could not load the catalog.", actionFailed: "This action could not be completed.",
+    dailyLikeLimit: "You have reached today's like limit. You can like more profiles tomorrow.", dailyChatLimit: "You have reached today's new chat limit. You can start more chats tomorrow.",
+    profileUnavailable: "This profile is no longer available.", chatUnavailable: "This conversation cannot be opened right now.",
   },
   ru: {
     browse: "Каталог профилей", collections: "Коллекции", all: "Все", day: "день", days: "дней", month: "месяц",
     filters: "Фильтры", allFilters: "Все фильтры", closeFilters: "Закрыть фильтры", clear: "Очистить всё", apply: "Применить фильтры",
-    country: "Страна", city: "Город", anyCountry: "Любая страна", cityFirst: "Сначала выберите одну страну",
+    country: "Страна", city: "Город", anyCountry: "Любая страна", cityFirst: "Сначала выберите одну страну", cityPlaceholder: "Начните вводить город...",
     profileType: "Тип профиля", donor: "Донор", lookingFor: "Ищет", allTypes: "Все типы",
     matches: "Показываем анкеты, соответствующие любому из выбранных вариантов", verified: "Только подтверждённые", age: "Возраст", from: "От", to: "До",
     ethnicity: "Этническая принадлежность", hair: "Цвет волос", eye: "Цвет глаз", education: "Образование", religion: "Религия",
-    premium: "Только Premium", search: "Поиск...", none: "Варианты не найдены", noProfiles: "Анкеты не найдены", noProfilesHelp: "Измените или очистите фильтры.",
+    premium: "Только Premium", premiumTitle: "Premium-фильтры", premiumText: "Оформите Premium, чтобы открыть расширенные фильтры и точнее искать подходящие анкеты.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Закрыть предложение Premium", search: "Поиск...", none: "Варианты не найдены", noProfiles: "Анкеты не найдены", noProfilesHelp: "Измените или очистите фильтры.",
     loadMore: "Показать ещё", loading: "Загрузка ...", locationHidden: "Местоположение скрыто", message: "Написать", like: "Нравится", liked: "Liked",
     ageError: "Минимальный возраст не может быть больше максимального.", failed: "Не удалось загрузить каталог.", actionFailed: "Не удалось выполнить действие.",
+    dailyLikeLimit: "Дневной лимит лайков исчерпан. Новые лайки будут доступны завтра.", dailyChatLimit: "Дневной лимит новых чатов исчерпан. Новые диалоги будут доступны завтра.",
+    profileUnavailable: "Этот профиль больше недоступен.", chatUnavailable: "Сейчас не удалось открыть этот диалог.",
   },
   es: {
     browse: "Explorar perfiles", collections: "Colecciones", all: "Todos", day: "día", days: "días", month: "mes",
     filters: "Filtros", allFilters: "Todos los filtros", closeFilters: "Cerrar filtros", clear: "Borrar todo", apply: "Aplicar filtros",
-    country: "País", city: "Ciudad", anyCountry: "Cualquier país", cityFirst: "Selecciona primero un país",
+    country: "País", city: "Ciudad", anyCountry: "Cualquier país", cityFirst: "Selecciona primero un país", cityPlaceholder: "Empieza a escribir una ciudad...",
     profileType: "Tipo de perfil", donor: "Donante", lookingFor: "Busca", allTypes: "Todos los tipos",
     matches: "Muestra perfiles que coincidan con cualquiera de estas opciones", verified: "Solo verificados", age: "Edad", from: "Desde", to: "Hasta",
     ethnicity: "Origen étnico", hair: "Color de pelo", eye: "Color de ojos", education: "Educación", religion: "Religión",
-    premium: "Solo Premium", search: "Buscar...", none: "No se encontraron opciones", noProfiles: "No se encontraron perfiles", noProfilesHelp: "Cambia o borra los filtros.",
+    premium: "Solo Premium", premiumTitle: "Filtros Premium", premiumText: "Elige Premium para desbloquear filtros avanzados y encontrar perfiles más compatibles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Cerrar oferta Premium", search: "Buscar...", none: "No se encontraron opciones", noProfiles: "No se encontraron perfiles", noProfilesHelp: "Cambia o borra los filtros.",
     loadMore: "Mostrar más", loading: "Cargando ...", locationHidden: "Ubicación oculta", message: "Escribir", like: "Me gusta", liked: "Liked",
     ageError: "La edad mínima no puede superar la máxima.", failed: "No se pudo cargar el catálogo.", actionFailed: "No se pudo completar la acción.",
+    dailyLikeLimit: "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana.", dailyChatLimit: "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
+    profileUnavailable: "Este perfil ya no está disponible.", chatUnavailable: "No se puede abrir esta conversación ahora mismo.",
+  },
+  pt: {
+    browse: "Explorar perfis", collections: "Coleções", all: "Todos", day: "dia", days: "dias", month: "mês",
+    filters: "Filtros", allFilters: "Todos os filtros", closeFilters: "Fechar filtros", clear: "Limpar tudo", apply: "Aplicar filtros",
+    country: "País", city: "Cidade", anyCountry: "Qualquer país", cityFirst: "Selecione um único país para filtrar por cidade", cityPlaceholder: "Comece a digitar o nome de uma cidade...",
+    profileType: "Tipo de perfil", donor: "Doador", lookingFor: "Procurando", allTypes: "Todos os tipos",
+    matches: "Mostra perfis que correspondem a qualquer uma dessas opções", verified: "Somente verificados", age: "Idade", from: "De", to: "Até",
+    ethnicity: "Etnia", hair: "Cor do cabelo", eye: "Cor dos olhos", education: "Educação", religion: "Religião",
+    premium: "Somente Premium", premiumTitle: "Filtros Premium", premiumText: "Escolha o Premium para desbloquear filtros avançados e encontrar perfis mais compatíveis.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Fechar oferta Premium", search: "Buscar...", none: "Nenhuma opção encontrada", noProfiles: "Nenhum perfil encontrado", noProfilesHelp: "Tente alterar ou limpar os filtros.",
+    loadMore: "Carregar mais", loading: "Carregando ...", locationHidden: "Localização oculta", message: "Mensagem", like: "Curtir", liked: "Liked",
+    ageError: "A idade mínima não pode ser maior que a idade máxima.", failed: "Não foi possível carregar o catálogo.", actionFailed: "Não foi possível concluir esta ação.",
+    dailyLikeLimit: "Você atingiu o limite diário de curtidas. Você pode curtir mais perfis amanhã.", dailyChatLimit: "Você atingiu o limite diário de novos chats. Você pode iniciar mais chats amanhã.",
+    profileUnavailable: "Este perfil não está mais disponível.", chatUnavailable: "Esta conversa não pode ser aberta no momento.",
+  },
+  fr: {
+    browse: "Parcourir les profils", collections: "Collections", all: "Tous", day: "jour", days: "jours", month: "mois",
+    filters: "Filtres", allFilters: "Tous les filtres", closeFilters: "Fermer les filtres", clear: "Tout effacer", apply: "Appliquer les filtres",
+    country: "Pays", city: "Ville", anyCountry: "Tout pays", cityFirst: "Sélectionnez un seul pays pour filtrer par ville", cityPlaceholder: "Commencez à taper le nom d'une ville...",
+    profileType: "Type de profil", donor: "Donneur", lookingFor: "Recherche", allTypes: "Tous les types",
+    matches: "Affiche les profils correspondant à l'une de ces options", verified: "Vérifiés uniquement", age: "Âge", from: "De", to: "À",
+    ethnicity: "Origine ethnique", hair: "Couleur de cheveux", eye: "Couleur des yeux", education: "Éducation", religion: "Religion",
+    premium: "Premium uniquement", premiumTitle: "Filtres Premium", premiumText: "Choisissez Premium pour débloquer des filtres avancés et trouver des profils plus compatibles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Fermer l'offre Premium", search: "Rechercher...", none: "Aucune option trouvée", noProfiles: "Aucun profil trouvé", noProfilesHelp: "Essayez de modifier ou d'effacer les filtres.",
+    loadMore: "Charger plus", loading: "Chargement ...", locationHidden: "Localisation masquée", message: "Message", like: "J'aime", liked: "Liked",
+    ageError: "L'âge minimum ne peut pas être supérieur à l'âge maximum.", failed: "Impossible de charger le catalogue.", actionFailed: "Cette action n'a pas pu être effectuée.",
+    dailyLikeLimit: "Vous avez atteint la limite quotidienne de « J'aime ». Vous pourrez aimer d'autres profils demain.", dailyChatLimit: "Vous avez atteint la limite quotidienne de nouveaux chats. Vous pourrez démarrer d'autres chats demain.",
+    profileUnavailable: "Ce profil n'est plus disponible.", chatUnavailable: "Cette conversation ne peut pas être ouverte pour le moment.",
+  },
+  de: {
+    browse: "Profile durchsuchen", collections: "Sammlungen", all: "Alle", day: "Tag", days: "Tage", month: "Monat",
+    filters: "Filter", allFilters: "Alle Filter", closeFilters: "Filter schließen", clear: "Alles löschen", apply: "Filter anwenden",
+    country: "Land", city: "Stadt", anyCountry: "Beliebiges Land", cityFirst: "Wählen Sie ein einzelnes Land, um nach Stadt zu filtern", cityPlaceholder: "Beginnen Sie, einen Stadtnamen einzugeben...",
+    profileType: "Profiltyp", donor: "Spender", lookingFor: "Sucht", allTypes: "Alle Typen",
+    matches: "Zeigt Profile, die einer dieser Optionen entsprechen", verified: "Nur verifizierte", age: "Alter", from: "Von", to: "Bis",
+    ethnicity: "Ethnizität", hair: "Haarfarbe", eye: "Augenfarbe", education: "Bildung", religion: "Religion",
+    premium: "Nur Premium", premiumTitle: "Premium-Filter", premiumText: "Wählen Sie Premium, um erweiterte Filter freizuschalten und besser passende Profile zu finden.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Premium-Angebot schließen", search: "Suchen...", none: "Keine Optionen gefunden", noProfiles: "Keine Profile gefunden", noProfilesHelp: "Versuchen Sie, die Filter zu ändern oder zu löschen.",
+    loadMore: "Mehr laden", loading: "Wird geladen ...", locationHidden: "Standort verborgen", message: "Nachricht", like: "Gefällt mir", liked: "Liked",
+    ageError: "Das Mindestalter darf nicht höher sein als das Höchstalter.", failed: "Der Katalog konnte nicht geladen werden.", actionFailed: "Diese Aktion konnte nicht abgeschlossen werden.",
+    dailyLikeLimit: "Sie haben das heutige Like-Limit erreicht. Sie können morgen weitere Profile liken.", dailyChatLimit: "Sie haben das heutige Limit für neue Chats erreicht. Sie können morgen weitere Chats starten.",
+    profileUnavailable: "Dieses Profil ist nicht mehr verfügbar.", chatUnavailable: "Diese Unterhaltung kann derzeit nicht geöffnet werden.",
+  },
+  it: {
+    browse: "Sfoglia profili", collections: "Raccolte", all: "Tutti", day: "giorno", days: "giorni", month: "mese",
+    filters: "Filtri", allFilters: "Tutti i filtri", closeFilters: "Chiudi filtri", clear: "Cancella tutto", apply: "Applica filtri",
+    country: "Paese", city: "Città", anyCountry: "Qualsiasi paese", cityFirst: "Seleziona un solo paese per filtrare per città", cityPlaceholder: "Inizia a digitare il nome di una città...",
+    profileType: "Tipo di profilo", donor: "Donatore", lookingFor: "Cerca", allTypes: "Tutti i tipi",
+    matches: "Mostra i profili che corrispondono a una qualsiasi di queste opzioni", verified: "Solo verificati", age: "Età", from: "Da", to: "A",
+    ethnicity: "Etnia", hair: "Colore dei capelli", eye: "Colore degli occhi", education: "Istruzione", religion: "Religione",
+    premium: "Solo Premium", premiumTitle: "Filtri Premium", premiumText: "Scegli Premium per sbloccare filtri avanzati e trovare profili più compatibili.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Chiudi offerta Premium", search: "Cerca...", none: "Nessuna opzione trovata", noProfiles: "Nessun profilo trovato", noProfilesHelp: "Prova a modificare o cancellare i filtri.",
+    loadMore: "Carica altro", loading: "Caricamento ...", locationHidden: "Posizione nascosta", message: "Messaggio", like: "Mi piace", liked: "Liked",
+    ageError: "L'età minima non può essere maggiore dell'età massima.", failed: "Impossibile caricare il catalogo.", actionFailed: "Non è stato possibile completare questa azione.",
+    dailyLikeLimit: "Hai raggiunto il limite giornaliero di Mi piace. Potrai mettere Mi piace ad altri profili domani.", dailyChatLimit: "Hai raggiunto il limite giornaliero di nuove chat. Potrai avviare altre chat domani.",
+    profileUnavailable: "Questo profilo non è più disponibile.", chatUnavailable: "Questa conversazione non può essere aperta al momento.",
+  },
+  pl: {
+    browse: "Przeglądaj profile", collections: "Kolekcje", all: "Wszystkie", day: "dzień", days: "dni", month: "miesiąc",
+    filters: "Filtry", allFilters: "Wszystkie filtry", closeFilters: "Zamknij filtry", clear: "Wyczyść wszystko", apply: "Zastosuj filtry",
+    country: "Kraj", city: "Miasto", anyCountry: "Dowolny kraj", cityFirst: "Wybierz jeden kraj, aby filtrować według miasta", cityPlaceholder: "Zacznij wpisywać nazwę miasta...",
+    profileType: "Typ profilu", donor: "Dawca", lookingFor: "Szuka", allTypes: "Wszystkie typy",
+    matches: "Pokazuje profile pasujące do dowolnej z tych opcji", verified: "Tylko zweryfikowani", age: "Wiek", from: "Od", to: "Do",
+    ethnicity: "Pochodzenie etniczne", hair: "Kolor włosów", eye: "Kolor oczu", education: "Wykształcenie", religion: "Religia",
+    premium: "Tylko Premium", premiumTitle: "Filtry Premium", premiumText: "Wybierz Premium, aby odblokować zaawansowane filtry i znaleźć bardziej dopasowane profile.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Zamknij ofertę Premium", search: "Szukaj...", none: "Nie znaleziono opcji", noProfiles: "Nie znaleziono profili", noProfilesHelp: "Spróbuj zmienić lub wyczyścić filtry.",
+    loadMore: "Załaduj więcej", loading: "Ładowanie ...", locationHidden: "Lokalizacja ukryta", message: "Wiadomość", like: "Polub", liked: "Liked",
+    ageError: "Minimalny wiek nie może być większy niż maksymalny.", failed: "Nie udało się załadować katalogu.", actionFailed: "Nie udało się wykonać tej czynności.",
+    dailyLikeLimit: "Osiągnięto dzisiejszy limit polubień. Możesz polubić więcej profili jutro.", dailyChatLimit: "Osiągnięto dzisiejszy limit nowych czatów. Możesz rozpocząć więcej czatów jutro.",
+    profileUnavailable: "Ten profil nie jest już dostępny.", chatUnavailable: "Tej rozmowy nie można teraz otworzyć.",
   },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
@@ -2619,9 +3613,9 @@ const catalogPhotoUrls = (item: Row) => {
   const urls: string[] = [];
   const add = (value: unknown) => {
     const url = typeof value === "string"
-      ? value.trim()
+      ? firstAvatarText(value)
       : value && typeof value === "object"
-        ? catalogText((value as Row).publicUrl ?? (value as Row).url)
+        ? firstAvatarText((value as Row).publicUrl, (value as Row).url)
         : "";
     if (url && url !== "—" && !urls.includes(url)) urls.push(url);
   };
@@ -2662,18 +3656,18 @@ function CatalogCard({
   const [photoIndex, setPhotoIndex] = useState(0);
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<Set<string>>(() => new Set());
   const name = catalogText(item.displayName ?? data.displayName, "LetsBeParents member");
-  const age = catalogText(item.age ?? data.age);
-  const location = [item.city ?? data.city, item.countryName ?? data.countryName ?? item.country ?? data.country]
+  const age = profileAge(item);
+ const location = [item.city ?? data.city, profileCountry(item.countryName ?? data.countryName ?? item.country ?? data.country, legacyLocaleOf(locale))]
     .filter(Boolean).map(String).join(", ");
   const donorTypes = catalogList(item.donorType ?? data.donorType);
   const lookingFor = catalogList(item.lookingFor ?? data.lookingFor ?? item.recipientType ?? data.recipientType);
-  const verified = catalogBoolean(item.isVerified ?? data.isVerified);
+  const verified = catalogBoolean(item.isVerified);
   const videoVerified = catalogBoolean(item.isVideoVerified ?? data.isVideoVerified);
   const liked = catalogBoolean(item.likedByViewer ?? data.likedByViewer);
   const id = catalogText(item.id ?? data.id);
-  const detailPath = `/${locale}/catalog/${encodeURIComponent(id)}`;
+  const detailPath = `/${locale}/profile/${encodeURIComponent(id)}`;
   const title = age ? `${name}, ${age}` : name;
-  const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  const initials = userInitials(name);
   const activePhoto = photos[photoIndex];
   const movePhoto = (direction: number) => setPhotoIndex((current) => (current + direction + photos.length) % photos.length);
   return (
@@ -2699,7 +3693,7 @@ function CatalogCard({
             <button type="button" aria-label={`${copy.message} ${name}`} onClick={() => onMessage(item)}>
               <svg className="catalog-message-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" /></svg>
             </button>
-            <button type="button" className={liked ? "active" : ""} aria-label={`${liked ? copy.liked : copy.like} ${name}`} aria-pressed={liked} onClick={() => { if (!liked) onLike(item); }}>
+            <button type="button" className={liked ? "active" : ""} aria-label={`${liked ? copy.liked : copy.like} ${name}`} aria-pressed={liked} disabled={liked} onClick={() => { if (!liked) onLike(item); }}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /><path d="M7 10v12" /></svg>
             </button>
           </div>
@@ -2754,6 +3748,7 @@ function CatalogFilterModal({
   cities,
   premium,
   onPremium,
+  premiumPromptOpen,
 }: {
   locale: CookieLocale;
   value: CatalogFilters;
@@ -2764,15 +3759,19 @@ function CatalogFilterModal({
   cities: CatalogOption[];
   premium: boolean;
   onPremium: () => void;
+  premiumPromptOpen: boolean;
 }) {
   const copy = CATALOG_COPY[locale];
   const [openField, setOpenField] = useState("");
   const [query, setQuery] = useState("");
+  const [cityQuery, setCityQuery] = useState(catalogText(value.city));
+  const [cityActiveIndex, setCityActiveIndex] = useState(-1);
+  const [dropdownActiveIndex, setDropdownActiveIndex] = useState(-1);
   const set = <K extends keyof CatalogFilters>(key: K, next: CatalogFilters[K]) => onChange({ ...value, [key]: next });
   useEffect(() => {
     document.body.classList.add("catalog-filter-open");
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented || premiumPromptOpen) return;
       if (openField) setOpenField("");
       else onClose();
     };
@@ -2781,7 +3780,30 @@ function CatalogFilterModal({
       document.body.classList.remove("catalog-filter-open");
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [onClose, openField]);
+  }, [onClose, openField, premiumPromptOpen]);
+  useEffect(() => {
+    if (!openField) return;
+    const closeOutside = (event: globalThis.PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const activeWrap = document.querySelector(`[data-catalog-filter-field="${openField}"]`);
+      if (activeWrap?.contains(target)) return;
+      setOpenField("");
+      setQuery("");
+      setDropdownActiveIndex(-1);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [openField]);
+  useEffect(() => {
+    setCityQuery(catalogText(value.city));
+    setCityActiveIndex(-1);
+  }, [value.city, value.country.join(",")]);
+  useEffect(() => {
+    if (!openField) return;
+    const index = openField === "city" ? cityActiveIndex : dropdownActiveIndex;
+    document.getElementById(`catalog-filter-${openField}-option-${index}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [openField, cityActiveIndex, dropdownActiveIndex, query, cityQuery]);
   const fieldOptions = (field: string) => field === "country" ? countries : field === "city" ? cities : CATALOG_ENUM_OPTIONS[field] || [];
   const selectedValues = (field: string) => {
     if (["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)) return value[field as keyof CatalogFilters] as string[];
@@ -2794,11 +3816,90 @@ function CatalogFilterModal({
       const current = value[key];
       const next = current.includes(optionValue) ? current.filter((item) => item !== optionValue) : [...current, optionValue];
       onChange({ ...value, [key]: next, ...(key === "country" ? { city: "" } : {}) });
+      if (key === "country") { setCityQuery(""); setCityActiveIndex(-1); }
     } else {
       const key = field as "city" | "ethnicity" | "hairColor" | "eyeColor" | "education" | "religion";
       set(key, value[key] === optionValue ? "" : optionValue);
       setOpenField("");
+      setDropdownActiveIndex(-1);
     }
+  };
+  const cityField = () => {
+    const disabled = value.country.length !== 1;
+    const controlId = "catalog-filter-city";
+    const labelId = `${controlId}-label`;
+    const selectedCountry = value.country[0] || "";
+ const countryLabel = countries.find((option) => option.value === selectedCountry)?.label || profileCountry(selectedCountry, legacyLocaleOf(locale));
+    const term = cityQuery.trim().toLowerCase();
+    const filtered = term ? cities.filter((option) => option.label.toLowerCase().includes(term) || option.value.toLowerCase().includes(term)).slice(0, 24) : [];
+    const dropdownOpen = openField === "city" && !disabled && filtered.length > 0;
+    const activeIndex = filtered.length ? Math.min(cityActiveIndex, filtered.length - 1) : -1;
+    const chooseCity = (option: CatalogOption) => {
+      set("city", option.value);
+      setCityQuery(option.label);
+      setCityActiveIndex(-1);
+      setOpenField("");
+    };
+    return (
+      <div className={`catalog-filter-field catalog-city-field${disabled ? " disabled" : ""}`} key="city">
+        <label id={labelId} htmlFor={controlId}>{copy.city}</label>
+        <div className="catalog-filter-select-wrap" data-catalog-filter-field="city">
+          <input
+            id={controlId}
+            className="catalog-city-autocomplete"
+            type="text"
+            role="combobox"
+            value={disabled ? "" : cityQuery}
+            disabled={disabled}
+            placeholder={disabled ? copy.cityFirst : copy.cityPlaceholder}
+            aria-labelledby={labelId}
+            aria-autocomplete="list"
+            aria-expanded={dropdownOpen}
+            aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
+            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
+
+            autoComplete="off"
+            onFocus={() => { if (!disabled) setOpenField("city"); }}
+            onKeyDown={(event) => {
+              if (disabled) return;
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setOpenField("city");
+                setCityActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setCityActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
+              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
+                event.preventDefault();
+                chooseCity(filtered[activeIndex]);
+              } else if (event.key === "Escape" && openField === "city") {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenField("");
+              }
+            }}
+            onChange={(event) => {
+              const next = event.target.value;
+              setCityQuery(next);
+              set("city", next);
+              setCityActiveIndex(-1);
+              setOpenField("city");
+            }}
+          />
+          {dropdownOpen && (
+            <div id={`${controlId}-options`} className="catalog-filter-dropdown catalog-city-dropdown" role="listbox" aria-labelledby={labelId}>
+              <section>
+                {filtered.map((option, index) => {
+                  const [name, rest] = option.label.split(/,\s*/, 2);
+                  const active = index === activeIndex;
+                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={option.value === value.city} className={`${option.value === value.city ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setCityActiveIndex(index)} onClick={() => chooseCity(option)}><span className="catalog-city-option-name">{name}</span>{countryLabel || rest ? <span className="catalog-city-option-country">, {countryLabel || rest}</span> : null}</button>;
+                })}
+              </section>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
   const filterField = (field: string, label: string, placeholder: string, options: { premium?: boolean; disabled?: boolean; description?: string } = {}) => {
     const locked = Boolean(options.premium && !premium);
@@ -2806,31 +3907,83 @@ function CatalogFilterModal({
     const allOptions = fieldOptions(field);
     const selectedLabels = selected.map((token) => allOptions.find((option) => option.value === token)?.label || catalogOptionLabel(field, token));
     const filtered = allOptions.filter((option) => option.label.toLowerCase().startsWith(query.trim().toLowerCase()) || option.value.toLowerCase().startsWith(query.trim().toLowerCase()));
+    const controlId = `catalog-filter-${field}`;
+    const labelId = `${controlId}-label`;
+    const valueId = `${controlId}-value`;
+    const premiumId = `${controlId}-premium`;
+    const dropdownOpen = openField === field && !locked && !options.disabled;
+    const activeIndex = filtered.length ? Math.min(dropdownActiveIndex, filtered.length - 1) : -1;
     return (
       <div className={`catalog-filter-field${options.disabled ? " disabled" : ""}${field === "lookingFor" ? " looking-field" : ""}`} key={field}>
-        <label>{label}</label>
-        <div className="catalog-filter-select-wrap">
+        <label id={labelId} htmlFor={controlId}>{label}</label>
+        <div className="catalog-filter-select-wrap" data-catalog-filter-field={field}>
           <button
+            id={controlId}
             className={`catalog-filter-select${locked ? " premium" : ""}`}
             type="button"
             disabled={options.disabled}
-            aria-expanded={openField === field}
+            aria-labelledby={`${labelId} ${valueId}${locked ? ` ${premiumId}` : ""}`}
+            aria-haspopup={locked || options.disabled ? undefined : "listbox"}
+            aria-expanded={locked || options.disabled ? undefined : dropdownOpen}
+            aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
+            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
             onClick={() => {
               if (locked) { onPremium(); return; }
               setOpenField((current) => current === field ? "" : field);
               setQuery("");
+              setDropdownActiveIndex(-1);
+            }}
+            onKeyDown={(event) => {
+              if (locked || options.disabled) return;
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setOpenField(field);
+                setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setOpenField(field);
+                setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
+              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
+                event.preventDefault();
+                choose(field, filtered[activeIndex].value);
+              } else if (event.key === "Escape" && dropdownOpen) {
+                event.preventDefault();
+                event.stopPropagation();
+                setOpenField("");
+                setQuery("");
+                setDropdownActiveIndex(-1);
+              }
             }}
           >
-            {selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : <span>{placeholder}</span>}
-            {locked ? <em><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>{copy.premium}</em> : !options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
+            <span id={valueId} className={`catalog-filter-value${selectedLabels.length ? "" : " placeholder"}`}>{selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : placeholder}</span>
+            {locked ? <span id={premiumId} className="catalog-filter-premium-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg><span>{copy.premium}</span></span> : null}
+            {!options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
           </button>
-          {openField === field && !locked && !options.disabled && (
-            <div className="catalog-filter-dropdown" role="listbox" aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
-              <div><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /></div>
+          {dropdownOpen && (
+            <div id={`${controlId}-options`} className="catalog-filter-dropdown" role="listbox" aria-labelledby={labelId} aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
+              <div><input autoFocus value={query} role="combobox" aria-expanded={dropdownOpen} aria-controls={`${controlId}-options`} aria-activedescendant={filtered.length && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined} aria-autocomplete="list" onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
+                } else if (event.key === "Enter" && filtered[activeIndex]) {
+                  event.preventDefault();
+                  choose(field, filtered[activeIndex].value);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setOpenField("");
+                  setQuery("");
+                  setDropdownActiveIndex(-1);
+                }
+              }} onChange={(event) => { setQuery(event.target.value); setDropdownActiveIndex(-1); }} placeholder={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} aria-label={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} /></div>
               <section>
-                {filtered.length ? filtered.map((option) => {
+                {filtered.length ? filtered.map((option, index) => {
                   const isSelected = selected.includes(option.value);
-                  return <button type="button" role="option" aria-selected={isSelected} className={isSelected ? "selected" : ""} key={option.value} onClick={() => choose(field, option.value)}><i aria-hidden="true" />{option.icon ? <span>{option.icon}</span> : null}<span>{option.label}</span></button>;
+                  const active = index === activeIndex;
+                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={isSelected} className={`${isSelected ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setDropdownActiveIndex(index)} onClick={() => choose(field, option.value)}><i aria-hidden="true" />{option.icon ? <span>{option.icon}</span> : null}<span>{option.label}</span></button>;
                 }) : <p>{copy.none}</p>}
               </section>
             </div>
@@ -2847,7 +4000,7 @@ function CatalogFilterModal({
         <header><h2 id="catalog-filter-title">{copy.allFilters}</h2><button type="button" aria-label={copy.closeFilters} onClick={onClose}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></header>
         <div className="catalog-filter-scroll"><div className="catalog-filter-content">
           {filterField("country", copy.country, copy.anyCountry)}
-          {filterField("city", copy.city, copy.cityFirst, { disabled: value.country.length !== 1 })}
+          {cityField()}
           {filterField("profileTypes", copy.profileType, copy.allTypes)}
           {filterField("donorTypes", copy.donor, copy.allTypes)}
           {filterField("lookingFor", copy.lookingFor, copy.allTypes, { description: copy.matches })}
@@ -2860,12 +4013,32 @@ function CatalogFilterModal({
           {filterField("religion", copy.religion, "—", { premium: true })}
         </div></div>
         <footer>
-          <button type="button" className="catalog-filter-clear" hidden={activeCatalogFilterCount(value) === 0} onClick={() => onChange(emptyCatalogFilters())}>{copy.clear}</button>
+          <button type="button" className="catalog-filter-clear" onClick={() => { onChange(emptyCatalogFilters()); setOpenField(""); setQuery(""); setDropdownActiveIndex(-1); setCityActiveIndex(-1); }}>{copy.clear}</button>
           <button type="button" className="catalog-filter-apply" onClick={onApply}>{copy.apply}</button>
         </footer>
       </section>
     </div>
   );
+}
+
+function useCatalogCities(country: string, query: string, enabled: boolean): CatalogOption[] {
+  const [result, setResult] = useState<{ key: string; cities: CatalogOption[] }>({ key: "", cities: [] });
+  const term = query.trim();
+  const key = enabled && country && term ? JSON.stringify([country, term]) : "";
+  useEffect(() => {
+    if (!key) return;
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({ country, q: term, limit: "200" });
+      api.get<{ cities?: Row[] }>(`/member/catalog/filter-options?${params}`)
+        .then((data) => {
+          if (alive) setResult({ key, cities: (data.cities || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })) });
+        })
+        .catch(() => { if (alive) setResult({ key, cities: [] }); });
+    }, 200);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [country, key, term]);
+  return key && result.key === key ? result.cities : [];
 }
 
 function Catalog({ session }: { session: Session }) {
@@ -2886,8 +4059,10 @@ function Catalog({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  const [premiumPromptOpen, setPremiumPromptOpen] = useState(false);
   const loadMoreSentinel = useRef<HTMLDivElement | null>(null);
-  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; cities: CatalogOption[]; premium: boolean }>({ countries: [], cities: [], premium: Boolean(session?.user.isPremium) });
+  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; premium: boolean }>({ countries: [], premium: catalogBoolean(session?.user.isPremium) });
+  const cities = useCatalogCities(draftFilters.country.length === 1 ? draftFilters.country[0] : "", draftFilters.city, filterOpen);
   const querySignature = JSON.stringify([period, filters]);
   useEffect(() => {
     let alive = true;
@@ -2921,7 +4096,7 @@ function Catalog({ session }: { session: Session }) {
     return () => { alive = false; };
   }, [copy.failed, offset, querySignature]);
   useEffect(() => {
-    if (!filterOpen || catalogOptions.countries.length) return;
+    if (!filterOpen) return;
     let alive = true;
     api.get<{ countries?: Row[]; isPremium?: unknown }>("/member/catalog/filter-options?limit=200")
       .then((data) => {
@@ -2929,49 +4104,51 @@ function Catalog({ session }: { session: Session }) {
         setCatalogOptions((current) => ({
           ...current,
           countries: (data.countries || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })),
-          premium: catalogBoolean(data.isPremium) || current.premium,
+          premium: data.isPremium === undefined ? current.premium : catalogBoolean(data.isPremium),
         }));
       })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [catalogOptions.countries.length, filterOpen]);
-  useEffect(() => {
-    if (!filterOpen || draftFilters.country.length !== 1) {
-      setCatalogOptions((current) => current.cities.length ? { ...current, cities: [] } : current);
-      return;
-    }
-    let alive = true;
-    api.get<{ cities?: Row[] }>(`/member/catalog/filter-options?country=${encodeURIComponent(draftFilters.country[0])}&limit=200`)
-      .then((data) => alive && setCatalogOptions((current) => ({ ...current, cities: (data.cities || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })) })))
-      .catch(() => undefined);
-    return () => { alive = false; };
-  }, [draftFilters.country, filterOpen]);
+  }, [filterOpen]);
   const persist = (nextFilters: CatalogFilters, nextPeriod = period) => {
     try { sessionStorage.setItem(storageKey, JSON.stringify({ period: nextPeriod, filters: nextFilters })); } catch { /* optional */ }
   };
-  const requireVerified = () => {
-    if (session?.user.profileVerified === true) return true;
-    navigate(`/${locale}/verification`);
-    return false;
-  };
   const like = async (item: Row) => {
-    if (!requireVerified()) return;
     const id = catalogText(item.id);
     if (catalogBoolean(item.likedByViewer ?? catalogData(item).likedByViewer)) return;
+    setError("");
     setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: true } : profile));
     try {
-      await api.post(`/member/likes/${encodeURIComponent(id)}`);
-    } catch {
+      const result = await api.post<Row>(`/member/likes/${encodeURIComponent(id)}`);
+      if (catalogBoolean(result.matched) && result.conversationId)
+        navigate(`/${locale}/chat/${encodeURIComponent(String(result.conversationId))}`);
+    } catch (failure) {
       setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: false } : profile));
-      setError(copy.actionFailed);
+      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
+      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
+      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyLikeLimit);
+      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.profileUnavailable);
+      else setError(copy.actionFailed);
     }
   };
   const message = async (item: Row) => {
-    if (!requireVerified()) return;
+    setError("");
     try {
-      await api.post("/member/conversations", { targetProfileId: catalogText(item.id) });
-      navigate(`/${locale}/messages`);
-    } catch { setError(copy.actionFailed); }
+      const conversation = await api.post<Row>("/member/conversations", { targetProfileId: catalogText(item.id) });
+      if (!conversation.conversationId) throw new Error("Conversation was not created");
+      navigate(`/${locale}/chat/${encodeURIComponent(String(conversation.conversationId))}`);
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
+      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
+      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
+      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyChatLimit);
+      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.chatUnavailable);
+      else setError(copy.actionFailed);
+    }
+  };
+  const openPremiumPrompt = () => {
+    setPremiumPromptOpen(true);
   };
   const applyFilters = () => {
     const min = Number(draftFilters.ageMin || 0);
@@ -2982,6 +4159,7 @@ function Catalog({ session }: { session: Session }) {
     setOffset(0);
     persist(next);
     setFilterOpen(false);
+    setPremiumPromptOpen(false);
   };
   const changePeriod = (next: number) => {
     setPeriod(next);
@@ -3005,14 +4183,30 @@ function Catalog({ session }: { session: Session }) {
       <h1>{copy.browse}</h1>
       <div className="catalog-reference-controls">
         <span>{copy.collections}</span>
-        <div className="catalog-reference-periods" role="tablist" aria-label={copy.collections}>
-          <button type="button" role="tab" aria-selected={period === 0} className={period === 0 ? "active" : ""} onClick={() => changePeriod(0)}><span>{copy.all}</span></button>
-          <button type="button" role="tab" aria-selected={period === 1} className={period === 1 ? "active" : ""} onClick={() => changePeriod(1)}><span>1</span><small>{copy.day}</small></button>
-          <button type="button" role="tab" aria-selected={period === 7} className={period === 7 ? "active" : ""} onClick={() => changePeriod(7)}><span>7</span><small>{copy.days}</small></button>
-          <button type="button" role="tab" aria-selected={period === 30} className={period === 30 ? "active" : ""} onClick={() => changePeriod(30)}><span>1</span><small>{copy.month}</small></button>
-        </div>
+        <SlidingTabs
+          className="catalog-reference-periods sliding-tabs--catalog"
+          label={copy.collections}
+          value={period}
+          onChange={changePeriod}
+          options={[
+            { value: 0, label: copy.all },
+            { value: 1, label: `1 ${copy.day}` },
+            { value: 7, label: `7 ${copy.days}` },
+            { value: 30, label: `1 ${copy.month}` },
+          ]}
+        />
         <button className="catalog-reference-filter-button" type="button" aria-label={copy.allFilters} onClick={() => { setDraftFilters({ ...filters }); setFilterOpen(true); }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 4h-7" />
+            <path d="M10 4H3" />
+            <path d="M21 12h-9" />
+            <path d="M8 12H3" />
+            <path d="M21 20h-5" />
+            <path d="M12 20H3" />
+            <path d="M14 2v4" />
+            <path d="M8 10v4" />
+            <path d="M16 18v4" />
+          </svg>
           <span>{copy.filters}</span>{filterCount > 0 ? <b>{filterCount}</b> : null}
         </button>
       </div>
@@ -3020,8 +4214,9 @@ function Catalog({ session }: { session: Session }) {
       {loading && offset === 0 ? <div className="catalog-reference-loading" role="status" aria-label={copy.loading}><span /></div> : error && items.length === 0 ? null : items.length ? (
         <div className="catalog-reference-grid">{items.map((item) => <CatalogCard key={catalogText(item.id)} item={item} locale={locale} onLike={(profile) => void like(profile)} onMessage={(profile) => void message(profile)} />)}</div>
       ) : <div className="catalog-reference-empty"><strong>{copy.noProfiles}</strong><span>{copy.noProfilesHelp}</span></div>}
-      {items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
-      {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={applyFilters} countries={catalogOptions.countries} cities={catalogOptions.cities} premium={catalogOptions.premium} onPremium={() => { setFilterOpen(false); navigate(`/${locale}/subscription`); }} /> : null}
+      {!(loading && offset === 0) && items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
+      {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => { setFilterOpen(false); setPremiumPromptOpen(false); }} onApply={applyFilters} countries={catalogOptions.countries} cities={cities} premium={catalogOptions.premium} onPremium={openPremiumPrompt} premiumPromptOpen={premiumPromptOpen} /> : null}
+{premiumPromptOpen ? <AccountPremium locale={memberLocaleOf(locale)} close={() => setPremiumPromptOpen(false)} /> : null}
     </section>
   );
 }
@@ -3036,315 +4231,624 @@ function Catalog({ session }: { session: Session }) {
 const REPORT_REASONS = ["Spam", "Harassment", "Inappropriate Content", "Fake Profile", "Scam", "Other"];
 
 function CatalogProfile({ session }: { session: Session }) {
-  const { id = "" } = useParams();
-  const locale = localeOf();
-  const navigate = useNavigate();
-  const [profile, setProfile] = useState<Row | null>(null);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  const [reportOpen, setReportOpen] = useState(false);
-  const [reportReason, setReportReason] = useState("");
-  useEffect(() => {
-    const endpoint = session ? "/member/catalog" : "/public/catalog";
-    api
-      .get<Row>(`${endpoint}/${encodeURIComponent(id)}`)
-      .then(setProfile)
-      .catch(() => setError("This profile is not available."));
-  }, [id, session]);
-  if (error)
-    return (
-      <section className="access-card">
-        <p className="error">{error}</p>
-        <Link to={`/${locale}/catalog`}>Back to catalog</Link>
-      </section>
-    );
-  if (!profile) return <LoadingIndicator />;
-  const action = async (kind: "like" | "message" | "block") => {
-    if (!session) {
-      navigate(`/${locale}/auth/login`);
-      return;
-    }
-    try {
-      if (kind === "like")
-        await api.post(`/member/likes/${encodeURIComponent(id)}`);
-      if (kind === "message")
-        await api.post("/member/conversations", { targetProfileId: id });
-      if (kind === "block")
-        await api.post(`/member/blocks/${encodeURIComponent(id)}`, {
-          reason: "Blocked from catalog",
-        });
-      setNotice(
-        kind === "message"
-          ? "Conversation is ready in Messages."
-          : `${kind[0].toUpperCase()}${kind.slice(1)} request completed.`,
-      );
-    } catch {
-      setNotice("This action is not currently available for your account.");
-    }
-  };
-  const submitReport = async () => {
-    if (!session) {
-      navigate(`/${locale}/auth/login`);
-      return;
-    }
-    if (!reportReason) return;
-    try {
-      await api.post(`/member/reports/${encodeURIComponent(id)}`, { reason: reportReason });
-      setNotice("Report submitted - thank you.");
-      setReportOpen(false);
-      setReportReason("");
-    } catch {
-      setNotice("This action is not currently available for your account.");
-    }
-  };
-  const data = (profile.data ?? {}) as Row;
-  const mayInteractWithMembers = session?.user.profileVerified === true;
-  return (
-    <article className="detail-card catalog-profile">
-      <Link to={`/${locale}/catalog`}>← Back to catalog</Link>
-      <div className="profile-summary">
-        {profile.avatarUrl ? (
-          <img src={asText(profile.avatarUrl)} alt="" />
-        ) : (
-          <div className="avatar-placeholder">
-            {asText(profile.displayName).slice(0, 1)}
-          </div>
-        )}
-        <div>
-          <h1>{asText(profile.displayName)}</h1>
-          <p>
-            {[profile.city, profile.country]
-              .filter(Boolean)
-              .map(asText)
-              .join(", ")}
-          </p>
-          <p>
-            {asText(
-              profile.profileType ??
-                data.profileType ??
-                profile.recipientType ??
-                profile.donorType,
-            )}
-          </p>
-        </div>
-      </div>
-      <p className="prose">{asText(data.about ?? data.bio)}</p>
-      {mayInteractWithMembers ? (
-        <>
-          <div className="actions">
-            <button className="primary" onClick={() => action("like")}>
-              Like
-            </button>
-            <button className="secondary" onClick={() => action("message")}>
-              Message
-            </button>
-            <button className="secondary" onClick={() => action("block")}>
-              Block
-            </button>
-            <button className="secondary" onClick={() => setReportOpen((open) => !open)}>
-              Report
-            </button>
-          </div>
-          {reportOpen ? (
-            <div className="report-picker">
-              <select
-                aria-label="Reason"
-                value={reportReason}
-                onChange={(event) => setReportReason(event.target.value)}
-              >
-                <option value="">Select a reason…</option>
-                {REPORT_REASONS.map((reason) => (
-                  <option key={reason} value={reason}>
-                    {reason}
-                  </option>
-                ))}
-              </select>
-              <button className="primary" disabled={!reportReason} onClick={() => void submitReport()}>
-                Submit report
-              </button>
-            </div>
-          ) : null}
-        </>
-      ) : session ? (
-        <div className="access-card">
-          <p>Verify your profile before interacting with members.</p>
-          <Link className="primary" to={`/${locale}/verification`}>
-            Start verification
-          </Link>
-        </div>
-      ) : (
-        <Link className="primary" to={`/${locale}/auth/login`}>
-          Sign in to interact
-        </Link>
-      )}
-      {notice && <p className="notice">{notice}</p>}
-    </article>
-  );
+  return <MemberProfile session={session} locale={legacyLocaleOf(localeOf())} />;
 }
 
 function Likes({ session }: { session: Session }) {
-  const locale = localeOf();
-  const [data, setData] = useState<Row | null>(null);
-  const [tab, setTab] = useState("likesYou");
-  const [visitors, setVisitors] = useState<Row[]>([]);
-  const [visitorsLocked, setVisitorsLocked] = useState(false);
-  const [favourites, setFavourites] = useState<Row | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (session)
-      api
-        .get<Row>("/member/likes")
-        .then(setData)
-        .catch(() => setError("Could not load likes."));
-  }, [session]);
-  useEffect(() => {
-    if (!session || tab !== "likesYou" || !data?.readThroughId) return;
-    void api
-      .post("/member/notifications/likes/read", {
-        readThroughId: Number(data.readThroughId),
-      })
-      .catch(() => undefined);
-  }, [data, session, tab]);
-  useEffect(() => {
-    if (!session || tab !== "visitors") return;
-    api
-      .get<{ items: Row[]; locked?: boolean }>("/member/profile-views")
-      .then((response) => {
-        setVisitors(response.items || []);
-        setVisitorsLocked(Boolean(response.locked));
-      })
-      .catch(() => setError("Could not load profile visitors."));
-  }, [session, tab]);
-  useEffect(() => {
-    if (!session || (tab !== "clinics" && tab !== "lawyers")) return;
-    api
-      .get<Row>("/member/favourites")
-      .then(setFavourites)
-      .catch(() => setError("Could not load liked clinics and lawyers."));
-  }, [session, tab]);
-  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
-  const removeFavourite = async (
-    kind: "clinics" | "lawyers",
-    identifier: unknown,
-  ) => {
-    try {
-      await api.delete(
-        `/member/favourites/${kind}/${encodeURIComponent(asText(identifier))}`,
-      );
-      const refreshed = await api.get<Row>("/member/favourites");
-      setFavourites(refreshed);
-    } catch {
-      setError("Could not remove this item.");
-    }
-  };
-  const tabs = [
-    ["likesYou", "Likes you"],
-    ["matches", "Matches"],
-    ["myLikes", "My likes"],
-    ["visitors", "Visitors"],
-    ["clinics", "Clinics"],
-    ["lawyers", "Lawyers"],
-  ];
-  const profileItems = Array.isArray(data?.[tab])
-    ? (data?.[tab] as Row[])
-    : tab === "visitors"
-      ? visitors
-      : [];
-  const favouriteItems = (favourites?.[tab] as Row[] | undefined) || [];
-  const isLocked =
-    (tab === "likesYou" && Boolean(data?.likesYouLocked)) ||
-    (tab === "visitors" && visitorsLocked);
-  return (
-    <section>
-      <h1>Likes</h1>
-      <nav className="member-tabs">
-        {tabs.map(([key, title]) => (
-          <button
-            className={tab === key ? "active" : ""}
-            key={key}
-            onClick={() => setTab(key)}
-          >
-            {title}
-          </button>
-        ))}
-      </nav>
-      {error && <p className="error">{error}</p>}
-      {isLocked ? (
-        <div className="access-card">
-          <h2>Premium feature</h2>
-          <p>
-            Verify your profile and activate Premium to access this section.
-          </p>
-        </div>
-      ) : tab === "clinics" || tab === "lawyers" ? (
-        <div className="directory-grid">
-          {favouriteItems.map((item, index) => (
-            <article
-              className="directory-card static"
-              key={asText(item.id ?? index)}
-            >
-              {item.logoUrl || item.photoUrl ? (
-                <img src={asText(item.logoUrl ?? item.photoUrl)} alt="" />
-              ) : (
-                <div className="avatar-placeholder">
-                  {asText(item.name).slice(0, 1)}
-                </div>
-              )}
-              <div>
-                <h3>{asText(item.name)}</h3>
-                <p>
-                  {[item.city, item.country]
-                    .filter(Boolean)
-                    .map(asText)
-                    .join(", ")}
-                </p>
-                <button
-                  className="secondary"
-                  onClick={() => void removeFavourite(tab, item.id)}
-                >
-                  Liked
-                </button>
-              </div>
-            </article>
-          ))}
-          {!favouriteItems.length && (
-            <p className="notice">There are no liked {tab}.</p>
-          )}
-        </div>
-      ) : (
-        <div className="profile-grid">
-          {profileItems.map((item, index) => (
-            <article
-              className="profile-card"
-              key={String(item.profileId ?? item.id ?? index)}
-            >
-              {item.avatarUrl ? (
-                <img src={asText(item.avatarUrl)} alt="" />
-              ) : (
-                <div className="avatar-placeholder">
-                  {asText(item.displayName).slice(0, 1)}
-                </div>
-              )}
-              <h2>{asText(item.displayName)}</h2>
-              <p>
-                {[item.city, item.country]
-                  .filter(Boolean)
-                  .map(asText)
-                  .join(", ")}
-              </p>
-            </article>
-          ))}
-          {!profileItems.length && (
-            <p className="notice">There are no entries to display.</p>
-          )}
-        </div>
-      )}
-    </section>
-  );
+  return <MemberLikes session={session} locale={legacyLocaleOf(localeOf())} renderProfileCard={props => <CatalogCard {...props} />} />;
 }
+
+
+const PROFILE_TEXT: Record<CookieLocale, {
+  pageTitle: string;
+  sectionBasic: string;
+  sectionAppearance: string;
+  sectionFamily: string;
+  labelDisplayName: string;
+  labelDateOfBirth: string;
+  labelProfileType: string;
+  optionSelectType: string;
+  optionSingleWoman: string;
+  optionSingleMan: string;
+  optionHeteroCouple: string;
+  optionLesbianCouple: string;
+  optionGayCouple: string;
+  labelLookingFor: string;
+  placeholderCommaList: string;
+  labelCountry: string;
+  labelState: string;
+  labelCity: string;
+  labelOccupation: string;
+  labelEducation: string;
+  labelLanguages: string;
+  placeholderLanguages: string;
+  labelReligion: string;
+  labelEthnicity: string;
+  labelHeight: string;
+  labelWeight: string;
+  labelEyeColor: string;
+  labelHairColor: string;
+  labelSmoking: string;
+  optionNotSpecified: string;
+  optionNever: string;
+  optionOccasionally: string;
+  optionRegularly: string;
+  labelDrinking: string;
+  labelUnits: string;
+  optionMetric: string;
+  optionImperial: string;
+  labelVisibility: string;
+  optionVisible: string;
+  optionHidden: string;
+  labelDonorTypes: string;
+  labelDesiredDonorContact: string;
+  labelAbout: string;
+  buttonSave: string;
+  noticeSaved: string;
+  noticeSaveError: string;
+}> = {
+  en: {
+    pageTitle: "My profile",
+    sectionBasic: "Basic information",
+    sectionAppearance: "Appearance & lifestyle",
+    sectionFamily: "Family-building preferences",
+    labelDisplayName: "Display name",
+    labelDateOfBirth: "Date of birth",
+    labelProfileType: "Profile type",
+    optionSelectType: "Select type",
+    optionSingleWoman: "Single Woman",
+    optionSingleMan: "Single Man",
+    optionHeteroCouple: "Hetero Couple",
+    optionLesbianCouple: "Lesbian Couple",
+    optionGayCouple: "Gay Couple",
+    labelLookingFor: "Looking for",
+    placeholderCommaList: "Separate choices with commas",
+    labelCountry: "Country",
+    labelState: "State / region",
+    labelCity: "City",
+    labelOccupation: "Occupation",
+    labelEducation: "Education",
+    labelLanguages: "Languages",
+    placeholderLanguages: "Separate languages with commas",
+    labelReligion: "Religion",
+    labelEthnicity: "Ethnicity",
+    labelHeight: "Height",
+    labelWeight: "Weight",
+    labelEyeColor: "Eye color",
+    labelHairColor: "Hair color",
+    labelSmoking: "Smoking",
+    optionNotSpecified: "Not specified",
+    optionNever: "Never",
+    optionOccasionally: "Occasionally",
+    optionRegularly: "Regularly",
+    labelDrinking: "Drinking",
+    labelUnits: "Units",
+    optionMetric: "Metric",
+    optionImperial: "Imperial",
+    labelVisibility: "Visibility",
+    optionVisible: "Visible in catalog",
+    optionHidden: "Hidden from catalog",
+    labelDonorTypes: "Donor types",
+    labelDesiredDonorContact: "Desired donor contact",
+    labelAbout: "About",
+    buttonSave: "Save changes",
+    noticeSaved: "Profile saved.",
+    noticeSaveError: "Could not save profile changes. Check the required date of birth and profile values.",
+  },
+  ru: {
+    pageTitle: "Мой профиль",
+    sectionBasic: "Основная информация",
+    sectionAppearance: "Внешность и образ жизни",
+    sectionFamily: "Предпочтения по созданию семьи",
+    labelDisplayName: "Отображаемое имя",
+    labelDateOfBirth: "Дата рождения",
+    labelProfileType: "Тип профиля",
+    optionSelectType: "Выберите тип",
+    optionSingleWoman: "Одинокая женщина",
+    optionSingleMan: "Одинокий мужчина",
+    optionHeteroCouple: "Гетеропара",
+    optionLesbianCouple: "Лесбийская пара",
+    optionGayCouple: "Гей-пара",
+    labelLookingFor: "Кого ищете",
+    placeholderCommaList: "Перечислите варианты через запятую",
+    labelCountry: "Страна",
+    labelState: "Область / регион",
+    labelCity: "Город",
+    labelOccupation: "Профессия",
+    labelEducation: "Образование",
+    labelLanguages: "Языки",
+    placeholderLanguages: "Перечислите языки через запятую",
+    labelReligion: "Религия",
+    labelEthnicity: "Этническая принадлежность",
+    labelHeight: "Рост",
+    labelWeight: "Вес",
+    labelEyeColor: "Цвет глаз",
+    labelHairColor: "Цвет волос",
+    labelSmoking: "Курение",
+    optionNotSpecified: "Не указано",
+    optionNever: "Никогда",
+    optionOccasionally: "Иногда",
+    optionRegularly: "Регулярно",
+    labelDrinking: "Алкоголь",
+    labelUnits: "Единицы измерения",
+    optionMetric: "Метрическая",
+    optionImperial: "Имперская",
+    labelVisibility: "Видимость",
+    optionVisible: "Видим в каталоге",
+    optionHidden: "Скрыт из каталога",
+    labelDonorTypes: "Типы доноров",
+    labelDesiredDonorContact: "Желаемый контакт с донором",
+    labelAbout: "О себе",
+    buttonSave: "Сохранить изменения",
+    noticeSaved: "Профиль сохранён.",
+    noticeSaveError: "Не удалось сохранить изменения профиля. Проверьте обязательную дату рождения и значения профиля.",
+  },
+  es: {
+    pageTitle: "Mi perfil",
+    sectionBasic: "Información básica",
+    sectionAppearance: "Aspecto y estilo de vida",
+    sectionFamily: "Preferencias para formar una familia",
+    labelDisplayName: "Nombre visible",
+    labelDateOfBirth: "Fecha de nacimiento",
+    labelProfileType: "Tipo de perfil",
+    optionSelectType: "Selecciona un tipo",
+    optionSingleWoman: "Mujer soltera",
+    optionSingleMan: "Hombre soltero",
+    optionHeteroCouple: "Pareja heterosexual",
+    optionLesbianCouple: "Pareja de lesbianas",
+    optionGayCouple: "Pareja gay",
+    labelLookingFor: "Qué buscas",
+    placeholderCommaList: "Separa las opciones con comas",
+    labelCountry: "País",
+    labelState: "Estado / región",
+    labelCity: "Ciudad",
+    labelOccupation: "Ocupación",
+    labelEducation: "Educación",
+    labelLanguages: "Idiomas",
+    placeholderLanguages: "Separa los idiomas con comas",
+    labelReligion: "Religión",
+    labelEthnicity: "Etnia",
+    labelHeight: "Altura",
+    labelWeight: "Peso",
+    labelEyeColor: "Color de ojos",
+    labelHairColor: "Color de pelo",
+    labelSmoking: "Tabaco",
+    optionNotSpecified: "No especificado",
+    optionNever: "Nunca",
+    optionOccasionally: "Ocasionalmente",
+    optionRegularly: "Regularmente",
+    labelDrinking: "Alcohol",
+    labelUnits: "Unidades",
+    optionMetric: "Métrico",
+    optionImperial: "Imperial",
+    labelVisibility: "Visibilidad",
+    optionVisible: "Visible en el catálogo",
+    optionHidden: "Oculto del catálogo",
+    labelDonorTypes: "Tipos de donante",
+    labelDesiredDonorContact: "Contacto deseado con el donante",
+    labelAbout: "Sobre ti",
+    buttonSave: "Guardar cambios",
+    noticeSaved: "Perfil guardado.",
+    noticeSaveError: "No se pudieron guardar los cambios del perfil. Revisa la fecha de nacimiento obligatoria y los valores del perfil.",
+  },
+  pt: {
+    pageTitle: "Meu perfil",
+    sectionBasic: "Informações básicas",
+    sectionAppearance: "Aparência e estilo de vida",
+    sectionFamily: "Preferências para formar uma família",
+    labelDisplayName: "Nome de exibição",
+    labelDateOfBirth: "Data de nascimento",
+    labelProfileType: "Tipo de perfil",
+    optionSelectType: "Selecione o tipo",
+    optionSingleWoman: "Mulher solteira",
+    optionSingleMan: "Homem solteiro",
+    optionHeteroCouple: "Casal heterossexual",
+    optionLesbianCouple: "Casal de lésbicas",
+    optionGayCouple: "Casal gay",
+    labelLookingFor: "O que você procura",
+    placeholderCommaList: "Separe as opções com vírgulas",
+    labelCountry: "País",
+    labelState: "Estado / região",
+    labelCity: "Cidade",
+    labelOccupation: "Profissão",
+    labelEducation: "Educação",
+    labelLanguages: "Idiomas",
+    placeholderLanguages: "Separe os idiomas com vírgulas",
+    labelReligion: "Religião",
+    labelEthnicity: "Etnia",
+    labelHeight: "Altura",
+    labelWeight: "Peso",
+    labelEyeColor: "Cor dos olhos",
+    labelHairColor: "Cor do cabelo",
+    labelSmoking: "Fumo",
+    optionNotSpecified: "Não especificado",
+    optionNever: "Nunca",
+    optionOccasionally: "Ocasionalmente",
+    optionRegularly: "Regularmente",
+    labelDrinking: "Bebida alcoólica",
+    labelUnits: "Unidades",
+    optionMetric: "Métrico",
+    optionImperial: "Imperial",
+    labelVisibility: "Visibilidade",
+    optionVisible: "Visível no catálogo",
+    optionHidden: "Oculto do catálogo",
+    labelDonorTypes: "Tipos de doador",
+    labelDesiredDonorContact: "Contato desejado com o doador",
+    labelAbout: "Sobre você",
+    buttonSave: "Salvar alterações",
+    noticeSaved: "Perfil salvo.",
+    noticeSaveError: "Não foi possível salvar as alterações do perfil. Verifique a data de nascimento obrigatória e os valores do perfil.",
+  },
+  fr: {
+    pageTitle: "Mon profil",
+    sectionBasic: "Informations de base",
+    sectionAppearance: "Apparence et mode de vie",
+    sectionFamily: "Préférences pour fonder une famille",
+    labelDisplayName: "Nom affiché",
+    labelDateOfBirth: "Date de naissance",
+    labelProfileType: "Type de profil",
+    optionSelectType: "Choisir un type",
+    optionSingleWoman: "Femme célibataire",
+    optionSingleMan: "Homme célibataire",
+    optionHeteroCouple: "Couple hétéro",
+    optionLesbianCouple: "Couple de lesbiennes",
+    optionGayCouple: "Couple gay",
+    labelLookingFor: "Ce que tu recherches",
+    placeholderCommaList: "Sépare les choix par des virgules",
+    labelCountry: "Pays",
+    labelState: "État / région",
+    labelCity: "Ville",
+    labelOccupation: "Profession",
+    labelEducation: "Formation",
+    labelLanguages: "Langues",
+    placeholderLanguages: "Sépare les langues par des virgules",
+    labelReligion: "Religion",
+    labelEthnicity: "Origine ethnique",
+    labelHeight: "Taille",
+    labelWeight: "Poids",
+    labelEyeColor: "Couleur des yeux",
+    labelHairColor: "Couleur des cheveux",
+    labelSmoking: "Tabac",
+    optionNotSpecified: "Non précisé",
+    optionNever: "Jamais",
+    optionOccasionally: "Occasionnellement",
+    optionRegularly: "Régulièrement",
+    labelDrinking: "Alcool",
+    labelUnits: "Unités",
+    optionMetric: "Métrique",
+    optionImperial: "Impérial",
+    labelVisibility: "Visibilité",
+    optionVisible: "Visible dans le catalogue",
+    optionHidden: "Masqué du catalogue",
+    labelDonorTypes: "Types de donneur",
+    labelDesiredDonorContact: "Contact souhaité avec le donneur",
+    labelAbout: "À propos de toi",
+    buttonSave: "Enregistrer les modifications",
+    noticeSaved: "Profil enregistré.",
+    noticeSaveError: "Impossible d'enregistrer les modifications du profil. Vérifie la date de naissance obligatoire et les valeurs du profil.",
+  },
+  de: {
+    pageTitle: "Mein Profil",
+    sectionBasic: "Grunddaten",
+    sectionAppearance: "Aussehen & Lebensstil",
+    sectionFamily: "Präferenzen zur Familiengründung",
+    labelDisplayName: "Anzeigename",
+    labelDateOfBirth: "Geburtsdatum",
+    labelProfileType: "Profiltyp",
+    optionSelectType: "Typ auswählen",
+    optionSingleWoman: "Alleinstehende Frau",
+    optionSingleMan: "Alleinstehender Mann",
+    optionHeteroCouple: "Heteropaar",
+    optionLesbianCouple: "Lesbisches Paar",
+    optionGayCouple: "Schwules Paar",
+    labelLookingFor: "Wonach du suchst",
+    placeholderCommaList: "Optionen mit Kommas trennen",
+    labelCountry: "Land",
+    labelState: "Bundesland / Region",
+    labelCity: "Stadt",
+    labelOccupation: "Beruf",
+    labelEducation: "Ausbildung",
+    labelLanguages: "Sprachen",
+    placeholderLanguages: "Sprachen mit Kommas trennen",
+    labelReligion: "Religion",
+    labelEthnicity: "Ethnische Zugehörigkeit",
+    labelHeight: "Größe",
+    labelWeight: "Gewicht",
+    labelEyeColor: "Augenfarbe",
+    labelHairColor: "Haarfarbe",
+    labelSmoking: "Rauchen",
+    optionNotSpecified: "Keine Angabe",
+    optionNever: "Nie",
+    optionOccasionally: "Gelegentlich",
+    optionRegularly: "Regelmäßig",
+    labelDrinking: "Alkohol",
+    labelUnits: "Einheiten",
+    optionMetric: "Metrisch",
+    optionImperial: "Imperial",
+    labelVisibility: "Sichtbarkeit",
+    optionVisible: "Im Katalog sichtbar",
+    optionHidden: "Aus dem Katalog verborgen",
+    labelDonorTypes: "Spendertypen",
+    labelDesiredDonorContact: "Gewünschter Kontakt zum Spender",
+    labelAbout: "Über dich",
+    buttonSave: "Änderungen speichern",
+    noticeSaved: "Profil gespeichert.",
+    noticeSaveError: "Die Profiländerungen konnten nicht gespeichert werden. Überprüfe das erforderliche Geburtsdatum und die Profilwerte.",
+  },
+  it: {
+    pageTitle: "Il mio profilo",
+    sectionBasic: "Informazioni di base",
+    sectionAppearance: "Aspetto e stile di vita",
+    sectionFamily: "Preferenze per costruire una famiglia",
+    labelDisplayName: "Nome visualizzato",
+    labelDateOfBirth: "Data di nascita",
+    labelProfileType: "Tipo di profilo",
+    optionSelectType: "Selezioni un tipo",
+    optionSingleWoman: "Donna single",
+    optionSingleMan: "Uomo single",
+    optionHeteroCouple: "Coppia etero",
+    optionLesbianCouple: "Coppia di lesbiche",
+    optionGayCouple: "Coppia gay",
+    labelLookingFor: "Cosa sta cercando",
+    placeholderCommaList: "Separi le opzioni con una virgola",
+    labelCountry: "Paese",
+    labelState: "Stato / regione",
+    labelCity: "Città",
+    labelOccupation: "Occupazione",
+    labelEducation: "Istruzione",
+    labelLanguages: "Lingue",
+    placeholderLanguages: "Separi le lingue con una virgola",
+    labelReligion: "Religione",
+    labelEthnicity: "Etnia",
+    labelHeight: "Altezza",
+    labelWeight: "Peso",
+    labelEyeColor: "Colore degli occhi",
+    labelHairColor: "Colore dei capelli",
+    labelSmoking: "Fumo",
+    optionNotSpecified: "Non specificato",
+    optionNever: "Mai",
+    optionOccasionally: "Occasionalmente",
+    optionRegularly: "Regolarmente",
+    labelDrinking: "Alcol",
+    labelUnits: "Unità di misura",
+    optionMetric: "Metrico",
+    optionImperial: "Imperiale",
+    labelVisibility: "Visibilità",
+    optionVisible: "Visibile nel catalogo",
+    optionHidden: "Nascosto dal catalogo",
+    labelDonorTypes: "Tipi di donatore",
+    labelDesiredDonorContact: "Contatto desiderato con il donatore",
+    labelAbout: "Su di Lei",
+    buttonSave: "Salva modifiche",
+    noticeSaved: "Profilo salvato.",
+    noticeSaveError: "Non è stato possibile salvare le modifiche al profilo. Controlli la data di nascita obbligatoria e i valori del profilo.",
+  },
+  pl: {
+    pageTitle: "Mój profil",
+    sectionBasic: "Podstawowe informacje",
+    sectionAppearance: "Wygląd i styl życia",
+    sectionFamily: "Preferencje dotyczące budowania rodziny",
+    labelDisplayName: "Wyświetlana nazwa",
+    labelDateOfBirth: "Data urodzenia",
+    labelProfileType: "Typ profilu",
+    optionSelectType: "Wybierz typ",
+    optionSingleWoman: "Samotna kobieta",
+    optionSingleMan: "Samotny mężczyzna",
+    optionHeteroCouple: "Para heteroseksualna",
+    optionLesbianCouple: "Para lesbijek",
+    optionGayCouple: "Para gejów",
+    labelLookingFor: "Kogo szukasz",
+    placeholderCommaList: "Oddziel opcje przecinkami",
+    labelCountry: "Kraj",
+    labelState: "Województwo / region",
+    labelCity: "Miasto",
+    labelOccupation: "Zawód",
+    labelEducation: "Wykształcenie",
+    labelLanguages: "Języki",
+    placeholderLanguages: "Oddziel języki przecinkami",
+    labelReligion: "Religia",
+    labelEthnicity: "Pochodzenie etniczne",
+    labelHeight: "Wzrost",
+    labelWeight: "Waga",
+    labelEyeColor: "Kolor oczu",
+    labelHairColor: "Kolor włosów",
+    labelSmoking: "Palenie",
+    optionNotSpecified: "Nie podano",
+    optionNever: "Nigdy",
+    optionOccasionally: "Czasami",
+    optionRegularly: "Regularnie",
+    labelDrinking: "Alkohol",
+    labelUnits: "Jednostki",
+    optionMetric: "Metryczne",
+    optionImperial: "Imperialne",
+    labelVisibility: "Widoczność",
+    optionVisible: "Widoczny w katalogu",
+    optionHidden: "Ukryty z katalogu",
+    labelDonorTypes: "Typy dawcy",
+    labelDesiredDonorContact: "Preferowany kontakt z dawcą",
+    labelAbout: "O tobie",
+    buttonSave: "Zapisz zmiany",
+    noticeSaved: "Profil zapisany.",
+    noticeSaveError: "Nie udało się zapisać zmian w profilu. Sprawdź wymaganą datę urodzenia i wartości profilu.",
+  },
+};
+
+const PHOTOS_TEXT: Record<CookieLocale, {
+  pageTitle: string;
+  uploadPhotoLabel: string;
+  setAvatarCropLabel: string;
+  hintText: string;
+  noticeLoadError: string;
+  noticeUploaded: string;
+  noticeUploadError: string;
+  noticeRemoved: string;
+  noticeRemoveError: string;
+  noticeAvatarSubmitted: string;
+  noticeAvatarError: string;
+  altProfile: string;
+  altCurrentAvatar: string;
+  placeholderPhotoText: string;
+  primaryLabel: string;
+  deleteButton: string;
+  emptyStateText: string;
+}> = {
+  en: {
+    pageTitle: "My photos",
+    uploadPhotoLabel: "Upload photo",
+    setAvatarCropLabel: "Set avatar crop",
+    hintText: "A primary profile photo must be approved before an avatar crop can be submitted.",
+    noticeLoadError: "Could not load photos.",
+    noticeUploaded: "Photo uploaded and sent to moderation.",
+    noticeUploadError: "Could not upload this photo. Use JPEG, PNG or WebP under the allowed size.",
+    noticeRemoved: "Photo removed.",
+    noticeRemoveError: "Could not remove this photo.",
+    noticeAvatarSubmitted: "Avatar submitted for moderation.",
+    noticeAvatarError: "Upload an approved primary profile photo before changing the avatar.",
+    altProfile: "Profile",
+    altCurrentAvatar: "Current avatar",
+    placeholderPhotoText: "Photo",
+    primaryLabel: "Primary · ",
+    deleteButton: "Delete",
+    emptyStateText: "No photos have been uploaded yet.",
+  },
+  ru: {
+    pageTitle: "Мои фото",
+    uploadPhotoLabel: "Загрузить фото",
+    setAvatarCropLabel: "Настроить обрезку аватара",
+    hintText: "Основное фото профиля должно быть одобрено, прежде чем можно будет отправить обрезку аватара.",
+    noticeLoadError: "Не удалось загрузить фотографии.",
+    noticeUploaded: "Фото загружено и отправлено на модерацию.",
+    noticeUploadError: "Не удалось загрузить это фото. Используйте JPEG, PNG или WebP в пределах допустимого размера.",
+    noticeRemoved: "Фото удалено.",
+    noticeRemoveError: "Не удалось удалить это фото.",
+    noticeAvatarSubmitted: "Аватар отправлен на модерацию.",
+    noticeAvatarError: "Загрузите одобренное основное фото профиля, прежде чем менять аватар.",
+    altProfile: "Профиль",
+    altCurrentAvatar: "Текущий аватар",
+    placeholderPhotoText: "Фото",
+    primaryLabel: "Основное · ",
+    deleteButton: "Удалить",
+    emptyStateText: "Фотографии ещё не загружены.",
+  },
+  es: {
+    pageTitle: "Mis fotos",
+    uploadPhotoLabel: "Subir foto",
+    setAvatarCropLabel: "Ajustar recorte del avatar",
+    hintText: "Una foto de perfil principal debe estar aprobada antes de poder enviar un recorte de avatar.",
+    noticeLoadError: "No se pudieron cargar las fotos.",
+    noticeUploaded: "Foto subida y enviada a moderación.",
+    noticeUploadError: "No se pudo subir esta foto. Usa JPEG, PNG o WebP dentro del tamaño permitido.",
+    noticeRemoved: "Foto eliminada.",
+    noticeRemoveError: "No se pudo eliminar esta foto.",
+    noticeAvatarSubmitted: "Avatar enviado a moderación.",
+    noticeAvatarError: "Sube una foto de perfil principal aprobada antes de cambiar el avatar.",
+    altProfile: "Perfil",
+    altCurrentAvatar: "Avatar actual",
+    placeholderPhotoText: "Foto",
+    primaryLabel: "Principal · ",
+    deleteButton: "Eliminar",
+    emptyStateText: "Todavía no se ha subido ninguna foto.",
+  },
+  pt: {
+    pageTitle: "Minhas fotos",
+    uploadPhotoLabel: "Enviar foto",
+    setAvatarCropLabel: "Definir recorte do avatar",
+    hintText: "Uma foto de perfil principal precisa ser aprovada antes que um recorte de avatar possa ser enviado.",
+    noticeLoadError: "Não foi possível carregar as fotos.",
+    noticeUploaded: "Foto enviada e encaminhada para moderação.",
+    noticeUploadError: "Não foi possível enviar esta foto. Use JPEG, PNG ou WebP dentro do tamanho permitido.",
+    noticeRemoved: "Foto removida.",
+    noticeRemoveError: "Não foi possível remover esta foto.",
+    noticeAvatarSubmitted: "Avatar enviado para moderação.",
+    noticeAvatarError: "Envie uma foto de perfil principal aprovada antes de alterar o avatar.",
+    altProfile: "Perfil",
+    altCurrentAvatar: "Avatar atual",
+    placeholderPhotoText: "Foto",
+    primaryLabel: "Principal · ",
+    deleteButton: "Excluir",
+    emptyStateText: "Ainda não há fotos enviadas.",
+  },
+  fr: {
+    pageTitle: "Mes photos",
+    uploadPhotoLabel: "Ajouter une photo",
+    setAvatarCropLabel: "Définir le recadrage de l'avatar",
+    hintText: "Une photo de profil principale doit être approuvée avant de pouvoir envoyer un recadrage d'avatar.",
+    noticeLoadError: "Impossible de charger les photos.",
+    noticeUploaded: "Photo envoyée et transmise à la modération.",
+    noticeUploadError: "Impossible d'envoyer cette photo. Utilise un fichier JPEG, PNG ou WebP dans la taille autorisée.",
+    noticeRemoved: "Photo supprimée.",
+    noticeRemoveError: "Impossible de supprimer cette photo.",
+    noticeAvatarSubmitted: "Avatar envoyé à la modération.",
+    noticeAvatarError: "Envoie une photo de profil principale approuvée avant de changer l'avatar.",
+    altProfile: "Profil",
+    altCurrentAvatar: "Avatar actuel",
+    placeholderPhotoText: "Photo",
+    primaryLabel: "Principale · ",
+    deleteButton: "Supprimer",
+    emptyStateText: "Aucune photo n'a encore été envoyée.",
+  },
+  de: {
+    pageTitle: "Meine Fotos",
+    uploadPhotoLabel: "Foto hochladen",
+    setAvatarCropLabel: "Avatar-Zuschnitt festlegen",
+    hintText: "Ein primäres Profilfoto muss genehmigt sein, bevor ein Avatar-Zuschnitt eingereicht werden kann.",
+    noticeLoadError: "Fotos konnten nicht geladen werden.",
+    noticeUploaded: "Foto hochgeladen und zur Moderation gesendet.",
+    noticeUploadError: "Dieses Foto konnte nicht hochgeladen werden. Verwende JPEG, PNG oder WebP innerhalb der zulässigen Größe.",
+    noticeRemoved: "Foto entfernt.",
+    noticeRemoveError: "Dieses Foto konnte nicht entfernt werden.",
+    noticeAvatarSubmitted: "Avatar zur Moderation eingereicht.",
+    noticeAvatarError: "Lade ein genehmigtes primäres Profilfoto hoch, bevor du den Avatar änderst.",
+    altProfile: "Profil",
+    altCurrentAvatar: "Aktueller Avatar",
+    placeholderPhotoText: "Foto",
+    primaryLabel: "Primär · ",
+    deleteButton: "Löschen",
+    emptyStateText: "Es wurden noch keine Fotos hochgeladen.",
+  },
+  it: {
+    pageTitle: "Le mie foto",
+    uploadPhotoLabel: "Carichi una foto",
+    setAvatarCropLabel: "Imposti il ritaglio dell'avatar",
+    hintText: "Una foto di profilo principale deve essere approvata prima di poter inviare un ritaglio dell'avatar.",
+    noticeLoadError: "Non è stato possibile caricare le foto.",
+    noticeUploaded: "Foto caricata e inviata alla moderazione.",
+    noticeUploadError: "Non è stato possibile caricare questa foto. Utilizzi JPEG, PNG o WebP entro la dimensione consentita.",
+    noticeRemoved: "Foto rimossa.",
+    noticeRemoveError: "Non è stato possibile rimuovere questa foto.",
+    noticeAvatarSubmitted: "Avatar inviato alla moderazione.",
+    noticeAvatarError: "Carichi una foto di profilo principale approvata prima di cambiare l'avatar.",
+    altProfile: "Profilo",
+    altCurrentAvatar: "Avatar attuale",
+    placeholderPhotoText: "Foto",
+    primaryLabel: "Principale · ",
+    deleteButton: "Elimina",
+    emptyStateText: "Non è stata ancora caricata nessuna foto.",
+  },
+  pl: {
+    pageTitle: "Moje zdjęcia",
+    uploadPhotoLabel: "Dodaj zdjęcie",
+    setAvatarCropLabel: "Ustaw kadrowanie awatara",
+    hintText: "Główne zdjęcie profilowe musi zostać zatwierdzone, zanim będzie można przesłać kadrowanie awatara.",
+    noticeLoadError: "Nie udało się wczytać zdjęć.",
+    noticeUploaded: "Zdjęcie przesłane i wysłane do moderacji.",
+    noticeUploadError: "Nie udało się przesłać tego zdjęcia. Użyj pliku JPEG, PNG lub WebP w dozwolonym rozmiarze.",
+    noticeRemoved: "Zdjęcie usunięte.",
+    noticeRemoveError: "Nie udało się usunąć tego zdjęcia.",
+    noticeAvatarSubmitted: "Awatar wysłany do moderacji.",
+    noticeAvatarError: "Prześlij zatwierdzone główne zdjęcie profilowe, zanim zmienisz awatar.",
+    altProfile: "Profil",
+    altCurrentAvatar: "Bieżący awatar",
+    placeholderPhotoText: "Zdjęcie",
+    primaryLabel: "Główne · ",
+    deleteButton: "Usuń",
+    emptyStateText: "Nie przesłano jeszcze żadnych zdjęć.",
+  },
+};
 
 function Profile({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = PROFILE_TEXT[locale] ?? PROFILE_TEXT.en;
   const [data, setData] = useState<Row | null>(null);
   const [draft, setDraft] = useState<Row>({});
   const [notice, setNotice] = useState("");
@@ -3352,7 +4856,7 @@ function Profile({ session }: { session: Session }) {
     if (session)
       api.get<Row>("/member/me").then((result) => {
         setData(result);
-        setDraft((result.profile ?? {}) as Row);
+        setDraft(ownProfileData(result.profile));
       });
   }, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
@@ -3360,11 +4864,9 @@ function Profile({ session }: { session: Session }) {
   const save = async () => {
     try {
       await api.patch("/member/profile", draft);
-      setNotice("Profile saved.");
+      setNotice(text.noticeSaved);
     } catch {
-      setNotice(
-        "Could not save profile changes. Check the required date of birth and profile values.",
-      );
+      setNotice(text.noticeSaveError);
     }
   };
   const field = (key: string) =>
@@ -3385,20 +4887,20 @@ function Profile({ session }: { session: Session }) {
     );
   return (
     <section className="member-form">
-      <h1>My profile</h1>
+      <h1>{text.pageTitle}</h1>
       <MemberLinks locale={locale} />
       {notice && <p className="notice">{notice}</p>}
-      <h2>Basic information</h2>
+      <h2>{text.sectionBasic}</h2>
       <div className="form-grid">
         <label>
-          Display name
+          {text.labelDisplayName}
           <input
             value={field("displayName")}
             onChange={(event) => set("displayName", event.target.value)}
           />
         </label>
         <label>
-          Date of birth
+          {text.labelDateOfBirth}
           <input
             type="date"
             value={field("dateOfBirth")}
@@ -3407,89 +4909,89 @@ function Profile({ session }: { session: Session }) {
           />
         </label>
         <label>
-          Profile type
+          {text.labelProfileType}
           <select
             value={field("profileType")}
             onChange={(event) => set("profileType", event.target.value)}
           >
-            <option value="">Select type</option>
-            <option>Single Woman</option>
-            <option>Single Man</option>
-            <option>Hetero Couple</option>
-            <option>Lesbian Couple</option>
-            <option>Gay Couple</option>
+            <option value="">{text.optionSelectType}</option>
+            <option value="Single Woman">{text.optionSingleWoman}</option>
+            <option value="Single Man">{text.optionSingleMan}</option>
+            <option value="Hetero Couple">{text.optionHeteroCouple}</option>
+            <option value="Lesbian Couple">{text.optionLesbianCouple}</option>
+            <option value="Gay Couple">{text.optionGayCouple}</option>
           </select>
         </label>
         <label>
-          Looking for
+          {text.labelLookingFor}
           <input
             value={listField("lookingFor")}
             onChange={(event) => setList("lookingFor", event.target.value)}
-            placeholder="Separate choices with commas"
+            placeholder={text.placeholderCommaList}
           />
         </label>
         <label>
-          Country
+          {text.labelCountry}
           <input
             value={field("country")}
             onChange={(event) => set("country", event.target.value)}
           />
         </label>
         <label>
-          State / region
+          {text.labelState}
           <input
             value={field("state")}
             onChange={(event) => set("state", event.target.value)}
           />
         </label>
         <label>
-          City
+          {text.labelCity}
           <input
             value={field("city")}
             onChange={(event) => set("city", event.target.value)}
           />
         </label>
         <label>
-          Occupation
+          {text.labelOccupation}
           <input
             value={field("occupation")}
             onChange={(event) => set("occupation", event.target.value)}
           />
         </label>
         <label>
-          Education
+          {text.labelEducation}
           <input
             value={field("education")}
             onChange={(event) => set("education", event.target.value)}
           />
         </label>
         <label>
-          Languages
+          {text.labelLanguages}
           <input
             value={listField("languages")}
             onChange={(event) => setList("languages", event.target.value)}
-            placeholder="Separate languages with commas"
+            placeholder={text.placeholderLanguages}
           />
         </label>
         <label>
-          Religion
+          {text.labelReligion}
           <input
             value={field("religion")}
             onChange={(event) => set("religion", event.target.value)}
           />
         </label>
         <label>
-          Ethnicity
+          {text.labelEthnicity}
           <input
             value={field("ethnicity")}
             onChange={(event) => set("ethnicity", event.target.value)}
           />
         </label>
       </div>
-      <h2>Appearance & lifestyle</h2>
+      <h2>{text.sectionAppearance}</h2>
       <div className="form-grid">
         <label>
-          Height
+          {text.labelHeight}
           <input
             type="number"
             min="0"
@@ -3503,7 +5005,7 @@ function Profile({ session }: { session: Session }) {
           />
         </label>
         <label>
-          Weight
+          {text.labelWeight}
           <input
             type="number"
             min="0"
@@ -3517,78 +5019,78 @@ function Profile({ session }: { session: Session }) {
           />
         </label>
         <label>
-          Eye color
+          {text.labelEyeColor}
           <input
             value={field("eyeColor")}
             onChange={(event) => set("eyeColor", event.target.value)}
           />
         </label>
         <label>
-          Hair color
+          {text.labelHairColor}
           <input
             value={field("hairColor")}
             onChange={(event) => set("hairColor", event.target.value)}
           />
         </label>
         <label>
-          Smoking
+          {text.labelSmoking}
           <select
             value={field("smokingStatus")}
             onChange={(event) => set("smokingStatus", event.target.value)}
           >
-            <option value="">Not specified</option>
-            <option>Never</option>
-            <option>Occasionally</option>
-            <option>Regularly</option>
+            <option value="">{text.optionNotSpecified}</option>
+            <option value="Never">{text.optionNever}</option>
+            <option value="Occasionally">{text.optionOccasionally}</option>
+            <option value="Regularly">{text.optionRegularly}</option>
           </select>
         </label>
         <label>
-          Drinking
+          {text.labelDrinking}
           <select
             value={field("drinkingStatus")}
             onChange={(event) => set("drinkingStatus", event.target.value)}
           >
-            <option value="">Not specified</option>
-            <option>Never</option>
-            <option>Occasionally</option>
-            <option>Regularly</option>
+            <option value="">{text.optionNotSpecified}</option>
+            <option value="Never">{text.optionNever}</option>
+            <option value="Occasionally">{text.optionOccasionally}</option>
+            <option value="Regularly">{text.optionRegularly}</option>
           </select>
         </label>
         <label>
-          Units
+          {text.labelUnits}
           <select
             value={field("unitPreference") || "METRIC"}
             onChange={(event) => set("unitPreference", event.target.value)}
           >
-            <option value="METRIC">Metric</option>
-            <option value="IMPERIAL">Imperial</option>
+            <option value="METRIC">{text.optionMetric}</option>
+            <option value="IMPERIAL">{text.optionImperial}</option>
           </select>
         </label>
         <label>
-          Visibility
+          {text.labelVisibility}
           <select
             value={String(draft.visibleInCatalog ?? true)}
             onChange={(event) =>
               set("visibleInCatalog", event.target.value === "true")
             }
           >
-            <option value="true">Visible in catalog</option>
-            <option value="false">Hidden from catalog</option>
+            <option value="true">{text.optionVisible}</option>
+            <option value="false">{text.optionHidden}</option>
           </select>
         </label>
       </div>
-      <h2>Family-building preferences</h2>
+      <h2>{text.sectionFamily}</h2>
       <div className="form-grid">
         <label>
-          Donor types
+          {text.labelDonorTypes}
           <input
             value={listField("donorType")}
             onChange={(event) => setList("donorType", event.target.value)}
-            placeholder="Separate choices with commas"
+            placeholder={text.placeholderCommaList}
           />
         </label>
         <label>
-          Desired donor contact
+          {text.labelDesiredDonorContact}
           <input
             value={field("desiredDonorContact")}
             onChange={(event) => set("desiredDonorContact", event.target.value)}
@@ -3596,7 +5098,7 @@ function Profile({ session }: { session: Session }) {
         </label>
       </div>
       <label>
-        About
+        {text.labelAbout}
         <textarea
           rows={6}
           value={field("about")}
@@ -3604,35 +5106,395 @@ function Profile({ session }: { session: Session }) {
         />
       </label>
       <button className="primary" onClick={save}>
-        Save changes
+        {text.buttonSave}
       </button>
     </section>
   );
 }
 
+
+const MEMBER_LINKS_TEXT: Record<CookieLocale, {
+  profile: string;
+  compatibility: string;
+  aiAdvisor: string;
+  photos: string;
+  verification: string;
+  messages: string;
+  visitors: string;
+  saved: string;
+  blocked: string;
+  boost: string;
+  referral: string;
+  safetyCheckIn: string;
+  costCalculator: string;
+  videoVerification: string;
+  community: string;
+  settings: string;
+}> = {
+  en: {
+    profile: "Profile",
+    compatibility: "Compatibility",
+    aiAdvisor: "AI Advisor",
+    photos: "Photos",
+    verification: "Verification",
+    messages: "Messages",
+    visitors: "Visitors",
+    saved: "Saved",
+    blocked: "Blocked",
+    boost: "Boost",
+    referral: "Referral",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Cost Calculator",
+    videoVerification: "Video Verification",
+    community: "Community",
+    settings: "Settings",
+  },
+  ru: {
+    profile: "Профиль",
+    compatibility: "Совместимость",
+    aiAdvisor: "AI Advisor",
+    photos: "Фото",
+    verification: "Верификация",
+    messages: "Сообщения",
+    visitors: "Посетители",
+    saved: "Избранное",
+    blocked: "Заблокированные",
+    boost: "Boost",
+    referral: "Рефералы",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Калькулятор расходов",
+    videoVerification: "Video Verification",
+    community: "Community",
+    settings: "Настройки",
+  },
+  es: {
+    profile: "Perfil",
+    compatibility: "Compatibilidad",
+    aiAdvisor: "AI Advisor",
+    photos: "Fotos",
+    verification: "Verificación",
+    messages: "Mensajes",
+    visitors: "Visitantes",
+    saved: "Guardados",
+    blocked: "Bloqueados",
+    boost: "Boost",
+    referral: "Referidos",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Calculadora de costes",
+    videoVerification: "Video Verification",
+    community: "Community",
+    settings: "Ajustes",
+  },
+  pt: {
+    profile: "Perfil",
+    compatibility: "Compatibilidade",
+    aiAdvisor: "AI Advisor",
+    photos: "Fotos",
+    verification: "Verificação",
+    messages: "Mensagens",
+    visitors: "Visitantes",
+    saved: "Salvos",
+    blocked: "Bloqueados",
+    boost: "Boost",
+    referral: "Indicações",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Calculadora de custos",
+    videoVerification: "Verificação em Vídeo",
+    community: "Community",
+    settings: "Configurações",
+  },
+  fr: {
+    profile: "Profil",
+    compatibility: "Compatibilité",
+    aiAdvisor: "AI Advisor",
+    photos: "Photos",
+    verification: "Vérification",
+    messages: "Messages",
+    visitors: "Visiteurs",
+    saved: "Enregistrés",
+    blocked: "Bloqués",
+    boost: "Boost",
+    referral: "Parrainage",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Calculateur de coûts",
+    videoVerification: "Vérification vidéo",
+    community: "Community",
+    settings: "Paramètres",
+  },
+  de: {
+    profile: "Profil",
+    compatibility: "Kompatibilität",
+    aiAdvisor: "AI Advisor",
+    photos: "Fotos",
+    verification: "Verifizierung",
+    messages: "Nachrichten",
+    visitors: "Besucher",
+    saved: "Gespeichert",
+    blocked: "Blockiert",
+    boost: "Boost",
+    referral: "Empfehlungen",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Kostenrechner",
+    videoVerification: "Video-Verifizierung",
+    community: "Community",
+    settings: "Einstellungen",
+  },
+  it: {
+    profile: "Profilo",
+    compatibility: "Compatibilità",
+    aiAdvisor: "AI Advisor",
+    photos: "Foto",
+    verification: "Verifica",
+    messages: "Messaggi",
+    visitors: "Visitatori",
+    saved: "Salvati",
+    blocked: "Bloccati",
+    boost: "Boost",
+    referral: "Inviti",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Calcolatore dei costi",
+    videoVerification: "Verifica Video",
+    community: "Community",
+    settings: "Impostazioni",
+  },
+  pl: {
+    profile: "Profil",
+    compatibility: "Kompatybilność",
+    aiAdvisor: "AI Advisor",
+    photos: "Zdjęcia",
+    verification: "Weryfikacja",
+    messages: "Wiadomości",
+    visitors: "Odwiedzający",
+    saved: "Zapisane",
+    blocked: "Zablokowani",
+    boost: "Boost",
+    referral: "Polecenia",
+    safetyCheckIn: "Safety Check-In",
+    costCalculator: "Kalkulator kosztów",
+    videoVerification: "Weryfikacja wideo",
+    community: "Community",
+    settings: "Ustawienia",
+  },
+};
+
+const SETTINGS_TEXT: Record<CookieLocale, {
+  title: string;
+  loadError: string;
+  saveSuccess: string;
+  saveError: string;
+  interfaceLanguageLabel: string;
+  languageOptionEnglish: string;
+  languageOptionRussian: string;
+  languageOptionSpanish: string;
+  languageOptionPortuguese: string;
+  languageOptionFrench: string;
+  languageOptionGerman: string;
+  languageOptionItalian: string;
+  languageOptionPolish: string;
+  visibleInCatalog: string;
+  incognitoBrowsing: string;
+  proFeatureSuffix: string;
+  incognitoProNotice: string;
+  emailNotificationsLegend: string;
+  saveButton: string;
+}> = {
+  en: {
+    title: "Settings",
+    loadError: "Could not load settings.",
+    saveSuccess: "Settings saved.",
+    saveError: "Could not save settings.",
+    interfaceLanguageLabel: "Interface language",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Visible in catalog",
+    incognitoBrowsing: "Incognito browsing",
+    proFeatureSuffix: " (Pro feature)",
+    incognitoProNotice: "Browse profiles without appearing in their Visitors list - available with a Pro subscription.",
+    emailNotificationsLegend: "Email notifications",
+    saveButton: "Save settings",
+  },
+  ru: {
+    title: "Настройки",
+    loadError: "Не удалось загрузить настройки.",
+    saveSuccess: "Настройки сохранены.",
+    saveError: "Не удалось сохранить настройки.",
+    interfaceLanguageLabel: "Язык интерфейса",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Видимость в каталоге",
+    incognitoBrowsing: "Инкогнито-просмотр",
+    proFeatureSuffix: " (функция Pro)",
+    incognitoProNotice: "Просматривай профили, не попадая в список посетителей других участников - доступно с подпиской Pro.",
+    emailNotificationsLegend: "Уведомления по email",
+    saveButton: "Сохранить настройки",
+  },
+  es: {
+    title: "Ajustes",
+    loadError: "No se pudieron cargar los ajustes.",
+    saveSuccess: "Ajustes guardados.",
+    saveError: "No se pudieron guardar los ajustes.",
+    interfaceLanguageLabel: "Idioma de la interfaz",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Visible en el catálogo",
+    incognitoBrowsing: "Navegación de incógnito",
+    proFeatureSuffix: " (función Pro)",
+    incognitoProNotice: "Navega por los perfiles sin aparecer en su lista de visitantes - disponible con una suscripción Pro.",
+    emailNotificationsLegend: "Notificaciones por email",
+    saveButton: "Guardar ajustes",
+  },
+  pt: {
+    title: "Configurações",
+    loadError: "Não foi possível carregar as configurações.",
+    saveSuccess: "Configurações salvas.",
+    saveError: "Não foi possível salvar as configurações.",
+    interfaceLanguageLabel: "Idioma da interface",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Visível no catálogo",
+    incognitoBrowsing: "Navegação anônima",
+    proFeatureSuffix: " (recurso Pro)",
+    incognitoProNotice: "Veja perfis sem aparecer na lista de visitantes deles - disponível com uma assinatura Pro.",
+    emailNotificationsLegend: "Notificações por e-mail",
+    saveButton: "Salvar configurações",
+  },
+  fr: {
+    title: "Paramètres",
+    loadError: "Impossible de charger les paramètres.",
+    saveSuccess: "Paramètres enregistrés.",
+    saveError: "Impossible d'enregistrer les paramètres.",
+    interfaceLanguageLabel: "Langue de l'interface",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Visible dans le catalogue",
+    incognitoBrowsing: "Navigation incognito",
+    proFeatureSuffix: " (fonctionnalité Pro)",
+    incognitoProNotice: "Parcours les profils sans apparaître dans leur liste de visiteurs - disponible avec un abonnement Pro.",
+    emailNotificationsLegend: "Notifications par email",
+    saveButton: "Enregistrer les paramètres",
+  },
+  de: {
+    title: "Einstellungen",
+    loadError: "Einstellungen konnten nicht geladen werden.",
+    saveSuccess: "Einstellungen gespeichert.",
+    saveError: "Einstellungen konnten nicht gespeichert werden.",
+    interfaceLanguageLabel: "Sprache der Oberfläche",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Im Katalog sichtbar",
+    incognitoBrowsing: "Inkognito-Browsing",
+    proFeatureSuffix: " (Pro-Funktion)",
+    incognitoProNotice: "Sieh dir Profile an, ohne in deren Besucherliste zu erscheinen - verfügbar mit einem Pro-Abo.",
+    emailNotificationsLegend: "E-Mail-Benachrichtigungen",
+    saveButton: "Einstellungen speichern",
+  },
+  it: {
+    title: "Impostazioni",
+    loadError: "Non è stato possibile caricare le impostazioni.",
+    saveSuccess: "Impostazioni salvate.",
+    saveError: "Non è stato possibile salvare le impostazioni.",
+    interfaceLanguageLabel: "Lingua dell'interfaccia",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Visibile nel catalogo",
+    incognitoBrowsing: "Navigazione in incognito",
+    proFeatureSuffix: " (funzione Pro)",
+    incognitoProNotice: "Consulti i profili senza comparire nella loro lista visitatori - disponibile con un abbonamento Pro.",
+    emailNotificationsLegend: "Notifiche via email",
+    saveButton: "Salva impostazioni",
+  },
+  pl: {
+    title: "Ustawienia",
+    loadError: "Nie udało się wczytać ustawień.",
+    saveSuccess: "Ustawienia zapisane.",
+    saveError: "Nie udało się zapisać ustawień.",
+    interfaceLanguageLabel: "Język interfejsu",
+    languageOptionEnglish: "English",
+    languageOptionRussian: "Русский",
+    languageOptionSpanish: "Español",
+    languageOptionPortuguese: "Português",
+    languageOptionFrench: "Français",
+    languageOptionGerman: "Deutsch",
+    languageOptionItalian: "Italiano",
+    languageOptionPolish: "Polski",
+    visibleInCatalog: "Widoczność w katalogu",
+    incognitoBrowsing: "Przeglądanie incognito",
+    proFeatureSuffix: " (funkcja Pro)",
+    incognitoProNotice: "Przeglądaj profile, nie pojawiając się na liście odwiedzających - dostępne w subskrypcji Pro.",
+    emailNotificationsLegend: "Powiadomienia e-mail",
+    saveButton: "Zapisz ustawienia",
+  },
+};
+
 function MemberLinks({ locale }: { locale: string }) {
+  // NavLink (not Link) so the current section gets the "active" pink pill
+  // (styles.css .member-links a.active) - previously plain <Link>s had no
+  // way to show which tab you were on at all.
+  const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined);
+  const text = MEMBER_LINKS_TEXT[locale as CookieLocale] ?? MEMBER_LINKS_TEXT.en;
   return (
     <nav className="member-links">
-      <Link to={`/${locale}/profile`}>Profile</Link>
-      <Link to={`/${locale}/compatibility`}>Compatibility</Link>
-      <Link to={`/${locale}/ai-advisor`}>AI Advisor</Link>
-      <Link to={`/${locale}/photos`}>Photos</Link>
-      <Link to={`/${locale}/verification`}>Verification</Link>
-      <Link to={`/${locale}/messages`}>Messages</Link>
-      <Link to={`/${locale}/visitors`}>Visitors</Link>
-      <Link to={`/${locale}/favourites`}>Saved</Link>
-      <Link to={`/${locale}/blocked`}>Blocked</Link>
-      <Link to={`/${locale}/boost`}>Boost</Link>
-      <Link to={`/${locale}/referral`}>Referral</Link>
-      <Link to={`/${locale}/safety-checkin`}>Safety Check-In</Link>
-      <Link to={`/${locale}/cost-calculator`}>Cost Calculator</Link>
-      <Link to={`/${locale}/video-verification`}>Video Verification</Link>
-      <Link to={`/${locale}/community`}>Community</Link>
-      <Link to={`/${locale}/settings`}>Settings</Link>
+      <NavLink to={`/${locale}/profile`} className={navClass}>{text.profile}</NavLink>
+      <NavLink to={`/${locale}/compatibility`} className={navClass}>{text.compatibility}</NavLink>
+      <NavLink to={`/${locale}/ai-advisor`} className={navClass}>{text.aiAdvisor}</NavLink>
+      <NavLink to={`/${locale}/photos`} className={navClass}>{text.photos}</NavLink>
+      <NavLink to={`/${locale}/verification`} className={navClass}>{text.verification}</NavLink>
+      <NavLink to={`/${locale}/chat`} className={navClass}>{text.messages}</NavLink>
+      <NavLink to={`/${locale}/visitors`} className={navClass}>{text.visitors}</NavLink>
+      <NavLink to={`/${locale}/favourites`} className={navClass}>{text.saved}</NavLink>
+      <NavLink to={`/${locale}/blocked`} className={navClass}>{text.blocked}</NavLink>
+      <NavLink to={`/${locale}/boost`} className={navClass}>{text.boost}</NavLink>
+      <NavLink to={`/${locale}/referral`} className={navClass}>{text.referral}</NavLink>
+      <NavLink to={`/${locale}/safety-checkin`} className={navClass}>{text.safetyCheckIn}</NavLink>
+      <NavLink to={`/${locale}/cost-calculator`} className={navClass}>{text.costCalculator}</NavLink>
+      <NavLink to={`/${locale}/video-verification`} className={navClass}>{text.videoVerification}</NavLink>
+      <NavLink to={`/${locale}/community`} className={navClass}>{text.community}</NavLink>
+      <NavLink to={`/${locale}/settings`} className={navClass}>{text.settings}</NavLink>
     </nav>
   );
 }
-
 function MemberGate({
   session,
   children,
@@ -3647,17 +5509,21 @@ function MemberGate({
     <Navigate to={`/${locale}/auth/login`} replace />
   );
 }
-
 function Photos({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = PHOTOS_TEXT[locale] ?? PHOTOS_TEXT.en;
   const [photos, setPhotos] = useState<Row[]>([]);
   const [notice, setNotice] = useState("");
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const [busy, setBusy] = useState(false);
   const load = () => {
     void api
       .get<{ items: Row[] }>("/member/photos")
       .then((data) => setPhotos(data.items || []))
-      .catch(() => setNotice("Could not load photos."));
+      .catch(() => {
+        setNotice(text.noticeLoadError);
+        setNoticeIsError(true);
+      });
   };
   useEffect(load, []);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
@@ -3665,17 +5531,18 @@ function Photos({ session }: { session: Session }) {
     if (!file) return;
     setBusy(true);
     setNotice("");
+    setNoticeIsError(false);
     try {
       const data = new FormData();
       data.append("file", file);
       data.append("position", String(photos.length));
       await api.upload("/member/photos", data);
-      setNotice("Photo uploaded and sent to moderation.");
+      setNotice(text.noticeUploaded);
+      setNoticeIsError(false);
       load();
     } catch {
-      setNotice(
-        "Could not upload this photo. Use JPEG, PNG or WebP under the allowed size.",
-      );
+      setNotice(text.noticeUploadError);
+      setNoticeIsError(true);
     } finally {
       setBusy(false);
     }
@@ -3683,37 +5550,40 @@ function Photos({ session }: { session: Session }) {
   const remove = async (id: unknown) => {
     try {
       await api.delete(`/member/photos/${encodeURIComponent(asText(id))}`);
-      setNotice("Photo removed.");
+      setNotice(text.noticeRemoved);
+      setNoticeIsError(false);
       load();
     } catch {
-      setNotice("Could not remove this photo.");
+      setNotice(text.noticeRemoveError);
+      setNoticeIsError(true);
     }
   };
   const uploadAvatar = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true);
     setNotice("");
+    setNoticeIsError(false);
     try {
       const data = new FormData();
       data.append("file", file);
       await api.upload("/member/avatar", data);
-      setNotice("Avatar submitted for moderation.");
+      setNotice(text.noticeAvatarSubmitted);
+      setNoticeIsError(false);
       load();
     } catch {
-      setNotice(
-        "Upload an approved primary profile photo before changing the avatar.",
-      );
+      setNotice(text.noticeAvatarError);
+      setNoticeIsError(true);
     } finally {
       setBusy(false);
     }
   };
   return (
     <section>
-      <h1>My photos</h1>
+      <h1>{text.pageTitle}</h1>
       <MemberLinks locale={locale} />
       <div className="photo-actions">
         <label className="upload-control">
-          Upload photo
+          {text.uploadPhotoLabel}
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -3722,7 +5592,7 @@ function Photos({ session }: { session: Session }) {
           />
         </label>
         <label className="upload-control">
-          Set avatar crop
+          {text.setAvatarCropLabel}
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -3739,48 +5609,40 @@ function Photos({ session }: { session: Session }) {
         </label>
       </div>
       {notice && (
-        <p
-          className={
-            notice.includes("Could not") ||
-            notice.includes("Upload an approved")
-              ? "error"
-              : "notice"
-          }
-        >
+        <p className={noticeIsError ? "error" : "notice"}>
           {notice}
         </p>
       )}
       <p className="hint">
-        A primary profile photo must be approved before an avatar crop can be
-        submitted.
+        {text.hintText}
       </p>
       <div className="photo-grid">
         {photos.map((photo) => (
           <article className="photo-card" key={asText(photo.id)}>
             {photo.publicUrl ? (
-              <img src={asText(photo.publicUrl)} alt="Profile" />
+              <img src={asText(photo.publicUrl)} alt={text.altProfile} />
             ) : (
-              <div className="avatar-placeholder">Photo</div>
+              <div className="avatar-placeholder">{text.placeholderPhotoText}</div>
             )}
             {Boolean(photo.avatarUrl) && (
               <img
                 className="avatar-preview"
                 src={asText(photo.avatarUrl)}
-                alt="Current avatar"
+                alt={text.altCurrentAvatar}
               />
             )}
             <p>
-              {Number(photo.position) === 0 ? "Primary · " : ""}
+              {Number(photo.position) === 0 ? text.primaryLabel : ""}
               {asText(photo.moderationStatus ?? photo.status)}
             </p>
             <button className="secondary" onClick={() => remove(photo.id)}>
-              Delete
+              {text.deleteButton}
             </button>
           </article>
         ))}
       </div>
       {!photos.length && (
-        <p className="notice">No photos have been uploaded yet.</p>
+        <p className="notice">{text.emptyStateText}</p>
       )}
     </section>
   );
@@ -3788,6 +5650,8 @@ function Photos({ session }: { session: Session }) {
 
 function Settings({ session }: { session: Session }) {
   const locale = localeOf();
+  const navigate = useNavigate();
+  const text = SETTINGS_TEXT[locale] ?? SETTINGS_TEXT.en;
   const [settings, setSettings] = useState<Row>({});
   const [notice, setNotice] = useState("");
   useEffect(() => {
@@ -3795,7 +5659,7 @@ function Settings({ session }: { session: Session }) {
       api
         .get<Row>("/member/settings")
         .then(setSettings)
-        .catch(() => setNotice("Could not load settings."));
+        .catch(() => setNotice(text.loadError));
   }, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
   const notifications = Array.isArray(settings.notificationSettings)
@@ -3814,22 +5678,29 @@ function Settings({ session }: { session: Session }) {
   const save = async () => {
     try {
       await api.patch("/member/settings", settings);
-      setNotice("Settings saved.");
+      setNotice(text.saveSuccess);
+      const nextLocale = String(settings.interfaceLanguage || locale).toLowerCase();
+      if ((SUPPORTED_SITE_LOCALES as string[]).includes(nextLocale) && nextLocale !== locale) {
+        writeCookie("NEXT_LOCALE", nextLocale, COOKIE_LOCALE_MAX_AGE);
+        const parts = window.location.pathname.split("/");
+        parts[1] = nextLocale;
+        navigate(`${parts.join("/")}${window.location.search}${window.location.hash}`, { replace: true });
+      }
     } catch {
-      setNotice("Could not save settings.");
+      setNotice(text.saveError);
     }
   };
   return (
     <section className="member-form">
-      <h1>Settings</h1>
+      <h1>{text.title}</h1>
       <MemberLinks locale={locale} />
       {notice && (
-        <p className={notice.includes("Could not") ? "error" : "notice"}>
+        <p className={notice === text.loadError || notice === text.saveError ? "error" : "notice"}>
           {notice}
         </p>
       )}
       <label>
-        Interface language
+        {text.interfaceLanguageLabel}
         <select
           value={asText(
             settings.interfaceLanguage === "—"
@@ -3843,9 +5714,14 @@ function Settings({ session }: { session: Session }) {
             }))
           }
         >
-          <option value="en">English</option>
-          <option value="ru">Русский</option>
-          <option value="de">Deutsch</option>
+          <option value="en">{text.languageOptionEnglish}</option>
+          <option value="ru">{text.languageOptionRussian}</option>
+          <option value="es">{text.languageOptionSpanish}</option>
+          <option value="pt">{text.languageOptionPortuguese}</option>
+          <option value="fr">{text.languageOptionFrench}</option>
+          <option value="de">{text.languageOptionGerman}</option>
+          <option value="it">{text.languageOptionItalian}</option>
+          <option value="pl">{text.languageOptionPolish}</option>
         </select>
       </label>
       <label className="toggle-row">
@@ -3859,7 +5735,7 @@ function Settings({ session }: { session: Session }) {
             }))
           }
         />
-        Visible in catalog
+        {text.visibleInCatalog}
       </label>
       <label className="toggle-row">
         <input
@@ -3873,15 +5749,15 @@ function Settings({ session }: { session: Session }) {
             }))
           }
         />
-        Incognito browsing{settings.incognitoAvailable ? "" : " (Pro feature)"}
+        {text.incognitoBrowsing}{settings.incognitoAvailable ? "" : text.proFeatureSuffix}
       </label>
       {!settings.incognitoAvailable && (
         <p className="notice">
-          Browse profiles without appearing in their Visitors list - available with a Pro subscription.
+          {text.incognitoProNotice}
         </p>
       )}
       <fieldset className="notification-settings">
-        <legend>Email notifications</legend>
+        <legend>{text.emailNotificationsLegend}</legend>
         {notifications.map((item) => (
           <label className="toggle-row" key={asText(item.type)}>
             <input
@@ -3896,14 +5772,497 @@ function Settings({ session }: { session: Session }) {
         ))}
       </fieldset>
       <button className="primary" onClick={save}>
-        Save settings
+        {text.saveButton}
       </button>
     </section>
   );
 }
 
+const VERIFICATION_TEXT: Record<CookieLocale, {
+  heading: string;
+  statusLabel: string;
+  primaryPhotoLabel: string;
+  primaryPhotoApproved: string;
+  primaryPhotoRequired: string;
+  startButton: string;
+  startButtonBusy: string;
+  providerNotConfigured: string;
+  overlayAriaLabel: string;
+  closeAriaLabel: string;
+  iframeTitle: string;
+  cancelButton: string;
+  cancelButtonBusy: string;
+  notice: {
+    loadError: string;
+    approved: string;
+    declined: string;
+    failed: string;
+    abandoned: string;
+    expired: string;
+    cancelled: string;
+    cancelError: string;
+    cannotStart: string;
+    startedFallback: string;
+  };
+}> = {
+  en: {
+    heading: "Identity verification",
+    statusLabel: "Status:",
+    primaryPhotoLabel: "Primary profile photo:",
+    primaryPhotoApproved: "approved",
+    primaryPhotoRequired: "required",
+    startButton: "Start verification",
+    startButtonBusy: "Please wait…",
+    providerNotConfigured: "Verification provider is not configured for this environment.",
+    overlayAriaLabel: "Identity verification",
+    closeAriaLabel: "Close verification",
+    iframeTitle: "Identity verification",
+    cancelButton: "Cancel verification",
+    cancelButtonBusy: "Cancelling…",
+    notice: {
+      loadError: "Could not load verification status.",
+      approved: "Identity verification approved.",
+      declined: "Verification declined.",
+      failed: "Verification failed.",
+      abandoned: "Verification abandoned.",
+      expired: "Verification expired.",
+      cancelled: "Verification cancelled.",
+      cancelError: "Could not cancel the verification.",
+      cannotStart: "Verification cannot be started until a primary photo is approved.",
+      startedFallback: "Verification request started.",
+    },
+  },
+  ru: {
+    heading: "Проверка личности",
+    statusLabel: "Статус:",
+    primaryPhotoLabel: "Основное фото профиля:",
+    primaryPhotoApproved: "одобрено",
+    primaryPhotoRequired: "требуется",
+    startButton: "Начать проверку",
+    startButtonBusy: "Пожалуйста, подожди…",
+    providerNotConfigured: "Провайдер проверки не настроен для этой среды.",
+    overlayAriaLabel: "Проверка личности",
+    closeAriaLabel: "Закрыть проверку",
+    iframeTitle: "Проверка личности",
+    cancelButton: "Отменить проверку",
+    cancelButtonBusy: "Отмена…",
+    notice: {
+      loadError: "Не удалось загрузить статус проверки.",
+      approved: "Проверка личности одобрена.",
+      declined: "Проверка отклонена.",
+      failed: "Проверка не пройдена.",
+      abandoned: "Проверка прервана.",
+      expired: "Срок проверки истёк.",
+      cancelled: "Проверка отменена.",
+      cancelError: "Не удалось отменить проверку.",
+      cannotStart: "Проверку нельзя начать, пока не одобрено основное фото.",
+      startedFallback: "Запрос на проверку отправлен.",
+    },
+  },
+  es: {
+    heading: "Verificación de identidad",
+    statusLabel: "Estado:",
+    primaryPhotoLabel: "Foto de perfil principal:",
+    primaryPhotoApproved: "aprobada",
+    primaryPhotoRequired: "requerida",
+    startButton: "Iniciar verificación",
+    startButtonBusy: "Espera un momento…",
+    providerNotConfigured: "El proveedor de verificación no está configurado para este entorno.",
+    overlayAriaLabel: "Verificación de identidad",
+    closeAriaLabel: "Cerrar verificación",
+    iframeTitle: "Verificación de identidad",
+    cancelButton: "Cancelar verificación",
+    cancelButtonBusy: "Cancelando…",
+    notice: {
+      loadError: "No se pudo cargar el estado de la verificación.",
+      approved: "Verificación de identidad aprobada.",
+      declined: "Verificación rechazada.",
+      failed: "Verificación fallida.",
+      abandoned: "Verificación abandonada.",
+      expired: "Verificación caducada.",
+      cancelled: "Verificación cancelada.",
+      cancelError: "No se pudo cancelar la verificación.",
+      cannotStart: "No puedes iniciar la verificación hasta que se apruebe una foto de perfil principal.",
+      startedFallback: "Solicitud de verificación enviada.",
+    },
+  },
+  pt: {
+    heading: "Verificação de identidade",
+    statusLabel: "Status:",
+    primaryPhotoLabel: "Foto de perfil principal:",
+    primaryPhotoApproved: "aprovada",
+    primaryPhotoRequired: "necessária",
+    startButton: "Iniciar verificação",
+    startButtonBusy: "Aguarde…",
+    providerNotConfigured: "O provedor de verificação não está configurado para este ambiente.",
+    overlayAriaLabel: "Verificação de identidade",
+    closeAriaLabel: "Fechar verificação",
+    iframeTitle: "Verificação de identidade",
+    cancelButton: "Cancelar verificação",
+    cancelButtonBusy: "Cancelando…",
+    notice: {
+      loadError: "Não foi possível carregar o status da verificação.",
+      approved: "Verificação de identidade aprovada.",
+      declined: "Verificação recusada.",
+      failed: "Verificação falhou.",
+      abandoned: "Verificação abandonada.",
+      expired: "Verificação expirada.",
+      cancelled: "Verificação cancelada.",
+      cancelError: "Não foi possível cancelar a verificação.",
+      cannotStart: "A verificação não pode começar até que uma foto de perfil principal seja aprovada.",
+      startedFallback: "Solicitação de verificação enviada.",
+    },
+  },
+  fr: {
+    heading: "Vérification d'identité",
+    statusLabel: "Statut :",
+    primaryPhotoLabel: "Photo de profil principale :",
+    primaryPhotoApproved: "approuvée",
+    primaryPhotoRequired: "requise",
+    startButton: "Démarrer la vérification",
+    startButtonBusy: "Un instant…",
+    providerNotConfigured: "Le prestataire de vérification n'est pas configuré pour cet environnement.",
+    overlayAriaLabel: "Vérification d'identité",
+    closeAriaLabel: "Fermer la vérification",
+    iframeTitle: "Vérification d'identité",
+    cancelButton: "Annuler la vérification",
+    cancelButtonBusy: "Annulation…",
+    notice: {
+      loadError: "Impossible de charger le statut de la vérification.",
+      approved: "Vérification d'identité approuvée.",
+      declined: "Vérification refusée.",
+      failed: "Vérification échouée.",
+      abandoned: "Vérification abandonnée.",
+      expired: "Vérification expirée.",
+      cancelled: "Vérification annulée.",
+      cancelError: "Impossible d'annuler la vérification.",
+      cannotStart: "La vérification ne peut pas démarrer tant qu'une photo de profil principale n'est pas approuvée.",
+      startedFallback: "Demande de vérification envoyée.",
+    },
+  },
+  de: {
+    heading: "Identitätsprüfung",
+    statusLabel: "Status:",
+    primaryPhotoLabel: "Primäres Profilfoto:",
+    primaryPhotoApproved: "genehmigt",
+    primaryPhotoRequired: "erforderlich",
+    startButton: "Verifizierung starten",
+    startButtonBusy: "Bitte warten…",
+    providerNotConfigured: "Für diese Umgebung ist kein Verifizierungsanbieter konfiguriert.",
+    overlayAriaLabel: "Identitätsprüfung",
+    closeAriaLabel: "Verifizierung schließen",
+    iframeTitle: "Identitätsprüfung",
+    cancelButton: "Verifizierung abbrechen",
+    cancelButtonBusy: "Wird abgebrochen…",
+    notice: {
+      loadError: "Verifizierungsstatus konnte nicht geladen werden.",
+      approved: "Identitätsprüfung genehmigt.",
+      declined: "Verifizierung abgelehnt.",
+      failed: "Verifizierung fehlgeschlagen.",
+      abandoned: "Verifizierung abgebrochen.",
+      expired: "Verifizierung abgelaufen.",
+      cancelled: "Verifizierung storniert.",
+      cancelError: "Verifizierung konnte nicht abgebrochen werden.",
+      cannotStart: "Die Verifizierung kann erst gestartet werden, wenn ein primäres Profilfoto genehmigt wurde.",
+      startedFallback: "Verifizierungsanfrage gesendet.",
+    },
+  },
+  it: {
+    heading: "Verifica dell'identità",
+    statusLabel: "Stato:",
+    primaryPhotoLabel: "Foto principale del profilo:",
+    primaryPhotoApproved: "approvata",
+    primaryPhotoRequired: "richiesta",
+    startButton: "Avvia la verifica",
+    startButtonBusy: "Attenda, prego…",
+    providerNotConfigured: "Il provider di verifica non è configurato per questo ambiente.",
+    overlayAriaLabel: "Verifica dell'identità",
+    closeAriaLabel: "Chiudi la verifica",
+    iframeTitle: "Verifica dell'identità",
+    cancelButton: "Annulla la verifica",
+    cancelButtonBusy: "Annullamento…",
+    notice: {
+      loadError: "Non è stato possibile caricare lo stato della verifica.",
+      approved: "Verifica dell'identità approvata.",
+      declined: "Verifica rifiutata.",
+      failed: "Verifica non riuscita.",
+      abandoned: "Verifica interrotta.",
+      expired: "Verifica scaduta.",
+      cancelled: "Verifica annullata.",
+      cancelError: "Non è stato possibile annullare la verifica.",
+      cannotStart: "Non è possibile avviare la verifica finché una foto principale del profilo non viene approvata.",
+      startedFallback: "Richiesta di verifica inviata.",
+    },
+  },
+  pl: {
+    heading: "Weryfikacja tożsamości",
+    statusLabel: "Status:",
+    primaryPhotoLabel: "Główne zdjęcie profilowe:",
+    primaryPhotoApproved: "zatwierdzone",
+    primaryPhotoRequired: "wymagane",
+    startButton: "Rozpocznij weryfikację",
+    startButtonBusy: "Proszę czekać…",
+    providerNotConfigured: "Dostawca weryfikacji nie jest skonfigurowany dla tego środowiska.",
+    overlayAriaLabel: "Weryfikacja tożsamości",
+    closeAriaLabel: "Zamknij weryfikację",
+    iframeTitle: "Weryfikacja tożsamości",
+    cancelButton: "Anuluj weryfikację",
+    cancelButtonBusy: "Anulowanie…",
+    notice: {
+      loadError: "Nie udało się wczytać statusu weryfikacji.",
+      approved: "Weryfikacja tożsamości zatwierdzona.",
+      declined: "Weryfikacja odrzucona.",
+      failed: "Weryfikacja nieudana.",
+      abandoned: "Weryfikacja przerwana.",
+      expired: "Weryfikacja wygasła.",
+      cancelled: "Weryfikacja anulowana.",
+      cancelError: "Nie udało się anulować weryfikacji.",
+      cannotStart: "Weryfikacji nie można rozpocząć, dopóki główne zdjęcie profilowe nie zostanie zatwierdzone.",
+      startedFallback: "Wysłano prośbę o weryfikację.",
+    },
+  },
+};
+
+const FAVOURITES_TEXT: Record<CookieLocale, {
+  notice: { loadError: string; removeError: string };
+  heading: string;
+  sections: {
+    clinics: { title: string; empty: string };
+    lawyers: { title: string; empty: string };
+  };
+  removeButton: string;
+}> = {
+  en: {
+    notice: {
+      loadError: "Could not load saved clinics and lawyers.",
+      removeError: "Could not remove this saved item.",
+    },
+    heading: "Saved",
+    sections: {
+      clinics: { title: "Clinics", empty: "There are no saved clinics." },
+      lawyers: { title: "Lawyers", empty: "There are no saved lawyers." },
+    },
+    removeButton: "Remove",
+  },
+  ru: {
+    notice: {
+      loadError: "Не удалось загрузить сохранённые клиники и юристов.",
+      removeError: "Не удалось удалить этот сохранённый элемент.",
+    },
+    heading: "Сохранённое",
+    sections: {
+      clinics: { title: "Клиники", empty: "Нет сохранённых клиник." },
+      lawyers: { title: "Юристы", empty: "Нет сохранённых юристов." },
+    },
+    removeButton: "Удалить",
+  },
+  es: {
+    notice: {
+      loadError: "No se pudieron cargar las clínicas y abogados guardados.",
+      removeError: "No se pudo eliminar este elemento guardado.",
+    },
+    heading: "Guardados",
+    sections: {
+      clinics: { title: "Clínicas", empty: "No tienes clínicas guardadas." },
+      lawyers: { title: "Abogados", empty: "No tienes abogados guardados." },
+    },
+    removeButton: "Quitar",
+  },
+  pt: {
+    notice: {
+      loadError: "Não foi possível carregar as clínicas e advogados salvos.",
+      removeError: "Não foi possível remover este item salvo.",
+    },
+    heading: "Salvos",
+    sections: {
+      clinics: { title: "Clínicas", empty: "Não há clínicas salvas." },
+      lawyers: { title: "Advogados", empty: "Não há advogados salvos." },
+    },
+    removeButton: "Remover",
+  },
+  fr: {
+    notice: {
+      loadError: "Impossible de charger les cliniques et avocats enregistrés.",
+      removeError: "Impossible de supprimer cet élément enregistré.",
+    },
+    heading: "Enregistrés",
+    sections: {
+      clinics: { title: "Cliniques", empty: "Aucune clinique enregistrée." },
+      lawyers: { title: "Avocats", empty: "Aucun avocat enregistré." },
+    },
+    removeButton: "Retirer",
+  },
+  de: {
+    notice: {
+      loadError: "Gespeicherte Kliniken und Anwälte konnten nicht geladen werden.",
+      removeError: "Dieser gespeicherte Eintrag konnte nicht entfernt werden.",
+    },
+    heading: "Gespeichert",
+    sections: {
+      clinics: { title: "Kliniken", empty: "Keine gespeicherten Kliniken." },
+      lawyers: { title: "Anwälte", empty: "Keine gespeicherten Anwälte." },
+    },
+    removeButton: "Entfernen",
+  },
+  it: {
+    notice: {
+      loadError: "Non è stato possibile caricare le cliniche e gli avvocati salvati.",
+      removeError: "Non è stato possibile rimuovere questo elemento salvato.",
+    },
+    heading: "Salvati",
+    sections: {
+      clinics: { title: "Cliniche", empty: "Non ci sono cliniche salvate." },
+      lawyers: { title: "Avvocati", empty: "Non ci sono avvocati salvati." },
+    },
+    removeButton: "Rimuovi",
+  },
+  pl: {
+    notice: {
+      loadError: "Nie udało się wczytać zapisanych klinik i prawników.",
+      removeError: "Nie udało się usunąć tego zapisanego elementu.",
+    },
+    heading: "Zapisane",
+    sections: {
+      clinics: { title: "Kliniki", empty: "Brak zapisanych klinik." },
+      lawyers: { title: "Prawnicy", empty: "Brak zapisanych prawników." },
+    },
+    removeButton: "Usuń",
+  },
+};
+
+// Note: `confirmWord` is intentionally identical ("DELETE") across every
+// locale. The backend (`AccountDeletionPayload.confirmation`) validates it
+// as the literal Python `Literal["DELETE"]`, so translating this word would
+// break the request. Only the sentence around it is translated, via the
+// `{word}` placeholder in `confirmLabel`.
+const ACCOUNT_DELETION_TEXT: Record<CookieLocale, {
+  heading: string;
+  warning: string;
+  reasonLabel: string;
+  reasonDefault: string;
+  detailsLabel: string;
+  confirmLabel: string;
+  confirmWord: string;
+  deleteButton: string;
+  notice: { submitted: string; submitError: string };
+}> = {
+  en: {
+    heading: "Delete account",
+    warning: "Access ends immediately. Your account, matches, and conversations are permanently deleted after 30 days.",
+    reasonLabel: "Reason",
+    reasonDefault: "Prefer not to say",
+    detailsLabel: "Details",
+    confirmLabel: "Type {word} to confirm",
+    confirmWord: "DELETE",
+    deleteButton: "Delete my account",
+    notice: {
+      submitted: "Deletion request submitted.",
+      submitError: "Could not submit the deletion request.",
+    },
+  },
+  ru: {
+    heading: "Удаление аккаунта",
+    warning: "Доступ прекращается немедленно. Твой аккаунт, совпадения и переписки будут безвозвратно удалены через 30 дней.",
+    reasonLabel: "Причина",
+    reasonDefault: "Предпочитаю не указывать",
+    detailsLabel: "Подробности",
+    confirmLabel: "Введи {word}, чтобы подтвердить",
+    confirmWord: "DELETE",
+    deleteButton: "Удалить мой аккаунт",
+    notice: {
+      submitted: "Запрос на удаление отправлен.",
+      submitError: "Не удалось отправить запрос на удаление.",
+    },
+  },
+  es: {
+    heading: "Eliminar cuenta",
+    warning: "El acceso termina de inmediato. Tu cuenta, tus matches y tus conversaciones se eliminarán de forma permanente después de 30 días.",
+    reasonLabel: "Motivo",
+    reasonDefault: "Prefiero no decirlo",
+    detailsLabel: "Detalles",
+    confirmLabel: "Escribe {word} para confirmar",
+    confirmWord: "DELETE",
+    deleteButton: "Eliminar mi cuenta",
+    notice: {
+      submitted: "Solicitud de eliminación enviada.",
+      submitError: "No se pudo enviar la solicitud de eliminación.",
+    },
+  },
+  pt: {
+    heading: "Excluir conta",
+    warning: "O acesso termina imediatamente. Sua conta, matches e conversas serão excluídos permanentemente após 30 dias.",
+    reasonLabel: "Motivo",
+    reasonDefault: "Prefiro não dizer",
+    detailsLabel: "Detalhes",
+    confirmLabel: "Digite {word} para confirmar",
+    confirmWord: "DELETE",
+    deleteButton: "Excluir minha conta",
+    notice: {
+      submitted: "Solicitação de exclusão enviada.",
+      submitError: "Não foi possível enviar a solicitação de exclusão.",
+    },
+  },
+  fr: {
+    heading: "Supprimer le compte",
+    warning: "L'accès se termine immédiatement. Ton compte, tes matchs et tes conversations seront définitivement supprimés après 30 jours.",
+    reasonLabel: "Motif",
+    reasonDefault: "Je préfère ne pas préciser",
+    detailsLabel: "Détails",
+    confirmLabel: "Tape {word} pour confirmer",
+    confirmWord: "DELETE",
+    deleteButton: "Supprimer mon compte",
+    notice: {
+      submitted: "Demande de suppression envoyée.",
+      submitError: "Impossible d'envoyer la demande de suppression.",
+    },
+  },
+  de: {
+    heading: "Konto löschen",
+    warning: "Der Zugriff endet sofort. Dein Konto, deine Matches und Unterhaltungen werden nach 30 Tagen endgültig gelöscht.",
+    reasonLabel: "Grund",
+    reasonDefault: "Möchte ich nicht angeben",
+    detailsLabel: "Details",
+    confirmLabel: "Gib {word} ein, um zu bestätigen",
+    confirmWord: "DELETE",
+    deleteButton: "Mein Konto löschen",
+    notice: {
+      submitted: "Löschantrag gesendet.",
+      submitError: "Der Löschantrag konnte nicht gesendet werden.",
+    },
+  },
+  it: {
+    heading: "Elimina account",
+    warning: "L'accesso termina immediatamente. Il Suo account, i Suoi match e le Sue conversazioni verranno eliminati definitivamente dopo 30 giorni.",
+    reasonLabel: "Motivo",
+    reasonDefault: "Preferisco non specificarlo",
+    detailsLabel: "Dettagli",
+    confirmLabel: "Digiti {word} per confermare",
+    confirmWord: "DELETE",
+    deleteButton: "Elimina il mio account",
+    notice: {
+      submitted: "Richiesta di eliminazione inviata.",
+      submitError: "Non è stato possibile inviare la richiesta di eliminazione.",
+    },
+  },
+  pl: {
+    heading: "Usuń konto",
+    warning: "Dostęp kończy się natychmiast. Twoje konto, dopasowania i rozmowy zostaną trwale usunięte po 30 dniach.",
+    reasonLabel: "Powód",
+    reasonDefault: "Wolę nie podawać",
+    detailsLabel: "Szczegóły",
+    confirmLabel: "Wpisz {word}, aby potwierdzić",
+    confirmWord: "DELETE",
+    deleteButton: "Usuń moje konto",
+    notice: {
+      submitted: "Wniosek o usunięcie został wysłany.",
+      submitError: "Nie udało się wysłać wniosku o usunięcie.",
+    },
+  },
+};
+
 function Verification({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = VERIFICATION_TEXT[locale] ?? VERIFICATION_TEXT.en;
   const [data, setData] = useState<Row | null>(null);
   const [notice, setNotice] = useState("");
   const [verificationUrl, setVerificationUrl] = useState("");
@@ -3912,7 +6271,7 @@ function Verification({ session }: { session: Session }) {
     try {
       setData(await api.get<Row>("/member/verification"));
     } catch {
-      setNotice("Could not load verification status.");
+      setNotice(text.notice.loadError);
     }
   };
   useEffect(() => {
@@ -3934,8 +6293,14 @@ function Verification({ session }: { session: Session }) {
             setVerificationUrl("");
             setNotice(
               status === "APPROVED"
-                ? "Identity verification approved."
-                : `Verification ${status.toLowerCase()}.`,
+                ? text.notice.approved
+                : text.notice[
+                    status.toLowerCase() as
+                      | "declined"
+                      | "failed"
+                      | "abandoned"
+                      | "expired"
+                  ],
             );
           }
         })
@@ -3954,13 +6319,11 @@ function Verification({ session }: { session: Session }) {
       const url = asText(response.url);
       if (url && url !== "—") setVerificationUrl(url);
       else {
-        setNotice(asText(response.status ?? "Verification request started."));
+        setNotice(asText(response.status ?? text.notice.startedFallback));
         await load();
       }
     } catch {
-      setNotice(
-        "Verification cannot be started until a primary photo is approved.",
-      );
+      setNotice(text.notice.cannotStart);
     } finally {
       setBusy(false);
     }
@@ -3970,10 +6333,10 @@ function Verification({ session }: { session: Session }) {
     try {
       await api.post("/member/verification/abandon");
       setVerificationUrl("");
-      setNotice("Verification cancelled.");
+      setNotice(text.notice.cancelled);
       await load();
     } catch {
-      setNotice("Could not cancel the verification.");
+      setNotice(text.notice.cancelError);
     } finally {
       setBusy(false);
     }
@@ -3981,14 +6344,16 @@ function Verification({ session }: { session: Session }) {
   return (
     <>
       <section className="access-card">
-        <h1>Identity verification</h1>
+        <h1>{text.heading}</h1>
         <MemberLinks locale={locale} />
         <p>
-          Status: <strong>{asText(data?.status)}</strong>
+          {text.statusLabel} <strong>{asText(data?.status)}</strong>
         </p>
         <p>
-          Primary profile photo:{" "}
-          {data?.primaryPhotoReady ? "approved" : "required"}
+          {text.primaryPhotoLabel}{" "}
+          {data?.primaryPhotoReady
+            ? text.primaryPhotoApproved
+            : text.primaryPhotoRequired}
         </p>
         {notice && <p className="notice">{notice}</p>}
         <button
@@ -3996,11 +6361,11 @@ function Verification({ session }: { session: Session }) {
           onClick={() => void start()}
           disabled={!data?.providerConfigured || busy}
         >
-          {busy ? "Please wait…" : "Start verification"}
+          {busy ? text.startButtonBusy : text.startButton}
         </button>
         {!data?.providerConfigured && (
           <p className="error">
-            Verification provider is not configured for this environment.
+            {text.providerNotConfigured}
           </p>
         )}
       </section>
@@ -4009,19 +6374,19 @@ function Verification({ session }: { session: Session }) {
           className="verification-overlay"
           role="dialog"
           aria-modal="true"
-          aria-label="Identity verification"
+          aria-label={text.overlayAriaLabel}
         >
           <section>
             <button
               className="plain-button close-verification"
               type="button"
-              aria-label="Close verification"
+              aria-label={text.closeAriaLabel}
               onClick={() => setVerificationUrl("")}
             >
               ×
             </button>
             <iframe
-              title="Identity verification"
+              title={text.iframeTitle}
               src={verificationUrl}
               allow="camera *; microphone *"
               referrerPolicy="strict-origin-when-cross-origin"
@@ -4032,7 +6397,7 @@ function Verification({ session }: { session: Session }) {
               onClick={() => void abandon()}
               disabled={busy}
             >
-              {busy ? "Cancelling…" : "Cancel verification"}
+              {busy ? text.cancelButtonBusy : text.cancelButton}
             </button>
           </section>
         </div>
@@ -4040,246 +6405,7 @@ function Verification({ session }: { session: Session }) {
     </>
   );
 }
-
-function Conversations({ session }: { session: Session }) {
-  const locale = localeOf();
-  const [conversations, setConversations] = useState<Row[]>([]);
-  const [active, setActive] = useState<Row | null>(null);
-  const [messages, setMessages] = useState<Row[]>([]);
-  const [body, setBody] = useState("");
-  const [notice, setNotice] = useState("");
-  const [starters, setStarters] = useState<string[]>([]);
-  const [startersLoading, setStartersLoading] = useState(false);
-  const load = () => {
-    void api
-      .get<{ items: Row[] }>("/member/conversations")
-      .then((data) => setConversations(data.items || []))
-      .catch(() => setNotice("Could not load messages."));
-  };
-  const loadMessages = async (conversationId: unknown) => {
-    const response = await api.get<{ items: Row[] }>(
-      `/member/conversations/${encodeURIComponent(asText(conversationId))}/messages`,
-    );
-    setMessages(response.items || []);
-  };
-  useEffect(load, []);
-  useEffect(() => {
-    if (active?.id)
-      void loadMessages(active.id).catch(() =>
-        setNotice("Could not load this conversation."),
-      );
-  }, [active]);
-  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!active?.id || !body.trim()) return;
-    try {
-      await api.post(
-        `/member/conversations/${encodeURIComponent(asText(active.id))}/messages`,
-        { body },
-      );
-      setBody("");
-      await loadMessages(active.id);
-      load();
-    } catch {
-      setNotice(
-        "Message could not be sent. Both members must be verified before chatting.",
-      );
-    }
-  };
-  const attach = async (file: File | undefined) => {
-    if (!file || !active?.id) return;
-    try {
-      const data = new FormData();
-      data.append("file", file);
-      await api.upload(
-        `/member/conversations/${encodeURIComponent(asText(active.id))}/attachments`,
-        data,
-      );
-      await loadMessages(active.id);
-      load();
-    } catch {
-      setNotice(
-        "Attachment could not be sent. Images and PDF files are supported after verification.",
-      );
-    }
-  };
-  const startCall = async (callType: "AUDIO" | "VIDEO") => {
-    if (!active?.id) return;
-    try {
-      const response = await api.post<Row>(
-        `/member/conversations/${encodeURIComponent(asText(active.id))}/calls`,
-        { callType },
-      );
-      const call = response.call as Row | undefined;
-      if (!call) throw new Error("Call was not created");
-      window.dispatchEvent(
-        new CustomEvent<Row>("lbp-call-start", { detail: call }),
-      );
-      setNotice("Calling your match…");
-    } catch {
-      setNotice(
-        "A Premium subscription and verification are required for calls.",
-      );
-    }
-  };
-  const loadStarters = async () => {
-    if (!active?.id) return;
-    setStartersLoading(true);
-    setStarters([]);
-    try {
-      const response = await api.post<{ ok: true; starters: string[] }>(
-        `/member/conversations/${encodeURIComponent(asText(active.id))}/message-starters`,
-        {},
-      );
-      setStarters(response.starters || []);
-    } catch (err) {
-      setNotice(
-        err instanceof ApiError && err.status === 402
-          ? "AI-suggested openers are a Pro feature."
-          : "Could not suggest openers right now.",
-      );
-    } finally {
-      setStartersLoading(false);
-    }
-  };
-  return (
-    <section className="conversations">
-      <div>
-        <h1>Messages</h1>
-        <MemberLinks locale={locale} />
-        {notice && (
-          <p className={notice.includes("started") ? "notice" : "error"}>
-            {notice}
-          </p>
-        )}
-        <div className="conversation-layout">
-          <aside>
-            {conversations.map((item) => (
-              <button
-                className={active?.id === item.id ? "active" : ""}
-                key={asText(item.id)}
-                onClick={() => setActive(item)}
-              >
-                <strong>
-                  {asText(
-                    item.peerDisplayName ?? item.displayName ?? item.title,
-                  )}
-                </strong>
-                <small>{asText(item.lastMessageBody)}</small>
-              </button>
-            ))}
-          </aside>
-          <div className="message-pane">
-            {active ? (
-              <>
-                <div className="message-title">
-                  <h2>
-                    {asText(
-                      active.peerDisplayName ??
-                        active.displayName ??
-                        active.title,
-                    )}
-                  </h2>
-                  <div className="call-actions">
-                    <button
-                      className="secondary"
-                      onClick={() => void startCall("AUDIO")}
-                    >
-                      Audio call
-                    </button>
-                    <button
-                      className="secondary"
-                      onClick={() => void startCall("VIDEO")}
-                    >
-                      Video call
-                    </button>
-                    {Boolean(active.other_profile_id) && (
-                      <Link
-                        className="secondary"
-                        to={`/${locale}/family-room/${encodeURIComponent(asText(active.other_profile_id))}`}
-                      >
-                        Family Room
-                      </Link>
-                    )}
-                    {Boolean(active.other_profile_id) && (
-                      <Link
-                        className="secondary"
-                        to={`/${locale}/compatibility-report/${encodeURIComponent(asText(active.other_profile_id))}`}
-                      >
-                        Compatibility Report
-                      </Link>
-                    )}
-                  </div>
-                </div>
-                <div className="message-list">
-                  {messages.map((message) => (
-                    <div className="message-bubble" key={asText(message.id)}>
-                      <span>{asText(message.body)}</span>
-                      {Boolean(message.mediaUrl) && (
-                        <a
-                          href={asText(message.mediaUrl)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open attachment
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <div className="message-starters">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => void loadStarters()}
-                    disabled={startersLoading}
-                  >
-                    {startersLoading ? "Thinking…" : "Suggest openers"}
-                  </button>
-                  {starters.length > 0 && (
-                    <ul>
-                      {starters.map((text, index) => (
-                        <li key={index}>
-                          <span>{text}</span>
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={() => setBody(text)}
-                          >
-                            Use
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <form onSubmit={send}>
-                  <input
-                    value={body}
-                    onChange={(event) => setBody(event.target.value)}
-                    placeholder="Write a message…"
-                  />
-                  <label className="attachment-control">
-                    Attach
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,application/pdf"
-                      onChange={(event) => void attach(event.target.files?.[0])}
-                    />
-                  </label>
-                  <button className="primary">Send</button>
-                </form>
-              </>
-            ) : (
-              <p>Select a conversation.</p>
-            )}
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
+function Conversations({ session }: { session: Session }) { return <MemberChat session={session} locale={memberLocaleOf(localeOf())} />; }
 
 function SimpleMemberList({
   session,
@@ -4325,13 +6451,7 @@ function SimpleMemberList({
             className="profile-card"
             key={asText(item.profileId ?? item.id ?? index)}
           >
-            {item.avatarUrl ? (
-              <img src={asText(item.avatarUrl)} alt="" />
-            ) : (
-              <div className="avatar-placeholder">
-                {asText(item.displayName).slice(0, 1)}
-              </div>
-            )}
+            <UserAvatar src={item.avatarUrl} name={firstAvatarText(item.displayName, item.display_name, item.name)} />
             <h2>{asText(item.displayName ?? item.name)}</h2>
             <p>
               {[item.city, item.country].filter(Boolean).map(asText).join(", ")}
@@ -4356,6 +6476,7 @@ function SimpleMemberList({
 
 function Favourites({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = FAVOURITES_TEXT[locale] ?? FAVOURITES_TEXT.en;
   const [data, setData] = useState<Row | null>(null);
   const [notice, setNotice] = useState("");
   const load = () => {
@@ -4363,7 +6484,7 @@ function Favourites({ session }: { session: Session }) {
       void api
         .get<Row>("/member/favourites")
         .then(setData)
-        .catch(() => setNotice("Could not load saved clinics and lawyers."));
+        .catch(() => setNotice(text.notice.loadError));
   };
   useEffect(load, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
@@ -4374,7 +6495,7 @@ function Favourites({ session }: { session: Session }) {
       );
       load();
     } catch {
-      setNotice("Could not remove this saved item.");
+      setNotice(text.notice.removeError);
     }
   };
   const block = (kind: "clinics" | "lawyers", title: string) => (
@@ -4405,124 +6526,641 @@ function Favourites({ session }: { session: Session }) {
                 className="secondary"
                 onClick={() => void remove(kind, item.id)}
               >
-                Remove
+                {text.removeButton}
               </button>
             </div>
           </article>
         ))}
       </div>
       {!((data?.[kind] as Row[] | undefined) || []).length && (
-        <p className="notice">There are no saved {kind}.</p>
+        <p className="notice">{text.sections[kind].empty}</p>
       )}
     </section>
   );
   return (
     <section>
-      <h1>Saved</h1>
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
       {notice && <p className="error">{notice}</p>}
-      {block("clinics", "Clinics")}
-      {block("lawyers", "Lawyers")}
+      {block("clinics", text.sections.clinics.title)}
+      {block("lawyers", text.sections.lawyers.title)}
     </section>
   );
 }
-
 function AccountDeletion({ session }: { session: Session }) {
   const locale = localeOf();
-  const [reason, setReason] = useState("Prefer not to say");
+  const text = ACCOUNT_DELETION_TEXT[locale] ?? ACCOUNT_DELETION_TEXT.en;
+  const [reason, setReason] = useState(text.reasonDefault);
   const [details, setDetails] = useState("");
+  const [confirmation, setConfirmation] = useState("");
   const [notice, setNotice] = useState("");
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  const confirmWord = text.confirmWord;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     try {
       const response = await api.post<Row>("/member/account-deletion", {
         reason,
         details,
+        confirmation,
       });
-      setNotice(asText(response.message ?? "Deletion request submitted."));
+      setNotice(asText(response.message ?? text.notice.submitted));
+      window.setTimeout(() => window.location.assign(`/${locale}/auth/login`), 1200);
     } catch {
-      setNotice("Could not submit the deletion request.");
+      setNotice(text.notice.submitError);
     }
   };
   return (
     <section className="member-form danger-zone">
-      <h1>Delete account</h1>
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
-      <p>Your request is reviewed before the account is permanently removed.</p>
+      <p>{text.warning}</p>
       {notice && <p className="notice">{notice}</p>}
       <form onSubmit={submit}>
         <label>
-          Reason
+          {text.reasonLabel}
           <input
             value={reason}
             onChange={(event) => setReason(event.target.value)}
           />
         </label>
         <label>
-          Details
+          {text.detailsLabel}
           <textarea
             rows={5}
             value={details}
             onChange={(event) => setDetails(event.target.value)}
           />
         </label>
-        <button className="primary">Request account deletion</button>
+        <label>
+          {text.confirmLabel.replace("{word}", confirmWord)}
+          <input
+            value={confirmation}
+            onChange={(event) =>
+              setConfirmation(
+                event.target.value.toUpperCase().slice(0, confirmWord.length),
+              )
+            }
+            autoComplete="off"
+            required
+          />
+        </label>
+        <button className="primary" disabled={confirmation !== confirmWord}>
+          {text.deleteButton}
+        </button>
       </form>
     </section>
   );
 }
 
+const SUBSCRIPTION_TIER_RANK: Record<string, number> = { EXPLORE: 0, BUILDER: 1, PRO: 2 };
+
+const SUBSCRIPTION_TEXT: Record<CookieLocale, {
+  title: string;
+  loadError: string;
+  requestError: string;
+  verifyPrompt: string;
+  startVerification: string;
+  currentStatusPrefix: string;
+  currentPlanPrefix: string;
+  tierLabels: Record<string, string>;
+  activeNotice: string;
+  upgradeOffer: string;
+  upgradeToProLabel: string;
+  planLabels: Record<string, string>;
+  compareAllPlans: string;
+}> = {
+  en: {
+    title: "Premium",
+    loadError: "Could not load your Premium access.",
+    requestError: "Premium is available only after profile verification.",
+    verifyPrompt: "Verify your profile to access Premium.",
+    startVerification: "Start verification",
+    currentStatusPrefix: "Current status:",
+    currentPlanPrefix: "Current plan:",
+    tierLabels: { EXPLORE: "Explore (free)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Your Premium subscription is active.",
+    upgradeOffer: "Want the Family Builder Pro extras - Detailed Compatibility Report, Co-Parenting Agreement sign-off, Family Plan & Shared Family Room?",
+    upgradeToProLabel: "Upgrade to Pro",
+    planLabels: { MONTHLY: "monthly", QUARTERLY: "quarterly" },
+    compareAllPlans: "Compare all plans",
+  },
+  ru: {
+    title: "Premium",
+    loadError: "Не удалось загрузить информацию о вашем доступе Premium.",
+    requestError: "Premium доступен только после верификации профиля.",
+    verifyPrompt: "Пройдите верификацию профиля, чтобы получить доступ к Premium.",
+    startVerification: "Начать верификацию",
+    currentStatusPrefix: "Текущий статус:",
+    currentPlanPrefix: "Текущий план:",
+    tierLabels: { EXPLORE: "Explore (бесплатно)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Ваша подписка Premium активна.",
+    upgradeOffer: "Хотите получить дополнительные возможности Family Builder Pro - Подробный отчёт о совместимости, подписание Co-Parenting Agreement, Family Plan и общую комнату семьи?",
+    upgradeToProLabel: "Перейти на Pro",
+    planLabels: { MONTHLY: "помесячно", QUARTERLY: "поквартально" },
+    compareAllPlans: "Сравнить все планы",
+  },
+  es: {
+    title: "Premium",
+    loadError: "No se pudo cargar tu acceso Premium.",
+    requestError: "Premium solo está disponible después de verificar tu perfil.",
+    verifyPrompt: "Verifica tu perfil para acceder a Premium.",
+    startVerification: "Empezar verificación",
+    currentStatusPrefix: "Estado actual:",
+    currentPlanPrefix: "Plan actual:",
+    tierLabels: { EXPLORE: "Explore (gratis)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Tu suscripción Premium está activa.",
+    upgradeOffer: "¿Quieres los extras de Family Builder Pro - Informe de compatibilidad detallado, firma del Co-Parenting Agreement, Family Plan y Sala Familiar Compartida?",
+    upgradeToProLabel: "Pasar a Pro",
+    planLabels: { MONTHLY: "mensual", QUARTERLY: "trimestral" },
+    compareAllPlans: "Comparar todos los planes",
+  },
+  pt: {
+    title: "Premium",
+    loadError: "Não foi possível carregar seu acesso Premium.",
+    requestError: "O Premium só fica disponível depois da verificação do perfil.",
+    verifyPrompt: "Verifique seu perfil para acessar o Premium.",
+    startVerification: "Iniciar verificação",
+    currentStatusPrefix: "Status atual:",
+    currentPlanPrefix: "Plano atual:",
+    tierLabels: { EXPLORE: "Explore (grátis)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Sua assinatura Premium está ativa.",
+    upgradeOffer: "Quer os extras do Family Builder Pro - Relatório de Compatibilidade detalhado, assinatura do Co-Parenting Agreement, Family Plan e Sala Familiar Partilhada?",
+    upgradeToProLabel: "Passar para o Pro",
+    planLabels: { MONTHLY: "mensal", QUARTERLY: "trimestral" },
+    compareAllPlans: "Comparar todos os planos",
+  },
+  fr: {
+    title: "Premium",
+    loadError: "Impossible de charger votre accès Premium.",
+    requestError: "Premium n'est disponible qu'après vérification du profil.",
+    verifyPrompt: "Vérifiez votre profil pour accéder à Premium.",
+    startVerification: "Commencer la vérification",
+    currentStatusPrefix: "Statut actuel :",
+    currentPlanPrefix: "Formule actuelle :",
+    tierLabels: { EXPLORE: "Explore (gratuit)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Votre abonnement Premium est actif.",
+    upgradeOffer: "Vous voulez les avantages Family Builder Pro - Rapport de compatibilité détaillé, signature du Co-Parenting Agreement, Family Plan et Espace Familial Partagé ?",
+    upgradeToProLabel: "Passer à Pro",
+    planLabels: { MONTHLY: "mensuel", QUARTERLY: "trimestriel" },
+    compareAllPlans: "Comparer toutes les formules",
+  },
+  de: {
+    title: "Premium",
+    loadError: "Ihr Premium-Zugang konnte nicht geladen werden.",
+    requestError: "Premium ist erst nach der Profilverifizierung verfügbar.",
+    verifyPrompt: "Verifizieren Sie Ihr Profil, um auf Premium zuzugreifen.",
+    startVerification: "Verifizierung starten",
+    currentStatusPrefix: "Aktueller Status:",
+    currentPlanPrefix: "Aktueller Plan:",
+    tierLabels: { EXPLORE: "Explore (kostenlos)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Ihr Premium-Abo ist aktiv.",
+    upgradeOffer: "Möchten Sie die Family Builder Pro-Extras - Detaillierter Kompatibilitätsbericht, Unterzeichnung der Co-Parenting Agreement, Family Plan & gemeinsamer Familienraum?",
+    upgradeToProLabel: "Auf Pro upgraden",
+    planLabels: { MONTHLY: "monatlich", QUARTERLY: "vierteljährlich" },
+    compareAllPlans: "Alle Pläne vergleichen",
+  },
+  it: {
+    title: "Premium",
+    loadError: "Non è stato possibile caricare il tuo accesso Premium.",
+    requestError: "Premium è disponibile solo dopo la verifica del profilo.",
+    verifyPrompt: "Verifica il tuo profilo per accedere a Premium.",
+    startVerification: "Inizia la verifica",
+    currentStatusPrefix: "Stato attuale:",
+    currentPlanPrefix: "Piano attuale:",
+    tierLabels: { EXPLORE: "Explore (gratis)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Il tuo abbonamento Premium è attivo.",
+    upgradeOffer: "Vuoi gli extra di Family Builder Pro - Report di Compatibilità dettagliato, firma del Co-Parenting Agreement, Family Plan e Family Room condivisa?",
+    upgradeToProLabel: "Passa a Pro",
+    planLabels: { MONTHLY: "mensile", QUARTERLY: "trimestrale" },
+    compareAllPlans: "Confronta tutti i piani",
+  },
+  pl: {
+    title: "Premium",
+    loadError: "Nie udało się wczytać Twojego dostępu Premium.",
+    requestError: "Premium jest dostępne dopiero po weryfikacji profilu.",
+    verifyPrompt: "Zweryfikuj swój profil, aby uzyskać dostęp do Premium.",
+    startVerification: "Rozpocznij weryfikację",
+    currentStatusPrefix: "Aktualny status:",
+    currentPlanPrefix: "Aktualny plan:",
+    tierLabels: { EXPLORE: "Explore (za darmo)", BUILDER: "Family Builder", PRO: "Family Builder Pro" },
+    activeNotice: "Twoja subskrypcja Premium jest aktywna.",
+    upgradeOffer: "Chcesz dodatkowe funkcje Family Builder Pro - Szczegółowy Raport Kompatybilności, podpisanie Co-Parenting Agreement, Family Plan i wspólny Pokój Rodzinny?",
+    upgradeToProLabel: "Przejdź na Pro",
+    planLabels: { MONTHLY: "miesięcznie", QUARTERLY: "kwartalnie" },
+    compareAllPlans: "Porównaj wszystkie plany",
+  },
+};
+
+const BOOST_TEXT: Record<CookieLocale, {
+  title: string;
+  intro: string;
+  loading: string;
+  loadError: string;
+  activeUntil: string;
+  pendingReview: string;
+  requestButton: string;
+  requesting: string;
+  verifyRequiredError: string;
+  requestGenericError: string;
+  defaultRequestedMessage: string;
+}> = {
+  en: {
+    title: "Boost",
+    intro: "Boost puts your profile near the top of Catalog results for a limited time, so more people see you first.",
+    loading: "Loading…",
+    loadError: "Could not load your Boost status.",
+    activeUntil: "Your Boost is active until {date}.",
+    pendingReview: "Your Boost request is under review.",
+    requestButton: "Request a Boost",
+    requesting: "Requesting…",
+    verifyRequiredError: "You need to be verified before requesting a Boost.",
+    requestGenericError: "Could not request a Boost right now.",
+    defaultRequestedMessage: "Boost requested.",
+  },
+  ru: {
+    title: "Boost",
+    intro: "Boost поднимает ваш профиль ближе к началу списка в Каталоге на ограниченное время, чтобы больше людей увидели вас первыми.",
+    loading: "Загрузка…",
+    loadError: "Не удалось загрузить статус вашего Boost.",
+    activeUntil: "Ваш Boost активен до {date}.",
+    pendingReview: "Ваш запрос на Boost на рассмотрении.",
+    requestButton: "Запросить Boost",
+    requesting: "Отправка запроса…",
+    verifyRequiredError: "Перед запросом Boost вам нужно пройти верификацию.",
+    requestGenericError: "Сейчас не удалось запросить Boost.",
+    defaultRequestedMessage: "Boost запрошен.",
+  },
+  es: {
+    title: "Boost",
+    intro: "Boost coloca tu perfil cerca de la parte superior de los resultados del Catálogo durante un tiempo limitado, para que más personas te vean primero.",
+    loading: "Cargando…",
+    loadError: "No se pudo cargar el estado de tu Boost.",
+    activeUntil: "Tu Boost está activo hasta {date}.",
+    pendingReview: "Tu solicitud de Boost está en revisión.",
+    requestButton: "Solicitar un Boost",
+    requesting: "Solicitando…",
+    verifyRequiredError: "Necesitas estar verificado para solicitar un Boost.",
+    requestGenericError: "No se pudo solicitar un Boost en este momento.",
+    defaultRequestedMessage: "Boost solicitado.",
+  },
+  pt: {
+    title: "Boost",
+    intro: "O Boost coloca seu perfil perto do topo dos resultados do Catálogo por tempo limitado, para que mais pessoas vejam você primeiro.",
+    loading: "Carregando…",
+    loadError: "Não foi possível carregar o status do seu Boost.",
+    activeUntil: "Seu Boost está ativo até {date}.",
+    pendingReview: "Sua solicitação de Boost está em análise.",
+    requestButton: "Solicitar um Boost",
+    requesting: "Solicitando…",
+    verifyRequiredError: "Você precisa estar verificado para solicitar um Boost.",
+    requestGenericError: "Não foi possível solicitar um Boost agora.",
+    defaultRequestedMessage: "Boost solicitado.",
+  },
+  fr: {
+    title: "Boost",
+    intro: "Le Boost place votre profil près du haut des résultats du Catalogue pendant une durée limitée, pour que davantage de personnes vous voient en premier.",
+    loading: "Chargement…",
+    loadError: "Impossible de charger le statut de votre Boost.",
+    activeUntil: "Votre Boost est actif jusqu'au {date}.",
+    pendingReview: "Votre demande de Boost est en cours d'examen.",
+    requestButton: "Demander un Boost",
+    requesting: "Envoi de la demande…",
+    verifyRequiredError: "Vous devez être vérifié(e) avant de demander un Boost.",
+    requestGenericError: "Impossible de demander un Boost pour le moment.",
+    defaultRequestedMessage: "Boost demandé.",
+  },
+  de: {
+    title: "Boost",
+    intro: "Der Boost bringt Ihr Profil für begrenzte Zeit weiter nach oben in den Katalog-Ergebnissen, damit mehr Menschen Sie zuerst sehen.",
+    loading: "Wird geladen…",
+    loadError: "Ihr Boost-Status konnte nicht geladen werden.",
+    activeUntil: "Ihr Boost ist aktiv bis {date}.",
+    pendingReview: "Ihre Boost-Anfrage wird geprüft.",
+    requestButton: "Boost anfragen",
+    requesting: "Wird angefragt…",
+    verifyRequiredError: "Sie müssen verifiziert sein, um einen Boost anzufragen.",
+    requestGenericError: "Der Boost konnte gerade nicht angefragt werden.",
+    defaultRequestedMessage: "Boost angefragt.",
+  },
+  it: {
+    title: "Boost",
+    intro: "Il Boost porta il tuo profilo vicino alla cima dei risultati del Catalogo per un periodo limitato, così più persone ti vedono per prime.",
+    loading: "Caricamento…",
+    loadError: "Non è stato possibile caricare lo stato del tuo Boost.",
+    activeUntil: "Il tuo Boost è attivo fino al {date}.",
+    pendingReview: "La tua richiesta di Boost è in revisione.",
+    requestButton: "Richiedi un Boost",
+    requesting: "Richiesta in corso…",
+    verifyRequiredError: "Devi essere verificato/a prima di richiedere un Boost.",
+    requestGenericError: "Non è stato possibile richiedere un Boost in questo momento.",
+    defaultRequestedMessage: "Boost richiesto.",
+  },
+  pl: {
+    title: "Boost",
+    intro: "Boost przenosi Twój profil bliżej góry wyników w Katalogu na ograniczony czas, dzięki czemu więcej osób zobaczy Cię jako pierwsze.",
+    loading: "Wczytywanie…",
+    loadError: "Nie udało się wczytać statusu Twojego Boosta.",
+    activeUntil: "Twój Boost jest aktywny do {date}.",
+    pendingReview: "Twoja prośba o Boost jest w trakcie rozpatrywania.",
+    requestButton: "Poproś o Boost",
+    requesting: "Wysyłanie prośby…",
+    verifyRequiredError: "Musisz zostać zweryfikowany/a, zanim poprosisz o Boost.",
+    requestGenericError: "Nie udało się teraz poprosić o Boost.",
+    defaultRequestedMessage: "Poproszono o Boost.",
+  },
+};
+
+const REFERRAL_TEXT: Record<CookieLocale, {
+  title: string;
+  intro: string;
+  loading: string;
+  loadError: string;
+  yourInviteLink: string;
+  copyLink: string;
+  copied: string;
+  codeFallbackPrefix: string;
+  friendsInvited: string;
+  haveInviteCode: string;
+  inviteCodePlaceholder: string;
+  redeemButton: string;
+  redeeming: string;
+  alreadyRedeemed: string;
+  redeemSuccess: string;
+  errorAlreadyUsed: string;
+  errorNotFound: string;
+  errorOwnCode: string;
+  errorGeneric: string;
+  copyLinkError: string;
+}> = {
+  en: {
+    title: "Referral",
+    intro: "Invite friends to LetsBeParents - when they join and get verified, you earn a profile Boost.",
+    loading: "Loading…",
+    loadError: "Could not load your referral info.",
+    yourInviteLink: "Your invite link",
+    copyLink: "Copy link",
+    copied: "Copied!",
+    codeFallbackPrefix: "Or share the code directly:",
+    friendsInvited: "{referredCount} friend(s) invited - {rewardedCount} rewarded",
+    haveInviteCode: "Have an invite code?",
+    inviteCodePlaceholder: "Enter invite code",
+    redeemButton: "Redeem code",
+    redeeming: "Redeeming…",
+    alreadyRedeemed: "You've already redeemed an invite code ({redeemedCode}).",
+    redeemSuccess: "Invite code redeemed.",
+    errorAlreadyUsed: "You've already used an invite code.",
+    errorNotFound: "That invite code was not found.",
+    errorOwnCode: "You can't use your own invite code.",
+    errorGeneric: "Could not redeem that code.",
+    copyLinkError: "Could not copy the link - you can select and copy it manually.",
+  },
+  ru: {
+    title: "Приглашай и получай Boost",
+    intro: "Приглашайте друзей в LetsBeParents - когда они присоединятся и пройдут верификацию, вы получите Boost профиля.",
+    loading: "Загрузка…",
+    loadError: "Не удалось загрузить информацию о ваших рефералах.",
+    yourInviteLink: "Ваша ссылка-приглашение",
+    copyLink: "Скопировать ссылку",
+    copied: "Скопировано!",
+    codeFallbackPrefix: "Или поделитесь кодом напрямую:",
+    friendsInvited: "Приглашено друзей: {referredCount} - вознаграждено: {rewardedCount}",
+    haveInviteCode: "Есть код приглашения?",
+    inviteCodePlaceholder: "Введите код приглашения",
+    redeemButton: "Применить код",
+    redeeming: "Применение…",
+    alreadyRedeemed: "Вы уже использовали код приглашения ({redeemedCode}).",
+    redeemSuccess: "Код приглашения применён.",
+    errorAlreadyUsed: "Вы уже использовали код приглашения.",
+    errorNotFound: "Такой код приглашения не найден.",
+    errorOwnCode: "Нельзя использовать свой собственный код приглашения.",
+    errorGeneric: "Не удалось применить этот код.",
+    copyLinkError: "Не удалось скопировать ссылку - вы можете выделить и скопировать её вручную.",
+  },
+  es: {
+    title: "Invita y gana un Boost",
+    intro: "Invita a tus amigos a LetsBeParents - cuando se unan y se verifiquen, ganas un Boost de perfil.",
+    loading: "Cargando…",
+    loadError: "No se pudo cargar tu información de referidos.",
+    yourInviteLink: "Tu enlace de invitación",
+    copyLink: "Copiar enlace",
+    copied: "¡Copiado!",
+    codeFallbackPrefix: "O comparte el código directamente:",
+    friendsInvited: "{referredCount} amigo(s) invitado(s) - {rewardedCount} recompensado(s)",
+    haveInviteCode: "¿Tienes un código de invitación?",
+    inviteCodePlaceholder: "Introduce el código de invitación",
+    redeemButton: "Canjear código",
+    redeeming: "Canjeando…",
+    alreadyRedeemed: "Ya has canjeado un código de invitación ({redeemedCode}).",
+    redeemSuccess: "Código de invitación canjeado.",
+    errorAlreadyUsed: "Ya has usado un código de invitación.",
+    errorNotFound: "No se encontró ese código de invitación.",
+    errorOwnCode: "No puedes usar tu propio código de invitación.",
+    errorGeneric: "No se pudo canjear ese código.",
+    copyLinkError: "No se pudo copiar el enlace - puedes seleccionarlo y copiarlo manualmente.",
+  },
+  pt: {
+    title: "Indique e ganhe um Boost",
+    intro: "Convide amigos para a LetsBeParents - quando eles entrarem e forem verificados, você ganha um Boost de perfil.",
+    loading: "Carregando…",
+    loadError: "Não foi possível carregar suas informações de indicação.",
+    yourInviteLink: "Seu link de convite",
+    copyLink: "Copiar link",
+    copied: "Copiado!",
+    codeFallbackPrefix: "Ou compartilhe o código diretamente:",
+    friendsInvited: "{referredCount} amigo(s) convidado(s) - {rewardedCount} recompensado(s)",
+    haveInviteCode: "Tem um código de convite?",
+    inviteCodePlaceholder: "Digite o código de convite",
+    redeemButton: "Resgatar código",
+    redeeming: "Resgatando…",
+    alreadyRedeemed: "Você já resgatou um código de convite ({redeemedCode}).",
+    redeemSuccess: "Código de convite resgatado.",
+    errorAlreadyUsed: "Você já usou um código de convite.",
+    errorNotFound: "Esse código de convite não foi encontrado.",
+    errorOwnCode: "Você não pode usar seu próprio código de convite.",
+    errorGeneric: "Não foi possível resgatar esse código.",
+    copyLinkError: "Não foi possível copiar o link - você pode selecioná-lo e copiá-lo manualmente.",
+  },
+  fr: {
+    title: "Parrainez et gagnez un Boost",
+    intro: "Invitez des amis sur LetsBeParents - quand ils rejoignent la plateforme et se vérifient, vous gagnez un Boost de profil.",
+    loading: "Chargement…",
+    loadError: "Impossible de charger vos informations de parrainage.",
+    yourInviteLink: "Votre lien d'invitation",
+    copyLink: "Copier le lien",
+    copied: "Copié !",
+    codeFallbackPrefix: "Ou partagez directement le code :",
+    friendsInvited: "{referredCount} ami(s) invité(s) - {rewardedCount} récompensé(s)",
+    haveInviteCode: "Vous avez un code d'invitation ?",
+    inviteCodePlaceholder: "Saisissez le code d'invitation",
+    redeemButton: "Utiliser le code",
+    redeeming: "Utilisation en cours…",
+    alreadyRedeemed: "Vous avez déjà utilisé un code d'invitation ({redeemedCode}).",
+    redeemSuccess: "Code d'invitation utilisé.",
+    errorAlreadyUsed: "Vous avez déjà utilisé un code d'invitation.",
+    errorNotFound: "Ce code d'invitation est introuvable.",
+    errorOwnCode: "Vous ne pouvez pas utiliser votre propre code d'invitation.",
+    errorGeneric: "Impossible d'utiliser ce code.",
+    copyLinkError: "Impossible de copier le lien - vous pouvez le sélectionner et le copier manuellement.",
+  },
+  de: {
+    title: "Einladen & einen Boost verdienen",
+    intro: "Laden Sie Freunde zu LetsBeParents ein - sobald sie beitreten und sich verifizieren, erhalten Sie einen Profil-Boost.",
+    loading: "Wird geladen…",
+    loadError: "Ihre Empfehlungsdaten konnten nicht geladen werden.",
+    yourInviteLink: "Ihr Einladungslink",
+    copyLink: "Link kopieren",
+    copied: "Kopiert!",
+    codeFallbackPrefix: "Oder teilen Sie den Code direkt:",
+    friendsInvited: "{referredCount} Freund(e) eingeladen - {rewardedCount} belohnt",
+    haveInviteCode: "Haben Sie einen Einladungscode?",
+    inviteCodePlaceholder: "Einladungscode eingeben",
+    redeemButton: "Code einlösen",
+    redeeming: "Wird eingelöst…",
+    alreadyRedeemed: "Sie haben bereits einen Einladungscode eingelöst ({redeemedCode}).",
+    redeemSuccess: "Einladungscode eingelöst.",
+    errorAlreadyUsed: "Sie haben bereits einen Einladungscode verwendet.",
+    errorNotFound: "Dieser Einladungscode wurde nicht gefunden.",
+    errorOwnCode: "Sie können Ihren eigenen Einladungscode nicht verwenden.",
+    errorGeneric: "Dieser Code konnte nicht eingelöst werden.",
+    copyLinkError: "Der Link konnte nicht kopiert werden - Sie können ihn manuell markieren und kopieren.",
+  },
+  it: {
+    title: "Invita e guadagna un Boost",
+    intro: "Invita i tuoi amici su LetsBeParents - quando si iscrivono e verificano il profilo, ottieni un Boost del profilo.",
+    loading: "Caricamento…",
+    loadError: "Non è stato possibile caricare le informazioni sui tuoi inviti.",
+    yourInviteLink: "Il tuo link di invito",
+    copyLink: "Copia link",
+    copied: "Copiato!",
+    codeFallbackPrefix: "Oppure condividi direttamente il codice:",
+    friendsInvited: "{referredCount} amico/i invitato/i - {rewardedCount} premiato/i",
+    haveInviteCode: "Hai un codice di invito?",
+    inviteCodePlaceholder: "Inserisci il codice di invito",
+    redeemButton: "Usa il codice",
+    redeeming: "Applicazione in corso…",
+    alreadyRedeemed: "Hai già usato un codice di invito ({redeemedCode}).",
+    redeemSuccess: "Codice di invito applicato.",
+    errorAlreadyUsed: "Hai già usato un codice di invito.",
+    errorNotFound: "Codice di invito non trovato.",
+    errorOwnCode: "Non puoi usare il tuo stesso codice di invito.",
+    errorGeneric: "Non è stato possibile usare questo codice.",
+    copyLinkError: "Non è stato possibile copiare il link - puoi selezionarlo e copiarlo manualmente.",
+  },
+  pl: {
+    title: "Zaproś i zdobądź Boost",
+    intro: "Zaproś znajomych do LetsBeParents - gdy dołączą i przejdą weryfikację, zdobędziesz Boost profilu.",
+    loading: "Wczytywanie…",
+    loadError: "Nie udało się wczytać informacji o poleceniach.",
+    yourInviteLink: "Twój link zaproszenia",
+    copyLink: "Kopiuj link",
+    copied: "Skopiowano!",
+    codeFallbackPrefix: "Albo udostępnij kod bezpośrednio:",
+    friendsInvited: "Zaproszonych znajomych: {referredCount} - nagrodzonych: {rewardedCount}",
+    haveInviteCode: "Masz kod zaproszenia?",
+    inviteCodePlaceholder: "Wpisz kod zaproszenia",
+    redeemButton: "Wykorzystaj kod",
+    redeeming: "Wykorzystywanie…",
+    alreadyRedeemed: "Wykorzystałeś/aś już kod zaproszenia ({redeemedCode}).",
+    redeemSuccess: "Kod zaproszenia wykorzystany.",
+    errorAlreadyUsed: "Wykorzystałeś/aś już kod zaproszenia.",
+    errorNotFound: "Nie znaleziono takiego kodu zaproszenia.",
+    errorOwnCode: "Nie możesz użyć własnego kodu zaproszenia.",
+    errorGeneric: "Nie udało się wykorzystać tego kodu.",
+    copyLinkError: "Nie udało się skopiować linku - możesz zaznaczyć go i skopiować ręcznie.",
+  },
+};
+
 function Subscription({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = SUBSCRIPTION_TEXT[locale] ?? SUBSCRIPTION_TEXT.en;
   const [data, setData] = useState<Row | null>(null);
   const [notice, setNotice] = useState("");
-  useEffect(() => {
+  const [requesting, setRequesting] = useState(false);
+  const load = () => {
     if (session)
       api
         .get<Row>("/member/subscription")
         .then(setData)
-        .catch(() => setNotice("Could not load your Premium access."));
-  }, [session]);
+        .catch(() => setNotice(text.loadError));
+  };
+  useEffect(load, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
-  const request = async (plan: string) => {
+  const request = async (plan: string, tier: string) => {
+    setRequesting(true);
     try {
       const response = await api.post<Row>("/member/subscription-intent", {
         plan,
+        tier,
         payload: {},
       });
       setNotice(asText(response.message ?? response.status));
+      load();
     } catch {
-      setNotice("Premium is available only after profile verification.");
+      setNotice(text.requestError);
+    } finally {
+      setRequesting(false);
     }
   };
   const verified = data?.isVerified === true;
+  const currentTier = asText(data?.tier || "EXPLORE").toUpperCase();
+  const canUpgradeToPro = data?.isPremium && SUBSCRIPTION_TIER_RANK[currentTier] < SUBSCRIPTION_TIER_RANK.PRO;
   return (
-    <section className="access-card">
-      <h1>Premium</h1>
+    <section className="access-card premium-card">
+      <h1>{text.title}</h1>
       {data && !verified ? (
         <>
-          <p>Verify your profile to access Premium.</p>
+          <p>{text.verifyPrompt}</p>
           <Link className="primary" to={`/${locale}/verification`}>
-            Start verification
+            {text.startVerification}
           </Link>
         </>
       ) : (
         <>
-          <p>Current status: {asText(data?.status)}</p>
+          <p>{text.currentStatusPrefix} {asText(data?.status)}</p>
           {data?.isPremium ? (
-            <p>Your Premium subscription is active.</p>
+            <>
+              <p className="premium-current-tier">
+                {text.currentPlanPrefix} <strong>{text.tierLabels[currentTier] || currentTier}</strong>
+              </p>
+              <p>{text.activeNotice}</p>
+              {canUpgradeToPro && (
+                <div className="premium-upgrade">
+                  <p>
+                    {text.upgradeOffer}
+                  </p>
+                  <div className="plan-actions">
+                    {["MONTHLY", "QUARTERLY"].map((plan) => (
+                      <button
+                        className="primary"
+                        key={plan}
+                        disabled={requesting}
+                        onClick={() => void request(plan, "PRO")}
+                      >
+                        {text.upgradeToProLabel} ({text.planLabels[plan]})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Link className="secondary" to={`/${locale}/pricing`}>
+                {text.compareAllPlans}
+              </Link>
+            </>
           ) : (
             <div className="plan-actions">
-              {["MONTHLY", "QUARTERLY", "ANNUAL"].map((plan) => (
-                <button
-                  className="primary"
-                  key={plan}
-                  onClick={() => request(plan)}
-                >
-                  {plan.toLowerCase()}
-                </button>
-              ))}
+              {(["BUILDER", "PRO"] as const).flatMap((tier) =>
+                ["MONTHLY", "QUARTERLY"].map((plan) => (
+                  <button
+                    className="primary"
+                    key={`${tier}-${plan}`}
+                    disabled={requesting}
+                    onClick={() => void request(plan, tier)}
+                  >
+                    {text.tierLabels[tier]} ({text.planLabels[plan]})
+                  </button>
+                )),
+              )}
             </div>
           )}
         </>
@@ -4562,15 +7200,657 @@ const PREGNANCY_CATEGORY_LABELS: Record<string, string> = {
   prescription: "Prescription",
 };
 
+
+const FILE_SIZE_UNITS_TEXT = {
+  en: { bytes: "B", kb: "KB", mb: "MB" },
+  ru: { bytes: "B", kb: "KB", mb: "MB" },
+  es: { bytes: "B", kb: "KB", mb: "MB" },
+  pt: { bytes: "B", kb: "KB", mb: "MB" },
+  fr: { bytes: "B", kb: "KB", mb: "MB" },
+  de: { bytes: "B", kb: "KB", mb: "MB" },
+  it: { bytes: "B", kb: "KB", mb: "MB" },
+  pl: { bytes: "B", kb: "KB", mb: "MB" },
+};
+
+const FAMILY_ROOM_TEXT = {
+  en: {
+    title: "Family Room",
+    loading: "Loading…",
+    viewPremium: "View Premium",
+    remove: "Remove",
+    uploading: "Uploading…",
+    needsPremium: {
+      body: "The Family Plan, Shared Family Room and document tools are part of Family Builder Pro. Upgrade to plan your family together with your match.",
+    },
+    noMatch: {
+      body: "You don't have an active match with this profile, so there's no shared Family Room here yet.",
+      backToMessages: "Back to Messages",
+    },
+    loadError: "Could not load your Family Room. Please try again.",
+    notices: {
+      savePlanError: "Could not save the Family Plan. Please try again.",
+      addChecklistItemError: "Could not add that checklist item.",
+      updateChecklistItemError: "Could not update that checklist item.",
+      removeDocumentError: "Could not remove that document.",
+      uploadDocumentError: "Could not upload that document.",
+      uploadPregnancyError: "Could not upload that file to the Pregnancy Room.",
+      removePregnancyEntryError: "Could not remove that entry.",
+      agreementConflict: "Complete every Family Plan section together before signing.",
+      agreementSignError: "Could not sign the agreement.",
+      agreementSigned: "Signed.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Keep parenting, finances and legal notes in one shared place - only you and your match can see this.",
+      parentingLabel: "Parenting",
+      parentingPlaceholder: "How do you both picture day-to-day parenting?",
+      financesLabel: "Finances",
+      financesPlaceholder: "How will costs be shared and planned for?",
+      legalLabel: "Legal",
+      legalPlaceholder: "What legal steps or agreements do you need to look into?",
+      saving: "Saving…",
+      save: "Save Family Plan",
+    },
+    checklist: {
+      heading: "Checklist",
+      sectionLabels: { parenting: "Parenting", finances: "Finances", legal: "Legal", general: "General" },
+      empty: "No items yet.",
+      addPlaceholder: "Add an item…",
+      add: "Add",
+    },
+    documents: {
+      heading: "Documents",
+      empty: "No documents shared yet.",
+      upload: "Upload a document",
+    },
+    pregnancy: {
+      heading: "Pregnancy Room",
+      intro: "Keep lab results, ultrasounds and prescriptions in one shared, private place - free for any active match, no Premium needed.",
+      empty: "No entries yet.",
+      categoryAriaLabel: "Category",
+      categoryLabels: { lab_test: "Lab result", ultrasound: "Ultrasound", prescription: "Prescription" },
+      notePlaceholder: "Note (optional)",
+      upload: "Upload",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Once you've completed every Family Plan section together, either of you can sign - a good-faith mutual record of what you agreed on, not a legally binding e-signature.",
+      needsPremium: "The Co-Parenting Agreement is part of Family Builder Pro.",
+      loadError: "Could not load your agreement.",
+      signedByBothOn: "Signed by both of you on",
+      youLabel: "You:",
+      partnerLabel: "Partner:",
+      progressOf: "of",
+      progressSuffix: "sections complete by both of you.",
+      waitingForPartner: "You signed this agreement. Waiting for your partner to sign their copy.",
+      signLabel: "Type your full legal name to sign",
+      fullNamePlaceholder: "Full legal name",
+      signing: "Signing…",
+      signButton: "Sign agreement",
+      notReady: "Complete every Family Plan section together before you can sign.",
+      partnerSigned: "Your partner has already signed their copy.",
+    },
+  },
+  ru: {
+    title: "Семейная комната",
+    loading: "Загрузка…",
+    viewPremium: "Смотреть Premium",
+    remove: "Удалить",
+    uploading: "Загрузка файла…",
+    needsPremium: {
+      body: "Family Plan, общая семейная комната и инструменты для документов — часть Family Builder Pro. Оформите подписку, чтобы планировать будущее семьи вместе со своей парой.",
+    },
+    noMatch: {
+      body: "У вас нет активной пары с этим профилем, поэтому общей семейной комнаты здесь пока нет.",
+      backToMessages: "Назад к сообщениям",
+    },
+    loadError: "Не удалось загрузить вашу семейную комнату. Попробуйте ещё раз.",
+    notices: {
+      savePlanError: "Не удалось сохранить Family Plan. Попробуйте ещё раз.",
+      addChecklistItemError: "Не удалось добавить этот пункт списка.",
+      updateChecklistItemError: "Не удалось обновить этот пункт списка.",
+      removeDocumentError: "Не удалось удалить этот документ.",
+      uploadDocumentError: "Не удалось загрузить этот документ.",
+      uploadPregnancyError: "Не удалось загрузить этот файл в комнату беременности.",
+      removePregnancyEntryError: "Не удалось удалить эту запись.",
+      agreementConflict: "Заполните все разделы Family Plan вместе со своей парой, прежде чем подписывать.",
+      agreementSignError: "Не удалось подписать соглашение.",
+      agreementSigned: "Подписано.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Храните заметки о воспитании, финансах и юридических вопросах в одном общем месте - их видите только вы и ваша пара.",
+      parentingLabel: "Воспитание",
+      parentingPlaceholder: "Как вы оба представляете повседневное воспитание детей?",
+      financesLabel: "Финансы",
+      financesPlaceholder: "Как вы будете делить расходы и планировать их?",
+      legalLabel: "Юридические вопросы",
+      legalPlaceholder: "Какие юридические шаги или соглашения вам нужно изучить?",
+      saving: "Сохранение…",
+      save: "Сохранить Family Plan",
+    },
+    checklist: {
+      heading: "Чек-лист",
+      sectionLabels: { parenting: "Воспитание", finances: "Финансы", legal: "Юридические вопросы", general: "Общее" },
+      empty: "Пока нет пунктов.",
+      addPlaceholder: "Добавить пункт…",
+      add: "Добавить",
+    },
+    documents: {
+      heading: "Документы",
+      empty: "Пока нет общих документов.",
+      upload: "Загрузить документ",
+    },
+    pregnancy: {
+      heading: "Комната беременности",
+      intro: "Храните результаты анализов, УЗИ и рецепты в одном общем приватном месте - бесплатно для любой активной пары, Premium не нужен.",
+      empty: "Пока нет записей.",
+      categoryAriaLabel: "Категория",
+      categoryLabels: { lab_test: "Результат анализа", ultrasound: "УЗИ", prescription: "Рецепт" },
+      notePlaceholder: "Заметка (необязательно)",
+      upload: "Загрузить",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Как только вы вместе заполните все разделы Family Plan, любой из вас сможет подписать его - это добросовестная запись того, о чём вы договорились, а не юридически обязывающая электронная подпись.",
+      needsPremium: "Co-Parenting Agreement входит в Family Builder Pro.",
+      loadError: "Не удалось загрузить ваше соглашение.",
+      signedByBothOn: "Подписано вами обоими",
+      youLabel: "Вы:",
+      partnerLabel: "Партнёр:",
+      progressOf: "из",
+      progressSuffix: "разделов заполнено вами обоими.",
+      waitingForPartner: "Вы подписали это соглашение. Ждём, когда партнёр подпишет свою копию.",
+      signLabel: "Введите своё полное юридическое имя, чтобы подписать",
+      fullNamePlaceholder: "Полное юридическое имя",
+      signing: "Подписание…",
+      signButton: "Подписать соглашение",
+      notReady: "Сначала заполните все разделы Family Plan вместе со своей парой, чтобы можно было подписать.",
+      partnerSigned: "Ваш партнёр уже подписал свою копию.",
+    },
+  },
+  es: {
+    title: "Sala Familiar",
+    loading: "Cargando…",
+    viewPremium: "Ver Premium",
+    remove: "Eliminar",
+    uploading: "Subiendo…",
+    needsPremium: {
+      body: "El Family Plan, la Sala Familiar Compartida y las herramientas de documentos forman parte de Family Builder Pro. Actualiza tu plan para planificar tu familia junto con tu match.",
+    },
+    noMatch: {
+      body: "No tienes un match activo con este perfil, así que todavía no hay una Sala Familiar compartida aquí.",
+      backToMessages: "Volver a Mensajes",
+    },
+    loadError: "No se pudo cargar tu Sala Familiar. Inténtalo de nuevo.",
+    notices: {
+      savePlanError: "No se pudo guardar el Family Plan. Inténtalo de nuevo.",
+      addChecklistItemError: "No se pudo añadir ese elemento a la lista.",
+      updateChecklistItemError: "No se pudo actualizar ese elemento de la lista.",
+      removeDocumentError: "No se pudo eliminar ese documento.",
+      uploadDocumentError: "No se pudo subir ese documento.",
+      uploadPregnancyError: "No se pudo subir ese archivo a la Sala de Embarazo.",
+      removePregnancyEntryError: "No se pudo eliminar esa entrada.",
+      agreementConflict: "Completa cada sección del Family Plan junto con tu match antes de firmar.",
+      agreementSignError: "No se pudo firmar el acuerdo.",
+      agreementSigned: "Firmado.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Guarda tus notas sobre crianza, finanzas y aspectos legales en un solo lugar compartido - solo tú y tu match pueden verlas.",
+      parentingLabel: "Crianza",
+      parentingPlaceholder: "¿Cómo se imaginan ambos la crianza del día a día?",
+      financesLabel: "Finanzas",
+      financesPlaceholder: "¿Cómo se compartirán y planificarán los gastos?",
+      legalLabel: "Legal",
+      legalPlaceholder: "¿Qué pasos legales o acuerdos necesitan investigar?",
+      saving: "Guardando…",
+      save: "Guardar Family Plan",
+    },
+    checklist: {
+      heading: "Lista de verificación",
+      sectionLabels: { parenting: "Crianza", finances: "Finanzas", legal: "Legal", general: "General" },
+      empty: "Aún no hay elementos.",
+      addPlaceholder: "Añadir un elemento…",
+      add: "Añadir",
+    },
+    documents: {
+      heading: "Documentos",
+      empty: "Aún no se ha compartido ningún documento.",
+      upload: "Subir un documento",
+    },
+    pregnancy: {
+      heading: "Sala de Embarazo",
+      intro: "Guarda resultados de análisis, ecografías y recetas en un solo lugar compartido y privado - gratis para cualquier match activo, sin necesidad de Premium.",
+      empty: "Aún no hay entradas.",
+      categoryAriaLabel: "Categoría",
+      categoryLabels: { lab_test: "Resultado de análisis", ultrasound: "Ecografía", prescription: "Receta" },
+      notePlaceholder: "Nota (opcional)",
+      upload: "Subir",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Una vez que completen juntos todas las secciones del Family Plan, cualquiera de los dos puede firmar - un registro de buena fe de lo que acordaron, no una firma electrónica legalmente vinculante.",
+      needsPremium: "El Co-Parenting Agreement forma parte de Family Builder Pro.",
+      loadError: "No se pudo cargar tu acuerdo.",
+      signedByBothOn: "Firmado por ambos el",
+      youLabel: "Tú:",
+      partnerLabel: "Pareja:",
+      progressOf: "de",
+      progressSuffix: "secciones completadas por ambos.",
+      waitingForPartner: "Has firmado este acuerdo. Esperando a que tu pareja firme su copia.",
+      signLabel: "Escribe tu nombre legal completo para firmar",
+      fullNamePlaceholder: "Nombre legal completo",
+      signing: "Firmando…",
+      signButton: "Firmar acuerdo",
+      notReady: "Completa cada sección del Family Plan junto con tu match antes de poder firmar.",
+      partnerSigned: "Tu pareja ya firmó su copia.",
+    },
+  },
+  pt: {
+    title: "Sala Familiar",
+    loading: "Carregando…",
+    viewPremium: "Ver Premium",
+    remove: "Remover",
+    uploading: "Enviando…",
+    needsPremium: {
+      body: "O Family Plan, a Sala Familiar Compartilhada e as ferramentas de documentos fazem parte do Family Builder Pro. Atualize seu plano para planejar sua família junto com seu match.",
+    },
+    noMatch: {
+      body: "Você não tem um match ativo com este perfil, então ainda não há uma Sala Familiar compartilhada aqui.",
+      backToMessages: "Voltar para Mensagens",
+    },
+    loadError: "Não foi possível carregar sua Sala Familiar. Tente novamente.",
+    notices: {
+      savePlanError: "Não foi possível salvar o Family Plan. Tente novamente.",
+      addChecklistItemError: "Não foi possível adicionar esse item à lista.",
+      updateChecklistItemError: "Não foi possível atualizar esse item da lista.",
+      removeDocumentError: "Não foi possível remover esse documento.",
+      uploadDocumentError: "Não foi possível enviar esse documento.",
+      uploadPregnancyError: "Não foi possível enviar esse arquivo para a Sala da Gravidez.",
+      removePregnancyEntryError: "Não foi possível remover esse registro.",
+      agreementConflict: "Complete cada seção do Family Plan junto com seu match antes de assinar.",
+      agreementSignError: "Não foi possível assinar o acordo.",
+      agreementSigned: "Assinado.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Guarde suas anotações sobre criação dos filhos, finanças e questões legais em um só lugar compartilhado - só você e seu match podem vê-las.",
+      parentingLabel: "Criação dos filhos",
+      parentingPlaceholder: "Como vocês dois imaginam a criação no dia a dia?",
+      financesLabel: "Finanças",
+      financesPlaceholder: "Como os custos serão divididos e planejados?",
+      legalLabel: "Jurídico",
+      legalPlaceholder: "Quais passos legais ou acordos vocês precisam analisar?",
+      saving: "Salvando…",
+      save: "Salvar Family Plan",
+    },
+    checklist: {
+      heading: "Lista de verificação",
+      sectionLabels: { parenting: "Criação dos filhos", finances: "Finanças", legal: "Jurídico", general: "Geral" },
+      empty: "Ainda não há itens.",
+      addPlaceholder: "Adicionar um item…",
+      add: "Adicionar",
+    },
+    documents: {
+      heading: "Documentos",
+      empty: "Ainda não há documentos compartilhados.",
+      upload: "Enviar um documento",
+    },
+    pregnancy: {
+      heading: "Sala da Gravidez",
+      intro: "Guarde resultados de exames, ultrassons e receitas em um só lugar compartilhado e privado - grátis para qualquer match ativo, sem precisar de Premium.",
+      empty: "Ainda não há registros.",
+      categoryAriaLabel: "Categoria",
+      categoryLabels: { lab_test: "Resultado de exame", ultrasound: "Ultrassom", prescription: "Receita" },
+      notePlaceholder: "Nota (opcional)",
+      upload: "Enviar",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Assim que vocês tiverem completado juntos todas as seções do Family Plan, qualquer um de vocês pode assinar - um registro de boa-fé do que combinaram, não uma assinatura eletrônica juridicamente vinculante.",
+      needsPremium: "O Co-Parenting Agreement faz parte do Family Builder Pro.",
+      loadError: "Não foi possível carregar seu acordo.",
+      signedByBothOn: "Assinado por vocês dois em",
+      youLabel: "Você:",
+      partnerLabel: "Parceiro(a):",
+      progressOf: "de",
+      progressSuffix: "seções concluídas por vocês dois.",
+      waitingForPartner: "Você assinou este acordo. Aguardando seu parceiro(a) assinar a própria cópia.",
+      signLabel: "Digite seu nome legal completo para assinar",
+      fullNamePlaceholder: "Nome legal completo",
+      signing: "Assinando…",
+      signButton: "Assinar acordo",
+      notReady: "Complete cada seção do Family Plan junto com seu match antes de poder assinar.",
+      partnerSigned: "Seu parceiro(a) já assinou a própria cópia.",
+    },
+  },
+  fr: {
+    title: "Espace Familial",
+    loading: "Chargement…",
+    viewPremium: "Voir Premium",
+    remove: "Supprimer",
+    uploading: "Envoi en cours…",
+    needsPremium: {
+      body: "Le Family Plan, l'Espace Familial Partagé et les outils de documents font partie de Family Builder Pro. Passe à une offre supérieure pour planifier ta famille avec ton match.",
+    },
+    noMatch: {
+      body: "Tu n'as pas de match actif avec ce profil, donc il n'y a pas encore d'Espace Familial partagé ici.",
+      backToMessages: "Retour aux messages",
+    },
+    loadError: "Impossible de charger ton Espace Familial. Réessaie.",
+    notices: {
+      savePlanError: "Impossible d'enregistrer le Family Plan. Réessaie.",
+      addChecklistItemError: "Impossible d'ajouter cet élément à la liste.",
+      updateChecklistItemError: "Impossible de mettre à jour cet élément de la liste.",
+      removeDocumentError: "Impossible de supprimer ce document.",
+      uploadDocumentError: "Impossible d'envoyer ce document.",
+      uploadPregnancyError: "Impossible d'envoyer ce fichier vers l'Espace Grossesse.",
+      removePregnancyEntryError: "Impossible de supprimer cette entrée.",
+      agreementConflict: "Complète chaque section du Family Plan avec ton match avant de signer.",
+      agreementSignError: "Impossible de signer l'accord.",
+      agreementSigned: "Signé.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Garde tes notes sur l'éducation, les finances et les démarches légales au même endroit partagé - seuls toi et ton match pouvez les voir.",
+      parentingLabel: "Parentalité",
+      parentingPlaceholder: "Comment imaginez-vous tous les deux la parentalité au quotidien ?",
+      financesLabel: "Finances",
+      financesPlaceholder: "Comment les dépenses seront-elles partagées et planifiées ?",
+      legalLabel: "Juridique",
+      legalPlaceholder: "Quelles démarches légales ou quels accords devez-vous examiner ?",
+      saving: "Enregistrement…",
+      save: "Enregistrer le Family Plan",
+    },
+    checklist: {
+      heading: "Liste de vérification",
+      sectionLabels: { parenting: "Parentalité", finances: "Finances", legal: "Juridique", general: "Général" },
+      empty: "Pas encore d'éléments.",
+      addPlaceholder: "Ajouter un élément…",
+      add: "Ajouter",
+    },
+    documents: {
+      heading: "Documents",
+      empty: "Aucun document partagé pour le moment.",
+      upload: "Envoyer un document",
+    },
+    pregnancy: {
+      heading: "Espace Grossesse",
+      intro: "Garde les résultats d'analyses, les échographies et les ordonnances dans un seul espace partagé et privé - gratuit pour tout match actif, sans besoin de Premium.",
+      empty: "Aucune entrée pour le moment.",
+      categoryAriaLabel: "Catégorie",
+      categoryLabels: { lab_test: "Résultat d'analyse", ultrasound: "Échographie", prescription: "Ordonnance" },
+      notePlaceholder: "Note (facultatif)",
+      upload: "Envoyer",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Une fois que vous aurez complété ensemble chaque section du Family Plan, l'un de vous deux peut signer - un accord de bonne foi sur ce que vous avez convenu, pas une signature électronique juridiquement contraignante.",
+      needsPremium: "Le Co-Parenting Agreement fait partie de Family Builder Pro.",
+      loadError: "Impossible de charger ton accord.",
+      signedByBothOn: "Signé par vous deux le",
+      youLabel: "Toi :",
+      partnerLabel: "Partenaire :",
+      progressOf: "sur",
+      progressSuffix: "sections complétées par vous deux.",
+      waitingForPartner: "Tu as signé cet accord. En attente que ton partenaire signe sa copie.",
+      signLabel: "Saisis ton nom légal complet pour signer",
+      fullNamePlaceholder: "Nom légal complet",
+      signing: "Signature en cours…",
+      signButton: "Signer l'accord",
+      notReady: "Complète chaque section du Family Plan avec ton match avant de pouvoir signer.",
+      partnerSigned: "Ton partenaire a déjà signé sa copie.",
+    },
+  },
+  de: {
+    title: "Familienraum",
+    loading: "Wird geladen…",
+    viewPremium: "Premium ansehen",
+    remove: "Entfernen",
+    uploading: "Wird hochgeladen…",
+    needsPremium: {
+      body: "Der Family Plan, der gemeinsame Familienraum und die Dokument-Tools gehören zu Family Builder Pro. Upgrade dein Abo, um deine Familienplanung gemeinsam mit deinem Match anzugehen.",
+    },
+    noMatch: {
+      body: "Du hast kein aktives Match mit diesem Profil, deshalb gibt es hier noch keinen gemeinsamen Familienraum.",
+      backToMessages: "Zurück zu den Nachrichten",
+    },
+    loadError: "Dein Familienraum konnte nicht geladen werden. Bitte versuch es erneut.",
+    notices: {
+      savePlanError: "Der Family Plan konnte nicht gespeichert werden. Bitte versuch es erneut.",
+      addChecklistItemError: "Dieser Checklisten-Punkt konnte nicht hinzugefügt werden.",
+      updateChecklistItemError: "Dieser Checklisten-Punkt konnte nicht aktualisiert werden.",
+      removeDocumentError: "Dieses Dokument konnte nicht entfernt werden.",
+      uploadDocumentError: "Dieses Dokument konnte nicht hochgeladen werden.",
+      uploadPregnancyError: "Diese Datei konnte nicht in den Schwangerschaftsbereich hochgeladen werden.",
+      removePregnancyEntryError: "Dieser Eintrag konnte nicht entfernt werden.",
+      agreementConflict: "Vervollständige gemeinsam mit deinem Match jeden Abschnitt des Family Plan, bevor du unterschreibst.",
+      agreementSignError: "Die Vereinbarung konnte nicht unterschrieben werden.",
+      agreementSigned: "Unterschrieben.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Bewahre eure Notizen zu Erziehung, Finanzen und rechtlichen Fragen an einem gemeinsamen Ort auf - nur du und dein Match könnt sie sehen.",
+      parentingLabel: "Erziehung",
+      parentingPlaceholder: "Wie stellt ihr euch beide den Elternalltag vor?",
+      financesLabel: "Finanzen",
+      financesPlaceholder: "Wie werden die Kosten aufgeteilt und geplant?",
+      legalLabel: "Rechtliches",
+      legalPlaceholder: "Welche rechtlichen Schritte oder Vereinbarungen müsst ihr klären?",
+      saving: "Wird gespeichert…",
+      save: "Family Plan speichern",
+    },
+    checklist: {
+      heading: "Checkliste",
+      sectionLabels: { parenting: "Erziehung", finances: "Finanzen", legal: "Rechtliches", general: "Allgemein" },
+      empty: "Noch keine Einträge.",
+      addPlaceholder: "Eintrag hinzufügen…",
+      add: "Hinzufügen",
+    },
+    documents: {
+      heading: "Dokumente",
+      empty: "Noch keine Dokumente geteilt.",
+      upload: "Dokument hochladen",
+    },
+    pregnancy: {
+      heading: "Schwangerschaftsbereich",
+      intro: "Bewahre Laborergebnisse, Ultraschallbilder und Rezepte an einem gemeinsamen, privaten Ort auf - kostenlos für jedes aktive Match, ganz ohne Premium.",
+      empty: "Noch keine Einträge.",
+      categoryAriaLabel: "Kategorie",
+      categoryLabels: { lab_test: "Laborergebnis", ultrasound: "Ultraschall", prescription: "Rezept" },
+      notePlaceholder: "Notiz (optional)",
+      upload: "Hochladen",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Sobald ihr gemeinsam jeden Abschnitt des Family Plan ausgefüllt habt, kann einer von euch unterschreiben - eine Aufzeichnung in gutem Glauben dessen, was ihr vereinbart habt, keine rechtsverbindliche elektronische Unterschrift.",
+      needsPremium: "Das Co-Parenting Agreement ist Teil von Family Builder Pro.",
+      loadError: "Deine Vereinbarung konnte nicht geladen werden.",
+      signedByBothOn: "Von euch beiden unterschrieben am",
+      youLabel: "Du:",
+      partnerLabel: "Partner:",
+      progressOf: "von",
+      progressSuffix: "Abschnitten gemeinsam abgeschlossen.",
+      waitingForPartner: "Du hast diese Vereinbarung unterschrieben. Wir warten darauf, dass dein Partner seine Kopie unterschreibt.",
+      signLabel: "Gib deinen vollständigen rechtlichen Namen ein, um zu unterschreiben",
+      fullNamePlaceholder: "Vollständiger rechtlicher Name",
+      signing: "Wird unterschrieben…",
+      signButton: "Vereinbarung unterschreiben",
+      notReady: "Vervollständige gemeinsam mit deinem Match jeden Abschnitt des Family Plan, bevor du unterschreiben kannst.",
+      partnerSigned: "Dein Partner hat seine Kopie bereits unterschrieben.",
+    },
+  },
+  it: {
+    title: "Family Room",
+    loading: "Caricamento…",
+    viewPremium: "Visualizza Premium",
+    remove: "Rimuovi",
+    uploading: "Caricamento del file…",
+    needsPremium: {
+      body: "Il Family Plan, il Family Room condiviso e gli strumenti per i documenti fanno parte di Family Builder Pro. Esegua l'upgrade per pianificare la Sua famiglia insieme al Suo match.",
+    },
+    noMatch: {
+      body: "Non ha un match attivo con questo profilo, quindi qui non è ancora disponibile un Family Room condiviso.",
+      backToMessages: "Torna ai Messaggi",
+    },
+    loadError: "Non è stato possibile caricare il Suo Family Room. Riprovi.",
+    notices: {
+      savePlanError: "Non è stato possibile salvare il Family Plan. Riprovi.",
+      addChecklistItemError: "Non è stato possibile aggiungere questo elemento alla lista.",
+      updateChecklistItemError: "Non è stato possibile aggiornare questo elemento della lista.",
+      removeDocumentError: "Non è stato possibile rimuovere questo documento.",
+      uploadDocumentError: "Non è stato possibile caricare questo documento.",
+      uploadPregnancyError: "Non è stato possibile caricare questo file nello Spazio Gravidanza.",
+      removePregnancyEntryError: "Non è stato possibile rimuovere questa voce.",
+      agreementConflict: "Completi ogni sezione del Family Plan insieme al Suo match prima di firmare.",
+      agreementSignError: "Non è stato possibile firmare l'accordo.",
+      agreementSigned: "Firmato.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Conservi le note su genitorialità, finanze e questioni legali in un unico spazio condiviso - solo Lei e il Suo match possono vederle.",
+      parentingLabel: "Genitorialità",
+      parentingPlaceholder: "Come immaginate entrambi la genitorialità quotidiana?",
+      financesLabel: "Finanze",
+      financesPlaceholder: "Come verranno condivise e pianificate le spese?",
+      legalLabel: "Aspetti legali",
+      legalPlaceholder: "Quali passaggi legali o accordi dovete approfondire?",
+      saving: "Salvataggio…",
+      save: "Salva il Family Plan",
+    },
+    checklist: {
+      heading: "Lista di controllo",
+      sectionLabels: { parenting: "Genitorialità", finances: "Finanze", legal: "Aspetti legali", general: "Generale" },
+      empty: "Nessun elemento ancora.",
+      addPlaceholder: "Aggiungi un elemento…",
+      add: "Aggiungi",
+    },
+    documents: {
+      heading: "Documenti",
+      empty: "Nessun documento condiviso ancora.",
+      upload: "Carica un documento",
+    },
+    pregnancy: {
+      heading: "Spazio Gravidanza",
+      intro: "Conservi risultati di analisi, ecografie e prescrizioni in un unico spazio condiviso e privato - gratuito per qualsiasi match attivo, senza bisogno di Premium.",
+      empty: "Nessuna voce ancora.",
+      categoryAriaLabel: "Categoria",
+      categoryLabels: { lab_test: "Risultato di analisi", ultrasound: "Ecografia", prescription: "Prescrizione" },
+      notePlaceholder: "Nota (facoltativa)",
+      upload: "Carica",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Quando entrambi avranno completato insieme ogni sezione del Family Plan, uno dei due potrà firmare - una registrazione in buona fede di quanto concordato, non una firma elettronica legalmente vincolante.",
+      needsPremium: "Il Co-Parenting Agreement fa parte di Family Builder Pro.",
+      loadError: "Non è stato possibile caricare il Suo accordo.",
+      signedByBothOn: "Firmato da entrambi il",
+      youLabel: "Lei:",
+      partnerLabel: "Partner:",
+      progressOf: "su",
+      progressSuffix: "sezioni completate da entrambi.",
+      waitingForPartner: "Ha firmato questo accordo. È in attesa che il Suo partner firmi la propria copia.",
+      signLabel: "Digiti il Suo nome legale completo per firmare",
+      fullNamePlaceholder: "Nome legale completo",
+      signing: "Firma in corso…",
+      signButton: "Firma l'accordo",
+      notReady: "Completi ogni sezione del Family Plan insieme al Suo match prima di poter firmare.",
+      partnerSigned: "Il Suo partner ha già firmato la propria copia.",
+    },
+  },
+  pl: {
+    title: "Pokój Rodzinny",
+    loading: "Ładowanie…",
+    viewPremium: "Zobacz Premium",
+    remove: "Usuń",
+    uploading: "Przesyłanie…",
+    needsPremium: {
+      body: "Family Plan, wspólny Pokój Rodzinny i narzędzia do dokumentów są częścią Family Builder Pro. Ulepsz swój plan, aby planować przyszłość rodziny razem z Twoim dopasowaniem.",
+    },
+    noMatch: {
+      body: "Nie masz aktywnego dopasowania z tym profilem, więc nie ma tu jeszcze wspólnego Pokoju Rodzinnego.",
+      backToMessages: "Powrót do wiadomości",
+    },
+    loadError: "Nie udało się załadować Twojego Pokoju Rodzinnego. Spróbuj ponownie.",
+    notices: {
+      savePlanError: "Nie udało się zapisać Family Plan. Spróbuj ponownie.",
+      addChecklistItemError: "Nie udało się dodać tego elementu do listy.",
+      updateChecklistItemError: "Nie udało się zaktualizować tego elementu listy.",
+      removeDocumentError: "Nie udało się usunąć tego dokumentu.",
+      uploadDocumentError: "Nie udało się przesłać tego dokumentu.",
+      uploadPregnancyError: "Nie udało się przesłać tego pliku do Strefy Ciąży.",
+      removePregnancyEntryError: "Nie udało się usunąć tego wpisu.",
+      agreementConflict: "Uzupełnij każdą sekcję Family Plan razem z Twoim dopasowaniem, zanim podpiszesz.",
+      agreementSignError: "Nie udało się podpisać umowy.",
+      agreementSigned: "Podpisano.",
+    },
+    plan: {
+      heading: "Family Plan",
+      intro: "Zachowuj notatki o rodzicielstwie, finansach i kwestiach prawnych w jednym wspólnym miejscu - widzicie je tylko Ty i Twoje dopasowanie.",
+      parentingLabel: "Rodzicielstwo",
+      parentingPlaceholder: "Jak oboje wyobrażacie sobie rodzicielstwo na co dzień?",
+      financesLabel: "Finanse",
+      financesPlaceholder: "Jak będziecie dzielić i planować koszty?",
+      legalLabel: "Kwestie prawne",
+      legalPlaceholder: "Jakie kroki prawne lub umowy musicie jeszcze przeanalizować?",
+      saving: "Zapisywanie…",
+      save: "Zapisz Family Plan",
+    },
+    checklist: {
+      heading: "Lista kontrolna",
+      sectionLabels: { parenting: "Rodzicielstwo", finances: "Finanse", legal: "Kwestie prawne", general: "Ogólne" },
+      empty: "Brak elementów.",
+      addPlaceholder: "Dodaj element…",
+      add: "Dodaj",
+    },
+    documents: {
+      heading: "Dokumenty",
+      empty: "Nie udostępniono jeszcze żadnych dokumentów.",
+      upload: "Prześlij dokument",
+    },
+    pregnancy: {
+      heading: "Strefa Ciąży",
+      intro: "Trzymaj wyniki badań, USG i recepty w jednym wspólnym, prywatnym miejscu - bezpłatnie przy każdym aktywnym dopasowaniu, bez potrzeby Premium.",
+      empty: "Brak wpisów.",
+      categoryAriaLabel: "Kategoria",
+      categoryLabels: { lab_test: "Wynik badania", ultrasound: "USG", prescription: "Recepta" },
+      notePlaceholder: "Notatka (opcjonalnie)",
+      upload: "Prześlij",
+    },
+    agreement: {
+      heading: "Co-Parenting Agreement",
+      intro: "Gdy wspólnie uzupełnicie każdą sekcję Family Plan, każde z was może ją podpisać - to zapis w dobrej wierze tego, na czym się umówiliście, a nie prawnie wiążący podpis elektroniczny.",
+      needsPremium: "Co-Parenting Agreement jest częścią Family Builder Pro.",
+      loadError: "Nie udało się załadować Twojej umowy.",
+      signedByBothOn: "Podpisane przez was oboje",
+      youLabel: "Ty:",
+      partnerLabel: "Partner:",
+      progressOf: "z",
+      progressSuffix: "sekcji ukończonych przez was oboje.",
+      waitingForPartner: "Ta umowa została przez Ciebie podpisana. Czekamy, aż Twój partner podpisze swoją kopię.",
+      signLabel: "Wpisz swoje pełne imię i nazwisko, aby podpisać",
+      fullNamePlaceholder: "Pełne imię i nazwisko",
+      signing: "Podpisywanie…",
+      signButton: "Podpisz umowę",
+      notReady: "Uzupełnij każdą sekcję Family Plan razem z Twoim dopasowaniem, zanim będzie można podpisać.",
+      partnerSigned: "Twój partner już podpisał swoją kopię.",
+    },
+  },
+};
+
 function formatFamilyRoomBytes(bytes: number): string {
+  const locale = localeOf();
+  const unitsText = FILE_SIZE_UNITS_TEXT[locale] ?? FILE_SIZE_UNITS_TEXT.en;
   if (!Number.isFinite(bytes)) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return `${bytes} ${unitsText.bytes}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} ${unitsText.kb}`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} ${unitsText.mb}`;
 }
 
 function FamilyRoom({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = FAMILY_ROOM_TEXT[locale] ?? FAMILY_ROOM_TEXT.en;
   const { profileId = "" } = useParams();
   const [status, setStatus] = useState<
     "loading" | "ok" | "needsPremium" | "noMatch" | "error"
@@ -4660,7 +7940,7 @@ function FamilyRoom({ session }: { session: Session }) {
       setRoom((prev) => (prev ? { ...prev, plan: response.plan } : prev));
       setPlanDirty(false);
     } catch {
-      setNotice("Could not save the Family Plan. Please try again.");
+      setNotice(text.notices.savePlanError);
     } finally {
       setSavingPlan(false);
     }
@@ -4694,7 +7974,7 @@ function FamilyRoom({ session }: { session: Session }) {
       );
       setNewItemText((prev) => ({ ...prev, [section]: "" }));
     } catch {
-      setNotice("Could not add that checklist item.");
+      setNotice(text.notices.addChecklistItemError);
     } finally {
       setAddingSection(null);
     }
@@ -4729,7 +8009,7 @@ function FamilyRoom({ session }: { session: Session }) {
             }
           : prev,
       );
-      setNotice("Could not update that checklist item.");
+      setNotice(text.notices.updateChecklistItemError);
     }
   };
 
@@ -4761,12 +8041,12 @@ function FamilyRoom({ session }: { session: Session }) {
       );
       setAgreement(data.agreement);
       setAgreementFullName("");
-      setAgreementNotice("Signed.");
+      setAgreementNotice(text.notices.agreementSigned);
     } catch (err) {
       setAgreementNotice(
         err instanceof ApiError && err.status === 409
-          ? "Complete every Family Plan section together before signing."
-          : "Could not sign the agreement.",
+          ? text.notices.agreementConflict
+          : text.notices.agreementSignError,
       );
     } finally {
       setAgreementSigning(false);
@@ -4790,7 +8070,7 @@ function FamilyRoom({ session }: { session: Session }) {
           : prev,
       );
     } catch {
-      setNotice("Could not upload that document.");
+      setNotice(text.notices.uploadDocumentError);
     } finally {
       setUploading(false);
     }
@@ -4809,7 +8089,7 @@ function FamilyRoom({ session }: { session: Session }) {
     try {
       await api.delete(`/member/family-room/documents/${encodeURIComponent(asText(docId))}`);
     } catch {
-      setNotice("Could not remove that document.");
+      setNotice(text.notices.removeDocumentError);
       load();
     }
   };
@@ -4830,7 +8110,7 @@ function FamilyRoom({ session }: { session: Session }) {
       setPregnancyEntries((prev) => [response.entry, ...prev]);
       setPregnancyNote("");
     } catch {
-      setNotice("Could not upload that file to the Pregnancy Room.");
+      setNotice(text.notices.uploadPregnancyError);
     } finally {
       setPregnancyUploading(false);
     }
@@ -4842,7 +8122,7 @@ function FamilyRoom({ session }: { session: Session }) {
     try {
       await api.delete(`/member/family-room/pregnancy/${encodeURIComponent(asText(entryId))}`);
     } catch {
-      setNotice("Could not remove that entry.");
+      setNotice(text.notices.removePregnancyEntryError);
       loadPregnancy();
     }
   };
@@ -4850,8 +8130,8 @@ function FamilyRoom({ session }: { session: Session }) {
   if (status === "loading") {
     return (
       <section className="access-card">
-        <h1>Family Room</h1>
-        <p>Loading…</p>
+        <h1>{text.title}</h1>
+        <p>{text.loading}</p>
       </section>
     );
   }
@@ -4859,14 +8139,12 @@ function FamilyRoom({ session }: { session: Session }) {
   if (status === "needsPremium") {
     return (
       <section className="access-card">
-        <h1>Family Room</h1>
+        <h1>{text.title}</h1>
         <p>
-          The Family Plan, Shared Family Room and document tools are part of
-          Family Builder Pro. Upgrade to plan your family together with your
-          match.
+          {text.needsPremium.body}
         </p>
         <Link className="primary" to={`/${locale}/subscription`}>
-          View Premium
+          {text.viewPremium}
         </Link>
       </section>
     );
@@ -4875,13 +8153,12 @@ function FamilyRoom({ session }: { session: Session }) {
   if (status === "noMatch") {
     return (
       <section className="access-card">
-        <h1>Family Room</h1>
+        <h1>{text.title}</h1>
         <p>
-          You don't have an active match with this profile, so there's no
-          shared Family Room here yet.
+          {text.noMatch.body}
         </p>
         <Link className="secondary" to={`/${locale}/messages`}>
-          Back to Messages
+          {text.noMatch.backToMessages}
         </Link>
       </section>
     );
@@ -4890,8 +8167,8 @@ function FamilyRoom({ session }: { session: Session }) {
   if (status === "error" || !room) {
     return (
       <section className="access-card">
-        <h1>Family Room</h1>
-        <p className="error">Could not load your Family Room. Please try again.</p>
+        <h1>{text.title}</h1>
+        <p className="error">{text.loadError}</p>
       </section>
     );
   }
@@ -4900,21 +8177,20 @@ function FamilyRoom({ session }: { session: Session }) {
 
   return (
     <section className="family-room">
-      <h1>Family Room</h1>
+      <h1>{text.title}</h1>
       {notice && <p className="error">{notice}</p>}
 
       <div className="list-card family-room-card">
-        <h2>Family Plan</h2>
+        <h2>{text.plan.heading}</h2>
         <p>
-          Keep parenting, finances and legal notes in one shared place - only
-          you and your match can see this.
+          {text.plan.intro}
         </p>
         <label>
-          Parenting
+          {text.plan.parentingLabel}
           <textarea
             rows={4}
             value={parenting}
-            placeholder="How do you both picture day-to-day parenting?"
+            placeholder={text.plan.parentingPlaceholder}
             onChange={(event) => {
               setParenting(event.target.value);
               setPlanDirty(true);
@@ -4922,11 +8198,11 @@ function FamilyRoom({ session }: { session: Session }) {
           />
         </label>
         <label>
-          Finances
+          {text.plan.financesLabel}
           <textarea
             rows={4}
             value={finances}
-            placeholder="How will costs be shared and planned for?"
+            placeholder={text.plan.financesPlaceholder}
             onChange={(event) => {
               setFinances(event.target.value);
               setPlanDirty(true);
@@ -4934,11 +8210,11 @@ function FamilyRoom({ session }: { session: Session }) {
           />
         </label>
         <label>
-          Legal
+          {text.plan.legalLabel}
           <textarea
             rows={4}
             value={legal}
-            placeholder="What legal steps or agreements do you need to look into?"
+            placeholder={text.plan.legalPlaceholder}
             onChange={(event) => {
               setLegal(event.target.value);
               setPlanDirty(true);
@@ -4951,18 +8227,18 @@ function FamilyRoom({ session }: { session: Session }) {
             onClick={() => void savePlan()}
             disabled={!planDirty || savingPlan}
           >
-            {savingPlan ? "Saving…" : "Save Family Plan"}
+            {savingPlan ? text.plan.saving : text.plan.save}
           </button>
         </div>
       </div>
 
       <div className="list-card family-room-card">
-        <h2>Checklist</h2>
+        <h2>{text.checklist.heading}</h2>
         {FAMILY_ROOM_SECTIONS.map((section) => (
           <div className="family-room-section" key={section}>
-            <h3>{FAMILY_ROOM_SECTION_LABELS[section]}</h3>
+            <h3>{text.checklist.sectionLabels[section]}</h3>
             {checklistBySection[section].length === 0 ? (
-              <p className="notice">No items yet.</p>
+              <p className="notice">{text.checklist.empty}</p>
             ) : (
               <ul className="family-room-checklist">
                 {checklistBySection[section].map((item) => (
@@ -4980,7 +8256,7 @@ function FamilyRoom({ session }: { session: Session }) {
                       className="link-button"
                       onClick={() => void deleteChecklistItem(item)}
                     >
-                      Remove
+                      {text.remove}
                     </button>
                   </li>
                 ))}
@@ -4995,13 +8271,13 @@ function FamilyRoom({ session }: { session: Session }) {
             >
               <input
                 value={newItemText[section] || ""}
-                placeholder="Add an item…"
+                placeholder={text.checklist.addPlaceholder}
                 onChange={(event) =>
                   setNewItemText((prev) => ({ ...prev, [section]: event.target.value }))
                 }
               />
               <button className="secondary" disabled={addingSection === section}>
-                Add
+                {text.checklist.add}
               </button>
             </form>
           </div>
@@ -5009,9 +8285,9 @@ function FamilyRoom({ session }: { session: Session }) {
       </div>
 
       <div className="list-card family-room-card">
-        <h2>Documents</h2>
+        <h2>{text.documents.heading}</h2>
         {documents.length === 0 ? (
-          <p className="notice">No documents shared yet.</p>
+          <p className="notice">{text.documents.empty}</p>
         ) : (
           <ul className="family-room-documents">
             {documents.map((doc) => (
@@ -5025,14 +8301,14 @@ function FamilyRoom({ session }: { session: Session }) {
                   className="link-button"
                   onClick={() => void deleteDocument(doc)}
                 >
-                  Remove
+                  {text.remove}
                 </button>
               </li>
             ))}
           </ul>
         )}
         <label className="attachment-control">
-          {uploading ? "Uploading…" : "Upload a document"}
+          {uploading ? text.uploading : text.documents.upload}
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp,application/pdf"
@@ -5043,19 +8319,18 @@ function FamilyRoom({ session }: { session: Session }) {
       </div>
 
       <div className="list-card family-room-card">
-        <h2>Pregnancy Room</h2>
+        <h2>{text.pregnancy.heading}</h2>
         <p>
-          Keep lab results, ultrasounds and prescriptions in one shared,
-          private place - free for any active match, no Premium needed.
+          {text.pregnancy.intro}
         </p>
         {pregnancyEntries.length === 0 ? (
-          <p className="notice">No entries yet.</p>
+          <p className="notice">{text.pregnancy.empty}</p>
         ) : (
           <ul className="family-room-documents">
             {pregnancyEntries.map((entry) => (
               <li key={asText(entry.id)}>
                 <a href={asText(entry.contentUrl)} target="_blank" rel="noreferrer">
-                  {PREGNANCY_CATEGORY_LABELS[asText(entry.category)] || asText(entry.category)}
+                  {(text.pregnancy.categoryLabels as Record<string, string>)[asText(entry.category)] || asText(entry.category)}
                   {entry.note ? ` - ${asText(entry.note)}` : ""}
                 </a>
                 <span>{formatFamilyRoomBytes(Number(entry.bytes) || 0)}</span>
@@ -5064,7 +8339,7 @@ function FamilyRoom({ session }: { session: Session }) {
                   className="link-button"
                   onClick={() => void deletePregnancyEntry(entry)}
                 >
-                  Remove
+                  {text.remove}
                 </button>
               </li>
             ))}
@@ -5072,21 +8347,21 @@ function FamilyRoom({ session }: { session: Session }) {
         )}
         <div className="pregnancy-upload-row">
           <select
-            aria-label="Category"
+            aria-label={text.pregnancy.categoryAriaLabel}
             value={pregnancyCategory}
             onChange={(event) => setPregnancyCategory(event.target.value as typeof pregnancyCategory)}
           >
-            <option value="lab_test">Lab result</option>
-            <option value="ultrasound">Ultrasound</option>
-            <option value="prescription">Prescription</option>
+            <option value="lab_test">{text.pregnancy.categoryLabels.lab_test}</option>
+            <option value="ultrasound">{text.pregnancy.categoryLabels.ultrasound}</option>
+            <option value="prescription">{text.pregnancy.categoryLabels.prescription}</option>
           </select>
           <input
             value={pregnancyNote}
-            placeholder="Note (optional)"
+            placeholder={text.pregnancy.notePlaceholder}
             onChange={(event) => setPregnancyNote(event.target.value)}
           />
           <label className="attachment-control">
-            {pregnancyUploading ? "Uploading…" : "Upload"}
+            {pregnancyUploading ? text.uploading : text.pregnancy.upload}
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
@@ -5098,51 +8373,47 @@ function FamilyRoom({ session }: { session: Session }) {
       </div>
 
       <div className="list-card family-room-card">
-        <h2>Co-Parenting Agreement</h2>
+        <h2>{text.agreement.heading}</h2>
         <p>
-          Once you've completed every Family Plan section together, either
-          of you can sign - a good-faith mutual record of what you agreed
-          on, not a legally binding e-signature.
+          {text.agreement.intro}
         </p>
         {agreementStatus === "needsPremium" && (
           <p className="notice">
-            The Co-Parenting Agreement is part of Family Builder Pro.{" "}
-            <Link to={`/${locale}/subscription`}>View Premium</Link>
+            {text.agreement.needsPremium}{" "}
+            <Link to={`/${locale}/subscription`}>{text.viewPremium}</Link>
           </p>
         )}
         {agreementStatus === "error" && (
-          <p className="error">Could not load your agreement.</p>
+          <p className="error">{text.agreement.loadError}</p>
         )}
         {agreementStatus === "ok" && agreement && (
           <>
             {agreement.status === "SIGNED" ? (
               <div className="notice">
-                <p>Signed by both of you on {asText(agreement.signedAt)}.</p>
+                <p>{text.agreement.signedByBothOn} {asText(agreement.signedAt)}.</p>
                 <p>
-                  You: {asText(agreement.myFullName)} - Partner:{" "}
+                  {text.agreement.youLabel} {asText(agreement.myFullName)} - {text.agreement.partnerLabel}{" "}
                   {asText(agreement.partnerFullName)}
                 </p>
               </div>
             ) : (
               <>
                 <p>
-                  {asText(agreement.sectionsCompleteCount)} of{" "}
-                  {asText(agreement.sectionsTotalCount)} sections complete by
-                  both of you.
+                  {asText(agreement.sectionsCompleteCount)} {text.agreement.progressOf}{" "}
+                  {asText(agreement.sectionsTotalCount)} {text.agreement.progressSuffix}
                 </p>
                 {agreement.mySigned ? (
                   <p className="notice">
-                    You signed this agreement. Waiting for your partner to
-                    sign their copy.
+                    {text.agreement.waitingForPartner}
                   </p>
                 ) : agreement.readyToSign ? (
                   <div className="member-form">
                     <label>
-                      Type your full legal name to sign
+                      {text.agreement.signLabel}
                       <input
                         value={agreementFullName}
                         onChange={(event) => setAgreementFullName(event.target.value)}
-                        placeholder="Full legal name"
+                        placeholder={text.agreement.fullNamePlaceholder}
                       />
                     </label>
                     <button
@@ -5150,22 +8421,21 @@ function FamilyRoom({ session }: { session: Session }) {
                       disabled={!agreementFullName.trim() || agreementSigning}
                       onClick={() => void signAgreement()}
                     >
-                      {agreementSigning ? "Signing…" : "Sign agreement"}
+                      {agreementSigning ? text.agreement.signing : text.agreement.signButton}
                     </button>
                   </div>
                 ) : (
                   <p className="notice">
-                    Complete every Family Plan section together before you
-                    can sign.
+                    {text.agreement.notReady}
                   </p>
                 )}
                 {agreement.partnerSigned && (
-                  <p className="notice">Your partner has already signed their copy.</p>
+                  <p className="notice">{text.agreement.partnerSigned}</p>
                 )}
               </>
             )}
             {agreementNotice && (
-              <p className={agreementNotice === "Signed." ? "notice" : "error"}>
+              <p className={agreementNotice === text.notices.agreementSigned ? "notice" : "error"}>
                 {agreementNotice}
               </p>
             )}
@@ -5186,8 +8456,266 @@ type AiAdvisorMessage = { role: "user" | "assistant"; text: string; at: string }
 // feature (see PRICING_TEXT below) - this is the actual feature behind
 // that checkmark, which did not exist on the website before (audit
 // 2026-09-13: site-vs-app-audit-2026-09-13.docx, item 1).
+
+const AI_ADVISOR_TEXT: Record<CookieLocale, {
+  title: string;
+  loading: string;
+  premiumBody: string;
+  viewPremium: string;
+  loadError: string;
+  weeklyTitle: string;
+  weeklyError: string;
+  clearConversation: string;
+  intro: string;
+  notConfigured: string;
+  sendError: string;
+  emptyState: string;
+  typing: string;
+  placeholder: string;
+  sendAriaLabel: string;
+}> = {
+  en: {
+    title: "AI Family Advisor",
+    loading: "Loading…",
+    premiumBody: "The AI Family Advisor is available with Family Builder or Pro. Upgrade to ask questions about the process, terminology, or how to use LetsBeParents at any time.",
+    viewPremium: "View Premium",
+    loadError: "Could not load the AI Family Advisor. Please try again.",
+    weeklyTitle: "Your weekly check-in",
+    weeklyError: "Could not load your weekly check-in.",
+    clearConversation: "Clear conversation",
+    intro: "Ask about the process, terminology, or how to use LetsBeParents - I'll help you find the right next step. This isn't medical, legal or financial advice.",
+    notConfigured: "The AI Family Advisor isn't set up yet - please check back soon.",
+    sendError: "Could not send that message. Please try again.",
+    emptyState: "Say hello to get started.",
+    typing: "Typing…",
+    placeholder: "Ask the Family Advisor…",
+    sendAriaLabel: "Send",
+  },
+  ru: {
+    title: "AI Family Advisor",
+    loading: "Загрузка…",
+    premiumBody: "AI Family Advisor доступен на тарифах Family Builder или Pro. Оформи подписку, чтобы в любое время задавать вопросы о процессе, терминологии и о том, как пользоваться LetsBeParents.",
+    viewPremium: "Смотреть Premium",
+    loadError: "Не удалось загрузить AI Family Advisor. Попробуй ещё раз.",
+    weeklyTitle: "Твой еженедельный чек-ин",
+    weeklyError: "Не удалось загрузить твой еженедельный чек-ин.",
+    clearConversation: "Очистить переписку",
+    intro: "Спрашивай о процессе, терминологии или о том, как пользоваться LetsBeParents - я помогу найти правильный следующий шаг. Это не медицинская, юридическая или финансовая консультация.",
+    notConfigured: "AI Family Advisor пока не настроен - загляни попозже.",
+    sendError: "Не удалось отправить сообщение. Попробуй ещё раз.",
+    emptyState: "Поздоровайся, чтобы начать.",
+    typing: "Печатает…",
+    placeholder: "Спроси Family Advisor…",
+    sendAriaLabel: "Отправить",
+  },
+  es: {
+    title: "AI Family Advisor",
+    loading: "Cargando…",
+    premiumBody: "El AI Family Advisor está disponible con Family Builder o Pro. Mejora tu plan para preguntar en cualquier momento sobre el proceso, la terminología o cómo usar LetsBeParents.",
+    viewPremium: "Ver Premium",
+    loadError: "No se pudo cargar el AI Family Advisor. Inténtalo de nuevo.",
+    weeklyTitle: "Tu check-in semanal",
+    weeklyError: "No se pudo cargar tu check-in semanal.",
+    clearConversation: "Borrar conversación",
+    intro: "Pregunta sobre el proceso, la terminología o cómo usar LetsBeParents - te ayudaré a encontrar el siguiente paso. Esto no es asesoramiento médico, legal ni financiero.",
+    notConfigured: "El AI Family Advisor todavía no está configurado - vuelve a intentarlo pronto.",
+    sendError: "No se pudo enviar ese mensaje. Inténtalo de nuevo.",
+    emptyState: "Saluda para empezar.",
+    typing: "Escribiendo…",
+    placeholder: "Pregunta al Family Advisor…",
+    sendAriaLabel: "Enviar",
+  },
+  pt: {
+    title: "AI Family Advisor",
+    loading: "Carregando…",
+    premiumBody: "O AI Family Advisor está disponível com o Family Builder ou Pro. Faça upgrade para tirar dúvidas sobre o processo, terminologia ou como usar o LetsBeParents a qualquer momento.",
+    viewPremium: "Ver Premium",
+    loadError: "Não foi possível carregar o AI Family Advisor. Tente novamente.",
+    weeklyTitle: "Seu check-in semanal",
+    weeklyError: "Não foi possível carregar seu check-in semanal.",
+    clearConversation: "Limpar conversa",
+    intro: "Pergunte sobre o processo, terminologia ou como usar o LetsBeParents - vou ajudar você a encontrar o próximo passo certo. Isso não é aconselhamento médico, jurídico ou financeiro.",
+    notConfigured: "O AI Family Advisor ainda não está configurado - volte a conferir em breve.",
+    sendError: "Não foi possível enviar essa mensagem. Tente novamente.",
+    emptyState: "Diga oi para começar.",
+    typing: "Digitando…",
+    placeholder: "Pergunte ao Family Advisor…",
+    sendAriaLabel: "Enviar",
+  },
+  fr: {
+    title: "AI Family Advisor",
+    loading: "Chargement…",
+    premiumBody: "L'AI Family Advisor est disponible avec Family Builder ou Pro. Passe à l'abonnement supérieur pour poser des questions sur le processus, la terminologie ou l'utilisation de LetsBeParents à tout moment.",
+    viewPremium: "Voir Premium",
+    loadError: "Impossible de charger l'AI Family Advisor. Réessaie.",
+    weeklyTitle: "Ton bilan hebdomadaire",
+    weeklyError: "Impossible de charger ton bilan hebdomadaire.",
+    clearConversation: "Effacer la conversation",
+    intro: "Pose des questions sur le processus, la terminologie ou l'utilisation de LetsBeParents - je t'aiderai à trouver la prochaine étape. Ceci n'est pas un conseil médical, juridique ou financier.",
+    notConfigured: "L'AI Family Advisor n'est pas encore configuré - reviens bientôt.",
+    sendError: "Impossible d'envoyer ce message. Réessaie.",
+    emptyState: "Dis bonjour pour commencer.",
+    typing: "En train d'écrire…",
+    placeholder: "Demande au Family Advisor…",
+    sendAriaLabel: "Envoyer",
+  },
+  de: {
+    title: "AI Family Advisor",
+    loading: "Wird geladen…",
+    premiumBody: "Der AI Family Advisor ist mit Family Builder oder Pro verfügbar. Upgrade jederzeit, um Fragen zum Prozess, zu Fachbegriffen oder zur Nutzung von LetsBeParents zu stellen.",
+    viewPremium: "Premium ansehen",
+    loadError: "Der AI Family Advisor konnte nicht geladen werden. Bitte versuch es erneut.",
+    weeklyTitle: "Dein wöchentlicher Check-in",
+    weeklyError: "Dein wöchentlicher Check-in konnte nicht geladen werden.",
+    clearConversation: "Unterhaltung löschen",
+    intro: "Frag zum Prozess, zu Fachbegriffen oder zur Nutzung von LetsBeParents - ich helfe dir, den richtigen nächsten Schritt zu finden. Das ist keine medizinische, rechtliche oder finanzielle Beratung.",
+    notConfigured: "Der AI Family Advisor ist noch nicht eingerichtet - schau bald wieder vorbei.",
+    sendError: "Diese Nachricht konnte nicht gesendet werden. Bitte versuch es erneut.",
+    emptyState: "Sag Hallo, um loszulegen.",
+    typing: "Tippt…",
+    placeholder: "Frag den Family Advisor…",
+    sendAriaLabel: "Senden",
+  },
+  it: {
+    title: "AI Family Advisor",
+    loading: "Caricamento…",
+    premiumBody: "L'AI Family Advisor è disponibile con Family Builder o Pro. Esegua l'upgrade per fare domande sul processo, sulla terminologia o su come usare LetsBeParents in qualsiasi momento.",
+    viewPremium: "Vedi Premium",
+    loadError: "Impossibile caricare l'AI Family Advisor. Riprovi.",
+    weeklyTitle: "Il Suo check-in settimanale",
+    weeklyError: "Impossibile caricare il Suo check-in settimanale.",
+    clearConversation: "Cancella conversazione",
+    intro: "Chieda pure informazioni sul processo, sulla terminologia o su come usare LetsBeParents - La aiuterò a trovare il passo successivo giusto. Questo non costituisce una consulenza medica, legale o finanziaria.",
+    notConfigured: "L'AI Family Advisor non è ancora configurato - torni a controllare presto.",
+    sendError: "Impossibile inviare il messaggio. Riprovi.",
+    emptyState: "Dica pure ciao per iniziare.",
+    typing: "Sta scrivendo…",
+    placeholder: "Chieda al Family Advisor…",
+    sendAriaLabel: "Invia",
+  },
+  pl: {
+    title: "AI Family Advisor",
+    loading: "Ładowanie…",
+    premiumBody: "AI Family Advisor jest dostępny w planach Family Builder lub Pro. Ulepsz plan, aby w każdej chwili pytać o proces, terminologię lub sposób korzystania z LetsBeParents.",
+    viewPremium: "Zobacz Premium",
+    loadError: "Nie udało się załadować AI Family Advisor. Spróbuj ponownie.",
+    weeklyTitle: "Twój cotygodniowy check-in",
+    weeklyError: "Nie udało się załadować Twojego cotygodniowego check-inu.",
+    clearConversation: "Wyczyść rozmowę",
+    intro: "Pytaj o proces, terminologię lub sposób korzystania z LetsBeParents - pomogę Ci znaleźć właściwy następny krok. To nie jest porada medyczna, prawna ani finansowa.",
+    notConfigured: "AI Family Advisor nie jest jeszcze skonfigurowany - zajrzyj tu ponownie wkrótce.",
+    sendError: "Nie udało się wysłać tej wiadomości. Spróbuj ponownie.",
+    emptyState: "Przywitaj się, aby zacząć.",
+    typing: "Pisze…",
+    placeholder: "Zapytaj Family Advisor…",
+    sendAriaLabel: "Wyślij",
+  },
+};
+
+const COMPATIBILITY_ANSWERS_TEXT: Record<CookieLocale, {
+  title: string;
+  loading: string;
+  loadError: string;
+  intro: string;
+  progress: string;
+  savedNotice: string;
+  saveError: string;
+  saving: string;
+  saveAnswers: string;
+}> = {
+  en: {
+    title: "Compatibility profile",
+    loading: "Loading...",
+    loadError: "Could not load the compatibility questions. Please try again.",
+    intro: "Answer a few questions about parenting, involvement, timeline and boundaries. When you match with someone, you will both see where you align and what is worth discussing - no percentage, no pass or fail.",
+    progress: "{answered} of {total} answered",
+    savedNotice: "Saved.",
+    saveError: "Could not save your answers. Please try again.",
+    saving: "Saving...",
+    saveAnswers: "Save answers",
+  },
+  ru: {
+    title: "Профиль совместимости",
+    loading: "Загрузка...",
+    loadError: "Не удалось загрузить вопросы о совместимости. Попробуй ещё раз.",
+    intro: "Ответь на несколько вопросов о воспитании, вовлечённости, сроках и границах. Когда вы найдёте пару, вы оба увидите, в чём совпадаете и что стоит обсудить - без процентов, без «сдал/не сдал».",
+    progress: "{answered} из {total} отвечено",
+    savedNotice: "Сохранено.",
+    saveError: "Не удалось сохранить твои ответы. Попробуй ещё раз.",
+    saving: "Сохранение...",
+    saveAnswers: "Сохранить ответы",
+  },
+  es: {
+    title: "Perfil de compatibilidad",
+    loading: "Cargando...",
+    loadError: "No se pudieron cargar las preguntas de compatibilidad. Inténtalo de nuevo.",
+    intro: "Responde algunas preguntas sobre crianza, nivel de implicación, plazos y límites. Cuando hagas match con alguien, ambos verán en qué coinciden y qué vale la pena hablar - sin porcentajes, sin aprobar o suspender.",
+    progress: "{answered} de {total} respondidas",
+    savedNotice: "Guardado.",
+    saveError: "No se pudieron guardar tus respuestas. Inténtalo de nuevo.",
+    saving: "Guardando...",
+    saveAnswers: "Guardar respuestas",
+  },
+  pt: {
+    title: "Perfil de compatibilidade",
+    loading: "Carregando...",
+    loadError: "Não foi possível carregar as perguntas de compatibilidade. Tente novamente.",
+    intro: "Responda a algumas perguntas sobre educação dos filhos, envolvimento, prazo e limites. Quando você encontrar um match, vocês dois verão onde estão alinhados e o que vale a pena conversar - sem porcentagem, sem aprovação ou reprovação.",
+    progress: "{answered} de {total} respondidas",
+    savedNotice: "Salvo.",
+    saveError: "Não foi possível salvar suas respostas. Tente novamente.",
+    saving: "Salvando...",
+    saveAnswers: "Salvar respostas",
+  },
+  fr: {
+    title: "Profil de compatibilité",
+    loading: "Chargement...",
+    loadError: "Impossible de charger les questions de compatibilité. Réessaie.",
+    intro: "Réponds à quelques questions sur l'éducation, l'implication, le calendrier et les limites. Quand tu matches avec quelqu'un, vous verrez tous les deux où vous êtes alignés et ce qui mérite d'être discuté - pas de pourcentage, pas de réussite ou d'échec.",
+    progress: "{answered} sur {total} répondues",
+    savedNotice: "Enregistré.",
+    saveError: "Impossible d'enregistrer tes réponses. Réessaie.",
+    saving: "Enregistrement...",
+    saveAnswers: "Enregistrer les réponses",
+  },
+  de: {
+    title: "Kompatibilitätsprofil",
+    loading: "Wird geladen...",
+    loadError: "Die Kompatibilitätsfragen konnten nicht geladen werden. Bitte versuch es erneut.",
+    intro: "Beantworte ein paar Fragen zu Erziehung, Engagement, Zeitplan und Grenzen. Wenn du mit jemandem matchst, seht ihr beide, wo ihr übereinstimmt und worüber es sich zu sprechen lohnt - kein Prozentwert, kein Bestehen oder Durchfallen.",
+    progress: "{answered} von {total} beantwortet",
+    savedNotice: "Gespeichert.",
+    saveError: "Deine Antworten konnten nicht gespeichert werden. Bitte versuch es erneut.",
+    saving: "Wird gespeichert...",
+    saveAnswers: "Antworten speichern",
+  },
+  it: {
+    title: "Profilo di compatibilità",
+    loading: "Caricamento...",
+    loadError: "Non è stato possibile caricare le domande di compatibilità. Riprovi.",
+    intro: "Risponda ad alcune domande su genitorialità, coinvolgimento, tempistiche e limiti. Quando troverà un match, vedrete entrambi dove siete allineati e cosa vale la pena discutere - senza percentuali, senza promozione o bocciatura.",
+    progress: "{answered} di {total} risposte fornite",
+    savedNotice: "Salvato.",
+    saveError: "Non è stato possibile salvare le Sue risposte. Riprovi.",
+    saving: "Salvataggio...",
+    saveAnswers: "Salva risposte",
+  },
+  pl: {
+    title: "Profil kompatybilności",
+    loading: "Ładowanie...",
+    loadError: "Nie udało się załadować pytań o kompatybilność. Spróbuj ponownie.",
+    intro: "Odpowiedz na kilka pytań o rodzicielstwo, zaangażowanie, harmonogram i granice. Gdy dopasujesz się do kogoś, oboje zobaczycie, w czym się zgadzacie i o czym warto porozmawiać - bez procentów, bez zdania czy oblania.",
+    progress: "{answered} z {total} - odpowiedziano",
+    savedNotice: "Zapisano.",
+    saveError: "Nie udało się zapisać Twoich odpowiedzi. Spróbuj ponownie.",
+    saving: "Zapisywanie...",
+    saveAnswers: "Zapisz odpowiedzi",
+  },
+};
+
 function AiAdvisor({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = AI_ADVISOR_TEXT[locale] ?? AI_ADVISOR_TEXT.en;
   const [status, setStatus] = useState<"loading" | "ok" | "needsPremium" | "error">("loading");
   const [configured, setConfigured] = useState(true);
   const [messages, setMessages] = useState<AiAdvisorMessage[]>([]);
@@ -5251,7 +8779,7 @@ function AiAdvisor({ session }: { session: Session }) {
       setMessages((prev) => prev.filter((m) => m !== optimistic));
       setDraft(text);
       if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
-      else setNotice("Could not send that message. Please try again.");
+      else setNotice(AI_ADVISOR_TEXT[locale]?.sendError ?? AI_ADVISOR_TEXT.en.sendError);
     } finally {
       setSending(false);
     }
@@ -5269,8 +8797,8 @@ function AiAdvisor({ session }: { session: Session }) {
   if (status === "loading") {
     return (
       <section className="access-card">
-        <h1>AI Family Advisor</h1>
-        <p>Loading…</p>
+        <h1>{text.title}</h1>
+        <p>{text.loading}</p>
       </section>
     );
   }
@@ -5278,14 +8806,12 @@ function AiAdvisor({ session }: { session: Session }) {
   if (status === "needsPremium") {
     return (
       <section className="access-card">
-        <h1>AI Family Advisor</h1>
+        <h1>{text.title}</h1>
         <p>
-          The AI Family Advisor is part of Family Builder Pro. Upgrade to ask
-          questions about the process, terminology, or how to use
-          LetsBeParents at any time.
+          {text.premiumBody}
         </p>
         <Link className="primary" to={`/${locale}/subscription`}>
-          View Premium
+          {text.viewPremium}
         </Link>
       </section>
     );
@@ -5294,8 +8820,8 @@ function AiAdvisor({ session }: { session: Session }) {
   if (status === "error") {
     return (
       <section className="access-card">
-        <h1>AI Family Advisor</h1>
-        <p className="error">Could not load the AI Family Advisor. Please try again.</p>
+        <h1>{text.title}</h1>
+        <p className="error">{text.loadError}</p>
       </section>
     );
   }
@@ -5304,33 +8830,31 @@ function AiAdvisor({ session }: { session: Session }) {
     <section className="advisor-page">
       {weeklyInsightStatus !== "idle" && weeklyInsightStatus !== "needsPremium" && (
         <div className="list-card advisor-card weekly-insight-card">
-          <h2>Your weekly check-in</h2>
-          {weeklyInsightStatus === "loading" && <p className="notice">Loading…</p>}
+          <h2>{text.weeklyTitle}</h2>
+          {weeklyInsightStatus === "loading" && <p className="notice">{text.loading}</p>}
           {weeklyInsightStatus === "error" && (
-            <p className="error">Could not load your weekly check-in.</p>
+            <p className="error">{text.weeklyError}</p>
           )}
           {weeklyInsightStatus === "ok" && <p>{weeklyInsight}</p>}
         </div>
       )}
       <div className="list-card advisor-card">
         <div className="message-title">
-          <h1>AI Family Advisor</h1>
+          <h1>{text.title}</h1>
           <button type="button" className="secondary" onClick={() => void clear()}>
-            Clear conversation
+            {text.clearConversation}
           </button>
         </div>
         <p>
-          Ask about the process, terminology, or how to use LetsBeParents -
-          I'll help you find the right next step. This isn't medical, legal
-          or financial advice.
+          {text.intro}
         </p>
         {!configured && (
-          <p className="error">The AI Family Advisor isn't set up yet - please check back soon.</p>
+          <p className="error">{text.notConfigured}</p>
         )}
         {notice && <p className="error">{notice}</p>}
         <div className="message-list advisor-list">
           {messages.length === 0 ? (
-            <p className="notice">Say hello to get started.</p>
+            <p className="notice">{text.emptyState}</p>
           ) : (
             messages.map((message, index) => (
               <div
@@ -5341,17 +8865,24 @@ function AiAdvisor({ session }: { session: Session }) {
               </div>
             ))
           )}
-          {sending && <p className="notice">Typing…</p>}
+          {sending && <p className="notice">{text.typing}</p>}
         </div>
         <form onSubmit={(event) => void send(event)}>
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Ask the Family Advisor…"
+            placeholder={text.placeholder}
             disabled={!configured}
           />
-          <button className="primary" disabled={!draft.trim() || sending || !configured}>
-            Send
+          <button
+            className="primary"
+            disabled={!draft.trim() || sending || !configured}
+            aria-label={text.sendAriaLabel}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
           </button>
         </form>
       </div>
@@ -5367,6 +8898,7 @@ function AiAdvisor({ session }: { session: Session }) {
 // from the account nav (MemberLinks) since it does not need a match.
 function CompatibilityAnswers({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = COMPATIBILITY_ANSWERS_TEXT[locale] ?? COMPATIBILITY_ANSWERS_TEXT.en;
   const [questions, setQuestions] = useState<Row[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
@@ -5407,8 +8939,8 @@ function CompatibilityAnswers({ session }: { session: Session }) {
   if (status === "loading") {
     return (
       <section className="access-card">
-        <h1>Compatibility profile</h1>
-        <p>Loading...</p>
+        <h1>{text.title}</h1>
+        <p>{text.loading}</p>
       </section>
     );
   }
@@ -5416,25 +8948,23 @@ function CompatibilityAnswers({ session }: { session: Session }) {
   if (status === "error") {
     return (
       <section className="access-card">
-        <h1>Compatibility profile</h1>
-        <p className="error">Could not load the compatibility questions. Please try again.</p>
+        <h1>{text.title}</h1>
+        <p className="error">{text.loadError}</p>
       </section>
     );
   }
 
   return (
     <section className="compatibility-answers">
-      <h1>Compatibility profile</h1>
+      <h1>{text.title}</h1>
       <p>
-        Answer a few questions about parenting, involvement, timeline and
-        boundaries. When you match with someone, you will both see where you
-        align and what is worth discussing - no percentage, no pass or fail.
+        {text.intro}
       </p>
       <p className="compatibility-progress">
-        {answeredCount} of {questions.length} answered
+        {text.progress.replace("{answered}", String(answeredCount)).replace("{total}", String(questions.length))}
       </p>
-      {notice === "saved" && <p className="notice">Saved.</p>}
-      {notice === "error" && <p className="error">Could not save your answers. Please try again.</p>}
+      {notice === "saved" && <p className="notice">{text.savedNotice}</p>}
+      {notice === "error" && <p className="error">{text.saveError}</p>}
 
       {questions.map((question) => {
         const qid = asText(question.id);
@@ -5463,7 +8993,7 @@ function CompatibilityAnswers({ session }: { session: Session }) {
 
       <div className="plan-actions">
         <button className="primary" onClick={() => void save()} disabled={saving}>
-          {saving ? "Saving..." : "Save answers"}
+          {saving ? text.saving : text.saveAnswers}
         </button>
       </div>
     </section>
@@ -5637,7 +9167,7 @@ const PRICING_TEXT = {
         key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "per month, billed monthly",
         altNote: "or €49.99 for 3 months - €16.66/month, save 33%",
         tagline: "For members ready to match with intention.",
-        features: ["Compatibility Score & Why you match", "Advanced family filters", "See who liked you", "Video & audio calls", "15 likes/day, 5 reach-outs/day", "Priority in discovery"],
+        features: ["Compatibility Score & Why you match", "AI Family Advisor", "Advanced family filters", "See who liked you", "Video & audio calls", "15 likes/day, 5 reach-outs/day", "Priority in discovery"],
         cta: "Start Family Builder", badge: "Best value",
       },
       {
@@ -5666,19 +9196,43 @@ const PRICING_TEXT = {
         { label: "Expanded profile info", values: ["", "check", "check"] },
         { label: "Verification info", values: ["", "check", "check"] },
       ] },
+      { name: "Stand out & stay safe", rows: [
+        { label: "Profile Boost", values: ["check", "check", "check"] },
+        { label: "Invite & earn a Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Video Verification badge", values: ["check", "check", "check"] },
+      ] },
       { name: "Connect & communicate", rows: [
         { label: "Video & audio calls", values: ["", "check", "check"] },
         { label: "Private photos", values: ["", "check", "check"] },
         { label: "Incognito mode", values: ["", "check", "check"] },
+        { label: "AI-drafted message starters", values: ["", "check", "check"] },
       ] },
       { name: "Build your family", rows: [
         { label: "Family Plan (shared)", values: ["", "Limited", "check"] },
-        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Weekly AI Advisor insight", values: ["", "check", "check"] },
+        { label: "Co-Parenting Agreement sign-off", values: ["", "", "check"] },
+        { label: "Community groups & discussions", values: ["", "", "check"] },
         { label: "Detailed Compatibility Report", values: ["", "", "check"] },
         { label: "Document & checklist tools", values: ["", "", "check"] },
         { label: "Priority support", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "ONE-TIME PURCHASES",
+      title: "Need just one boost? Buy it once.",
+      intro: "Prefer not to subscribe? These extras are available as one-time purchases in the LetsBeParents app (iOS - Android coming soon). Prices shown are approximate and set in the app.",
+      items: [
+        { name: "Boost", body: "Get shown more often in Browse for 24 hours.", price: "≈ €3.99" },
+        { name: "Superlike", body: "Stand out immediately - skips the daily like limit.", price: "≈ €1.99" },
+        { name: "Rewind", body: "Undo your last swipe.", price: "≈ €1.99" },
+      { name: "See who liked you (48h)", body: "Reveal everyone who's liked you for 48 hours.", price: "≈ €4.99" },
+        { name: "Full Compatibility Report", body: "Unlock the detailed report for one match.", price: "≈ €2.99" },
+        { name: "+10 extra likes", body: "Get 10 extra likes to use today.", price: "≈ €2.99" },
+      ],
+      note: "Purchases are made in the mobile app, not on this website.",
+    },
   },
   ru: {
     eyebrow: "ЦЕНЫ",
@@ -5695,7 +9249,7 @@ const PRICING_TEXT = {
         key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "в месяц, ежемесячная оплата",
         altNote: "или €49.99 за 3 месяца - €16.66/мес, экономия 33%",
         tagline: "Для тех, кто готов искать пару осознанно.",
-        features: ["Оценка совместимости и «почему вы подходите»", "Расширенные семейные фильтры", "Кто лайкнул вас", "Видео- и аудиозвонки", "15 лайков/день, 5 обращений/день", "Приоритет в поиске"],
+        features: ["Оценка совместимости и «почему вы подходите»", "AI Family Advisor", "Расширенные семейные фильтры", "Кто лайкнул вас", "Видео- и аудиозвонки", "15 лайков/день, 5 обращений/день", "Приоритет в поиске"],
         cta: "Начать Family Builder", badge: "Лучшая цена",
       },
       {
@@ -5724,19 +9278,43 @@ const PRICING_TEXT = {
         { label: "Расширенная информация профиля", values: ["", "check", "check"] },
         { label: "Информация о верификации", values: ["", "check", "check"] },
       ] },
+      { name: "Заметность и безопасность", rows: [
+        { label: "Boost профиля", values: ["check", "check", "check"] },
+        { label: "Приглашай и получай Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Значок Video Verification", values: ["check", "check", "check"] },
+      ] },
       { name: "Связь и общение", rows: [
         { label: "Видео- и аудиозвонки", values: ["", "check", "check"] },
         { label: "Приватные фото", values: ["", "check", "check"] },
         { label: "Режим инкогнито", values: ["", "check", "check"] },
+        { label: "AI-подсказки для первого сообщения", values: ["", "check", "check"] },
       ] },
       { name: "Постройте свою семью", rows: [
         { label: "Семейный план (общий)", values: ["", "Ограниченно", "check"] },
-        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Еженедельный совет от AI Advisor", values: ["", "check", "check"] },
+        { label: "Подписание Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Группы и обсуждения Community", values: ["", "", "check"] },
         { label: "Подробный отчёт о совместимости", values: ["", "", "check"] },
         { label: "Документы и чек-листы", values: ["", "", "check"] },
         { label: "Приоритетная поддержка", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "РАЗОВЫЕ ПОКУПКИ",
+      title: "Нужен только один буст? Купите один раз.",
+      intro: "Не хотите оформлять подписку? Эти дополнения доступны как разовые покупки в приложении LetsBeParents (iOS - Android скоро). Указанные цены приблизительные и задаются в приложении.",
+      items: [
+        { name: "Буст", body: "Ваша анкета будет чаще показываться в Обзоре в течение 24 часов.", price: "≈ €3.99" },
+        { name: "Суперлайк", body: "Выделитесь сразу - лайк не учитывается в дневном лимите.", price: "≈ €1.99" },
+        { name: "Rewind", body: "Отмените последний свайп.", price: "≈ €1.99" },
+      { name: "Кто вас лайкнул (48 часов)", body: "Откройте всех, кто вас лайкнул, на 48 часов.", price: "≈ €4.99" },
+        { name: "Полный отчёт совместимости", body: "Откройте подробный отчёт совместимости для одного мэтча.", price: "≈ €2.99" },
+        { name: "+10 лайков", body: "Получите 10 дополнительных лайков на сегодня.", price: "≈ €2.99" },
+      ],
+      note: "Покупки совершаются в мобильном приложении, а не на этом сайте.",
+    },
   },
   es: {
     eyebrow: "PRECIOS",
@@ -5753,7 +9331,7 @@ const PRICING_TEXT = {
         key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "al mes, facturación mensual",
         altNote: "o €49.99 por 3 meses - €16.66/mes, ahorra 33%",
         tagline: "Para quienes buscan match con intención.",
-        features: ["Puntuación de compatibilidad y «por qué haces match»", "Filtros familiares avanzados", "Ver quién te dio like", "Videollamadas y llamadas de audio", "15 likes/día, 5 contactos/día", "Prioridad en el descubrimiento"],
+        features: ["Puntuación de compatibilidad y «por qué haces match»", "AI Family Advisor", "Filtros familiares avanzados", "Ver quién te dio like", "Videollamadas y llamadas de audio", "15 likes/día, 5 contactos/día", "Prioridad en el descubrimiento"],
         cta: "Empezar Family Builder", badge: "Mejor precio",
       },
       {
@@ -5782,19 +9360,453 @@ const PRICING_TEXT = {
         { label: "Información ampliada del perfil", values: ["", "check", "check"] },
         { label: "Información de verificación", values: ["", "check", "check"] },
       ] },
+      { name: "Destaca y mantente seguro", rows: [
+        { label: "Boost de perfil", values: ["check", "check", "check"] },
+        { label: "Invita y gana un Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Insignia Video Verification", values: ["check", "check", "check"] },
+      ] },
       { name: "Conectar y comunicarse", rows: [
         { label: "Videollamadas y llamadas de audio", values: ["", "check", "check"] },
         { label: "Fotos privadas", values: ["", "check", "check"] },
         { label: "Modo incógnito", values: ["", "check", "check"] },
+        { label: "Mensajes iniciales sugeridos por IA", values: ["", "check", "check"] },
       ] },
       { name: "Construye tu familia", rows: [
         { label: "Plan familiar (compartido)", values: ["", "Limitado", "check"] },
-        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Consejo semanal del AI Advisor", values: ["", "check", "check"] },
+        { label: "Firma del Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Grupos y debates de Community", values: ["", "", "check"] },
         { label: "Informe de compatibilidad detallado", values: ["", "", "check"] },
         { label: "Documentos y listas de verificación", values: ["", "", "check"] },
         { label: "Soporte prioritario", values: ["", "", "check"] },
       ] },
     ],
+    oneTime: {
+      eyebrow: "COMPRAS ÚNICAS",
+      title: "¿Solo necesitas un boost? Cómpralo una vez.",
+      intro: "¿Prefieres no suscribirte? Estos extras están disponibles como compras únicas en la app de LetsBeParents (iOS - Android próximamente). Los precios mostrados son aproximados y se establecen en la app.",
+      items: [
+        { name: "Boost", body: "Aparece con más frecuencia en Explorar durante 24 horas.", price: "≈ €3.99" },
+        { name: "Superlike", body: "Destaca al instante - tu like no cuenta para el límite diario.", price: "≈ €1.99" },
+        { name: "Rewind", body: "Deshaz tu último swipe.", price: "≈ €1.99" },
+      { name: "Ve quién te dio like (48h)", body: "Descubre a todos los que te dieron like durante 48 horas.", price: "≈ €4.99" },
+        { name: "Informe de compatibilidad completo", body: "Desbloquea el informe detallado para un match.", price: "≈ €2.99" },
+        { name: "+10 likes extra", body: "Obtén 10 likes extra para usar hoy.", price: "≈ €2.99" },
+      ],
+      note: "Las compras se realizan en la app móvil, no en este sitio web.",
+    },
+  },
+  pt: {
+    eyebrow: "PREÇOS",
+    title: "Encontre a pessoa certa para construir uma família.",
+    intro: "Matches melhores. Compatibilidade mais profunda. Mais confiança. Comece grátis e faça upgrade quando estiver pronto para ir mais fundo.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Grátis para sempre", altNote: "",
+        tagline: "Crie o seu perfil e comece a descobrir.",
+        features: ["Perfil completo e descoberta básica", "3 likes por dia", "Compatibilidade básica"],
+        cta: "Comece grátis", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "por mês, faturação mensal",
+        altNote: "ou €49.99 por 3 meses - €16.66/mês, poupe 33%",
+        tagline: "Para quem está pronto para procurar com intenção.",
+        features: ["Pontuação de Compatibilidade e por que combinam", "AI Family Advisor", "Filtros familiares avançados", "Veja quem gostou de si", "Chamadas de vídeo e áudio", "15 likes/dia, 5 contactos/dia", "Prioridade na descoberta"],
+        cta: "Começar com Family Builder", badge: "Melhor valor",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "por mês", altNote: "",
+        tagline: "Tudo do Family Builder, com acompanhamento mais aprofundado.",
+        features: ["Tudo do Family Builder", "AI Family Advisor", "Relatório de Compatibilidade detalhado", "Family Plan e Sala Familiar Partilhada", "Ferramentas de documentos e listas de verificação", "Suporte prioritário"],
+        cta: "Passar para o Pro", badge: "",
+      },
+    ],
+    footnote: "Preços apresentados em EUR e podem variar consoante a região. Cancele quando quiser. O Premium requer verificação de perfil.",
+    faqLinkLabel: "Veja como verificamos os membros",
+    compareTitle: "Compare todas as funcionalidades",
+    compareSub: "Veja exatamente o que está incluído em cada plano.",
+    matrixGroups: [
+      { name: "Encontre melhores matches", rows: [
+        { label: "Likes diários", values: ["3", "15", "Ilimitado"] },
+        { label: "Ser o primeiro a contactar", values: ["", "5/dia", "Ilimitado"] },
+        { label: "Filtros familiares avançados", values: ["", "check", "check"] },
+        { label: "Prioridade no catálogo", values: ["", "check", "check"] },
+        { label: "Veja quem gostou de si", values: ["", "check", "check"] },
+        { label: "Veja quem visitou o seu perfil", values: ["", "check", "check"] },
+      ] },
+      { name: "Compreenda a compatibilidade", rows: [
+        { label: "Pontuação de Compatibilidade", values: ["", "check", "check"] },
+        { label: "Por que combinam", values: ["", "check", "check"] },
+        { label: "Informações de perfil ampliadas", values: ["", "check", "check"] },
+        { label: "Informações de verificação", values: ["", "check", "check"] },
+      ] },
+      { name: "Destaque-se e mantenha-se seguro", rows: [
+        { label: "Boost de perfil", values: ["check", "check", "check"] },
+        { label: "Convide e ganhe um Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Selo de Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Conecte-se e comunique", rows: [
+        { label: "Chamadas de vídeo e áudio", values: ["", "check", "check"] },
+        { label: "Fotos privadas", values: ["", "check", "check"] },
+        { label: "Modo incógnito", values: ["", "check", "check"] },
+        { label: "Sugestões de mensagens com IA", values: ["", "check", "check"] },
+      ] },
+      { name: "Construa a sua família", rows: [
+        { label: "Family Plan (partilhado)", values: ["", "Limitado", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Análise semanal do AI Advisor", values: ["", "check", "check"] },
+        { label: "Assinatura do Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Grupos e discussões da comunidade", values: ["", "", "check"] },
+        { label: "Relatório de Compatibilidade detalhado", values: ["", "", "check"] },
+        { label: "Ferramentas de documentos e listas de verificação", values: ["", "", "check"] },
+        { label: "Suporte prioritário", values: ["", "", "check"] },
+      ] },
+    ],
+    oneTime: {
+      eyebrow: "COMPRAS ÚNICAS",
+      title: "Só precisa de um boost? Compre uma vez.",
+      intro: "Prefere não assinar? Estes extras estão disponíveis como compras únicas na app LetsBeParents (iOS - Android brevemente). Os preços apresentados são aproximados e definidos na app.",
+      items: [
+        { name: "Boost", body: "Apareça com mais frequência na navegação durante 24 horas.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Destaque-se imediatamente - ignora o limite diário de likes.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Desfaça o seu último swipe.", price: "≈ 1,99 €" },
+        { name: "Ver quem gostou de você (48h)", body: "Revele todas as pessoas que gostaram de você durante 48 horas.", price: "≈ 4,99–5,99 €" },
+        { name: "Relatório de Compatibilidade Completo", body: "Desbloqueie o relatório detalhado de um match.", price: "≈ 2,99 €" },
+        { name: "+10 likes extra", body: "Receba 10 likes extra para usar hoje.", price: "≈ 2,99 €" },
+      ],
+      note: "As compras são feitas na app, não neste site.",
+    },
+  },
+  fr: {
+    eyebrow: "TARIFS",
+    title: "Trouvez la bonne personne pour construire une famille.",
+    intro: "De meilleurs matchs. Une compatibilité plus profonde. Plus de confiance. Commencez gratuitement, passez à un forfait supérieur quand vous êtes prêt à aller plus loin.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Gratuit pour toujours", altNote: "",
+        tagline: "Créez votre profil et commencez à découvrir.",
+        features: ["Profil complet et découverte de base", "3 likes par jour", "Mise en relation de base"],
+        cta: "Commencer gratuitement", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "par mois, facturation mensuelle",
+        altNote: "ou €49.99 pour 3 mois - €16.66/mois, économisez 33%",
+        tagline: "Pour les membres prêts à matcher avec intention.",
+        features: ["Score de compatibilité et pourquoi vous matchez", "AI Family Advisor", "Filtres familiaux avancés", "Voir qui vous a liké", "Appels vidéo et audio", "15 likes/jour, 5 prises de contact/jour", "Priorité dans la découverte"],
+        cta: "Choisir Family Builder", badge: "Meilleur rapport qualité-prix",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "par mois", altNote: "",
+        tagline: "Tout Family Builder, avec un accompagnement plus approfondi.",
+        features: ["Tout Family Builder", "AI Family Advisor", "Rapport de compatibilité détaillé", "Family Plan et Espace Familial Partagé", "Outils de documents et listes de vérification", "Support prioritaire"],
+        cta: "Passer au Pro", badge: "",
+      },
+    ],
+    footnote: "Prix affichés en EUR, pouvant varier selon la région. Annulation à tout moment. Premium nécessite la vérification du profil.",
+    faqLinkLabel: "Découvrez comment nous vérifions les membres",
+    compareTitle: "Comparez toutes les fonctionnalités",
+    compareSub: "Découvrez exactement ce qui est inclus dans chaque forfait.",
+    matrixGroups: [
+      { name: "Mieux matcher", rows: [
+        { label: "Likes quotidiens", values: ["3", "15", "Illimité"] },
+        { label: "Prendre contact en premier", values: ["", "5/jour", "Illimité"] },
+        { label: "Filtres familiaux avancés", values: ["", "check", "check"] },
+        { label: "Priorité dans le catalogue", values: ["", "check", "check"] },
+        { label: "Voir qui vous a liké", values: ["", "check", "check"] },
+        { label: "Voir les visiteurs du profil", values: ["", "check", "check"] },
+      ] },
+      { name: "Comprendre la compatibilité", rows: [
+        { label: "Score de compatibilité", values: ["", "check", "check"] },
+        { label: "Pourquoi vous matchez", values: ["", "check", "check"] },
+        { label: "Informations de profil étendues", values: ["", "check", "check"] },
+        { label: "Informations de vérification", values: ["", "check", "check"] },
+      ] },
+      { name: "Se démarquer et rester en sécurité", rows: [
+        { label: "Boost de profil", values: ["check", "check", "check"] },
+        { label: "Invitez et gagnez un Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Badge Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Se connecter et communiquer", rows: [
+        { label: "Appels vidéo et audio", values: ["", "check", "check"] },
+        { label: "Photos privées", values: ["", "check", "check"] },
+        { label: "Mode incognito", values: ["", "check", "check"] },
+        { label: "Messages de démarrage suggérés par l'IA", values: ["", "check", "check"] },
+      ] },
+      { name: "Construisez votre famille", rows: [
+        { label: "Family Plan (partagé)", values: ["", "Limité", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Conseil hebdomadaire de l'AI Advisor", values: ["", "check", "check"] },
+        { label: "Signature du Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Groupes et discussions communautaires", values: ["", "", "check"] },
+        { label: "Rapport de compatibilité détaillé", values: ["", "", "check"] },
+        { label: "Outils de documents et listes de vérification", values: ["", "", "check"] },
+        { label: "Support prioritaire", values: ["", "", "check"] },
+      ] },
+    ],
+    oneTime: {
+      eyebrow: "ACHATS UNIQUES",
+      title: "Besoin d'un seul boost ? Achetez-le une seule fois.",
+      intro: "Vous préférez ne pas vous abonner ? Ces options sont disponibles en achat unique dans l'application LetsBeParents (iOS - Android bientôt disponible). Les prix indiqués sont approximatifs et définis dans l'application.",
+      items: [
+        { name: "Boost", body: "Apparaissez plus souvent lors de la navigation, pendant 24 heures.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Démarquez-vous immédiatement - passe outre la limite quotidienne de likes.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Annulez votre dernier swipe.", price: "≈ 1,99 €" },
+        { name: "Voir qui vous a liké (48h)", body: "Révélez toutes les personnes qui vous ont liké(e) pendant 48 heures.", price: "≈ 4,99–5,99 €" },
+        { name: "Rapport de compatibilité complet", body: "Débloquez le rapport détaillé pour un match.", price: "≈ 2,99 €" },
+        { name: "+10 likes supplémentaires", body: "Obtenez 10 likes supplémentaires à utiliser aujourd'hui.", price: "≈ 2,99 €" },
+      ],
+      note: "Les achats se font dans l'application mobile, pas sur ce site.",
+    },
+  },
+  de: {
+    eyebrow: "PREISE",
+    title: "Finden Sie die richtige Person, um eine Familie zu gründen.",
+    intro: "Bessere Matches. Tiefere Kompatibilität. Mehr Sicherheit. Starten Sie kostenlos und upgraden Sie, wenn Sie bereit für mehr sind.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Für immer kostenlos", altNote: "",
+        tagline: "Erstellen Sie Ihr Profil und beginnen Sie zu entdecken.",
+        features: ["Vollständiges Profil & einfache Entdeckung", "3 Likes pro Tag", "Einfaches Matching"],
+        cta: "Kostenlos starten", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "pro Monat, monatliche Abrechnung",
+        altNote: "oder €49.99 für 3 Monate - €16.66/Monat, 33 % sparen",
+        tagline: "Für Mitglieder, die gezielt matchen möchten.",
+        features: ["Kompatibilitäts-Score & warum ihr zueinander passt", "AI Family Advisor", "Erweiterte Familienfilter", "Sehen, wer Sie geliked hat", "Video- und Audioanrufe", "15 Likes/Tag, 5 Kontaktaufnahmen/Tag", "Priorität in der Entdeckung"],
+        cta: "Family Builder starten", badge: "Bester Wert",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "pro Monat", altNote: "",
+        tagline: "Alles aus Family Builder, plus tiefere Begleitung.",
+        features: ["Alles aus Family Builder", "AI Family Advisor", "Detaillierter Kompatibilitätsbericht", "Family Plan & gemeinsamer Familienraum", "Dokument- & Checklisten-Tools", "Prioritäts-Support"],
+        cta: "Zu Pro wechseln", badge: "",
+      },
+    ],
+    footnote: "Preise in EUR angegeben und können je nach Region abweichen. Jederzeit kündbar. Premium erfordert eine Profilverifizierung.",
+    faqLinkLabel: "So verifizieren wir Mitglieder",
+    compareTitle: "Alle Funktionen vergleichen",
+    compareSub: "Sehen Sie genau, was in jedem Plan enthalten ist.",
+    matrixGroups: [
+      { name: "Besser matchen", rows: [
+        { label: "Likes pro Tag", values: ["3", "15", "Unbegrenzt"] },
+        { label: "Zuerst Kontakt aufnehmen", values: ["", "5/Tag", "Unbegrenzt"] },
+        { label: "Erweiterte Familienfilter", values: ["", "check", "check"] },
+        { label: "Priorität im Katalog", values: ["", "check", "check"] },
+        { label: "Sehen, wer Sie geliked hat", values: ["", "check", "check"] },
+        { label: "Profilbesucher sehen", values: ["", "check", "check"] },
+      ] },
+      { name: "Kompatibilität verstehen", rows: [
+        { label: "Kompatibilitäts-Score", values: ["", "check", "check"] },
+        { label: "Warum ihr zueinander passt", values: ["", "check", "check"] },
+        { label: "Erweiterte Profilinformationen", values: ["", "check", "check"] },
+        { label: "Verifizierungsinformationen", values: ["", "check", "check"] },
+      ] },
+      { name: "Auffallen & sicher bleiben", rows: [
+        { label: "Profil-Boost", values: ["check", "check", "check"] },
+        { label: "Einladen & einen Boost erhalten", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Video-Verification-Abzeichen", values: ["check", "check", "check"] },
+      ] },
+      { name: "Verbinden & kommunizieren", rows: [
+        { label: "Video- und Audioanrufe", values: ["", "check", "check"] },
+        { label: "Private Fotos", values: ["", "check", "check"] },
+        { label: "Inkognito-Modus", values: ["", "check", "check"] },
+        { label: "KI-vorgeschlagene Gesprächseinstiege", values: ["", "check", "check"] },
+      ] },
+      { name: "Bauen Sie Ihre Familie auf", rows: [
+        { label: "Family Plan (gemeinsam)", values: ["", "Eingeschränkt", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Wöchentliche Einblicke des AI Advisor", values: ["", "check", "check"] },
+        { label: "Unterzeichnung der Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Community-Gruppen & Diskussionen", values: ["", "", "check"] },
+        { label: "Detaillierter Kompatibilitätsbericht", values: ["", "", "check"] },
+        { label: "Dokument- & Checklisten-Tools", values: ["", "", "check"] },
+        { label: "Prioritäts-Support", values: ["", "", "check"] },
+      ] },
+    ],
+    oneTime: {
+      eyebrow: "EINMALKÄUFE",
+      title: "Brauchst du nur einen Boost? Einmal kaufen.",
+      intro: "Kein Abo gewünscht? Diese Extras sind als Einmalkäufe in der LetsBeParents App erhältlich (iOS - Android folgt in Kürze). Die angezeigten Preise sind ungefähre Richtwerte und werden in der App festgelegt.",
+      items: [
+        { name: "Boost", body: "Du wirst beim Stöbern 24 Stunden lang häufiger angezeigt.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Falle sofort auf - umgeht das tägliche Like-Limit.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Mache deinen letzten Swipe rückgängig.", price: "≈ 1,99 €" },
+        { name: "Wer hat dich geliked? (48 Std.)", body: "Zeigt dir 48 Stunden lang alle, die dich geliked haben.", price: "≈ 4,99–5,99 €" },
+        { name: "Vollständiger Kompatibilitätsbericht", body: "Schalte den detaillierten Bericht für ein Match frei.", price: "≈ 2,99 €" },
+        { name: "+10 zusätzliche Likes", body: "Erhalte 10 zusätzliche Likes für den heutigen Tag.", price: "≈ 2,99 €" },
+      ],
+      note: "Käufe erfolgen in der mobilen App, nicht auf dieser Website.",
+    },
+  },
+  it: {
+    eyebrow: "PREZZI",
+    title: "Trova la persona giusta con cui costruire una famiglia.",
+    intro: "Match migliori. Compatibilità più profonda. Più sicurezza. Inizia gratis e passa a un piano superiore quando sei pronto ad andare oltre.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Gratis per sempre", altNote: "",
+        tagline: "Crea il tuo profilo e inizia a scoprire.",
+        features: ["Profilo completo e scoperta di base", "3 like al giorno", "Abbinamento di base"],
+        cta: "Inizia gratis", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "al mese, fatturazione mensile",
+        altNote: "oppure €49.99 per 3 mesi - €16.66/mese, risparmia il 33%",
+        tagline: "Per chi è pronto a fare match con intenzione.",
+        features: ["Punteggio di Compatibilità e perché siete compatibili", "AI Family Advisor", "Filtri familiari avanzati", "Vedi chi ti ha messo like", "Videochiamate e chiamate audio", "15 like/giorno, 5 contatti/giorno", "Priorità nella scoperta"],
+        cta: "Inizia con Family Builder", badge: "Miglior valore",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "al mese", altNote: "",
+        tagline: "Tutto Family Builder, con un accompagnamento più approfondito.",
+        features: ["Tutto Family Builder", "AI Family Advisor", "Report di Compatibilità dettagliato", "Family Plan e Family Room condivisa", "Strumenti per documenti e checklist", "Supporto prioritario"],
+        cta: "Passa a Pro", badge: "",
+      },
+    ],
+    footnote: "Prezzi mostrati in EUR e possono variare in base alla regione. Annulla in qualsiasi momento. Premium richiede la verifica del profilo.",
+    faqLinkLabel: "Scopri come verifichiamo i membri",
+    compareTitle: "Confronta tutte le funzionalità",
+    compareSub: "Scopri esattamente cosa è incluso in ciascun piano.",
+    matrixGroups: [
+      { name: "Trova match migliori", rows: [
+        { label: "Like giornalieri", values: ["3", "15", "Illimitati"] },
+        { label: "Scrivere per primi", values: ["", "5/giorno", "Illimitato"] },
+        { label: "Filtri familiari avanzati", values: ["", "check", "check"] },
+        { label: "Priorità nel catalogo", values: ["", "check", "check"] },
+        { label: "Vedi chi ti ha messo like", values: ["", "check", "check"] },
+        { label: "Vedi chi ha visitato il profilo", values: ["", "check", "check"] },
+      ] },
+      { name: "Capire la compatibilità", rows: [
+        { label: "Punteggio di Compatibilità", values: ["", "check", "check"] },
+        { label: "Perché siete compatibili", values: ["", "check", "check"] },
+        { label: "Informazioni di profilo estese", values: ["", "check", "check"] },
+        { label: "Informazioni di verifica", values: ["", "check", "check"] },
+      ] },
+      { name: "Distinguiti e resta al sicuro", rows: [
+        { label: "Boost del profilo", values: ["check", "check", "check"] },
+        { label: "Invita e ottieni un Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Badge Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Connettiti e comunica", rows: [
+        { label: "Videochiamate e chiamate audio", values: ["", "check", "check"] },
+        { label: "Foto private", values: ["", "check", "check"] },
+        { label: "Modalità incognito", values: ["", "check", "check"] },
+        { label: "Messaggi di apertura suggeriti dall'IA", values: ["", "check", "check"] },
+      ] },
+      { name: "Costruisci la tua famiglia", rows: [
+        { label: "Family Plan (condiviso)", values: ["", "Limitato", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Approfondimento settimanale dell'AI Advisor", values: ["", "check", "check"] },
+        { label: "Firma del Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Gruppi e discussioni della community", values: ["", "", "check"] },
+        { label: "Report di Compatibilità dettagliato", values: ["", "", "check"] },
+        { label: "Strumenti per documenti e checklist", values: ["", "", "check"] },
+        { label: "Supporto prioritario", values: ["", "", "check"] },
+      ] },
+    ],
+    oneTime: {
+      eyebrow: "ACQUISTI UNA TANTUM",
+      title: "Ti serve solo un boost? Acquistalo una volta sola.",
+      intro: "Preferisci non abbonarti? Questi extra sono disponibili come acquisti una tantum nell'app LetsBeParents (iOS - Android in arrivo). I prezzi mostrati sono indicativi e vengono impostati nell'app.",
+      items: [
+        { name: "Boost", body: "Vieni mostrato più spesso durante la navigazione per 24 ore.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Fatti notare subito - salta il limite giornaliero di like.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Annulla il tuo ultimo swipe.", price: "≈ 1,99 €" },
+        { name: "Scopri chi ti ha messo like (48h)", body: "Rivela tutte le persone che ti hanno messo like nelle ultime 48 ore.", price: "≈ 4,99–5,99 €" },
+        { name: "Report di compatibilità completo", body: "Sblocca il report dettagliato per un match.", price: "≈ 2,99 €" },
+        { name: "+10 like extra", body: "Ricevi 10 like extra da usare oggi.", price: "≈ 2,99 €" },
+      ],
+      note: "Gli acquisti si effettuano nell'app mobile, non su questo sito.",
+    },
+  },
+  pl: {
+    eyebrow: "CENY",
+    title: "Znajdź odpowiednią osobę, z którą założysz rodzinę.",
+    intro: "Lepsze dopasowania. Głębsza kompatybilność. Więcej pewności. Zacznij za darmo, ulepsz plan, gdy będziesz gotowy na więcej.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Zawsze za darmo", altNote: "",
+        tagline: "Stwórz profil i zacznij odkrywać.",
+        features: ["Pełny profil i podstawowe odkrywanie", "3 polubienia dziennie", "Podstawowe dopasowanie"],
+        cta: "Zacznij za darmo", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "miesięcznie, rozliczenie co miesiąc",
+        altNote: "lub €49.99 za 3 miesiące - €16.66/miesiąc, oszczędź 33%",
+        tagline: "Dla osób gotowych na świadome dopasowania.",
+        features: ["Wskaźnik Kompatybilności i dlaczego pasujecie do siebie", "AI Family Advisor", "Zaawansowane filtry rodzinne", "Zobacz, kto Cię polubił", "Połączenia wideo i audio", "15 polubień/dzień, 5 kontaktów/dzień", "Priorytet w wyszukiwaniu"],
+        cta: "Wybierz Family Builder", badge: "Najlepsza wartość",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "miesięcznie", altNote: "",
+        tagline: "Wszystko z Family Builder oraz głębsze wsparcie.",
+        features: ["Wszystko z Family Builder", "AI Family Advisor", "Szczegółowy Raport Kompatybilności", "Family Plan i wspólny Pokój Rodzinny", "Narzędzia do dokumentów i list kontrolnych", "Priorytetowe wsparcie"],
+        cta: "Przejdź na Pro", badge: "",
+      },
+    ],
+    footnote: "Ceny podane w EUR i mogą się różnić w zależności od regionu. Anuluj w dowolnym momencie. Premium wymaga weryfikacji profilu.",
+    faqLinkLabel: "Zobacz, jak weryfikujemy użytkowników",
+    compareTitle: "Porównaj wszystkie funkcje",
+    compareSub: "Zobacz dokładnie, co zawiera każdy plan.",
+    matrixGroups: [
+      { name: "Dopasuj się lepiej", rows: [
+        { label: "Polubienia dziennie", values: ["3", "15", "Bez limitu"] },
+        { label: "Pierwszy kontakt", values: ["", "5/dzień", "Bez limitu"] },
+        { label: "Zaawansowane filtry rodzinne", values: ["", "check", "check"] },
+        { label: "Priorytet w katalogu", values: ["", "check", "check"] },
+        { label: "Zobacz, kto Cię polubił", values: ["", "check", "check"] },
+        { label: "Zobacz, kto odwiedził profil", values: ["", "check", "check"] },
+      ] },
+      { name: "Zrozum kompatybilność", rows: [
+        { label: "Wskaźnik Kompatybilności", values: ["", "check", "check"] },
+        { label: "Dlaczego pasujecie do siebie", values: ["", "check", "check"] },
+        { label: "Rozszerzone informacje o profilu", values: ["", "check", "check"] },
+        { label: "Informacje o weryfikacji", values: ["", "check", "check"] },
+      ] },
+      { name: "Wyróżnij się i zachowaj bezpieczeństwo", rows: [
+        { label: "Boost profilu", values: ["check", "check", "check"] },
+        { label: "Zaproś i zdobądź Boost", values: ["check", "check", "check"] },
+        { label: "Safety Check-In", values: ["check", "check", "check"] },
+        { label: "Odznaka Video Verification", values: ["check", "check", "check"] },
+      ] },
+      { name: "Łącz się i komunikuj", rows: [
+        { label: "Połączenia wideo i audio", values: ["", "check", "check"] },
+        { label: "Prywatne zdjęcia", values: ["", "check", "check"] },
+        { label: "Tryb incognito", values: ["", "check", "check"] },
+        { label: "Sugestie wiadomości od AI", values: ["", "check", "check"] },
+      ] },
+      { name: "Zbuduj swoją rodzinę", rows: [
+        { label: "Family Plan (wspólny)", values: ["", "Ograniczony", "check"] },
+        { label: "AI Family Advisor", values: ["", "check", "check"] },
+        { label: "Cotygodniowa analiza od AI Advisor", values: ["", "check", "check"] },
+        { label: "Podpisanie Co-Parenting Agreement", values: ["", "", "check"] },
+        { label: "Grupy i dyskusje społeczności", values: ["", "", "check"] },
+        { label: "Szczegółowy Raport Kompatybilności", values: ["", "", "check"] },
+        { label: "Narzędzia do dokumentów i list kontrolnych", values: ["", "", "check"] },
+        { label: "Priorytetowe wsparcie", values: ["", "", "check"] },
+      ] },
+    ],
+    oneTime: {
+      eyebrow: "ZAKUPY JEDNORAZOWE",
+      title: "Potrzebujesz tylko jednego boosta? Kup go raz.",
+      intro: "Wolisz nie subskrybować? Te dodatki są dostępne jako zakupy jednorazowe w aplikacji LetsBeParents (iOS - Android wkrótce). Podane ceny są przybliżone i ustalane w aplikacji.",
+      items: [
+        { name: "Boost", body: "Pojawiaj się częściej podczas przeglądania przez 24 godziny.", price: "≈ 3,99 €" },
+        { name: "Superlike", body: "Wyróżnij się od razu - pomija dzienny limit polubień.", price: "≈ 1,99 €" },
+        { name: "Rewind", body: "Cofnij swój ostatni swipe.", price: "≈ 1,99 €" },
+        { name: "Zobacz, kto cię polubił (48h)", body: "Odkryj wszystkie osoby, które cię polubiły, przez 48 godzin.", price: "≈ 4,99–5,99 €" },
+        { name: "Pełny raport kompatybilności", body: "Odblokuj szczegółowy raport dla jednego dopasowania.", price: "≈ 2,99 €" },
+        { name: "+10 dodatkowych polubień", body: "Otrzymaj 10 dodatkowych polubień do wykorzystania dziś.", price: "≈ 2,99 €" },
+      ],
+      note: "Zakupy odbywają się w aplikacji mobilnej, a nie na tej stronie.",
+    },
   },
 } satisfies Record<CookieLocale, Record<string, unknown>>;
 
@@ -5869,6 +9881,31 @@ function Pricing({ session }: { session: Session }) {
           ))}
         </div>
       </section>
+      {/* Item 19, 2026-09-15 - Alena: "Так сейчас создай экраны сам для
+          приложения и сайта" (also asked earlier "Там нету про разовые
+          покупки и их цена" about the mobile Premium screen). This is the
+          website half: an informational-only showcase of the six one-time
+          consumable purchases sold in the mobile app - no checkout here,
+          per her explicit choice ("Только показать цены"). */}
+      {text.oneTime ? (
+        <section className="pricing-onetime">
+          <div className="landing-section-intro">
+            <span>{text.oneTime.eyebrow}</span>
+            <h2>{text.oneTime.title}</h2>
+            <p className="resources-section-sub">{text.oneTime.intro}</p>
+          </div>
+          <div className="pricing-onetime-grid">
+            {text.oneTime.items.map((item) => (
+              <div key={item.name} className="pricing-onetime-card">
+                <h4>{item.name}</h4>
+                <p>{item.body}</p>
+                <strong>{item.price}</strong>
+              </div>
+            ))}
+          </div>
+          <p className="pricing-onetime-note">{text.oneTime.note}</p>
+        </section>
+      ) : null}
       <section className="pricing-footnote">
         <p>{text.footnote} <Link to={`/${locale}/trust-safety`}>{text.faqLinkLabel}</Link></p>
       </section>
@@ -5878,9 +9915,10 @@ function Pricing({ session }: { session: Session }) {
 
 const knowledgeCategories = [
   { slug: "ivf-in-vitro-fertilization", name: "IVF - In Vitro Fertilization" },
-  { slug: "Co-parenting", name: "Co-parenting" },
+  { slug: "co-parenting", name: "Co-parenting" },
   { slug: "sperm-donor", name: "Sperm donor" },
   { slug: "fertility", name: "Fertility" },
+  { slug: "parenthood", name: "Parenthood" },
   { slug: "lgbtq", name: "LGBTQ+" },
 ];
 
@@ -5890,13 +9928,15 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Co-parenting",
     "sperm-donor": "Sperm donor",
     fertility: "Fertility",
+    parenthood: "Parenthood",
     lgbtq: "LGBTQ+",
   },
   ru: {
     "ivf-in-vitro-fertilization": "ЭКО - Экстракорпоральное оплодотворение",
     "co-parenting": "Копереннтинг",
     "sperm-donor": "Донор спермы",
-    fertility: "Fertility",
+    fertility: "Фертильность",
+    parenthood: "Родительство",
     lgbtq: "ЛГБТК+",
   },
   es: {
@@ -5904,6 +9944,47 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
     "co-parenting": "Coparentalidad",
     "sperm-donor": "Donante de esperma",
     fertility: "Fertilidad",
+    parenthood: "Parentalidad",
+    lgbtq: "LGBTQ+",
+  },
+  pt: {
+    "ivf-in-vitro-fertilization": "FIV - Fertilização in vitro",
+    "co-parenting": "Coparentalidade",
+    "sperm-donor": "Doador de esperma",
+    fertility: "Fertilidade",
+    parenthood: "Parentalidade",
+    lgbtq: "LGBTQ+",
+  },
+  fr: {
+    "ivf-in-vitro-fertilization": "FIV - Fécondation in vitro",
+    "co-parenting": "Coparentalité",
+    "sperm-donor": "Donneur de sperme",
+    fertility: "Fertilité",
+    parenthood: "Parentalité",
+    lgbtq: "LGBTQ+",
+  },
+  de: {
+    "ivf-in-vitro-fertilization": "IVF - In-vitro-Fertilisation",
+    "co-parenting": "Co-Parenting",
+    "sperm-donor": "Samenspender",
+    fertility: "Fruchtbarkeit",
+    parenthood: "Elternschaft",
+    lgbtq: "LGBTQ+",
+  },
+  it: {
+    "ivf-in-vitro-fertilization": "FIVET - Fecondazione in vitro",
+    "co-parenting": "Co-genitorialità",
+    "sperm-donor": "Donatore di sperma",
+    fertility: "Fertilità",
+    parenthood: "Genitorialità",
+    lgbtq: "LGBTQ+",
+  },
+  pl: {
+    "ivf-in-vitro-fertilization": "In vitro - Zapłodnienie pozaustrojowe",
+    "co-parenting": "Współrodzicielstwo",
+    "sperm-donor": "Dawca nasienia",
+    fertility: "Płodność",
+    parenthood: "Rodzicielstwo",
     lgbtq: "LGBTQ+",
   },
 };
@@ -5960,19 +10041,73 @@ const knowledgeHubCopy: Record<CookieLocale, {
     next: "Artículo siguiente",
     navigationLabel: "Navegación de artículos",
   },
+  pt: {
+    title: "Central de Conhecimento",
+    intro: "Artigos de especialistas sobre doação, coparentalidade e saúde reprodutiva",
+    all: "Todos",
+    categoriesLabel: "Categorias de artigos",
+    views: "visualizações",
+    unavailable: "Este artigo não está disponível.",
+    back: "Voltar à Central de Conhecimento",
+    published: "Publicado em",
+    previous: "Artigo anterior",
+    next: "Próximo artigo",
+    navigationLabel: "Navegação de artigos",
+  },
+  fr: {
+    title: "Centre de connaissances",
+    intro: "Articles d'experts sur le don, la coparentalité et la santé reproductive",
+    all: "Tous",
+    categoriesLabel: "Catégories d'articles",
+    views: "vues",
+    unavailable: "Cet article n'est pas disponible.",
+    back: "Retour au centre de connaissances",
+    published: "Publié le",
+    previous: "Article précédent",
+    next: "Article suivant",
+    navigationLabel: "Navigation des articles",
+  },
+  de: {
+    title: "Wissenszentrum",
+    intro: "Expertenartikel zu Spende, Co-Parenting und reproduktiver Gesundheit",
+    all: "Alle",
+    categoriesLabel: "Artikelkategorien",
+    views: "Aufrufe",
+    unavailable: "Dieser Artikel ist nicht verfügbar.",
+    back: "Zurück zum Wissenszentrum",
+    published: "Veröffentlicht am",
+    previous: "Vorheriger Artikel",
+    next: "Nächster Artikel",
+    navigationLabel: "Artikelnavigation",
+  },
+  it: {
+    title: "Centro di conoscenza",
+    intro: "Articoli di esperti su donazione, co-genitorialità e salute riproduttiva",
+    all: "Tutti",
+    categoriesLabel: "Categorie di articoli",
+    views: "visualizzazioni",
+    unavailable: "Questo articolo non è disponibile.",
+    back: "Torna al Centro di conoscenza",
+    published: "Pubblicato il",
+    previous: "Articolo precedente",
+    next: "Articolo successivo",
+    navigationLabel: "Navigazione articoli",
+  },
+  pl: {
+    title: "Centrum Wiedzy",
+    intro: "Artykuły ekspertów na temat dawstwa, współrodzicielstwa i zdrowia reprodukcyjnego",
+    all: "Wszystkie",
+    categoriesLabel: "Kategorie artykułów",
+    views: "wyświetleń",
+    unavailable: "Ten artykuł jest niedostępny.",
+    back: "Powrót do Centrum Wiedzy",
+    published: "Opublikowano",
+    previous: "Poprzedni artykuł",
+    next: "Następny artykuł",
+    navigationLabel: "Nawigacja artykułów",
+  },
 };
 
-const latestKnowledgeArticles: Row[] = [
-  { id: "d21f57ef", slug: "co-parenting-red-flags-when-you-should-walk-away", title: "Co-Parenting Red Flags: When You Should Walk Away", excerpt: "Thinking about co-parenting? Learn which warning signs may signal an unhealthy or unsafe arrangement, from pressure and dishonesty to control and poor boundaries.", coverUrl: "/web-static/articles/1786801192887-d7333d16.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:39:19.430Z", views: 2 },
-  { id: "d69db046", slug: "can-co-parenting-work-without-a-romantic-relationship", title: "Can Co-Parenting Work Without a Romantic Relationship?", excerpt: "Can two people successfully co-parent without being a couple? Explore trust, boundaries, new partners, conflict and what makes co-parenting work.", coverUrl: "/web-static/articles/1786800884924-51087667.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:34:49.459Z", views: 1 },
-  { id: "316117d7", slug: "co-parenting-agreement-what-to-discuss-before-having-a-child", title: "Co-Parenting Agreement: What to Discuss Before Having a Child", excerpt: "Considering co-parenting? Learn what to discuss before pregnancy, from living arrangements and finances to decision-making, boundaries and future changes.", coverUrl: "/web-static/articles/1786800288283-2bb1dadc.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:25:06.599Z", views: 1 },
-  { id: "79c8f4b8", slug: "questions-to-ask-a-potential-co-parent-before-you-move-forward", title: "Questions to Ask a Potential Co-Parent Before You Move Forward", excerpt: "Thinking about co-parenting with someone? These practical questions can help you talk about parenting, money, living arrangements, boundaries and the future.", coverUrl: "/web-static/articles/1786799902679-855ba763.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:18:28.090Z", views: 2 },
-  { id: "0b9d1fac", slug: "how-to-find-a-co-parent-where-to-start-and-what-to-look-for", title: "How to Find a Co-Parent: Where to Start and What to Look For", excerpt: "Looking for a co-parent? Learn where to start, what to discuss early, how to spot compatibility and which red flags you shouldn't ignore.", coverUrl: "/web-static/articles/1786799585487-49cb88e4.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:13:10.321Z", views: 0 },
-  { id: "50a19e23", slug: "what-is-co-parenting-how-to-know-if-it-could-be-right-for-you", title: "What Is Co-Parenting? How to Know If It Could Be Right for You", excerpt: "What is co-parenting, and could it work for you? Explore relationships, boundaries, parenting decisions, finances and legal questions before you take the next step.", coverUrl: "/web-static/articles/1786799400356-2c5b1877.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:10:04.894Z", views: 3 },
-  { id: "316bf71e", slug: "how-to-choose-your-path-to-parenthood-questions-to-consider", title: "How to Choose Your Path to Parenthood: Questions to Consider", excerpt: "Not sure which path to parenthood is right for you? Explore the questions that matter around family, health, finances, support and your priorities.", coverUrl: "/web-static/articles/1786799040979-03f84347.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-15T13:04:04.950Z", views: 3 },
-  { id: "e585cffa", slug: "different-ways-to-become-a-parent-your-options-explained", title: "Different Ways to Become a Parent: Your Options Explained", excerpt: "Explore different paths to parenthood, from parenting with a partner and co-parenting to donor conception, fertility treatment, adoption and surrogacy.", coverUrl: "/web-static/articles/1786715854481-9e2ad679.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-14T13:57:51.783Z", views: 2 },
-  { id: "3e9f35f8", slug: "am-i-ready-to-become-a-parent-how-to-know-when-to-start", title: "Am I Ready to Become a Parent? How to Know When to Start", excerpt: "Thinking about becoming a parent but not sure you're ready? Explore the questions that matter most — from your reasons and lifestyle to finances, health and support — and find a clearer way forward.", coverUrl: "/web-static/articles/1786715655186-9f49a617.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-14T13:54:17.992Z", views: 2 },
-];
 
 const knowledgeCategoryName = (slug: string, locale: CookieLocale = "en") =>
   knowledgeCategoryCopy[locale][slug.toLowerCase()]
@@ -5986,6 +10121,22 @@ const knowledgeLoadMoreCopy: Record<
   en: { idle: "Load more", loading: "Loading ..." },
   ru: { idle: "Показать ещё", loading: "Загрузка ..." },
   es: { idle: "Cargar más", loading: "Cargando ..." },
+  pt: { idle: "Carregar mais", loading: "Carregando ..." },
+  fr: { idle: "Charger plus", loading: "Chargement ..." },
+  de: { idle: "Mehr laden", loading: "Wird geladen ..." },
+  it: { idle: "Carica altro", loading: "Caricamento ..." },
+  pl: { idle: "Załaduj więcej", loading: "Ładowanie ..." },
+};
+
+const articlePreviewCopy: Record<CookieLocale, string> = {
+  en: "Preview Mode — This article is not published yet",
+  ru: "Режим предпросмотра — Эта статья ещё не опубликована",
+  es: "Modo de vista previa — Este artículo aún no está publicado",
+  pt: "Modo de pré-visualização — Este artigo ainda não foi publicado",
+  fr: "Mode aperçu — Cet article n'est pas encore publié",
+  de: "Vorschaumodus — Dieser Artikel wurde noch nicht veröffentlicht",
+  it: "Modalità anteprima — Questo articolo non è ancora stato pubblicato",
+  pl: "Tryb podglądu — Ten artykuł nie został jeszcze opublikowany",
 };
 
 const knowledgeDate = (value: unknown) => {
@@ -5999,37 +10150,24 @@ const knowledgeDate = (value: unknown) => {
 function KnowledgeHub() {
   const locale = localeOf();
   const copy = knowledgeHubCopy[locale];
-  const [data, setData] = useState<Page<Row> | null>(null);
+  const [data, setData] = useState<Row[] | null>(null);
+  const [error, setError] = useState("");
   const [category, setCategory] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => {
-    api
-      .get<Page<Row>>(
-        `/public/articles?locale=${encodeURIComponent(locale)}&limit=60&offset=0`,
-      )
-      .then(setData)
-      .catch(() => setData({ items: [], total: 0, limit: 60, offset: 0 }));
-  }, [locale]);
-  const backendArticles: Row[] = (data?.items ?? []).map((item) => {
-    const meta = (item.meta ?? {}) as Row;
-    const metaCategory = (meta.category ?? {}) as Row;
-    const selectedTranslation = (meta.selectedTranslation ?? {}) as Row;
-    const categorySlug = String(item.category ?? metaCategory.slug ?? "");
-    const referenceMeta = referenceArticleMeta[String(item.slug)];
-    return {
-      ...item,
-      coverUrl: referenceMeta?.coverUrl ?? item.coverUrl ?? item.cover_url ?? selectedTranslation.coverImageUrl,
-      categorySlug,
-      categoryName: knowledgeCategoryName(categorySlug, locale),
-      publishedAt: item.publishedAt ?? item.published_at ?? meta.publishedAt,
-      views: referenceMeta?.views ?? item.views ?? meta.viewCount ?? 0,
-    } as Row;
-  });
-  const latestSlugs = new Set(latestKnowledgeArticles.map((item) => String(item.slug)));
-  const allArticles: Row[] = referenceKnowledgeArticles.map((item) => ({
+    let alive = true;
+    setData(null);
+    setError("");
+    setVisibleCount(12);
+    loadKnowledgeArticles(api, locale)
+      .then((items) => { if (alive) setData(items); })
+      .catch(() => { if (alive) setError(copy.unavailable); });
+    return () => { alive = false; };
+  }, [copy.unavailable, locale]);
+  const allArticles: Row[] = (data ?? []).map((item) => ({
     ...item,
-    categoryName: knowledgeCategoryName(item.categorySlug, locale),
+    categoryName: knowledgeCategoryName(String(item.categorySlug), locale),
   }));
   const filteredArticles = category
     ? allArticles.filter((item) => String(item.categorySlug).toLowerCase() === category.toLowerCase())
@@ -6054,6 +10192,8 @@ function KnowledgeHub() {
           <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{locale === "es" ? item.name : knowledgeCategoryName(item.slug, locale)}</button>
         ))}
       </div>
+      {error && <p className="error" role="alert">{error}</p>}
+      {!data && !error && <LoadingIndicator />}
       <div className="knowledge-grid">
         {visibleArticles.map((item) => (
           <Link
@@ -6061,7 +10201,7 @@ function KnowledgeHub() {
             key={String(item.id)}
             to={`/${locale}/knowledge-hub/${encodeURIComponent(asText(item.slug))}`}
           >
-            <div className="knowledge-card-image"><img src={asText(item.coverUrl)} alt={asText(item.title)} /></div>
+            <div className="knowledge-card-image">{Boolean(item.coverUrl) && <img src={asText(item.coverUrl)} alt={asText(item.title)} />}</div>
             <div className="knowledge-card-body">
               <span className="knowledge-badge">{asText(item.categoryName)}</span>
               <h3>{asText(item.title)}</h3>
@@ -6093,8 +10233,10 @@ function KnowledgeHub() {
 
 function Article() {
   const { locale = "en", slug = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const activeLocale = locale as CookieLocale;
   const copy = knowledgeHubCopy[activeLocale];
+  const previewMode = searchParams.get("preview") === "true";
   const [article, setArticle] = useState<Row | null>(null);
   const [navigationArticles, setNavigationArticles] = useState<Row[]>([]);
   const [error, setError] = useState("");
@@ -6105,13 +10247,11 @@ function Article() {
   }, [locale, slug]);
   useEffect(() => {
     let alive = true;
-    api
-      .get<Page<Row>>(
-        `/public/articles?locale=${encodeURIComponent(locale)}&limit=60&offset=0`,
-      )
-      .then((page) => {
+    setNavigationArticles([]);
+    loadKnowledgeArticles(api, locale)
+      .then((items) => {
         if (!alive) return;
-        setNavigationArticles(referenceKnowledgeArticles);
+        setNavigationArticles(items);
       })
       .catch(() => {
         if (alive) setNavigationArticles([]);
@@ -6123,58 +10263,100 @@ function Article() {
     const load = async () => {
       try {
         const result = await api.get<Row>(
-          `/public/articles/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}`,
+          `/public/articles/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}${previewMode ? "?preview=true" : ""}`,
         );
-        if (alive) setArticle(result);
+        if (alive) setArticle(normalizeArticle(result));
       } catch {
-        const latestIndex = latestKnowledgeArticles.findIndex((item) => item.slug === slug);
-        if (locale !== "en" || latestIndex < 0 || latestIndex > 8) {
-          if (alive) setError(copy.unavailable);
-          return;
-        }
-        try {
-          const response = await fetch(`/web-static/articles/details/${encodeURIComponent(slug)}-20260821.json`);
-          if (!response.ok) throw new Error("Article snapshot unavailable");
-          const payload = await response.json() as { result?: { data?: { json?: Row } } };
-          const result = payload.result?.data?.json;
-          if (!result) throw new Error("Article snapshot is invalid");
-          if (alive) setArticle(result);
-        } catch {
-          if (alive) setError(copy.unavailable);
-        }
+        if (alive) setError(copy.unavailable);
       }
     };
     void load();
     return () => { alive = false; };
-  }, [copy.unavailable, locale, slug]);
+  }, [copy.unavailable, locale, previewMode, slug]);
+  useEffect(() => {
+    if (!article) return;
+    const meta = article.meta && typeof article.meta === "object" && !Array.isArray(article.meta)
+      ? article.meta as Row
+      : {};
+    const translation = meta.translation && typeof meta.translation === "object" && !Array.isArray(meta.translation)
+      ? meta.translation as Row
+      : {};
+    const firstText = (...values: unknown[]) =>
+      values.map((value) => String(value ?? "").trim()).find(Boolean) ?? "";
+    const title = firstText(meta.metaTitle, meta.seoTitle, translation.metaTitle, translation.seoTitle, article.title, "LetsBeParents");
+    const description = firstText(meta.metaDescription, meta.seoDescription, translation.metaDescription, translation.seoDescription, article.excerpt);
+    const imageValue = firstText(meta.ogImage, meta.ogImageUrl, translation.ogImage, translation.ogImageUrl, article.coverUrl, article.cover_url);
+    let image = "";
+    try {
+      image = imageValue ? new URL(imageValue, window.location.origin).href : "";
+    } catch {
+      image = "";
+    }
+    const canonical = `${window.location.origin}/${locale}/knowledge-hub/${encodeURIComponent(slug)}`;
+    const localeTag = locale === "ru" ? "ru_RU" : locale === "es" ? "es_ES" : "en_US";
+    const managed: HTMLElement[] = [];
+    const setMeta = (attribute: "name" | "property", key: string, content: string) => {
+      if (!content) return;
+      const element = document.createElement("meta");
+      element.setAttribute(attribute, key);
+      element.setAttribute("content", content);
+      element.dataset.articleSeo = "true";
+      document.head.appendChild(element);
+      managed.push(element);
+    };
+    const canonicalLink = document.createElement("link");
+    canonicalLink.rel = "canonical";
+    canonicalLink.href = canonical;
+    canonicalLink.dataset.articleSeo = "true";
+    document.head.appendChild(canonicalLink);
+    managed.push(canonicalLink);
+    document.title = title || "LetsBeParents";
+    setMeta("name", "description", description);
+    setMeta("property", "og:title", title);
+    setMeta("property", "og:description", description);
+    setMeta("property", "og:url", canonical);
+    setMeta("property", "og:site_name", "LetsBeParents");
+    setMeta("property", "og:locale", localeTag);
+    setMeta("property", "og:type", "article");
+    setMeta("property", "article:published_time", String(article.publishedAt ?? article.published_at ?? ""));
+    setMeta("property", "article:modified_time", String(article.updated_at ?? article.updatedAt ?? ""));
+    setMeta("property", "og:image", image);
+    setMeta("name", "twitter:card", "summary_large_image");
+    setMeta("name", "twitter:title", title);
+    setMeta("name", "twitter:description", description);
+    setMeta("name", "twitter:image", image);
+    return () => {
+      managed.forEach((element) => element.remove());
+      document.title = "LetsBeParents";
+    };
+  }, [article, locale, slug]);
+  const previewBanner = previewMode ? (
+    <div className="article-preview-banner" role="status">
+      {articlePreviewCopy[activeLocale]}
+    </div>
+  ) : null;
   if (error)
     return (
-      <section className="access-card">
-        <p className="error">{error}</p>
-        <Link to={`/${locale}/knowledge-hub`}>{copy.back}</Link>
-      </section>
+      <>
+        {previewBanner}
+        <section className="access-card">
+          <p className="error">{error}</p>
+          <Link to={`/${locale}/knowledge-hub`}>{copy.back}</Link>
+        </section>
+      </>
     );
-  if (!article) return <LoadingIndicator />;
-  const staticArticle = latestKnowledgeArticles.find((item) => item.slug === slug);
-  const categoryValue = article.category;
-  const categoryName = typeof categoryValue === "object" && categoryValue
-    ? asText((categoryValue as Row).name)
-    : knowledgeCategoryName(asText(categoryValue), "en");
-  const referenceMeta = referenceArticleMeta[slug];
-  const coverUrl = referenceMeta?.coverUrl ?? staticArticle?.coverUrl ?? article.coverUrl ?? article.cover_url ?? article.coverImageUrl;
-  const publishedAt = staticArticle?.publishedAt ?? article.publishedAt ?? article.published_at;
-  const views = referenceMeta?.views ?? staticArticle?.views ?? article.views ?? article.viewCount ?? 0;
+  if (!article) return <>{previewBanner}<LoadingIndicator /></>;
+  const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale);
+  const coverUrl = article.coverUrl;
+  const publishedAt = article.publishedAt;
+  const views = article.views;
   const bodyHtml = article.bodyHtml ?? article.body_html ?? article.content;
   const referenceBodyHtml = asText(bodyHtml).replaceAll("https://letsbeparents.com/", "/");
   const navigationIndex = navigationArticles.findIndex((item) => asText(item.slug) === slug);
-  const referenceNavigation = referenceArticleNavigation[slug];
-  const previous = referenceNavigation
-    ? referenceNavigation.previous
-    : (article.previous as Row | null | undefined)
+  const previous = (article.prev as Row | null | undefined)
+      ?? (article.previous as Row | null | undefined)
       ?? (navigationIndex > 0 ? navigationArticles[navigationIndex - 1] : null);
-  const next = referenceNavigation
-    ? referenceNavigation.next
-    : (article.next as Row | null | undefined)
+  const next = (article.next as Row | null | undefined)
       ?? (navigationIndex >= 0 && navigationIndex < navigationArticles.length - 1
         ? navigationArticles[navigationIndex + 1]
         : null);
@@ -6188,7 +10370,9 @@ function Article() {
     },
   );
   return (
-    <article className="article-page">
+    <>
+      {previewBanner}
+      <article className="article-page">
       <Link className="article-back" to={`/${locale}/knowledge-hub`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg><span>{copy.back}</span></Link>
       <header className="article-heading">
         <span className="knowledge-badge">{categoryName}</span>
@@ -6220,7 +10404,8 @@ function Article() {
           ) : <span className="article-navigation-placeholder" />}
         </nav>
       )}
-    </article>
+      </article>
+    </>
   );
 }
 
@@ -6250,11 +10435,58 @@ const contactPageCopy: Record<CookieLocale, {
     options: ["Pregunta general", "Soporte", "Colaboración", "Reportar un error", "Otro"], send: "Enviar mensaje",
     success: "Gracias. Tu mensaje ha sido enviado.", error: "No se pudo enviar el mensaje. Inténtalo de nuevo.",
   },
+  pt: {
+    address: "Endereço:", registration: "Número de registro:", phone: "Telefone:", email: "Email:",
+    title: "Contate-nos", intro: "Envie-nos uma mensagem e entraremos em contato.", name: "Seu nome",
+    emailField: "Seu email", reason: "Motivo", message: "Mensagem",
+    options: ["Pergunta geral", "Suporte", "Parceria", "Reportar um erro", "Outro"], send: "Enviar mensagem",
+    success: "Obrigado. Sua mensagem foi enviada.", error: "Não foi possível enviar sua mensagem. Tente novamente.",
+  },
+  fr: {
+    address: "Adresse :", registration: "N° d'enregistrement :", phone: "Téléphone :", email: "Email :",
+    title: "Contactez-nous", intro: "Envoyez-nous un message et nous vous répondrons.", name: "Votre nom",
+    emailField: "Votre email", reason: "Motif", message: "Message",
+    options: ["Question générale", "Assistance", "Partenariat", "Signaler un bug", "Autre"], send: "Envoyer le message",
+    success: "Merci. Votre message a été envoyé.", error: "Nous n'avons pas pu envoyer votre message. Veuillez réessayer.",
+  },
+  de: {
+    address: "Adresse:", registration: "Registrierungsnummer:", phone: "Telefon:", email: "E-Mail:",
+    title: "Kontaktieren Sie uns", intro: "Senden Sie uns eine Nachricht und wir melden uns bei Ihnen.", name: "Ihr Name",
+    emailField: "Ihre E-Mail", reason: "Grund", message: "Nachricht",
+    options: ["Allgemeine Frage", "Support", "Partnerschaft", "Fehlerbericht", "Sonstiges"], send: "Nachricht senden",
+    success: "Vielen Dank. Ihre Nachricht wurde gesendet.", error: "Ihre Nachricht konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+  },
+  it: {
+    address: "Indirizzo:", registration: "Numero di registrazione:", phone: "Telefono:", email: "Email:",
+    title: "Contattaci", intro: "Inviaci un messaggio e ti risponderemo.", name: "Il tuo nome",
+    emailField: "La tua email", reason: "Motivo", message: "Messaggio",
+    options: ["Domanda generale", "Assistenza", "Collaborazione", "Segnala un bug", "Altro"], send: "Invia messaggio",
+    success: "Grazie. Il tuo messaggio è stato inviato.", error: "Non è stato possibile inviare il messaggio. Riprova.",
+  },
+  pl: {
+    address: "Adres:", registration: "Numer rejestracyjny:", phone: "Telefon:", email: "Email:",
+    title: "Skontaktuj się z nami", intro: "Wyślij nam wiadomość, a odpowiemy najszybciej jak to możliwe.", name: "Twoje imię",
+    emailField: "Twój email", reason: "Temat", message: "Wiadomość",
+    options: ["Pytanie ogólne", "Wsparcie", "Współpraca", "Zgłoszenie błędu", "Inne"], send: "Wyślij wiadomość",
+    success: "Dziękujemy. Twoja wiadomość została wysłana.", error: "Nie udało się wysłać wiadomości. Spróbuj ponownie.",
+  },
+};
+
+const contactSuccessCopy: Record<CookieLocale, { title: string; intro: string }> = {
+  en: { title: "Message sent", intro: "Thank you for reaching out. We'll reply as soon as we can." },
+  ru: { title: "Сообщение отправлено", intro: "Спасибо за обращение. Мы ответим как можно скорее." },
+  es: { title: "Mensaje enviado", intro: "Gracias por escribirnos. Responderemos lo antes posible." },
+  pt: { title: "Mensagem enviada", intro: "Agradecemos a sua mensagem. Responderemos assim que possível." },
+  fr: { title: "Message envoyé", intro: "Merci de nous avoir contactés. Nous vous répondrons dès que possible." },
+  de: { title: "Nachricht gesendet", intro: "Vielen Dank für Ihre Nachricht. Wir antworten Ihnen so schnell wie möglich." },
+  it: { title: "Messaggio inviato", intro: "Grazie per averci contattato. Ti risponderemo il prima possibile." },
+  pl: { title: "Wiadomość wysłana", intro: "Dziękujemy za kontakt. Odpowiemy tak szybko, jak to możliwe." },
 };
 
 function Contact() {
   const locale = localeOf();
   const copy = contactPageCopy[locale];
+  const successCopy = contactSuccessCopy[locale];
   const [draft, setDraft] = useState({
     name: "",
     email: "",
@@ -6284,10 +10516,16 @@ function Contact() {
           <dt>{copy.phone}</dt>
           <dd><a href="tel:+38268530700">+382 68 530 700</a></dd>
           <dt>{copy.email}</dt>
-          <dd><a href="mailto:contact@letsbeparents.com">contact@letsbeparents.com</a></dd>
+          <dd><a href="mailto:support@letsbeparents.com">support@letsbeparents.com</a></dd>
         </dl>
       </aside>
       <div className="contact-form-panel">
+        {notice === copy.success ? (
+          <section className="contact-success-card" role="status" aria-live="polite">
+            <h1>{successCopy.title}</h1>
+            <p>{successCopy.intro}</p>
+          </section>
+        ) : <>
         <h1>{copy.title}</h1>
         <p>{copy.intro}</p>
         <form onSubmit={submit}>
@@ -6314,14 +10552,237 @@ function Contact() {
           </label>
           {notice && <p className="notice contact-full">{notice}</p>}
           <button className="contact-submit">{copy.send}</button>
-        </form>
+        </form></>}
       </div>
     </section>
   );
 }
 
-function ContentPage() {
-  const { locale = "en", slug = "" } = useParams();
+type AskAiExchange = { question: string; answer?: string; error?: string };
+
+// Free, unauthenticated "Ask AI" tool (Sept 2026 growth push) - reuses
+// ai_advisor_call_claude() server-side via POST /public/ask-ai, scoped to
+// donor conception/surrogacy/family-law-basics questions (see
+// ASK_AI_SYSTEM_PROMPT in backend/main.py). Stateless per question by
+// design (no server-side history) to keep API cost and abuse risk bounded -
+// see AI_PUBLIC_RATE_LIMITS in backend/main.py for the per-IP daily limit.
+// --- i18n text for Ask AI / Agreement Draft tools (8 locales) ---
+type AskAiLocaleText = {
+  pill: string;
+  heading: string;
+  intro: string;
+  emptyState: string;
+  thinking: string;
+  placeholder: string;
+  button: string;
+  notePrefix: string;
+  createAccountLink: string;
+  rateLimited: string;
+  error: string;
+};
+const ASK_AI_TEXT: Record<CookieLocale, AskAiLocaleText> = {
+  en: {"pill": "Free AI tool", "heading": "Ask AI about donor conception & surrogacy", "intro": "Free, no account needed. Ask about donor conception, surrogacy, co-parenting or family-law basics - this isn't medical, legal or financial advice, and it's general orientation only.", "emptyState": "Ask your first question to get started.", "thinking": "Thinking…", "placeholder": "e.g. What's the difference between known and anonymous donation?", "button": "Ask", "notePrefix": "Want personal guidance and a directory of clinics and lawyers?", "createAccountLink": "Create a free account", "rateLimited": "You've reached today's free limit for this tool - please try again tomorrow.", "error": "Could not get an answer right now. Please try again."},
+  ru: {"pill": "Бесплатный ИИ-инструмент", "heading": "Спроси ИИ о донорском зачатии и суррогатном материнстве", "intro": "Бесплатно, регистрация не нужна. Спрашивайте о донорском зачатии, суррогатном материнстве, совместном родительстве или основах семейного права — это не медицинская, юридическая или финансовая консультация, а только общая ориентировка.", "emptyState": "Задайте первый вопрос, чтобы начать.", "thinking": "Думаю…", "placeholder": "например, в чём разница между известным и анонимным донорством?", "button": "Спросить", "notePrefix": "Нужна личная консультация и каталог клиник и юристов?", "createAccountLink": "Создайте бесплатный аккаунт", "rateLimited": "Вы достигли сегодняшнего бесплатного лимита для этого инструмента — попробуйте завтра.", "error": "Не удалось получить ответ прямо сейчас. Попробуйте ещё раз."},
+  es: {"pill": "Herramienta de IA gratuita", "heading": "Pregunta a la IA sobre donación y gestación subrogada", "intro": "Gratis, no se necesita cuenta. Pregunta sobre donación, gestación subrogada, co-crianza o nociones básicas de derecho de familia - esto no es asesoramiento médico, legal ni financiero, es solo orientación general.", "emptyState": "Haz tu primera pregunta para empezar.", "thinking": "Pensando…", "placeholder": "p. ej., ¿cuál es la diferencia entre donación conocida y anónima?", "button": "Preguntar", "notePrefix": "¿Quieres orientación personal y un directorio de clínicas y abogados?", "createAccountLink": "Crea una cuenta gratuita", "rateLimited": "Has alcanzado el límite gratuito de hoy para esta herramienta - inténtalo de nuevo mañana.", "error": "No se pudo obtener una respuesta en este momento. Inténtalo de nuevo."},
+  pt: {"pill": "Ferramenta de IA gratuita", "heading": "Pergunta à IA sobre doação de gâmetas e gestação de substituição", "intro": "Grátis, não é necessária conta. Pergunta sobre doação de gâmetas, gestação de substituição, coparentalidade ou noções básicas de direito da família - isto não é aconselhamento médico, legal ou financeiro, é apenas orientação geral.", "emptyState": "Faz a tua primeira pergunta para começar.", "thinking": "A pensar…", "placeholder": "ex.: qual é a diferença entre doação conhecida e anónima?", "button": "Perguntar", "notePrefix": "Queres orientação pessoal e um diretório de clínicas e advogados?", "createAccountLink": "Cria uma conta gratuita", "rateLimited": "Atingiste o limite gratuito de hoje para esta ferramenta - tenta novamente amanhã.", "error": "Não foi possível obter uma resposta agora. Tenta novamente."},
+  fr: {"pill": "Outil IA gratuit", "heading": "Demander à l'IA sur le don de gamètes et la gestation pour autrui", "intro": "Gratuit, aucun compte nécessaire. Posez vos questions sur le don de gamètes, la gestation pour autrui, la coparentalité ou les bases du droit de la famille - ceci n'est pas un conseil médical, juridique ou financier, seulement une orientation générale.", "emptyState": "Posez votre première question pour commencer.", "thinking": "Réflexion en cours…", "placeholder": "ex. : quelle est la différence entre don connu et don anonyme ?", "button": "Demander", "notePrefix": "Vous voulez un accompagnement personnalisé et un annuaire de cliniques et d'avocats ?", "createAccountLink": "Créez un compte gratuit", "rateLimited": "Vous avez atteint la limite gratuite du jour pour cet outil - veuillez réessayer demain.", "error": "Impossible d'obtenir une réponse pour le moment. Veuillez réessayer."},
+  de: {"pill": "Kostenloses KI-Tool", "heading": "Frag die KI zu Samen-/Eizellspende und Leihmutterschaft", "intro": "Kostenlos, kein Konto nötig. Frag zu Samen-/Eizellspende, Leihmutterschaft, Co-Elternschaft oder den Grundlagen des Familienrechts - das ist keine medizinische, rechtliche oder finanzielle Beratung, sondern nur eine allgemeine Orientierung.", "emptyState": "Stell deine erste Frage, um loszulegen.", "thinking": "Denke nach…", "placeholder": "z. B. Was ist der Unterschied zwischen bekannter und anonymer Spende?", "button": "Fragen", "notePrefix": "Möchtest du persönliche Beratung und ein Verzeichnis von Kliniken und Anwälten?", "createAccountLink": "Erstelle ein kostenloses Konto", "rateLimited": "Du hast das heutige kostenlose Limit für dieses Tool erreicht - bitte versuche es morgen erneut.", "error": "Die Antwort konnte gerade nicht abgerufen werden. Bitte erneut versuchen."},
+  it: {"pill": "Strumento IA gratuito", "heading": "Chiedi all'IA di fecondazione da donatore e maternità surrogata", "intro": "Gratuito, non è necessario un account. Chieda informazioni su fecondazione da donatore, maternità surrogata, co-genitorialità o nozioni di base di diritto di famiglia - non si tratta di consulenza medica, legale o finanziaria, ma solo di un orientamento generale.", "emptyState": "Faccia la Sua prima domanda per iniziare.", "thinking": "Sto pensando…", "placeholder": "ad es. Qual è la differenza tra donazione nota e anonima?", "button": "Chiedi", "notePrefix": "Vuoi una guida personalizzata e un elenco di cliniche e avvocati?", "createAccountLink": "Crea un account gratuito", "rateLimited": "Hai raggiunto il limite gratuito di oggi per questo strumento - riprova domani.", "error": "Impossibile ottenere una risposta in questo momento. Riprova."},
+  pl: {"pill": "Bezpłatne narzędzie AI", "heading": "Zapytaj AI o poczęcie z dawstwa i macierzyństwo zastępcze", "intro": "Bezpłatnie, konto nie jest potrzebne. Zapytaj o poczęcie z dawstwa, macierzyństwo zastępcze, współrodzicielstwo lub podstawy prawa rodzinnego - to nie jest porada medyczna, prawna ani finansowa, a jedynie ogólna orientacja.", "emptyState": "Zadaj swoje pierwsze pytanie, aby zacząć.", "thinking": "Myślę…", "placeholder": "np. jaka jest różnica między dawstwem znanym a anonimowym?", "button": "Zapytaj", "notePrefix": "Chcesz osobistego wsparcia i katalogu klinik oraz prawników?", "createAccountLink": "Załóż darmowe konto", "rateLimited": "Osiągnięto dzisiejszy bezpłatny limit dla tego narzędzia - spróbuj ponownie jutro.", "error": "Nie udało się teraz uzyskać odpowiedzi. Spróbuj ponownie."},
+};
+
+type AgreementDraftLocaleText = {
+  pill: string;
+  heading: string;
+  intro: string;
+  fieldAgreementType: string;
+  fieldJurisdiction: string;
+  jurisdictionPlaceholder: string;
+  fieldKeyPoints: string;
+  keyPointsPlaceholder: string;
+  rateLimited: string;
+  error: string;
+  draftingButton: string;
+  generateButton: string;
+  yourDraftHeading: string;
+  copyButton: string;
+  saveNotePrefix: string;
+  createAccountLink: string;
+};
+const AGREEMENT_DRAFT_TEXT: Record<CookieLocale, AgreementDraftLocaleText> = {
+  en: {"pill": "Free AI tool", "heading": "AI Agreement Draft", "intro": "Get a first-draft discussion document for a co-parenting or donor arrangement - free, no account needed. Always reviewed with a family-law attorney before signing anything.", "fieldAgreementType": "Agreement type", "fieldJurisdiction": "Jurisdiction (country/state, optional)", "jurisdictionPlaceholder": "e.g. California, USA", "fieldKeyPoints": "Key points you'd like included", "keyPointsPlaceholder": "e.g. shared custody, monthly contact, who covers medical costs...", "rateLimited": "You've reached today's free limit for this tool - please try again tomorrow.", "error": "Could not generate a draft right now. Please try again.", "draftingButton": "Drafting…", "generateButton": "Generate draft", "yourDraftHeading": "Your draft", "copyButton": "Copy", "saveNotePrefix": "Want to save and edit this together with a co-parent?", "createAccountLink": "Create a free account"},
+  ru: {"pill": "Бесплатный ИИ-инструмент", "heading": "Черновик соглашения от ИИ", "intro": "Получите черновик документа для обсуждения соглашения о совместном родительстве или с донором — бесплатно, без регистрации. Всегда проверяйте его с семейным юристом, прежде чем что-либо подписывать.", "fieldAgreementType": "Тип соглашения", "fieldJurisdiction": "Юрисдикция (страна/штат, необязательно)", "jurisdictionPlaceholder": "например, Калифорния, США", "fieldKeyPoints": "Ключевые пункты, которые вы хотели бы включить", "keyPointsPlaceholder": "например, совместная опека, ежемесячные встречи, кто оплачивает медицинские расходы...", "rateLimited": "Вы достигли сегодняшнего бесплатного лимита для этого инструмента — попробуйте завтра.", "error": "Не удалось создать черновик прямо сейчас. Попробуйте ещё раз.", "draftingButton": "Создаём черновик…", "generateButton": "Создать черновик", "yourDraftHeading": "Ваш черновик", "copyButton": "Копировать", "saveNotePrefix": "Хотите сохранить и редактировать это вместе с со-родителем?", "createAccountLink": "Создайте бесплатный аккаунт"},
+  es: {"pill": "Herramienta de IA gratuita", "heading": "Borrador de acuerdo con IA", "intro": "Obtén un primer borrador de documento de discusión para un acuerdo de co-crianza o con donante - gratis, sin necesidad de cuenta. Revísalo siempre con un abogado de familia antes de firmar nada.", "fieldAgreementType": "Tipo de acuerdo", "fieldJurisdiction": "Jurisdicción (país/estado, opcional)", "jurisdictionPlaceholder": "p. ej., California, EE. UU.", "fieldKeyPoints": "Puntos clave que te gustaría incluir", "keyPointsPlaceholder": "p. ej., custodia compartida, contacto mensual, quién cubre los gastos médicos...", "rateLimited": "Has alcanzado el límite gratuito de hoy para esta herramienta - inténtalo de nuevo mañana.", "error": "No se pudo generar un borrador en este momento. Inténtalo de nuevo.", "draftingButton": "Generando borrador…", "generateButton": "Generar un borrador", "yourDraftHeading": "Tu borrador", "copyButton": "Copiar", "saveNotePrefix": "¿Quieres guardar y editar esto junto con un co-padre o co-madre?", "createAccountLink": "Crea una cuenta gratuita"},
+  pt: {"pill": "Ferramenta de IA gratuita", "heading": "Rascunho de acordo com IA", "intro": "Obtém um primeiro rascunho de documento de discussão para um acordo de coparentalidade ou com dador - grátis, sem necessidade de conta. Revê sempre com um advogado de direito da família antes de assinar seja o que for.", "fieldAgreementType": "Tipo de acordo", "fieldJurisdiction": "Jurisdição (país/estado, opcional)", "jurisdictionPlaceholder": "ex.: Califórnia, EUA", "fieldKeyPoints": "Pontos-chave que gostarias de incluir", "keyPointsPlaceholder": "ex.: guarda partilhada, contacto mensal, quem cobre as despesas médicas...", "rateLimited": "Atingiste o limite gratuito de hoje para esta ferramenta - tenta novamente amanhã.", "error": "Não foi possível gerar um rascunho agora. Tenta novamente.", "draftingButton": "A gerar rascunho…", "generateButton": "Gerar um rascunho", "yourDraftHeading": "O teu rascunho", "copyButton": "Copiar", "saveNotePrefix": "Queres guardar e editar isto juntamente com um coparente?", "createAccountLink": "Cria uma conta gratuita"},
+  fr: {"pill": "Outil IA gratuit", "heading": "Brouillon d'accord par IA", "intro": "Obtenez un premier brouillon de document de discussion pour un accord de coparentalité ou avec un donneur - gratuit, aucun compte nécessaire. À faire toujours relire par un avocat en droit de la famille avant de signer quoi que ce soit.", "fieldAgreementType": "Type d'accord", "fieldJurisdiction": "Juridiction (pays/état, facultatif)", "jurisdictionPlaceholder": "ex. : Californie, États-Unis", "fieldKeyPoints": "Points clés que vous souhaitez inclure", "keyPointsPlaceholder": "ex. : garde partagée, contact mensuel, qui prend en charge les frais médicaux...", "rateLimited": "Vous avez atteint la limite gratuite du jour pour cet outil - veuillez réessayer demain.", "error": "Impossible de générer un brouillon pour le moment. Veuillez réessayer.", "draftingButton": "Génération du brouillon…", "generateButton": "Générer un brouillon", "yourDraftHeading": "Votre brouillon", "copyButton": "Copier", "saveNotePrefix": "Vous voulez enregistrer et modifier ce document avec un coparent ?", "createAccountLink": "Créez un compte gratuit"},
+  de: {"pill": "Kostenloses KI-Tool", "heading": "KI-Vertragsentwurf", "intro": "Erhalte einen ersten Entwurf eines Diskussionsdokuments für eine Co-Elternschafts- oder Spendervereinbarung - kostenlos, kein Konto nötig. Lass ihn immer von einer Familienrechtsanwältin oder einem Familienrechtsanwalt prüfen, bevor du etwas unterschreibst.", "fieldAgreementType": "Vertragsart", "fieldJurisdiction": "Gerichtsbarkeit (Land/Bundesland, optional)", "jurisdictionPlaceholder": "z. B. Kalifornien, USA", "fieldKeyPoints": "Wichtige Punkte, die du einschließen möchtest", "keyPointsPlaceholder": "z. B. gemeinsames Sorgerecht, monatlicher Kontakt, wer die medizinischen Kosten übernimmt...", "rateLimited": "Du hast das heutige kostenlose Limit für dieses Tool erreicht - bitte versuche es morgen erneut.", "error": "Der Entwurf konnte gerade nicht erstellt werden. Bitte erneut versuchen.", "draftingButton": "Entwurf wird erstellt…", "generateButton": "Entwurf erstellen", "yourDraftHeading": "Dein Entwurf", "copyButton": "Kopieren", "saveNotePrefix": "Möchtest du das gemeinsam mit einer Co-Eltern-Person speichern und bearbeiten?", "createAccountLink": "Erstelle ein kostenloses Konto"},
+  it: {"pill": "Strumento IA gratuito", "heading": "Bozza di accordo con IA", "intro": "Ottenga una prima bozza di documento di discussione per un accordo di co-genitorialità o con un donatore - gratuito, senza bisogno di un account. Lo faccia sempre rivedere da un avvocato di diritto di famiglia prima di firmare qualsiasi cosa.", "fieldAgreementType": "Tipo di accordo", "fieldJurisdiction": "Giurisdizione (paese/stato, facoltativo)", "jurisdictionPlaceholder": "ad es. California, USA", "fieldKeyPoints": "Punti chiave che desidera includere", "keyPointsPlaceholder": "ad es. affido condiviso, contatto mensile, chi copre le spese mediche...", "rateLimited": "Hai raggiunto il limite gratuito di oggi per questo strumento - riprova domani.", "error": "Impossibile generare una bozza in questo momento. Riprova.", "draftingButton": "Generazione bozza…", "generateButton": "Genera una bozza", "yourDraftHeading": "La Sua bozza", "copyButton": "Copia", "saveNotePrefix": "Vuoi salvare e modificare questo documento insieme a un co-genitore?", "createAccountLink": "Crea un account gratuito"},
+  pl: {"pill": "Bezpłatne narzędzie AI", "heading": "Szkic umowy od AI", "intro": "Otrzymaj pierwszy szkic dokumentu do dyskusji dla umowy o współrodzicielstwie lub z dawcą - bezpłatnie, bez konta. Zawsze skonsultuj go z prawnikiem rodzinnym, zanim cokolwiek podpiszesz.", "fieldAgreementType": "Rodzaj umowy", "fieldJurisdiction": "Jurysdykcja (kraj/stan, opcjonalnie)", "jurisdictionPlaceholder": "np. Kalifornia, USA", "fieldKeyPoints": "Kluczowe punkty, które chcesz uwzględnić", "keyPointsPlaceholder": "np. wspólna opieka, comiesięczny kontakt, kto pokrywa koszty medyczne...", "rateLimited": "Osiągnięto dzisiejszy bezpłatny limit dla tego narzędzia - spróbuj ponownie jutro.", "error": "Nie udało się teraz wygenerować szkicu. Spróbuj ponownie.", "draftingButton": "Generowanie szkicu…", "generateButton": "Wygeneruj szkic", "yourDraftHeading": "Twój szkic", "copyButton": "Kopiuj", "saveNotePrefix": "Chcesz zapisać i edytować to razem ze współrodzicem?", "createAccountLink": "Załóż darmowe konto"},
+};
+
+const AGREEMENT_DRAFT_TYPES_TEXT: Record<CookieLocale, string[]> = {
+  en: ["Co-parenting agreement", "Known donor agreement", "Surrogacy arrangement overview"],
+  ru: ["Соглашение о совместном родительстве", "Соглашение с известным донором", "Обзор договорённости о суррогатном материнстве"],
+  es: ["Acuerdo de co-crianza", "Acuerdo con donante conocido", "Resumen del acuerdo de gestación subrogada"],
+  pt: ["Acordo de coparentalidade", "Acordo com dador conhecido", "Resumo do acordo de gestação de substituição"],
+  fr: ["Accord de coparentalité", "Accord avec donneur connu", "Aperçu de l'accord de gestation pour autrui"],
+  de: ["Co-Elternschaftsvereinbarung", "Vereinbarung mit bekanntem Spender", "Übersicht Leihmutterschaftsvereinbarung"],
+  it: ["Accordo di co-genitorialità", "Accordo con donatore conosciuto", "Panoramica dell'accordo di maternità surrogata"],
+  pl: ["Umowa o współrodzicielstwie", "Umowa ze znanym dawcą", "Przegląd umowy o macierzyństwie zastępczym"],
+};
+
+function AskAiTool() {
+  const locale = localeOf();
+  const text = ASK_AI_TEXT[locale] ?? ASK_AI_TEXT.en;
+  const [question, setQuestion] = useState("");
+  const [exchanges, setExchanges] = useState<AskAiExchange[]>([]);
+  const [sending, setSending] = useState(false);
+
+  const ask = async (event: FormEvent) => {
+    event.preventDefault();
+    const questionText = question.trim();
+    if (!questionText || sending) return;
+    setQuestion("");
+    setSending(true);
+    setExchanges((prev) => [...prev, { question: questionText }]);
+    try {
+      const res = await api.post<{ ok: true; answer: string }>("/public/ask-ai", { question: questionText });
+      setExchanges((prev) => prev.map((item, index) => (index === prev.length - 1 ? { ...item, answer: res.answer } : item)));
+    } catch (err) {
+      const message = err instanceof ApiError && err.status === 429 ? text.rateLimited : text.error;
+      setExchanges((prev) => prev.map((item, index) => (index === prev.length - 1 ? { ...item, error: message } : item)));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    // Was just a bare `.advisor-card` floating alone on an otherwise empty
+    // white page (Alena: "надо на всю страницу сделать и красиво" - this is
+    // also very likely what an earlier "на сайте все прилипло" report on
+    // the sibling Agreement Draft tool was really about: not a freeze, just
+    // a page that looks broken/unfinished). Now matches the full-page hero
+    // + white content pattern every other /resources and /tools page uses
+    // (see AgreementDraftTool right below, which already does this).
+    <div className="resources-page ask-ai-page">
+      <section className="resources-hero">
+        <span className="landing-pill resources-pill"><i /><span>{text.pill}</span></span>
+        <h1>{text.heading}</h1>
+        <p>{text.intro}</p>
+      </section>
+      <div className="list-card advisor-card ask-ai-card">
+        <div className="message-list advisor-list">
+          {exchanges.length === 0 ? (
+            <p className="notice">{text.emptyState}</p>
+          ) : (
+            exchanges.map((exchange, index) => (
+              <div key={index} className="ask-ai-exchange">
+                <div className="message-bubble advisor-bubble-user"><span>{exchange.question}</span></div>
+                {exchange.answer && <div className="message-bubble advisor-bubble-assistant"><span>{exchange.answer}</span></div>}
+                {exchange.error && <p className="error">{exchange.error}</p>}
+              </div>
+            ))
+          )}
+          {sending && <p className="notice">{text.thinking}</p>}
+        </div>
+        <form onSubmit={(event) => void ask(event)}>
+          <input
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder={text.placeholder}
+          />
+          <button className="primary" disabled={!question.trim() || sending} aria-label={text.button}>
+            {text.button}
+          </button>
+        </form>
+        <p className="resources-category-note">
+          {text.notePrefix} <Link to={`/${locale}/auth/register`}>{text.createAccountLink}</Link>.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+type AgreementDraftForm = { agreementType: string; jurisdiction: string; keyPoints: string };
+
+// Free, unauthenticated first-draft generator (Sept 2026 growth push) -
+// POST /public/agreement-draft, see AGREEMENT_DRAFT_SYSTEM_PROMPT in
+// backend/main.py for the safety rules (always opens with a disclaimer,
+// never claims to be a binding/enforceable document).
+function AgreementDraftTool() {
+  const locale = localeOf();
+  const text = AGREEMENT_DRAFT_TEXT[locale] ?? AGREEMENT_DRAFT_TEXT.en;
+  const agreementTypes = AGREEMENT_DRAFT_TYPES_TEXT[locale] ?? AGREEMENT_DRAFT_TYPES_TEXT.en;
+  const [form, setForm] = useState<AgreementDraftForm>({ agreementType: agreementTypes[0], jurisdiction: "", keyPoints: "" });
+  const [status, setStatus] = useState<"idle" | "sending" | "ok" | "limited" | "error">("idle");
+  const [draft, setDraft] = useState("");
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!form.keyPoints.trim() || status === "sending") return;
+    setStatus("sending");
+    try {
+      const res = await api.post<{ ok: true; draft: string }>("/public/agreement-draft", { ...form, locale });
+      setDraft(res.draft);
+      setStatus("ok");
+    } catch (err) {
+      setStatus(err instanceof ApiError && err.status === 429 ? "limited" : "error");
+    }
+  };
+
+  const copyDraft = () => {
+    if (navigator.clipboard) void navigator.clipboard.writeText(draft);
+  };
+
+  return (
+    <div className="resources-page agreement-draft-page">
+      <section className="resources-hero">
+        <span className="landing-pill resources-pill"><i /><span>{text.pill}</span></span>
+        <h1>{text.heading}</h1>
+        <p>{text.intro}</p>
+      </section>
+      <div className="contact-form-panel">
+        <form onSubmit={(event) => void submit(event)}>
+          <label className="contact-full">
+            <span>{text.fieldAgreementType}</span>
+            <span className="contact-select">
+              <select value={form.agreementType} onChange={(event) => setForm((current) => ({ ...current, agreementType: event.target.value }))}>
+                {agreementTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </span>
+          </label>
+          <label className="contact-full">
+            <span>{text.fieldJurisdiction}</span>
+            <input value={form.jurisdiction} onChange={(event) => setForm((current) => ({ ...current, jurisdiction: event.target.value }))} placeholder={text.jurisdictionPlaceholder} />
+          </label>
+          <label className="contact-full">
+            <span>{text.fieldKeyPoints}</span>
+            <textarea value={form.keyPoints} onChange={(event) => setForm((current) => ({ ...current, keyPoints: event.target.value }))} placeholder={text.keyPointsPlaceholder} required />
+          </label>
+          {status === "limited" && <p className="notice contact-full error">{text.rateLimited}</p>}
+          {status === "error" && <p className="notice contact-full error">{text.error}</p>}
+          <button className="contact-submit" disabled={status === "sending"}>{status === "sending" ? text.draftingButton : text.generateButton}</button>
+        </form>
+      </div>
+      {status === "ok" && (
+        <div className="list-card advisor-card agreement-draft-result">
+          <div className="message-title">
+            <h2>{text.yourDraftHeading}</h2>
+            <button type="button" className="secondary" onClick={copyDraft}>{text.copyButton}</button>
+          </div>
+          <div className="article-body" style={{ whiteSpace: "pre-wrap" }}>{draft}</div>
+          <p className="resources-category-note">
+            {text.saveNotePrefix} <Link to={`/${locale}/auth/register`}>{text.createAccountLink}</Link>.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContentPage({ forcedSlug }: { forcedSlug?: string } = {}) {
+  const { locale = "en", slug: routeSlug = "" } = useParams();
+  const slug = forcedSlug ?? routeSlug;
   const [page, setPage] = useState<Row | null>(null);
   useEffect(() => {
     api
@@ -6530,6 +10991,198 @@ const RESOURCES_CATEGORIES: ResourceCategoryData[] = [
   },
 ];
 
+// --- i18n translations for RESOURCES_CATEGORIES data (8 locales; en falls through to the base array above) ---
+type ResourceCategoryI18nEntry = { eyebrow: string; title: string; description: string; disclaimer?: string };
+type ResourceToolI18nEntry = { title: string; description: string; sections?: string[]; sampleQuestions?: string[]; disclaimer?: string; downloadUrl?: string };
+
+const RESOURCES_CATEGORIES_I18N: Partial<Record<string, Partial<Record<CookieLocale, ResourceCategoryI18nEntry>>>> = {
+  "co-parenting": {
+    ru: {"eyebrow": "Совместное родительство", "title": "Инструменты для создания семьи с со-родителем", "description": "Вопросы, чек-листы и шаблоны, которые помогут найти со-родителя и лучше его узнать."},
+    es: {"eyebrow": "Co-crianza", "title": "Herramientas para formar una familia con un co-padre o co-madre", "description": "Preguntas, listas de verificación y plantillas para encontrar y conocer a un co-padre o co-madre."},
+    pt: {"eyebrow": "Coparentalidade", "title": "Ferramentas para construíres uma família com um coparente", "description": "Perguntas, checklists e modelos para encontrares e conheceres um coparente."},
+    fr: {"eyebrow": "Coparentalité", "title": "Des outils pour construire une famille avec un coparent", "description": "Des questions, des listes de contrôle et des modèles pour trouver un coparent et apprendre à le connaître."},
+    de: {"eyebrow": "Co-Elternschaft", "title": "Tools, um mit einer Co-Eltern-Person eine Familie zu gründen", "description": "Fragen, Checklisten und Vorlagen, die dir helfen, eine Co-Eltern-Person zu finden und kennenzulernen."},
+    it: {"eyebrow": "Co-genitorialità", "title": "Strumenti per costruire una famiglia con un co-genitore", "description": "Domande, checklist e modelli per trovare un co-genitore e conoscerlo meglio."},
+    pl: {"eyebrow": "Współrodzicielstwo", "title": "Narzędzia do budowania rodziny ze współrodzicem", "description": "Pytania, listy kontrolne i szablony, które pomogą Ci znaleźć współrodzica i lepiej go poznać."},
+  },
+  "fertility-donor": {
+    ru: {"eyebrow": "Фертильность и донорское зачатие", "title": "Подготовьтесь к разговорам с клиникой и донором", "description": "Практические вопросы и чек-листы для разговоров с клиниками и специалистами.", "disclaimer": "Эти ресурсы созданы, чтобы помочь вам подготовиться к разговору с квалифицированными специалистами. Это не медицинская и не юридическая консультация."},
+    es: {"eyebrow": "Fertilidad y concepción con donante", "title": "Prepárate para las conversaciones con la clínica y el donante", "description": "Preguntas prácticas y listas de verificación para hablar con clínicas y profesionales.", "disclaimer": "Estos recursos están diseñados para ayudarte a prepararte para las conversaciones con profesionales cualificados. No constituyen asesoramiento médico ni legal."},
+    pt: {"eyebrow": "Fertilidade e conceção com dador", "title": "Prepara-te para as conversas com a clínica e o dador", "description": "Perguntas práticas e checklists para falar com clínicas e profissionais.", "disclaimer": "Estes recursos foram concebidos para te ajudar a preparares-te para as conversas com profissionais qualificados. Não constituem aconselhamento médico ou legal."},
+    fr: {"eyebrow": "Fertilité et conception avec don de gamètes", "title": "Préparez-vous aux échanges avec la clinique et le donneur", "description": "Des questions pratiques et des listes de contrôle pour échanger avec les cliniques et les professionnels.", "disclaimer": "Ces ressources sont conçues pour vous aider à préparer vos échanges avec des professionnels qualifiés. Elles ne constituent pas un conseil médical ou juridique."},
+    de: {"eyebrow": "Fruchtbarkeit & Samen-/Eizellspende", "title": "Bereite dich auf Gespräche mit Klinik und Spender vor", "description": "Praktische Fragen und Checklisten für Gespräche mit Kliniken und Fachpersonen.", "disclaimer": "Diese Ressourcen sollen dir helfen, dich auf Gespräche mit qualifizierten Fachpersonen vorzubereiten. Sie stellen keine medizinische oder rechtliche Beratung dar."},
+    it: {"eyebrow": "Fertilità e fecondazione da donatore", "title": "Si prepari per i colloqui con la clinica e il donatore", "description": "Domande pratiche e checklist per parlare con cliniche e professionisti.", "disclaimer": "Queste risorse sono pensate per aiutarLa a prepararsi ai colloqui con professionisti qualificati. Non costituiscono una consulenza medica o legale."},
+    pl: {"eyebrow": "Płodność i poczęcie z dawstwa", "title": "Przygotuj się do rozmów z kliniką i dawcą", "description": "Praktyczne pytania i listy kontrolne do rozmów z klinikami i specjalistami.", "disclaimer": "Te zasoby mają pomóc Ci przygotować się do rozmów z wykwalifikowanymi specjalistami. Nie stanowią porady medycznej ani prawnej."},
+  },
+  "parenthood-planning": {
+    ru: {"eyebrow": "Планирование родительства", "title": "Подготовьтесь к практической стороне вопроса", "description": "О практической стороне подготовки к появлению ребёнка."},
+    es: {"eyebrow": "Planificación de la parentalidad", "title": "Prepárate para el lado práctico", "description": "Para el lado práctico de prepararte para tener un hijo o hija."},
+    pt: {"eyebrow": "Planeamento da parentalidade", "title": "Prepara-te para o lado prático", "description": "Para o lado prático de te preparares para teres um filho ou filha."},
+    fr: {"eyebrow": "Planification de la parentalité", "title": "Préparez-vous au côté pratique", "description": "Pour le côté pratique de la préparation à l'arrivée d'un enfant."},
+    de: {"eyebrow": "Elternschaftsplanung", "title": "Bereite dich auf die praktische Seite vor", "description": "Für die praktische Seite der Vorbereitung auf ein Kind."},
+    it: {"eyebrow": "Pianificazione della genitorialità", "title": "Si prepari per il lato pratico", "description": "Per il lato pratico della preparazione all'arrivo di un figlio."},
+    pl: {"eyebrow": "Planowanie rodzicielstwa", "title": "Przygotuj się na praktyczną stronę", "description": "Praktyczna strona przygotowań do posiadania dziecka."},
+  },
+};
+
+const RESOURCES_TOOLS_I18N: Partial<Record<string, Partial<Record<CookieLocale, ResourceToolI18nEntry>>>> = {
+  "co-parenting/planning-template": {
+    ru: {"title": "Шаблон планирования совместного родительства", "description": "Обсудите воспитание, финансы, условия проживания и границы, прежде чем двигаться дальше.", "sections": ["Наши намерения", "Дом ребёнка и повседневная жизнь", "Ценности и решения в воспитании", "Беременность, зачатие и медицинское наблюдение", "Финансы", "Общение и границы", "Новые партнёры и меняющиеся семьи", "Отношения ребёнка с обоими родителями", "Конфликты и внешняя поддержка", "Если обстоятельства изменятся"], "sampleQuestions": ["Почему мы рассматриваем совместное родительство?", "Что заставило бы нас отказаться от этой идеи?", "Чего каждый из нас ожидает от другого как от родителя?"], "disclaimer": "Этот шаблон - инструмент для разговора, а не юридический документ. Его заполнение не создаёт и не гарантирует юридическое родительство, родительскую ответственность, опеку или финансовые права. Прежде чем полагаться на то, о чём вы здесь договоритесь, проверьте законодательство, применимое к вашей семье."},
+    es: {"title": "Plantilla de planificación de co-crianza", "description": "Habla sobre crianza, finanzas, convivencia y límites antes de avanzar.", "sections": ["Nuestras intenciones", "El hogar del niño y la vida cotidiana", "Valores y decisiones de crianza", "Embarazo, concepción y atención médica", "Finanzas", "Comunicación y límites", "Nuevas parejas y familias cambiantes", "La relación del niño con ambos padres", "Conflictos y apoyo externo", "Si las circunstancias cambian"], "sampleQuestions": ["¿Por qué estamos considerando la co-crianza?", "¿Qué nos haría decidir no seguir adelante?", "¿Qué esperamos cada uno del otro como madre o padre?"], "disclaimer": "Esta plantilla es una herramienta de conversación, no un documento legal. Completarla no crea ni garantiza la paternidad o maternidad legal, la patria potestad, la custodia ni los derechos económicos. Comprueba la legislación aplicable a tu familia antes de basarte en cualquier acuerdo alcanzado aquí."},
+    pt: {"title": "Modelo de planeamento de coparentalidade", "description": "Fala sobre educação, finanças, condições de vida e limites antes de avançar.", "sections": ["As nossas intenções", "A casa da criança e o dia a dia", "Valores e decisões de educação", "Gravidez, conceção e cuidados médicos", "Finanças", "Comunicação e limites", "Novos parceiros e famílias em mudança", "A relação da criança com ambos os pais", "Conflitos e apoio externo", "Se as circunstâncias mudarem"], "sampleQuestions": ["Porque é que estamos a considerar a coparentalidade?", "O que nos faria decidir não avançar?", "O que é que cada um espera do outro como pai ou mãe?"], "disclaimer": "Este modelo é uma ferramenta de conversa, não um documento legal. Preenchê-lo não cria nem garante a parentalidade legal, as responsabilidades parentais, a guarda ou os direitos financeiros. Verifica a lei aplicável à tua família antes de te basares em qualquer coisa que acordes aqui."},
+    fr: {"title": "Modèle de planification de coparentalité", "description": "Discutez de l'éducation, des finances, du mode de vie et des limites avant d'aller plus loin.", "sections": ["Nos intentions", "Le foyer de l'enfant et la vie quotidienne", "Valeurs éducatives et décisions", "Grossesse, conception et suivi médical", "Finances", "Communication et limites", "Nouveaux partenaires et familles qui évoluent", "La relation de l'enfant avec les deux parents", "Conflits et soutien extérieur", "Si la situation change"], "sampleQuestions": ["Pourquoi envisageons-nous la coparentalité ?", "Qu'est-ce qui nous ferait renoncer à ce projet ?", "Qu'attendons-nous chacun de l'autre en tant que parent ?"], "disclaimer": "Ce modèle est un outil de discussion, pas un document juridique. Le remplir ne crée ni ne garantit la parentalité légale, l'autorité parentale, la garde ou des droits financiers. Vérifiez la législation applicable à votre famille avant de vous appuyer sur ce que vous convenez ici."},
+    de: {"title": "Vorlage zur Co-Elternschaftsplanung", "description": "Sprecht über Erziehung, Finanzen, Wohnsituation und Grenzen, bevor ihr weitermacht.", "sections": ["Unsere Absichten", "Zuhause und Alltag des Kindes", "Erziehungswerte und Entscheidungen", "Schwangerschaft, Zeugung und medizinische Betreuung", "Finanzen", "Kommunikation und Grenzen", "Neue Partner und sich verändernde Familien", "Die Beziehung des Kindes zu beiden Elternteilen", "Konflikte und externe Unterstützung", "Wenn sich die Umstände ändern"], "sampleQuestions": ["Warum ziehen wir Co-Elternschaft in Betracht?", "Was würde uns dazu bringen, nicht weiterzumachen?", "Was erwarten wir jeweils voneinander als Elternteil?"], "disclaimer": "Diese Vorlage ist ein Gesprächswerkzeug, kein Rechtsdokument. Das Ausfüllen begründet oder garantiert keine rechtliche Elternschaft, elterliche Sorge, kein Sorgerecht und keine finanziellen Ansprüche. Prüfe das für deine Familie geltende Recht, bevor du dich auf hier vereinbarte Punkte verlässt."},
+    it: {"title": "Modello di pianificazione della co-genitorialità", "description": "Parlate di educazione, finanze, convivenza e confini prima di andare avanti.", "sections": ["Le nostre intenzioni", "La casa del bambino e la vita quotidiana", "Valori educativi e decisioni", "Gravidanza, concepimento e assistenza medica", "Finanze", "Comunicazione e confini", "Nuovi partner e famiglie che cambiano", "La relazione del bambino con entrambi i genitori", "Conflitti e supporto esterno", "Se le circostanze cambiano"], "sampleQuestions": ["Perché stiamo considerando la co-genitorialità?", "Cosa ci farebbe decidere di non andare avanti?", "Cosa ci aspettiamo l'uno dall'altro come genitori?"], "disclaimer": "Questo modello è uno strumento di conversazione, non un documento legale. Compilarlo non crea né garantisce la genitorialità legale, la responsabilità genitoriale, l'affidamento o i diritti finanziari. Verifichi la legge applicabile alla propria famiglia prima di fare affidamento su quanto concordato qui."},
+    pl: {"title": "Szablon planowania współrodzicielstwa", "description": "Porozmawiajcie o wychowaniu, finansach, warunkach mieszkaniowych i granicach, zanim pójdziecie dalej.", "sections": ["Nasze intencje", "Dom dziecka i codzienne życie", "Wartości i decyzje wychowawcze", "Ciąża, poczęcie i opieka medyczna", "Finanse", "Komunikacja i granice", "Nowi partnerzy i zmieniające się rodziny", "Relacja dziecka z obojgiem rodziców", "Konflikty i wsparcie z zewnątrz", "Jeśli okoliczności się zmienią"], "sampleQuestions": ["Dlaczego rozważamy współrodzicielstwo?", "Co sprawiłoby, że zrezygnowalibyśmy z tego pomysłu?", "Czego każde z nas oczekuje od drugiej osoby jako rodzica?"], "disclaimer": "Ten szablon jest narzędziem do rozmowy, a nie dokumentem prawnym. Jego wypełnienie nie tworzy ani nie gwarantuje prawnego rodzicielstwa, odpowiedzialności rodzicielskiej, opieki ani praw finansowych. Sprawdź przepisy prawa obowiązujące Twoją rodzinę, zanim oprzesz się na czymkolwiek, co tu ustalicie."},
+  },
+  "co-parenting/questions-to-ask": {
+    ru: {"title": "Вопросы потенциальному со-родителю", "description": "Практический список вопросов о воспитании, деньгах, общении и повседневной жизни.", "sections": ["Почему родительство?", "Повседневная жизнь", "Ценности в воспитании", "Деньги", "Отношения и границы", "Сложные ситуации", "Перед тем как двигаться дальше"], "sampleQuestions": ["Почему вы хотите стать родителем?", "Почему вы рассматриваете совместное родительство?", "Что для вас значит быть вовлечённым родителем?"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Preguntas para un posible co-padre o co-madre", "description": "Una lista práctica de preguntas sobre crianza, dinero, comunicación y vida cotidiana.", "sections": ["¿Por qué ser madre o padre?", "Vida cotidiana", "Valores de crianza", "Dinero", "Relaciones y límites", "Situaciones difíciles", "Antes de avanzar"], "sampleQuestions": ["¿Por qué quieres ser madre o padre?", "¿Por qué estás considerando la co-crianza?", "¿Qué significa para ti ser un progenitor implicado?"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Perguntas a fazer a um potencial coparente", "description": "Uma lista prática de perguntas sobre educação, dinheiro, comunicação e vida quotidiana.", "sections": ["Porquê ser pai ou mãe?", "Vida quotidiana", "Valores de educação", "Dinheiro", "Relações e limites", "Situações difíceis", "Antes de avançar"], "sampleQuestions": ["Porque é que queres ser pai ou mãe?", "Porque é que estás a considerar a coparentalidade?", "O que significa para ti ser um pai ou mãe presente?"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Questions à poser à un coparent potentiel", "description": "Une liste pratique de questions sur l'éducation, l'argent, la communication et la vie quotidienne.", "sections": ["Pourquoi devenir parent ?", "Vie quotidienne", "Valeurs éducatives", "Argent", "Relations et limites", "Situations difficiles", "Avant d'aller plus loin"], "sampleQuestions": ["Pourquoi voulez-vous devenir parent ?", "Pourquoi envisagez-vous la coparentalité ?", "Qu'est-ce qu'être un parent impliqué signifie pour vous ?"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Fragen an eine mögliche Co-Eltern-Person", "description": "Eine praktische Liste mit Fragen zu Erziehung, Geld, Kommunikation und Alltag.", "sections": ["Warum Elternschaft?", "Alltag", "Erziehungswerte", "Geld", "Beziehungen und Grenzen", "Schwierige Situationen", "Bevor es weitergeht"], "sampleQuestions": ["Warum möchtest du Elternteil werden?", "Warum ziehst du Co-Elternschaft in Betracht?", "Was bedeutet es für dich, ein aktiver Elternteil zu sein?"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Domande da fare a un potenziale co-genitore", "description": "Un elenco pratico di domande su educazione, denaro, comunicazione e vita quotidiana.", "sections": ["Perché la genitorialità?", "Vita quotidiana", "Valori educativi", "Denaro", "Relazioni e confini", "Situazioni difficili", "Prima di andare avanti"], "sampleQuestions": ["Perché desidera diventare genitore?", "Perché sta considerando la co-genitorialità?", "Cosa significa per Lei essere un genitore presente?"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Pytania do potencjalnego współrodzica", "description": "Praktyczna lista pytań o wychowanie, pieniądze, komunikację i codzienne życie.", "sections": ["Dlaczego rodzicielstwo?", "Codzienne życie", "Wartości wychowawcze", "Pieniądze", "Relacje i granice", "Trudne sytuacje", "Zanim pójdziecie dalej"], "sampleQuestions": ["Dlaczego chcesz zostać rodzicem?", "Dlaczego rozważasz współrodzicielstwo?", "Co oznacza dla Ciebie bycie zaangażowanym rodzicem?"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "co-parenting/first-meeting": {
+    ru: {"title": "Первая встреча с потенциальным со-родителем", "description": "Что обсудить и на что обратить внимание при первой личной встрече.", "sections": ["Перед встречей", "Начните с общей картины", "Обратите внимание на свои ощущения", "Не обязательно решать всё сразу", "После встречи"], "sampleQuestions": ["Почему вы оба рассматриваете совместное родительство?", "Что для каждого из вас значит родительство?", "Какую семью вы надеетесь построить?"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Primer encuentro con un posible co-padre o co-madre", "description": "Qué tratar y qué observar en el primer encuentro en persona.", "sections": ["Antes del encuentro", "Empieza por el panorama general", "Fíjate en cómo te sientes", "No hace falta decidirlo todo", "Después del encuentro"], "sampleQuestions": ["¿Por qué se plantean la co-crianza?", "¿Qué significa la paternidad o maternidad para cada uno de ustedes?", "¿Qué tipo de familia esperan construir?"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Primeiro encontro com um potencial coparente", "description": "O que abordar e a que prestar atenção no primeiro encontro presencial.", "sections": ["Antes do encontro", "Começa pelo panorama geral", "Repara em como te sentes", "Não precisas de decidir tudo", "Depois do encontro"], "sampleQuestions": ["Porque é que ambos estão a considerar a coparentalidade?", "O que significa a parentalidade para cada um de vocês?", "Que tipo de família esperam construir?"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Première rencontre avec un coparent potentiel", "description": "Ce qu'il faut aborder et à quoi faire attention lors du premier rendez-vous en personne.", "sections": ["Avant la rencontre", "Commencez par la vue d'ensemble", "Soyez attentif à ce que vous ressentez", "Vous n'avez pas besoin de tout décider", "Après la rencontre"], "sampleQuestions": ["Pourquoi envisagez-vous tous les deux la coparentalité ?", "Que signifie la parentalité pour chacun de vous ?", "Quel type de famille espérez-vous construire ?"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Erstes Treffen mit einer möglichen Co-Eltern-Person", "description": "Worauf es beim ersten persönlichen Treffen ankommt und was ihr besprechen solltet.", "sections": ["Vor dem Treffen", "Beginne mit dem großen Ganzen", "Achte darauf, wie es sich anfühlt", "Du musst nicht alles entscheiden", "Nach dem Treffen"], "sampleQuestions": ["Warum zieht ihr beide Co-Elternschaft in Betracht?", "Was bedeutet Elternschaft für jeden von euch?", "Was für eine Familie möchtet ihr aufbauen?"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Primo incontro con un potenziale co-genitore", "description": "Cosa affrontare e a cosa prestare attenzione al primo incontro di persona.", "sections": ["Prima dell'incontro", "Inizi dal quadro generale", "Presti attenzione a come si sente", "Non deve decidere tutto subito", "Dopo l'incontro"], "sampleQuestions": ["Perché entrambi state considerando la co-genitorialità?", "Cosa significa la genitorialità per ciascuno di voi?", "Che tipo di famiglia sperate di costruire?"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Pierwsze spotkanie z potencjalnym współrodzicem", "description": "Co poruszyć i na co zwrócić uwagę podczas pierwszego spotkania na żywo.", "sections": ["Przed spotkaniem", "Zacznij od ogólnego obrazu", "Zwróć uwagę na swoje odczucia", "Nie musisz wszystkiego decydować od razu", "Po spotkaniu"], "sampleQuestions": ["Dlaczego oboje rozważacie współrodzicielstwo?", "Co rodzicielstwo oznacza dla każdego z Was?", "Jaką rodzinę chcecie zbudować?"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "co-parenting/red-flags-checklist": {
+    ru: {"title": "Чек-лист тревожных сигналов в совместном родительстве", "description": "Признаки, на которые стоит обратить внимание, прежде чем решиться на совместное родительство с кем-то.", "sections": ["Давление", "Границы", "Общение", "Деньги", "Ответственность", "Безопасность", "Если что-то настораживает"], "sampleQuestions": ["Они подталкивают вас к быстрым важным решениям.", "Они давят на вас, используя возраст, сроки фертильности или страх упустить момент.", "Они игнорируют чёткое «нет»."], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Checklist de señales de alerta en la co-crianza", "description": "Señales a las que merece la pena prestar atención antes de comprometerte a la co-crianza con alguien.", "sections": ["Presión", "Límites", "Comunicación", "Dinero", "Responsabilidad", "Seguridad", "Si algo no te cuadra"], "sampleQuestions": ["Te presiona para tomar decisiones importantes rápidamente.", "Usa la edad, los plazos de fertilidad o el miedo a quedarte sin tiempo para presionarte.", "Ignora un no claro."], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Checklist de sinais de alerta na coparentalidade", "description": "Sinais a que vale a pena prestar atenção antes de te comprometeres com a coparentalidade com alguém.", "sections": ["Pressão", "Limites", "Comunicação", "Dinheiro", "Responsabilidade", "Segurança", "Se algo parecer errado"], "sampleQuestions": ["Pressiona-te a tomar decisões importantes rapidamente.", "Usa a idade, os prazos de fertilidade ou o medo de ficar para trás para te pressionar.", "Ignora um não claro."], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Liste des signaux d'alerte en coparentalité", "description": "Des signes à surveiller avant de vous engager dans une coparentalité avec quelqu'un.", "sections": ["Pression", "Limites", "Communication", "Argent", "Responsabilité", "Sécurité", "Si quelque chose vous semble anormal"], "sampleQuestions": ["On vous pousse à prendre rapidement des décisions importantes.", "On utilise l'âge, les délais de fertilité ou la peur de rater sa chance pour vous mettre la pression.", "On ignore un refus clair."], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Checkliste: Warnsignale bei der Co-Elternschaft", "description": "Anzeichen, auf die du achten solltest, bevor du dich mit jemandem auf eine Co-Elternschaft einlässt.", "sections": ["Druck", "Grenzen", "Kommunikation", "Geld", "Verantwortung", "Sicherheit", "Wenn sich etwas falsch anfühlt"], "sampleQuestions": ["Er oder sie drängt dich, wichtige Entscheidungen schnell zu treffen.", "Er oder sie nutzt Alter, den biologischen Zeitdruck oder die Angst, etwas zu verpassen, um dich unter Druck zu setzen.", "Er oder sie ignoriert ein klares Nein."], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Checklist dei segnali d'allarme nella co-genitorialità", "description": "Segnali a cui prestare attenzione prima di impegnarsi nella co-genitorialità con qualcuno.", "sections": ["Pressione", "Confini", "Comunicazione", "Denaro", "Responsabilità", "Sicurezza", "Se qualcosa non convince"], "sampleQuestions": ["La spinge a prendere decisioni importanti in fretta.", "Usa l'età, i tempi della fertilità o la paura di perdere l'occasione per farLe pressione.", "Ignora un no chiaro."], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Lista ostrzegawczych sygnałów we współrodzicielstwie", "description": "Sygnały, na które warto zwrócić uwagę, zanim zdecydujesz się na współrodzicielstwo z kimś.", "sections": ["Presja", "Granice", "Komunikacja", "Pieniądze", "Odpowiedzialność", "Bezpieczeństwo", "Jeśli coś wydaje się nie tak"], "sampleQuestions": ["Naciska na Ciebie, żebyś szybko podejmował(a) ważne decyzje.", "Wykorzystuje wiek, czas na dziecko lub strach przed przegapieniem szansy, żeby wywrzeć na Tobie presję.", "Ignoruje wyraźne „nie”."], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "co-parenting/compatibility-scorecard": {
+    ru: {"title": "Оценочная карта совместимости со-родителей", "description": "Простой способ отметить, в чём есть совпадения, а в чём нет, после первой встречи.", "sections": ["Оценка 1-5", "Вопросы, которые стоит задать себе", "Перед следующим шагом"], "sampleQuestions": ["Общение", "Уважение границ", "Ценности в воспитании"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Ficha de compatibilidad de co-crianza", "description": "Una forma sencilla de anotar en qué hay coincidencias y en qué no, después del primer encuentro.", "sections": ["Puntuación 1-5", "Preguntas para hacerte a ti mismo/a", "Antes de dar otro paso"], "sampleQuestions": ["Comunicación", "Respeto de los límites", "Valores de crianza"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Ficha de compatibilidade de coparentalidade", "description": "Uma forma simples de registar onde há coincidências e onde não há, depois do primeiro encontro.", "sections": ["Pontuação 1-5", "Perguntas para te fazeres", "Antes de dares outro passo"], "sampleQuestions": ["Comunicação", "Respeito pelos limites", "Valores de educação"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Fiche de compatibilité de coparentalité", "description": "Un moyen simple de noter les points d'accord et de désaccord après votre première rencontre.", "sections": ["Notation 1-5", "Questions à vous poser", "Avant d'aller plus loin"], "sampleQuestions": ["Communication", "Respect des limites", "Valeurs éducatives"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Kompatibilitäts-Scorecard für die Co-Elternschaft", "description": "Eine einfache Möglichkeit festzuhalten, wo ihr übereinstimmt und wo nicht, nach eurem ersten Treffen.", "sections": ["Bewertung 1-5", "Fragen an dich selbst", "Vor dem nächsten Schritt"], "sampleQuestions": ["Kommunikation", "Respekt für Grenzen", "Erziehungswerte"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Scheda di compatibilità per la co-genitorialità", "description": "Un modo semplice per annotare dove c'è sintonia e dove no, dopo il primo incontro.", "sections": ["Valutazione 1-5", "Domande da porsi", "Prima di un altro passo"], "sampleQuestions": ["Comunicazione", "Rispetto dei confini", "Valori educativi"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Karta kompatybilności ze współrodzicem", "description": "Prosty sposób na zanotowanie, w czym się zgadzacie, a w czym nie, po pierwszym spotkaniu.", "sections": ["Ocena 1-5", "Pytania, które warto sobie zadać", "Przed kolejnym krokiem"], "sampleQuestions": ["Komunikacja", "Szacunek dla granic", "Wartości wychowawcze"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "co-parenting/parenting-values-worksheet": {
+    ru: {"title": "Рабочий лист родительских ценностей", "description": "Определите собственные родительские ценности, прежде чем сравнивать их с чужими.", "sections": ["Что важнее всего", "Повседневное воспитание", "Образование и идентичность", "Деньги и семья", "Когда мы не согласны"], "sampleQuestions": ["Три вещи, которые я больше всего хочу дать своему ребёнку:", "Ценности, которые я хочу показывать своим примером:", "Каким родителем я надеюсь быть:"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Hoja de trabajo de valores de crianza", "description": "Aclara tus propios valores de crianza antes de compararlos con los de otra persona.", "sections": ["Lo que más importa", "Crianza cotidiana", "Educación e identidad", "Dinero y familia", "Cuando no estamos de acuerdo"], "sampleQuestions": ["Las tres cosas que más quiero que mi hijo o hija experimente son:", "Los valores que quiero transmitir con el ejemplo son:", "El tipo de madre o padre que espero ser es:"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Folha de trabalho de valores de educação", "description": "Esclarece os teus próprios valores de educação antes de os comparares com os de outra pessoa.", "sections": ["O que importa mais", "Parentalidade do dia a dia", "Educação e identidade", "Dinheiro e família", "Quando discordamos"], "sampleQuestions": ["As três coisas que mais quero que o meu filho ou filha viva são:", "Os valores que quero transmitir pelo exemplo são:", "O tipo de pai ou mãe que espero ser é:"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Fiche de travail sur les valeurs éducatives", "description": "Clarifiez vos propres valeurs éducatives avant de les comparer à celles de quelqu'un d'autre.", "sections": ["Ce qui compte le plus", "La parentalité au quotidien", "Éducation et identité", "Argent et famille", "Quand nous ne sommes pas d'accord"], "sampleQuestions": ["Les trois choses que je veux le plus que mon enfant vive sont :", "Les valeurs que je veux transmettre par l'exemple sont :", "Le type de parent que j'espère être est :"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Arbeitsblatt zu Erziehungswerten", "description": "Kläre deine eigenen Erziehungswerte, bevor du sie mit denen einer anderen Person vergleichst.", "sections": ["Was am wichtigsten ist", "Erziehung im Alltag", "Bildung und Identität", "Geld und Familie", "Wenn wir unterschiedlicher Meinung sind"], "sampleQuestions": ["Die drei Dinge, die mein Kind am meisten erleben soll, sind:", "Die Werte, die ich vorleben möchte, sind:", "Die Art von Elternteil, die ich sein möchte, ist:"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Scheda di lavoro sui valori educativi", "description": "Chiarisca i propri valori educativi prima di confrontarli con quelli di qualcun altro.", "sections": ["Ciò che conta di più", "Genitorialità quotidiana", "Istruzione e identità", "Denaro e famiglia", "Quando non siamo d'accordo"], "sampleQuestions": ["Le tre cose che desidero di più far vivere a mio figlio o mia figlia sono:", "I valori che voglio trasmettere con l'esempio sono:", "Il tipo di genitore che spero di essere è:"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Arkusz wartości wychowawczych", "description": "Określ swoje własne wartości wychowawcze, zanim porównasz je z wartościami kogoś innego.", "sections": ["Co jest najważniejsze", "Codzienne rodzicielstwo", "Edukacja i tożsamość", "Pieniądze i rodzina", "Gdy się nie zgadzamy"], "sampleQuestions": ["Trzy rzeczy, których najbardziej chcę, by doświadczyło moje dziecko, to:", "Wartości, które chcę przekazywać własnym przykładem, to:", "Rodzicem, jakim mam nadzieję być, jest:"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "fertility-donor/fertility-consultation-questions": {
+    ru: {"title": "Вопросы для консультации по фертильности", "description": "Вопросы, которые стоит задать на первой консультации в клинике репродуктивной медицины.", "sections": ["Понимание своих вариантов", "Успех и ожидания", "Риски и медикаменты", "Стоимость", "Если лечение не сработает", "Поддержка", "Донорское зачатие"], "sampleQuestions": ["Почему вы рекомендуете именно это лечение?", "Какие есть альтернативы?", "Какие факторы моей истории повлияли на эту рекомендацию?"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Preguntas para la consulta de fertilidad", "description": "Preguntas que vale la pena llevar a tu primera consulta con una clínica de fertilidad.", "sections": ["Entender tus opciones", "Éxito y expectativas", "Riesgos y medicación", "Coste", "Si el tratamiento no funciona", "Apoyo", "Concepción con donante"], "sampleQuestions": ["¿Por qué recomienda este tratamiento?", "¿Qué alternativas hay disponibles?", "¿Qué factores de mi historial influyen en la recomendación?"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Perguntas para a consulta de fertilidade", "description": "Perguntas que vale a pena levar à tua primeira consulta numa clínica de fertilidade.", "sections": ["Compreender as tuas opções", "Sucesso e expectativas", "Riscos e medicação", "Custo", "Se o tratamento não resultar", "Apoio", "Conceção com dador"], "sampleQuestions": ["Porque é que recomenda este tratamento?", "Que alternativas existem?", "Que fatores do meu historial influenciam esta recomendação?"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Questions pour la consultation de fertilité", "description": "Des questions à poser lors de votre première consultation dans une clinique de fertilité.", "sections": ["Comprendre vos options", "Réussite et attentes", "Risques et médicaments", "Coût", "Si le traitement ne fonctionne pas", "Soutien", "Conception avec don de gamètes"], "sampleQuestions": ["Pourquoi recommandez-vous ce traitement ?", "Quelles alternatives existent ?", "Quels éléments de mes antécédents influencent cette recommandation ?"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Fragen für die Kinderwunschberatung", "description": "Fragen, die sich für die erste Beratung in einer Kinderwunschklinik lohnen.", "sections": ["Deine Optionen verstehen", "Erfolg und Erwartungen", "Risiken und Medikamente", "Kosten", "Wenn die Behandlung nicht wirkt", "Unterstützung", "Samen-/Eizellspende"], "sampleQuestions": ["Warum empfehlen Sie diese Behandlung?", "Welche Alternativen gibt es?", "Welche Faktoren in meiner Vorgeschichte beeinflussen die Empfehlung?"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Domande per la consulenza sulla fertilità", "description": "Domande da portare al primo colloquio con una clinica della fertilità.", "sections": ["Comprendere le proprie opzioni", "Successo e aspettative", "Rischi e farmaci", "Costo", "Se il trattamento non funziona", "Supporto", "Fecondazione da donatore"], "sampleQuestions": ["Perché consiglia questo trattamento?", "Quali alternative sono disponibili?", "Quali fattori della mia storia influenzano questa raccomandazione?"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Pytania na konsultację dotyczącą płodności", "description": "Pytania, które warto zabrać na pierwszą konsultację w klinice leczenia niepłodności.", "sections": ["Poznanie swoich opcji", "Skuteczność i oczekiwania", "Ryzyko i leki", "Koszt", "Jeśli leczenie nie zadziała", "Wsparcie", "Poczęcie z dawstwa"], "sampleQuestions": ["Dlaczego zaleca Pan/Pani to leczenie?", "Jakie są dostępne alternatywy?", "Jakie czynniki z mojej historii wpływają na tę rekomendację?"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "fertility-donor/donor-conception-questions": {
+    ru: {"title": "Чек-лист вопросов о донорском зачатии", "description": "Что стоит спросить и обдумать, прежде чем выбрать донорское зачатие.", "sections": ["О доноре", "Клиника и лечение", "Известный донор", "Разговор с ребёнком", "Юридические вопросы и вопросы на будущее"], "sampleQuestions": ["Какая информация доступна?", "Какие медицинские и генетические обследования были проведены?", "К какой информации сможет получить доступ будущий ребёнок?"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Checklist de preguntas sobre la concepción con donante", "description": "Qué preguntar y qué pensar antes de elegir la concepción con donante.", "sections": ["Sobre el donante", "Clínica y tratamiento", "Donante conocido", "Hablar con tu hijo o hija", "Preguntas legales y de futuro"], "sampleQuestions": ["¿Qué información hay disponible?", "¿Qué pruebas médicas y genéticas se han realizado?", "¿A qué información podrá acceder el futuro hijo o hija?"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Checklist de perguntas sobre conceção com dador", "description": "O que perguntar e pensar antes de escolher a conceção com dador.", "sections": ["Sobre o dador", "Clínica e tratamento", "Dador conhecido", "Falar com o teu filho ou filha", "Questões legais e futuras"], "sampleQuestions": ["Que informação está disponível?", "Que rastreios médicos e genéticos foram realizados?", "A que informação pode aceder o futuro filho ou filha?"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Liste de questions sur la conception avec don de gamètes", "description": "Ce qu'il faut demander et réfléchir avant de choisir la conception avec don de gamètes.", "sections": ["À propos du donneur", "Clinique et traitement", "Donneur connu", "Parler à votre enfant", "Questions juridiques et futures"], "sampleQuestions": ["Quelles informations sont disponibles ?", "Quels dépistages médicaux et génétiques ont été réalisés ?", "À quelles informations le futur enfant pourra-t-il accéder ?"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Checkliste: Fragen zur Samen-/Eizellspende", "description": "Was du fragen und bedenken solltest, bevor du dich für eine Samen-/Eizellspende entscheidest.", "sections": ["Über den Spender", "Klinik und Behandlung", "Bekannter Spender", "Mit deinem Kind sprechen", "Rechtliche und zukünftige Fragen"], "sampleQuestions": ["Welche Informationen sind verfügbar?", "Welche medizinischen und genetischen Untersuchungen wurden durchgeführt?", "Auf welche Informationen kann das zukünftige Kind zugreifen?"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Checklist di domande sulla fecondazione da donatore", "description": "Cosa chiedere e su cosa riflettere prima di scegliere la fecondazione da donatore.", "sections": ["Informazioni sul donatore", "Clinica e trattamento", "Donatore conosciuto", "Parlare con il proprio figlio o la propria figlia", "Questioni legali e future"], "sampleQuestions": ["Quali informazioni sono disponibili?", "Quali controlli medici e genetici sono stati effettuati?", "A quali informazioni potrà accedere il futuro figlio o la futura figlia?"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Lista pytań o poczęcie z dawstwa", "description": "O co zapytać i nad czym się zastanowić przed wyborem poczęcia z dawstwa.", "sections": ["O dawcy", "Klinika i leczenie", "Znany dawca", "Rozmowa z dzieckiem", "Kwestie prawne i przyszłe pytania"], "sampleQuestions": ["Jakie informacje są dostępne?", "Jakie badania medyczne i genetyczne zostały wykonane?", "Do jakich informacji będzie mogło mieć dostęp przyszłe dziecko?"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "fertility-donor/fertility-clinic-checklist": {
+    ru: {"title": "Чек-лист выбора клиники репродуктивной медицины", "description": "Что сравнивать при выборе между клиниками репродуктивной медицины.", "sections": ["Регулирование и безопасность", "Лечение и доказательная база", "Стоимость", "Поддержка", "Лечение за границей"], "sampleQuestions": ["Правильно ли регулируется деятельность клиники?", "Какие стандарты качества и безопасности применяются?", "Как организованы лаборатории и хранение?"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Checklist para elegir una clínica de fertilidad", "description": "Qué comparar cuando estás decidiendo entre clínicas de fertilidad.", "sections": ["Regulación y seguridad", "Tratamiento y evidencia", "Costes", "Apoyo", "Tratamiento en el extranjero"], "sampleQuestions": ["¿Está la clínica debidamente regulada?", "¿Qué estándares de calidad y seguridad se aplican?", "¿Cómo se gestionan los laboratorios y el almacenamiento?"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Checklist para escolher uma clínica de fertilidade", "description": "O que comparar quando estás a decidir entre clínicas de fertilidade.", "sections": ["Regulação e segurança", "Tratamento e evidência", "Custos", "Apoio", "Tratamento no estrangeiro"], "sampleQuestions": ["A clínica está devidamente regulada?", "Que padrões de qualidade e segurança se aplicam?", "Como são geridos os laboratórios e o armazenamento?"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Liste de contrôle pour choisir une clinique de fertilité", "description": "Ce qu'il faut comparer lorsque vous choisissez entre plusieurs cliniques de fertilité.", "sections": ["Réglementation et sécurité", "Traitement et données probantes", "Coûts", "Soutien", "Traitement à l'étranger"], "sampleQuestions": ["La clinique est-elle correctement réglementée ?", "Quelles normes de qualité et de sécurité s'appliquent ?", "Comment les laboratoires et le stockage sont-ils gérés ?"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Checkliste zur Wahl einer Kinderwunschklinik", "description": "Was du vergleichen solltest, wenn du dich zwischen Kinderwunschkliniken entscheidest.", "sections": ["Regulierung und Sicherheit", "Behandlung und Evidenz", "Kosten", "Unterstützung", "Behandlung im Ausland"], "sampleQuestions": ["Ist die Klinik ordnungsgemäß reguliert?", "Welche Qualitäts- und Sicherheitsstandards gelten?", "Wie werden Labore und Lagerung verwaltet?"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Checklist per scegliere una clinica della fertilità", "description": "Cosa confrontare quando si sceglie tra diverse cliniche della fertilità.", "sections": ["Regolamentazione e sicurezza", "Trattamento ed evidenze", "Costi", "Supporto", "Trattamento all'estero"], "sampleQuestions": ["La clinica è regolamentata correttamente?", "Quali standard di qualità e sicurezza si applicano?", "Come vengono gestiti i laboratori e la conservazione?"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Lista kontrolna wyboru kliniki leczenia niepłodności", "description": "Co porównać, decydując się między klinikami leczenia niepłodności.", "sections": ["Regulacje i bezpieczeństwo", "Leczenie i dowody naukowe", "Koszty", "Wsparcie", "Leczenie za granicą"], "sampleQuestions": ["Czy klinika jest odpowiednio regulowana?", "Jakie standardy jakości i bezpieczeństwa obowiązują?", "Jak zarządza się laboratoriami i przechowywaniem?"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "parenthood-planning/financial-planning": {
+    ru: {"title": "Финансовое планирование для будущих родителей", "description": "Рабочий лист, который поможет продумать расходы на создание и воспитание семьи.", "sections": ["До беременности или лечения", "Беременность и роды", "Первый год", "Общие расходы", "Финансовые изменения"], "sampleQuestions": ["Какие расходы стоит делить поровну?", "Какие расходы стоит делить пропорционально доходу?", "Что произойдёт, если доход изменится?"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Planificación financiera para futuros padres y madres", "description": "Una hoja de trabajo para pensar en el coste de formar y criar una familia.", "sections": ["Antes del embarazo o el tratamiento", "Embarazo y parto", "Primer año", "Gastos compartidos", "Cambios financieros"], "sampleQuestions": ["¿Qué costes deberían repartirse a partes iguales?", "¿Qué costes deberían dividirse según los ingresos?", "¿Qué pasa si cambian los ingresos?"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Planeamento financeiro para futuros pais", "description": "Uma folha de trabalho para pensares no custo de construir e criar uma família.", "sections": ["Antes da gravidez ou do tratamento", "Gravidez e parto", "Primeiro ano", "Despesas partilhadas", "Alterações financeiras"], "sampleQuestions": ["Que custos devem ser divididos igualmente?", "Que custos devem ser divididos consoante o rendimento?", "O que acontece se o rendimento mudar?"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Planification financière pour futurs parents", "description": "Une fiche de travail pour réfléchir au coût de la construction et de l'éducation d'une famille.", "sections": ["Avant la grossesse ou le traitement", "Grossesse et naissance", "Première année", "Dépenses partagées", "Changements financiers"], "sampleQuestions": ["Quels coûts doivent être partagés à parts égales ?", "Quels coûts doivent être répartis selon les revenus ?", "Que se passe-t-il si les revenus changent ?"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Finanzplanung für zukünftige Eltern", "description": "Ein Arbeitsblatt, um die Kosten für den Aufbau und die Erziehung einer Familie durchzudenken.", "sections": ["Vor Schwangerschaft oder Behandlung", "Schwangerschaft und Geburt", "Erstes Jahr", "Gemeinsame Ausgaben", "Finanzielle Veränderungen"], "sampleQuestions": ["Welche Kosten sollten gleich aufgeteilt werden?", "Welche Kosten sollten nach Einkommen aufgeteilt werden?", "Was passiert, wenn sich das Einkommen ändert?"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Pianificazione finanziaria per futuri genitori", "description": "Una scheda di lavoro per riflettere sul costo di costruire e crescere una famiglia.", "sections": ["Prima della gravidanza o del trattamento", "Gravidanza e parto", "Primo anno", "Spese condivise", "Cambiamenti finanziari"], "sampleQuestions": ["Quali costi dovrebbero essere condivisi in parti uguali?", "Quali costi dovrebbero essere suddivisi in base al reddito?", "Cosa succede se il reddito cambia?"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Planowanie finansowe dla przyszłych rodziców", "description": "Arkusz do przemyślenia kosztów założenia i wychowania rodziny.", "sections": ["Przed ciążą lub leczeniem", "Ciąża i poród", "Pierwszy rok", "Wspólne wydatki", "Zmiany finansowe"], "sampleQuestions": ["Które koszty powinny być dzielone po równo?", "Które koszty powinny być dzielone proporcjonalnie do dochodów?", "Co się stanie, jeśli dochody się zmienią?"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+  "parenthood-planning/parenting-values-worksheet": {
+    ru: {"title": "Рабочий лист родительских ценностей", "description": "Определите собственные родительские ценности, прежде чем сравнивать их с чужими.", "sections": ["Что важнее всего", "Повседневное воспитание", "Образование и идентичность", "Деньги и семья", "Когда мы не согласны"], "sampleQuestions": ["Три вещи, которые я больше всего хочу дать своему ребёнку:", "Ценности, которые я хочу показывать своим примером:", "Каким родителем я надеюсь быть:"], "disclaimer": "Этот ресурс предназначен для планирования и обсуждения. Это не юридическая, медицинская, психологическая или финансовая консультация. Правила и рекомендации специалистов различаются в зависимости от страны и индивидуальных обстоятельств."},
+    es: {"title": "Hoja de trabajo de valores de crianza", "description": "Aclara tus propios valores de crianza antes de compararlos con los de otra persona.", "sections": ["Lo que más importa", "Crianza cotidiana", "Educación e identidad", "Dinero y familia", "Cuando no estamos de acuerdo"], "sampleQuestions": ["Las tres cosas que más quiero que mi hijo o hija experimente son:", "Los valores que quiero transmitir con el ejemplo son:", "El tipo de madre o padre que espero ser es:"], "disclaimer": "Este recurso tiene fines de planificación y debate. No constituye asesoramiento legal, médico, psicológico ni financiero. Las normas y las recomendaciones profesionales varían según el país y las circunstancias individuales."},
+    pt: {"title": "Folha de trabalho de valores de educação", "description": "Esclarece os teus próprios valores de educação antes de os comparares com os de outra pessoa.", "sections": ["O que importa mais", "Parentalidade do dia a dia", "Educação e identidade", "Dinheiro e família", "Quando discordamos"], "sampleQuestions": ["As três coisas que mais quero que o meu filho ou filha viva são:", "Os valores que quero transmitir pelo exemplo são:", "O tipo de pai ou mãe que espero ser é:"], "disclaimer": "Este recurso destina-se a fins de planeamento e discussão. Não constitui aconselhamento legal, médico, psicológico ou financeiro. As regras e as recomendações profissionais variam consoante o país e as circunstâncias individuais."},
+    fr: {"title": "Fiche de travail sur les valeurs éducatives", "description": "Clarifiez vos propres valeurs éducatives avant de les comparer à celles de quelqu'un d'autre.", "sections": ["Ce qui compte le plus", "La parentalité au quotidien", "Éducation et identité", "Argent et famille", "Quand nous ne sommes pas d'accord"], "sampleQuestions": ["Les trois choses que je veux le plus que mon enfant vive sont :", "Les valeurs que je veux transmettre par l'exemple sont :", "Le type de parent que j'espère être est :"], "disclaimer": "Cette ressource est destinée à la planification et à la discussion. Elle ne constitue pas un conseil juridique, médical, psychologique ou financier. Les règles et les recommandations professionnelles varient selon le pays et la situation individuelle."},
+    de: {"title": "Arbeitsblatt zu Erziehungswerten", "description": "Kläre deine eigenen Erziehungswerte, bevor du sie mit denen einer anderen Person vergleichst.", "sections": ["Was am wichtigsten ist", "Erziehung im Alltag", "Bildung und Identität", "Geld und Familie", "Wenn wir unterschiedlicher Meinung sind"], "sampleQuestions": ["Die drei Dinge, die mein Kind am meisten erleben soll, sind:", "Die Werte, die ich vorleben möchte, sind:", "Die Art von Elternteil, die ich sein möchte, ist:"], "disclaimer": "Diese Ressource dient der Planung und Orientierung im Gespräch. Sie stellt keine rechtliche, medizinische, psychologische oder finanzielle Beratung dar. Regeln und fachliche Empfehlungen unterscheiden sich je nach Land und individueller Situation."},
+    it: {"title": "Scheda di lavoro sui valori educativi", "description": "Chiarisca i propri valori educativi prima di confrontarli con quelli di qualcun altro.", "sections": ["Ciò che conta di più", "Genitorialità quotidiana", "Istruzione e identità", "Denaro e famiglia", "Quando non siamo d'accordo"], "sampleQuestions": ["Le tre cose che desidero di più far vivere a mio figlio o mia figlia sono:", "I valori che voglio trasmettere con l'esempio sono:", "Il tipo di genitore che spero di essere è:"], "disclaimer": "Questa risorsa ha finalità di pianificazione e discussione. Non costituisce una consulenza legale, medica, psicologica o finanziaria. Le norme e le raccomandazioni professionali variano in base al Paese e alle circostanze individuali."},
+    pl: {"title": "Arkusz wartości wychowawczych", "description": "Określ swoje własne wartości wychowawcze, zanim porównasz je z wartościami kogoś innego.", "sections": ["Co jest najważniejsze", "Codzienne rodzicielstwo", "Edukacja i tożsamość", "Pieniądze i rodzina", "Gdy się nie zgadzamy"], "sampleQuestions": ["Trzy rzeczy, których najbardziej chcę, by doświadczyło moje dziecko, to:", "Wartości, które chcę przekazywać własnym przykładem, to:", "Rodzicem, jakim mam nadzieję być, jest:"], "disclaimer": "Ten zasób służy do planowania i rozmowy. Nie stanowi porady prawnej, medycznej, psychologicznej ani finansowej. Zasady i zalecenia specjalistów różnią się w zależności od kraju i indywidualnej sytuacji."},
+  },
+};
+
+function localizedCategory(cat: ResourceCategoryData, locale: CookieLocale): ResourceCategoryData {
+  const t = RESOURCES_CATEGORIES_I18N[cat.slug]?.[locale];
+  if (!t) return cat;
+  return { ...cat, eyebrow: t.eyebrow, title: t.title, description: t.description, disclaimer: t.disclaimer ?? cat.disclaimer };
+}
+
+function LegacyLegalPageRedirect({ slug }: { slug: "terms-of-use" | "privacy-policy" }) {
+  const { locale = "en" } = useParams();
+  return <Navigate to={`/${locale}/${slug}`} replace />;
+}
+
+function localizedDownloadUrl(downloadUrl: string | undefined, locale: CookieLocale): string | undefined {
+  if (!downloadUrl || locale === "en") return downloadUrl;
+  const marker = "/web-static/resources/";
+  const index = downloadUrl.indexOf(marker);
+  if (index === -1) return downloadUrl;
+  return `${downloadUrl.slice(0, index + marker.length)}${locale}/${downloadUrl.slice(index + marker.length)}`;
+}
+
+function localizedTool(cat: ResourceCategoryData, tool: ResourceTool, locale: CookieLocale): ResourceTool {
+  const t = RESOURCES_TOOLS_I18N[`${cat.slug}/${tool.slug}`]?.[locale];
+  const downloadUrl = localizedDownloadUrl(t?.downloadUrl ?? tool.downloadUrl, locale);
+  if (!t) return downloadUrl === tool.downloadUrl ? tool : { ...tool, downloadUrl };
+  return { ...tool, title: t.title, description: t.description, sections: t.sections ?? tool.sections, sampleQuestions: t.sampleQuestions ?? tool.sampleQuestions, disclaimer: t.disclaimer ?? tool.disclaimer, downloadUrl };
+}
+
+// tool.format was previously a hardcoded English string like ".docx · 10 sections · free";
+// it's always exactly derivable from sections.length, so it's computed per-locale here instead
+// of being stored as a 5th translated field per tool (which would have needed a plural
+// form per tool per language, since the count is baked in - this keeps one small pluralization
+// helper instead of ~440 extra translated strings).
+function resourceSectionsWord(count: number, locale: CookieLocale): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  switch (locale) {
+    case "ru":
+      if (mod10 === 1 && mod100 !== 11) return "раздел";
+      if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return "раздела";
+      return "разделов";
+    case "pl":
+      if (count === 1) return "sekcja";
+      if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return "sekcje";
+      return "sekcji";
+    case "es": return count === 1 ? "sección" : "secciones";
+    case "pt": return count === 1 ? "secção" : "secções";
+    case "fr": return count === 1 ? "section" : "sections";
+    case "de": return count === 1 ? "Abschnitt" : "Abschnitte";
+    case "it": return count === 1 ? "sezione" : "sezioni";
+    default: return count === 1 ? "section" : "sections";
+  }
+}
+
+function resourceFormatLabel(count: number, locale: CookieLocale, freeWord: string): string {
+  return `.docx · ${count} ${resourceSectionsWord(count, locale)} · ${freeWord}`;
+}
+
 function resourceArrow() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>;
 }
@@ -6552,98 +11205,345 @@ function resourceChatIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>;
 }
 
+// --- i18n text for Resources index/tool/category chrome (8 locales) ---
+type ResourcesIndexText = {
+  heroPill: string;
+  heroTitle: string;
+  heroBody: string;
+  startPill: string;
+  startTitle: string;
+  startSub: string;
+  startCard1Title: string;
+  startCard1Body: string;
+  startCard1Link: string;
+  startCard2Title: string;
+  startCard2Body: string;
+  startCard2Link: string;
+  startCard3Title: string;
+  startCard3Body: string;
+  startCard3Link: string;
+  aiToolsPill: string;
+  aiToolsTitle: string;
+  aiToolsSub: string;
+  aiCard1Title: string;
+  aiCard1Body: string;
+  aiCard1Link: string;
+  aiCard2Title: string;
+  aiCard2Body: string;
+  aiCard2Link: string;
+  categoriesPill: string;
+  categoriesTitle: string;
+  categoriesSub: string;
+  exploreLink: string;
+  routesTitle: string;
+  routesBody: string;
+  routeCoparenting: string;
+  routeFertility: string;
+  routeDonor: string;
+  routePlan: string;
+  proTitle: string;
+  proBody: string;
+  proLink: string;
+  ctaTitle: string;
+  ctaBody: string;
+  ctaButton: string;
+};
+
+type ResourcesLocaleText = {
+  index: ResourcesIndexText;
+  notFoundTitle: string;
+  categoryNotFoundTitle: string;
+  backToResources: string;
+  backToPrefix: string;
+  comingSoonTag: string;
+  whatsInsideHeading: string;
+  sectionsIntro: string;
+  sampleQuestionsLabel: string;
+  relatedResourcesHeading: string;
+  toolCtaHeading: string;
+  toolCtaBody: string;
+  comingSoonBody: string;
+  viewResourceLink: string;
+  quizStripHeading: string;
+  quizStripBody: string;
+  freeWord: string;
+};
+
+const RESOURCES_TEXT: Record<CookieLocale, ResourcesLocaleText> = {
+  en: {
+    index: {"heroPill": "Resources & tools", "heroTitle": "Parenthood resources and tools", "heroBody": "Practical checklists, worksheets and planning tools to help you explore co-parenting, fertility, donor conception and the practical side of becoming a parent.", "startPill": "Start here", "startTitle": "Three good places to begin", "startSub": "Whichever stage you're at.", "startCard1Title": "Co-Parenting Planning Template", "startCard1Body": "Thinking about becoming co-parents? Talk through parenting, finances, living arrangements and boundaries before you move forward.", "startCard1Link": "Download the template", "startCard2Title": "Questions to Ask a Potential Co-Parent", "startCard2Body": "Not sure what to ask before taking the next step? A practical list covering parenting, money, communication and everyday life.", "startCard2Link": "View the questions", "startCard3Title": "Co-Parenting Compatibility Quiz", "startCard3Body": "See where your expectations line up, and what's worth discussing further. It won't tell you whether you're a \"match.\"", "startCard3Link": "Take the quiz", "aiToolsPill": "Free AI tools", "aiToolsTitle": "Get instant, personalized help", "aiToolsSub": "No account needed.", "aiCard1Title": "Ask AI", "aiCard1Body": "Free answers to your questions about donor conception, surrogacy, co-parenting and family-law basics.", "aiCard1Link": "Ask a question", "aiCard2Title": "AI Agreement Draft", "aiCard2Body": "Describe your situation and get a first-draft co-parenting or donor agreement to discuss and refine with a lawyer.", "aiCard2Link": "Generate a draft", "categoriesPill": "Explore all", "categoriesTitle": "Explore all resources", "categoriesSub": "The full set of checklists, worksheets and templates, grouped by what you're working through.", "exploreLink": "Explore", "routesTitle": "Not sure where to start?", "routesBody": "You don't have to have everything figured out. Start with the question that's most relevant to you right now.", "routeCoparenting": "I'm exploring co-parenting", "routeFertility": "I'm thinking about fertility", "routeDonor": "I'm considering donor conception", "routePlan": "I want to plan ahead", "proTitle": "Looking for professional guidance?", "proBody": "Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.", "proLink": "Learn about professional support", "ctaTitle": "Explore LetsBeParents", "ctaBody": "These tools work well on their own - or as part of your journey on the platform.", "ctaButton": "Create free account"},
+    notFoundTitle: "Resource not found",
+    categoryNotFoundTitle: "Resource category not found",
+    backToResources: "Back to Resources & Tools",
+    backToPrefix: "Back to",
+    comingSoonTag: "Coming soon",
+    whatsInsideHeading: "What's inside",
+    sectionsIntro: "{count} sections, each with open questions for both of you to answer - independently first, then together.",
+    sampleQuestionsLabel: "A few sample questions from section 1",
+    relatedResourcesHeading: "Related resources",
+    toolCtaHeading: "Ready to take the next step?",
+    toolCtaBody: "Create a free account to save your answers and build a shared Family Plan on LetsBeParents.",
+    comingSoonBody: "We're finishing this resource - check back soon, or explore what's already available in {category}.",
+    viewResourceLink: "View resource",
+    quizStripHeading: "Not sure you're on the same page yet?",
+    quizStripBody: "The Co-Parenting Compatibility Quiz helps you and a potential co-parent see where your expectations align - and what's worth discussing further.",
+    freeWord: "free",
+  },
+  ru: {
+    index: {"heroPill": "Ресурсы и инструменты", "heroTitle": "Ресурсы и инструменты для родительства", "heroBody": "Практические чек-листы, рабочие листы и инструменты планирования, которые помогут разобраться в совместном родительстве, фертильности, донорском зачатии и практической стороне родительства.", "startPill": "Начните здесь", "startTitle": "Три хороших отправных точки", "startSub": "На каком бы этапе вы ни находились.", "startCard1Title": "Шаблон планирования совместного родительства", "startCard1Body": "Думаете стать со-родителями? Обсудите воспитание, финансы, условия проживания и границы, прежде чем двигаться дальше.", "startCard1Link": "Скачать шаблон", "startCard2Title": "Вопросы потенциальному со-родителю", "startCard2Body": "Не знаете, что спросить, прежде чем сделать следующий шаг? Практический список о воспитании, деньгах, общении и повседневной жизни.", "startCard2Link": "Посмотреть вопросы", "startCard3Title": "Тест на совместимость в совместном родительстве", "startCard3Body": "Узнайте, в чём совпадают ваши ожидания и что стоит обсудить подробнее. Тест не скажет вам, «подходите» ли вы друг другу.", "startCard3Link": "Пройти тест", "aiToolsPill": "Бесплатные ИИ-инструменты", "aiToolsTitle": "Получите мгновенную персональную помощь", "aiToolsSub": "Регистрация не нужна.", "aiCard1Title": "Спроси ИИ", "aiCard1Body": "Бесплатные ответы на вопросы о донорском зачатии, суррогатном материнстве, совместном родительстве и основах семейного права.", "aiCard1Link": "Задать вопрос", "aiCard2Title": "Черновик соглашения от ИИ", "aiCard2Body": "Опишите свою ситуацию и получите черновик соглашения о совместном родительстве или с донором, чтобы обсудить и доработать с юристом.", "aiCard2Link": "Создать черновик", "categoriesPill": "Изучить всё", "categoriesTitle": "Все ресурсы", "categoriesSub": "Полный набор чек-листов, рабочих листов и шаблонов, сгруппированных по тому, с чем вы сейчас разбираетесь.", "exploreLink": "Изучить", "routesTitle": "Не знаете, с чего начать?", "routesBody": "Вам не обязательно во всём уже разобраться. Начните с вопроса, который сейчас наиболее актуален для вас.", "routeCoparenting": "Я изучаю совместное родительство", "routeFertility": "Я думаю о фертильности", "routeDonor": "Я рассматриваю донорское зачатие", "routePlan": "Я хочу спланировать заранее", "proTitle": "Нужна консультация специалиста?", "proBody": "Некоторые вопросы лучше обсуждать с квалифицированным специалистом. LetsBeParents создаёт надёжное пространство, где люди могут получить психологическую, медицинскую и другую профессиональную поддержку, когда она нужна.", "proLink": "Узнать о профессиональной поддержке", "ctaTitle": "Изучите LetsBeParents", "ctaBody": "Эти инструменты хорошо работают сами по себе — или как часть вашего пути на платформе.", "ctaButton": "Создать бесплатный аккаунт"},
+    notFoundTitle: "Ресурс не найден",
+    categoryNotFoundTitle: "Категория ресурсов не найдена",
+    backToResources: "Назад к ресурсам и инструментам",
+    backToPrefix: "Назад к",
+    comingSoonTag: "Скоро",
+    whatsInsideHeading: "Что внутри",
+    sectionsIntro: "{count} разделов, в каждом — открытые вопросы для вас обоих: сначала ответьте по отдельности, потом вместе.",
+    sampleQuestionsLabel: "Несколько примеров вопросов из раздела 1",
+    relatedResourcesHeading: "Похожие ресурсы",
+    toolCtaHeading: "Готовы сделать следующий шаг?",
+    toolCtaBody: "Создайте бесплатный аккаунт, чтобы сохранить ответы и построить общий семейный план на LetsBeParents.",
+    comingSoonBody: "Мы дорабатываем этот ресурс — загляните позже или посмотрите, что уже доступно в разделе {category}.",
+    viewResourceLink: "Посмотреть ресурс",
+    quizStripHeading: "Ещё не уверены, что вы на одной волне?",
+    quizStripBody: "Тест на совместимость в совместном родительстве помогает вам и потенциальному со-родителю увидеть, в чём совпадают ваши ожидания — и что стоит обсудить подробнее.",
+    freeWord: "бесплатно",
+  },
+  es: {
+    index: {"heroPill": "Recursos y herramientas", "heroTitle": "Recursos y herramientas para la crianza", "heroBody": "Listas de verificación prácticas, hojas de trabajo y herramientas de planificación para ayudarte a explorar la co-crianza, la fertilidad, la donación y el lado práctico de convertirte en madre o padre.", "startPill": "Empieza aquí", "startTitle": "Tres buenos puntos de partida", "startSub": "Sea cual sea tu etapa.", "startCard1Title": "Plantilla de planificación de co-crianza", "startCard1Body": "¿Piensas en convertirte en co-padre o co-madre? Habla sobre crianza, finanzas, convivencia y límites antes de avanzar.", "startCard1Link": "Descargar la plantilla", "startCard2Title": "Preguntas para un posible co-padre o co-madre", "startCard2Body": "¿No sabes qué preguntar antes de dar el siguiente paso? Una lista práctica sobre crianza, dinero, comunicación y vida cotidiana.", "startCard2Link": "Ver las preguntas", "startCard3Title": "Test de compatibilidad de co-crianza", "startCard3Body": "Descubre dónde coinciden tus expectativas y qué vale la pena seguir hablando. No te dirá si sois \"compatibles\".", "startCard3Link": "Hacer el test", "aiToolsPill": "Herramientas de IA gratuitas", "aiToolsTitle": "Obtén ayuda instantánea y personalizada", "aiToolsSub": "No se necesita cuenta.", "aiCard1Title": "Pregunta a la IA", "aiCard1Body": "Respuestas gratuitas a tus preguntas sobre donación, gestación subrogada, co-crianza y nociones básicas de derecho de familia.", "aiCard1Link": "Haz una pregunta", "aiCard2Title": "Borrador de acuerdo con IA", "aiCard2Body": "Describe tu situación y obtén un primer borrador de acuerdo de co-crianza o con donante para hablar y perfeccionar con un abogado.", "aiCard2Link": "Generar un borrador", "categoriesPill": "Explorar todo", "categoriesTitle": "Explora todos los recursos", "categoriesSub": "El conjunto completo de listas de verificación, hojas de trabajo y plantillas, agrupadas según lo que estás resolviendo.", "exploreLink": "Explorar", "routesTitle": "¿No sabes por dónde empezar?", "routesBody": "No hace falta que lo tengas todo resuelto. Empieza por la pregunta que más te interese ahora mismo.", "routeCoparenting": "Estoy explorando la co-crianza", "routeFertility": "Estoy pensando en la fertilidad", "routeDonor": "Estoy considerando la concepción con donante", "routePlan": "Quiero planificar con antelación", "proTitle": "¿Buscas orientación profesional?", "proBody": "Algunas preguntas es mejor hablarlas con un profesional cualificado. LetsBeParents está construyendo un espacio de confianza para conectar a las personas con apoyo psicológico, médico y profesional cuando lo necesiten.", "proLink": "Conoce el apoyo profesional", "ctaTitle": "Explora LetsBeParents", "ctaBody": "Estas herramientas funcionan bien por sí solas, o como parte de tu recorrido en la plataforma.", "ctaButton": "Crear cuenta gratis"},
+    notFoundTitle: "Recurso no encontrado",
+    categoryNotFoundTitle: "Categoría de recursos no encontrada",
+    backToResources: "Volver a Recursos y herramientas",
+    backToPrefix: "Volver a",
+    comingSoonTag: "Próximamente",
+    whatsInsideHeading: "Qué incluye",
+    sectionsIntro: "{count} secciones, cada una con preguntas abiertas para que respondan los dos - primero por separado y luego juntos.",
+    sampleQuestionsLabel: "Algunas preguntas de ejemplo de la sección 1",
+    relatedResourcesHeading: "Recursos relacionados",
+    toolCtaHeading: "¿Damos el siguiente paso?",
+    toolCtaBody: "Crea una cuenta gratis para guardar tus respuestas y construir un Plan Familiar compartido en LetsBeParents.",
+    comingSoonBody: "Estamos terminando este recurso - vuelve pronto, o explora lo que ya está disponible en {category}.",
+    viewResourceLink: "Ver recurso",
+    quizStripHeading: "¿Todavía no está claro si están en la misma sintonía?",
+    quizStripBody: "El Test de compatibilidad de co-crianza te ayuda a ti y a un posible co-padre o co-madre a ver en qué coinciden sus expectativas, y qué vale la pena seguir hablando.",
+    freeWord: "gratis",
+  },
+  pt: {
+    index: {"heroPill": "Recursos e ferramentas", "heroTitle": "Recursos e ferramentas para a parentalidade", "heroBody": "Checklists práticos, folhas de trabalho e ferramentas de planeamento para te ajudar a explorar a coparentalidade, a fertilidade, a doação e o lado prático de te tornares pai ou mãe.", "startPill": "Começa aqui", "startTitle": "Três bons pontos de partida", "startSub": "Seja qual for a tua fase.", "startCard1Title": "Modelo de planeamento de coparentalidade", "startCard1Body": "A pensar em tornares-te coparente? Fala sobre educação, finanças, condições de vida e limites antes de avançar.", "startCard1Link": "Descarregar o modelo", "startCard2Title": "Perguntas a fazer a um potencial coparente", "startCard2Body": "Não sabes o que perguntar antes de dares o próximo passo? Uma lista prática sobre educação, dinheiro, comunicação e vida quotidiana.", "startCard2Link": "Ver as perguntas", "startCard3Title": "Teste de compatibilidade de coparentalidade", "startCard3Body": "Descobre onde as tuas expectativas coincidem e o que vale a pena discutir mais. Não te vai dizer se são um \"match\".", "startCard3Link": "Fazer o teste", "aiToolsPill": "Ferramentas de IA gratuitas", "aiToolsTitle": "Obtém ajuda instantânea e personalizada", "aiToolsSub": "Não é necessária conta.", "aiCard1Title": "Pergunta à IA", "aiCard1Body": "Respostas gratuitas às tuas perguntas sobre doação de gâmetas, gestação de substituição, coparentalidade e noções básicas de direito da família.", "aiCard1Link": "Faz uma pergunta", "aiCard2Title": "Rascunho de acordo com IA", "aiCard2Body": "Descreve a tua situação e obtém um primeiro rascunho de acordo de coparentalidade ou com dador para discutir e refinar com um advogado.", "aiCard2Link": "Gerar um rascunho", "categoriesPill": "Explorar tudo", "categoriesTitle": "Explora todos os recursos", "categoriesSub": "O conjunto completo de checklists, folhas de trabalho e modelos, agrupados pelo que estás a resolver.", "exploreLink": "Explorar", "routesTitle": "Não sabes por onde começar?", "routesBody": "Não precisas de ter tudo resolvido. Começa pela pergunta que é mais relevante para ti agora.", "routeCoparenting": "Estou a explorar a coparentalidade", "routeFertility": "Estou a pensar em fertilidade", "routeDonor": "Estou a considerar a conceção com dador", "routePlan": "Quero planear com antecedência", "proTitle": "Procuras orientação profissional?", "proBody": "Algumas perguntas são melhor discutidas com um profissional qualificado. A LetsBeParents está a construir um espaço de confiança para ligar as pessoas a apoio psicológico, médico e outro apoio profissional quando precisarem.", "proLink": "Saber mais sobre apoio profissional", "ctaTitle": "Explora a LetsBeParents", "ctaBody": "Estas ferramentas funcionam bem por si só - ou como parte do teu percurso na plataforma.", "ctaButton": "Criar conta gratuita"},
+    notFoundTitle: "Recurso não encontrado",
+    categoryNotFoundTitle: "Categoria de recursos não encontrada",
+    backToResources: "Voltar a Recursos e ferramentas",
+    backToPrefix: "Voltar a",
+    comingSoonTag: "Brevemente",
+    whatsInsideHeading: "O que inclui",
+    sectionsIntro: "{count} secções, cada uma com perguntas abertas para os dois responderem - primeiro sozinhos, depois juntos.",
+    sampleQuestionsLabel: "Algumas perguntas de exemplo da secção 1",
+    relatedResourcesHeading: "Recursos relacionados",
+    toolCtaHeading: "Vamos dar o próximo passo?",
+    toolCtaBody: "Cria uma conta gratuita para guardar as tuas respostas e construir um Plano Familiar partilhado na LetsBeParents.",
+    comingSoonBody: "Estamos a terminar este recurso - volta em breve, ou explora o que já está disponível em {category}.",
+    viewResourceLink: "Ver recurso",
+    quizStripHeading: "Ainda não têm a certeza se estão em sintonia?",
+    quizStripBody: "O Teste de compatibilidade de coparentalidade ajuda-te, a ti e a um potencial coparente, a ver onde coincidem as expectativas de ambos - e o que vale a pena discutir mais.",
+    freeWord: "grátis",
+  },
+  fr: {
+    index: {"heroPill": "Ressources et outils", "heroTitle": "Ressources et outils pour devenir parent", "heroBody": "Des listes de contrôle pratiques, des fiches de travail et des outils de planification pour vous aider à explorer la coparentalité, la fertilité, le don de gamètes et le côté pratique de devenir parent.", "startPill": "Commencez ici", "startTitle": "Trois bons points de départ", "startSub": "Quelle que soit votre étape.", "startCard1Title": "Modèle de planification de coparentalité", "startCard1Body": "Vous envisagez de devenir coparents ? Discutez de l'éducation, des finances, du mode de vie et des limites avant d'aller plus loin.", "startCard1Link": "Télécharger le modèle", "startCard2Title": "Questions à poser à un coparent potentiel", "startCard2Body": "Vous ne savez pas quoi demander avant de passer à l'étape suivante ? Une liste pratique sur l'éducation, l'argent, la communication et la vie quotidienne.", "startCard2Link": "Voir les questions", "startCard3Title": "Quiz de compatibilité de coparentalité", "startCard3Body": "Découvrez où vos attentes se rejoignent, et ce qui mérite d'être approfondi. Il ne vous dira pas si vous êtes « compatibles ».", "startCard3Link": "Faire le quiz", "aiToolsPill": "Outils IA gratuits", "aiToolsTitle": "Obtenez une aide instantanée et personnalisée", "aiToolsSub": "Aucun compte nécessaire.", "aiCard1Title": "Demander à l'IA", "aiCard1Body": "Réponses gratuites à vos questions sur le don de gamètes, la gestation pour autrui, la coparentalité et les bases du droit de la famille.", "aiCard1Link": "Poser une question", "aiCard2Title": "Brouillon d'accord par IA", "aiCard2Body": "Décrivez votre situation et obtenez un premier brouillon d'accord de coparentalité ou avec un donneur, à discuter et affiner avec un avocat.", "aiCard2Link": "Générer un brouillon", "categoriesPill": "Tout explorer", "categoriesTitle": "Explorez toutes les ressources", "categoriesSub": "L'ensemble complet des listes de contrôle, fiches de travail et modèles, regroupés selon ce que vous traversez.", "exploreLink": "Explorer", "routesTitle": "Vous ne savez pas par où commencer ?", "routesBody": "Vous n'avez pas besoin de tout avoir résolu. Commencez par la question la plus pertinente pour vous en ce moment.", "routeCoparenting": "J'explore la coparentalité", "routeFertility": "Je réfléchis à la fertilité", "routeDonor": "J'envisage la conception avec don de gamètes", "routePlan": "Je veux planifier à l'avance", "proTitle": "Vous cherchez un accompagnement professionnel ?", "proBody": "Certaines questions se discutent mieux avec un professionnel qualifié. LetsBeParents construit un espace de confiance pour mettre les gens en relation avec un accompagnement psychologique, médical et autre lorsqu'ils en ont besoin.", "proLink": "En savoir plus sur l'accompagnement professionnel", "ctaTitle": "Découvrez LetsBeParents", "ctaBody": "Ces outils fonctionnent bien seuls - ou dans le cadre de votre parcours sur la plateforme.", "ctaButton": "Créer un compte gratuit"},
+    notFoundTitle: "Ressource introuvable",
+    categoryNotFoundTitle: "Catégorie de ressources introuvable",
+    backToResources: "Retour à Ressources et outils",
+    backToPrefix: "Retour à",
+    comingSoonTag: "Bientôt",
+    whatsInsideHeading: "Ce qu'il contient",
+    sectionsIntro: "{count} sections, chacune avec des questions ouvertes auxquelles vous répondez tous les deux - d'abord séparément, puis ensemble.",
+    sampleQuestionsLabel: "Quelques exemples de questions de la section 1",
+    relatedResourcesHeading: "Ressources associées",
+    toolCtaHeading: "Envie de passer à l'étape suivante ?",
+    toolCtaBody: "Créez un compte gratuit pour enregistrer vos réponses et construire un Plan Familial partagé sur LetsBeParents.",
+    comingSoonBody: "Nous finalisons cette ressource - repassez bientôt, ou explorez ce qui est déjà disponible dans {category}.",
+    viewResourceLink: "Voir la ressource",
+    quizStripHeading: "Pas sûrs d'être encore sur la même longueur d'onde ?",
+    quizStripBody: "Le Quiz de compatibilité de coparentalité vous aide, vous et un coparent potentiel, à voir où vos attentes se rejoignent - et ce qui mérite d'être approfondi.",
+    freeWord: "gratuit",
+  },
+  de: {
+    index: {"heroPill": "Ressourcen & Tools", "heroTitle": "Ressourcen und Tools für Elternschaft", "heroBody": "Praktische Checklisten, Arbeitsblätter und Planungstools, die dir helfen, Co-Elternschaft, Fruchtbarkeit, Samen-/Eizellspende und die praktische Seite der Elternschaft zu erkunden.", "startPill": "Hier starten", "startTitle": "Drei gute Ausgangspunkte", "startSub": "Egal, in welcher Phase du dich befindest.", "startCard1Title": "Vorlage zur Co-Elternschaftsplanung", "startCard1Body": "Denkst du über Co-Elternschaft nach? Sprecht über Erziehung, Finanzen, Wohnsituation und Grenzen, bevor ihr weitermacht.", "startCard1Link": "Vorlage herunterladen", "startCard2Title": "Fragen an eine mögliche Co-Eltern-Person", "startCard2Body": "Nicht sicher, was du vor dem nächsten Schritt fragen sollst? Eine praktische Liste zu Erziehung, Geld, Kommunikation und Alltag.", "startCard2Link": "Fragen ansehen", "startCard3Title": "Kompatibilitätstest für Co-Elternschaft", "startCard3Body": "Finde heraus, wo eure Erwartungen übereinstimmen und was noch besprochen werden sollte. Er sagt dir nicht, ob ihr „zueinanderpasst“.", "startCard3Link": "Test starten", "aiToolsPill": "Kostenlose KI-Tools", "aiToolsTitle": "Erhalte sofortige, persönliche Hilfe", "aiToolsSub": "Kein Konto nötig.", "aiCard1Title": "Frag die KI", "aiCard1Body": "Kostenlose Antworten auf deine Fragen zu Samen-/Eizellspende, Leihmutterschaft, Co-Elternschaft und den Grundlagen des Familienrechts.", "aiCard1Link": "Frage stellen", "aiCard2Title": "KI-Vertragsentwurf", "aiCard2Body": "Beschreibe deine Situation und erhalte einen ersten Entwurf einer Co-Elternschafts- oder Spendervereinbarung, um ihn mit einem Anwalt zu besprechen und zu verfeinern.", "aiCard2Link": "Entwurf erstellen", "categoriesPill": "Alles entdecken", "categoriesTitle": "Alle Ressourcen entdecken", "categoriesSub": "Die komplette Sammlung an Checklisten, Arbeitsblättern und Vorlagen, gruppiert nach dem, womit du dich gerade beschäftigst.", "exploreLink": "Entdecken", "routesTitle": "Nicht sicher, wo du anfangen sollst?", "routesBody": "Du musst nicht schon alles herausgefunden haben. Beginne mit der Frage, die für dich gerade am wichtigsten ist.", "routeCoparenting": "Ich erkunde Co-Elternschaft", "routeFertility": "Ich denke über Fruchtbarkeit nach", "routeDonor": "Ich ziehe eine Samen-/Eizellspende in Betracht", "routePlan": "Ich möchte vorausplanen", "proTitle": "Suchst du professionelle Beratung?", "proBody": "Manche Fragen bespricht man besser mit einer qualifizierten Fachperson. LetsBeParents baut einen vertrauenswürdigen Raum auf, um Menschen bei Bedarf mit psychologischer, medizinischer und anderer professioneller Unterstützung zu verbinden.", "proLink": "Mehr über professionelle Unterstützung erfahren", "ctaTitle": "Entdecke LetsBeParents", "ctaBody": "Diese Tools funktionieren gut für sich allein - oder als Teil deines Weges auf der Plattform.", "ctaButton": "Kostenloses Konto erstellen"},
+    notFoundTitle: "Ressource nicht gefunden",
+    categoryNotFoundTitle: "Ressourcenkategorie nicht gefunden",
+    backToResources: "Zurück zu Ressourcen & Tools",
+    backToPrefix: "Zurück zu",
+    comingSoonTag: "Demnächst",
+    whatsInsideHeading: "Was dich erwartet",
+    sectionsIntro: "{count} Abschnitte, jeder mit offenen Fragen, die ihr beide beantwortet - zuerst einzeln, dann gemeinsam.",
+    sampleQuestionsLabel: "Ein paar Beispielfragen aus Abschnitt 1",
+    relatedResourcesHeading: "Verwandte Ressourcen",
+    toolCtaHeading: "Bereit für den nächsten Schritt?",
+    toolCtaBody: "Erstelle ein kostenloses Konto, um deine Antworten zu speichern und einen gemeinsamen Familienplan auf LetsBeParents zu erstellen.",
+    comingSoonBody: "Wir arbeiten noch an dieser Ressource - schau bald wieder vorbei oder entdecke, was in {category} bereits verfügbar ist.",
+    viewResourceLink: "Ressource ansehen",
+    quizStripHeading: "Noch nicht sicher, ob ihr auf einer Wellenlänge seid?",
+    quizStripBody: "Der Kompatibilitätstest für Co-Elternschaft hilft dir und einer möglichen Co-Eltern-Person zu erkennen, wo eure Erwartungen übereinstimmen - und was sich zu besprechen lohnt.",
+    freeWord: "kostenlos",
+  },
+  it: {
+    index: {"heroPill": "Risorse e strumenti", "heroTitle": "Risorse e strumenti per la genitorialità", "heroBody": "Checklist pratiche, schede di lavoro e strumenti di pianificazione per aiutarti a esplorare la co-genitorialità, la fertilità, la fecondazione da donatore e il lato pratico del diventare genitore.", "startPill": "Inizia da qui", "startTitle": "Tre buoni punti di partenza", "startSub": "Qualunque sia la tua fase.", "startCard1Title": "Modello di pianificazione della co-genitorialità", "startCard1Body": "Stai pensando di diventare co-genitori? Parlate di educazione, finanze, convivenza e confini prima di andare avanti.", "startCard1Link": "Scarica il modello", "startCard2Title": "Domande da fare a un potenziale co-genitore", "startCard2Body": "Non sai cosa chiedere prima di fare il prossimo passo? Un elenco pratico su educazione, denaro, comunicazione e vita quotidiana.", "startCard2Link": "Vedi le domande", "startCard3Title": "Quiz di compatibilità per la co-genitorialità", "startCard3Body": "Scopri dove le tue aspettative coincidono e cosa vale la pena approfondire. Non ti dirà se siete \"compatibili\".", "startCard3Link": "Fai il quiz", "aiToolsPill": "Strumenti IA gratuiti", "aiToolsTitle": "Ottieni aiuto istantaneo e personalizzato", "aiToolsSub": "Non serve un account.", "aiCard1Title": "Chiedi all'IA", "aiCard1Body": "Risposte gratuite alle tue domande su fecondazione da donatore, maternità surrogata, co-genitorialità e nozioni di base di diritto di famiglia.", "aiCard1Link": "Fai una domanda", "aiCard2Title": "Bozza di accordo con IA", "aiCard2Body": "Descrivi la tua situazione e ottieni una prima bozza di accordo di co-genitorialità o con un donatore da discutere e perfezionare con un avvocato.", "aiCard2Link": "Genera una bozza", "categoriesPill": "Esplora tutto", "categoriesTitle": "Esplora tutte le risorse", "categoriesSub": "L'intera raccolta di checklist, schede di lavoro e modelli, raggruppate in base a ciò che stai affrontando.", "exploreLink": "Esplora", "routesTitle": "Non sai da dove iniziare?", "routesBody": "Non devi avere già tutto chiaro. Inizia dalla domanda più rilevante per te in questo momento.", "routeCoparenting": "Sto esplorando la co-genitorialità", "routeFertility": "Sto pensando alla fertilità", "routeDonor": "Sto considerando la fecondazione da donatore", "routePlan": "Voglio pianificare in anticipo", "proTitle": "Cerchi una guida professionale?", "proBody": "Alcune domande è meglio discuterle con un professionista qualificato. LetsBeParents sta costruendo uno spazio affidabile per mettere in contatto le persone con supporto psicologico, medico e professionale quando ne hanno bisogno.", "proLink": "Scopri il supporto professionale", "ctaTitle": "Esplora LetsBeParents", "ctaBody": "Questi strumenti funzionano bene da soli, o come parte del tuo percorso sulla piattaforma.", "ctaButton": "Crea un account gratuito"},
+    notFoundTitle: "Risorsa non trovata",
+    categoryNotFoundTitle: "Categoria di risorse non trovata",
+    backToResources: "Torna a Risorse e strumenti",
+    backToPrefix: "Torna a",
+    comingSoonTag: "Prossimamente",
+    whatsInsideHeading: "Cosa contiene",
+    sectionsIntro: "{count} sezioni, ciascuna con domande aperte a cui rispondere in due - prima singolarmente, poi insieme.",
+    sampleQuestionsLabel: "Alcune domande di esempio dalla sezione 1",
+    relatedResourcesHeading: "Risorse correlate",
+    toolCtaHeading: "Facciamo il prossimo passo?",
+    toolCtaBody: "Crei un account gratuito per salvare le Sue risposte e creare un Piano Famiglia condiviso su LetsBeParents.",
+    comingSoonBody: "Stiamo completando questa risorsa - torni a trovarci presto, oppure esplori ciò che è già disponibile in {category}.",
+    viewResourceLink: "Vedi risorsa",
+    quizStripHeading: "Non è ancora chiaro se siete sulla stessa lunghezza d'onda?",
+    quizStripBody: "Il Quiz di compatibilità per la co-genitorialità aiuta a vedere dove le proprie aspettative e quelle di un potenziale co-genitore coincidono, e cosa vale la pena approfondire ulteriormente.",
+    freeWord: "gratuito",
+  },
+  pl: {
+    index: {"heroPill": "Zasoby i narzędzia", "heroTitle": "Zasoby i narzędzia dla rodzicielstwa", "heroBody": "Praktyczne listy kontrolne, arkusze robocze i narzędzia planowania, które pomogą Ci poznać współrodzicielstwo, płodność, poczęcie z dawstwa i praktyczną stronę zostania rodzicem.", "startPill": "Zacznij tutaj", "startTitle": "Trzy dobre miejsca, by zacząć", "startSub": "Niezależnie od etapu, na którym jesteś.", "startCard1Title": "Szablon planowania współrodzicielstwa", "startCard1Body": "Rozważasz zostanie współrodzicem? Porozmawiajcie o wychowaniu, finansach, warunkach mieszkaniowych i granicach, zanim pójdziecie dalej.", "startCard1Link": "Pobierz szablon", "startCard2Title": "Pytania do potencjalnego współrodzica", "startCard2Body": "Nie wiesz, o co zapytać przed kolejnym krokiem? Praktyczna lista pytań o wychowanie, pieniądze, komunikację i codzienne życie.", "startCard2Link": "Zobacz pytania", "startCard3Title": "Test kompatybilności współrodzicielstwa", "startCard3Body": "Sprawdź, gdzie Wasze oczekiwania się pokrywają i co warto jeszcze omówić. Nie powie Ci, czy jesteście „dopasowani”.", "startCard3Link": "Rozwiąż test", "aiToolsPill": "Bezpłatne narzędzia AI", "aiToolsTitle": "Uzyskaj natychmiastową, spersonalizowaną pomoc", "aiToolsSub": "Konto nie jest potrzebne.", "aiCard1Title": "Zapytaj AI", "aiCard1Body": "Bezpłatne odpowiedzi na pytania o poczęcie z dawstwa, macierzyństwo zastępcze, współrodzicielstwo i podstawy prawa rodzinnego.", "aiCard1Link": "Zadaj pytanie", "aiCard2Title": "Szkic umowy od AI", "aiCard2Body": "Opisz swoją sytuację i uzyskaj pierwszy szkic umowy o współrodzicielstwie lub z dawcą, do omówienia i dopracowania z prawnikiem.", "aiCard2Link": "Wygeneruj szkic", "categoriesPill": "Odkryj wszystko", "categoriesTitle": "Odkryj wszystkie zasoby", "categoriesSub": "Pełny zestaw list kontrolnych, arkuszy i szablonów, pogrupowanych według tego, czym się teraz zajmujesz.", "exploreLink": "Odkryj", "routesTitle": "Nie wiesz, od czego zacząć?", "routesBody": "Nie musisz mieć wszystkiego przemyślanego. Zacznij od pytania, które jest dla Ciebie teraz najważniejsze.", "routeCoparenting": "Poznaję współrodzicielstwo", "routeFertility": "Myślę o płodności", "routeDonor": "Rozważam poczęcie z dawstwa", "routePlan": "Chcę zaplanować z wyprzedzeniem", "proTitle": "Szukasz profesjonalnego wsparcia?", "proBody": "Niektóre pytania lepiej omówić z wykwalifikowanym specjalistą. LetsBeParents buduje zaufaną przestrzeń, by łączyć ludzi ze wsparciem psychologicznym, medycznym i innym profesjonalnym wsparciem, gdy tego potrzebują.", "proLink": "Dowiedz się o profesjonalnym wsparciu", "ctaTitle": "Odkryj LetsBeParents", "ctaBody": "Te narzędzia dobrze działają same w sobie - lub jako część Twojej drogi na platformie.", "ctaButton": "Załóż darmowe konto"},
+    notFoundTitle: "Nie znaleziono zasobu",
+    categoryNotFoundTitle: "Nie znaleziono kategorii zasobów",
+    backToResources: "Powrót do Zasobów i narzędzi",
+    backToPrefix: "Powrót do",
+    comingSoonTag: "Wkrótce",
+    whatsInsideHeading: "Co znajdziesz w środku",
+    sectionsIntro: "{count} sekcji, każda z otwartymi pytaniami, na które odpowiadacie oboje - najpierw osobno, potem razem.",
+    sampleQuestionsLabel: "Kilka przykładowych pytań z sekcji 1",
+    relatedResourcesHeading: "Powiązane zasoby",
+    toolCtaHeading: "Zróbmy kolejny krok?",
+    toolCtaBody: "Załóż darmowe konto, aby zapisać swoje odpowiedzi i zbudować wspólny Plan Rodzinny na LetsBeParents.",
+    comingSoonBody: "Kończymy pracę nad tym zasobem - zajrzyj tu wkrótce albo sprawdź, co jest już dostępne w {category}.",
+    viewResourceLink: "Zobacz zasób",
+    quizStripHeading: "Nie jesteście pewni, czy jesteście na tej samej fali?",
+    quizStripBody: "Test kompatybilności współrodzicielstwa pomaga Tobie i potencjalnemu współrodzicowi zobaczyć, gdzie Wasze oczekiwania się pokrywają - i co warto jeszcze omówić.",
+    freeWord: "za darmo",
+  },
+};
+
 function ResourcesIndex() {
   const locale = localeOf();
+  const text = RESOURCES_TEXT[locale] ?? RESOURCES_TEXT.en;
+  const t = text.index;
   return (
     <div className="resources-page">
       <section className="resources-hero">
-        <span className="landing-pill resources-pill"><i /><span>Resources & tools</span></span>
-        <h1>Parenthood resources and tools</h1>
-        <p>Practical checklists, worksheets and planning tools to help you explore co-parenting, fertility, donor conception and the practical side of becoming a parent.</p>
+        <span className="landing-pill resources-pill"><i /><span>{t.heroPill}</span></span>
+        <h1>{t.heroTitle}</h1>
+        <p>{t.heroBody}</p>
       </section>
 
       <section className="resources-start">
         <div className="landing-section-intro">
-          <span>Start here</span>
-          <h2>Three good places to begin</h2>
-          <p className="resources-section-sub">Whichever stage you're at.</p>
+          <span>{t.startPill}</span>
+          <h2>{t.startTitle}</h2>
+          <p className="resources-section-sub">{t.startSub}</p>
         </div>
         <div className="resources-start-grid">
           <Link className="resources-start-card" to={`/${locale}/resources/co-parenting/planning-template`}>
             <span className="resources-start-icon">{resourceDocIcon()}</span>
-            <h3>Co-Parenting Planning Template</h3>
-            <p>Thinking about becoming co-parents? Talk through parenting, finances, living arrangements and boundaries before you move forward.</p>
-            <span className="resources-start-link">Download the template {resourceArrow()}</span>
+            <h3>{t.startCard1Title}</h3>
+            <p>{t.startCard1Body}</p>
+            <span className="resources-start-link">{t.startCard1Link} {resourceArrow()}</span>
           </Link>
           <Link className="resources-start-card" to={`/${locale}/resources/co-parenting/questions-to-ask`}>
             <span className="resources-start-icon">{resourceDocIcon()}</span>
-            <h3>Questions to Ask a Potential Co-Parent</h3>
-            <p>Not sure what to ask before taking the next step? A practical list covering parenting, money, communication and everyday life.</p>
-            <span className="resources-start-link">View the questions {resourceArrow()}</span>
+            <h3>{t.startCard2Title}</h3>
+            <p>{t.startCard2Body}</p>
+            <span className="resources-start-link">{t.startCard2Link} {resourceArrow()}</span>
           </Link>
           <Link className="resources-start-card featured" to={`/${locale}/resources/co-parenting/compatibility-quiz`}>
             <span className="resources-start-icon">{resourceQuizIcon()}</span>
-            <h3>Co-Parenting Compatibility Quiz</h3>
-            <p>See where your expectations line up, and what's worth discussing further. It won't tell you whether you're a "match."</p>
-            <span className="resources-start-link">Take the quiz {resourceArrow()}</span>
+            <h3>{t.startCard3Title}</h3>
+            <p>{t.startCard3Body}</p>
+            <span className="resources-start-link">{t.startCard3Link} {resourceArrow()}</span>
+          </Link>
+        </div>
+      </section>
+
+      <section className="resources-ai-tools">
+        <div className="landing-section-intro">
+          <span>{t.aiToolsPill}</span>
+          <h2>{t.aiToolsTitle}</h2>
+          <p className="resources-section-sub">{t.aiToolsSub}</p>
+        </div>
+        <div className="resources-start-grid">
+          <Link className="resources-start-card" to={`/${locale}/tools/ask-ai`}>
+            <span className="resources-start-icon">{resourceChatIcon()}</span>
+            <h3>{t.aiCard1Title}</h3>
+            <p>{t.aiCard1Body}</p>
+            <span className="resources-start-link">{t.aiCard1Link} {resourceArrow()}</span>
+          </Link>
+          <Link className="resources-start-card" to={`/${locale}/tools/agreement-draft`}>
+            <span className="resources-start-icon">{resourceDocIcon()}</span>
+            <h3>{t.aiCard2Title}</h3>
+            <p>{t.aiCard2Body}</p>
+            <span className="resources-start-link">{t.aiCard2Link} {resourceArrow()}</span>
           </Link>
         </div>
       </section>
 
       <section className="resources-categories">
         <div className="landing-section-intro">
-          <span>Explore all</span>
-          <h2>Explore all resources</h2>
-          <p className="resources-section-sub">The full set of checklists, worksheets and templates, grouped by what you're working through.</p>
+          <span>{t.categoriesPill}</span>
+          <h2>{t.categoriesTitle}</h2>
+          <p className="resources-section-sub">{t.categoriesSub}</p>
         </div>
         <div className="resources-category-grid">
-          {RESOURCES_CATEGORIES.map((cat) => (
-            <article key={cat.slug} className="resources-category-card">
-              <span className="resources-category-icon">{resourceCategoryIcon(cat.icon)}</span>
-              <span className="resources-category-eyebrow">{cat.eyebrow}</span>
-              <h3>{cat.title}</h3>
-              <p>{cat.description}</p>
-              <ul>
-                {cat.tools.map((tool) => (
-                  <li key={tool.slug}><Link to={`/${locale}/resources/${cat.slug}/${tool.slug}`}>{tool.title}</Link></li>
-                ))}
-              </ul>
-              {cat.disclaimer && <p className="resources-category-note">{cat.disclaimer}</p>}
-              <Link className="resources-category-cta" to={`/${locale}/resources/${cat.slug}`}>
-                Explore {cat.eyebrow.toLowerCase()} {resourceArrow()}
-              </Link>
-            </article>
-          ))}
+          {RESOURCES_CATEGORIES.map((baseCat) => {
+            const cat = localizedCategory(baseCat, locale);
+            return (
+              <article key={cat.slug} className="resources-category-card">
+                <span className="resources-category-icon">{resourceCategoryIcon(cat.icon)}</span>
+                <span className="resources-category-eyebrow">{cat.eyebrow}</span>
+                <h3>{cat.title}</h3>
+                <p>{cat.description}</p>
+                <ul>
+                  {cat.tools.map((baseTool) => {
+                    const tool = localizedTool(cat, baseTool, locale);
+                    return <li key={tool.slug}><Link to={`/${locale}/resources/${cat.slug}/${tool.slug}`}>{tool.title}</Link></li>;
+                  })}
+                </ul>
+                {cat.disclaimer && <p className="resources-category-note">{cat.disclaimer}</p>}
+                <Link className="resources-category-cta" to={`/${locale}/resources/${cat.slug}`}>
+                  {t.exploreLink} {cat.eyebrow.toLowerCase()} {resourceArrow()}
+                </Link>
+              </article>
+            );
+          })}
         </div>
       </section>
 
       <section className="resources-routes">
         <span className="resources-routes-icon">{resourceArrow()}</span>
         <div className="resources-routes-copy">
-          <h2>Not sure where to start?</h2>
-          <p>You don't have to have everything figured out. Start with the question that's most relevant to you right now.</p>
+          <h2>{t.routesTitle}</h2>
+          <p>{t.routesBody}</p>
         </div>
         <div className="resources-routes-grid">
-          <Link to={`/${locale}/resources/co-parenting`}>I'm exploring co-parenting {resourceArrow()}</Link>
-          <Link to={`/${locale}/resources/fertility-donor`}>I'm thinking about fertility {resourceArrow()}</Link>
-          <Link to={`/${locale}/resources/fertility-donor`}>I'm considering donor conception {resourceArrow()}</Link>
-          <Link to={`/${locale}/resources/parenthood-planning`}>I want to plan ahead {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/co-parenting`}>{t.routeCoparenting} {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/fertility-donor`}>{t.routeFertility} {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/fertility-donor`}>{t.routeDonor} {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/parenthood-planning`}>{t.routePlan} {resourceArrow()}</Link>
         </div>
       </section>
 
       <section className="resources-pro">
         <span className="resources-pro-icon">{resourceChatIcon()}</span>
         <div className="resources-pro-copy">
-          <h2>Looking for professional guidance?</h2>
-          <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
+          <h2>{t.proTitle}</h2>
+          <p>{t.proBody}</p>
         </div>
-        <Link className="resources-pro-button" to={`/${locale}/professionals`}>Learn about professional support {resourceArrow()}</Link>
+        <Link className="resources-pro-button" to={`/${locale}/professionals`}>{t.proLink} {resourceArrow()}</Link>
       </section>
 
       <section className="landing-cta">
-        <h2>Explore LetsBeParents</h2>
-        <p>These tools work well on their own - or as part of your journey on the platform.</p>
-        <Link to={`/${locale}/auth/register`}>Create free account <span>→</span></Link>
+        <h2>{t.ctaTitle}</h2>
+        <p>{t.ctaBody}</p>
+        <Link to={`/${locale}/auth/register`}>{t.ctaButton} <span>→</span></Link>
       </section>
     </div>
   );
@@ -6651,18 +11551,20 @@ function ResourcesIndex() {
 
 function ResourceCategory() {
   const locale = localeOf();
+  const text = RESOURCES_TEXT[locale] ?? RESOURCES_TEXT.en;
   const { category = "" } = useParams();
-  const cat = RESOURCES_CATEGORIES.find((item) => item.slug === category);
-  if (!cat) {
+  const baseCat = RESOURCES_CATEGORIES.find((item) => item.slug === category);
+  if (!baseCat) {
     return (
       <div className="resources-page">
         <section className="resources-hero">
-          <h1>Resource category not found</h1>
-          <Link className="landing-gradient-button" to={`/${locale}/resources`}>Back to Resources & Tools {resourceArrow()}</Link>
+          <h1>{text.categoryNotFoundTitle}</h1>
+          <Link className="landing-gradient-button" to={`/${locale}/resources`}>{text.backToResources} {resourceArrow()}</Link>
         </section>
       </div>
     );
   }
+  const cat = localizedCategory(baseCat, locale);
   return (
     <div className="resources-page">
       <section className="resources-hero resource-detail-hero">
@@ -6671,21 +11573,24 @@ function ResourceCategory() {
         <p>{cat.description}</p>
       </section>
       <div className="resources-tool-grid">
-        {cat.tools.map((tool) => (
-          <Link key={tool.slug} className="resources-tool-card" to={`/${locale}/resources/${cat.slug}/${tool.slug}`}>
-            <span className="resources-tool-icon">{resourceDocIcon()}</span>
-            {tool.tag && <span className="resources-tool-tag">{tool.tag}</span>}
-            <h3>{tool.title}</h3>
-            <p>{tool.description}</p>
-            <span className="resources-tool-link">{tool.downloadUrl ? "Download the template" : "View resource"} {resourceArrow()}</span>
-          </Link>
-        ))}
+        {cat.tools.map((baseTool) => {
+          const tool = localizedTool(cat, baseTool, locale);
+          return (
+            <Link key={tool.slug} className="resources-tool-card" to={`/${locale}/resources/${cat.slug}/${tool.slug}`}>
+              <span className="resources-tool-icon">{resourceDocIcon()}</span>
+              {tool.tag && <span className="resources-tool-tag">{tool.tag}</span>}
+              <h3>{tool.title}</h3>
+              <p>{tool.description}</p>
+              <span className="resources-tool-link">{tool.downloadUrl ? text.index.startCard1Link : text.viewResourceLink} {resourceArrow()}</span>
+            </Link>
+          );
+        })}
       </div>
       {cat.slug === "co-parenting" && (
         <section className="resources-quiz-strip">
-          <h2>Not sure you're on the same page yet?</h2>
-          <p>The Co-Parenting Compatibility Quiz helps you and a potential co-parent see where your expectations align - and what's worth discussing further.</p>
-          <Link className="landing-gradient-button" to={`/${locale}/resources/co-parenting/compatibility-quiz`}>Take the quiz {resourceArrow()}</Link>
+          <h2>{text.quizStripHeading}</h2>
+          <p>{text.quizStripBody}</p>
+          <Link className="landing-gradient-button" to={`/${locale}/resources/co-parenting/compatibility-quiz`}>{text.index.startCard3Link} {resourceArrow()}</Link>
         </section>
       )}
     </div>
@@ -6765,9 +11670,108 @@ const QUIZ_PROMPTS: Record<number, string[]> = {
   8: ["What would be a dealbreaker for each of you?", "Is there anything you're hesitant to bring up right now?"],
 };
 
-function computeQuizResults(answers: (string | null)[]) {
+// --- i18n text for the Compatibility Quiz (8 locales; ported from mobile's QUIZ_CONTENT + quiz.* keys) ---
+type QuizLocaleText = {
+  sections: string[];
+  questions: { section: number; type: "select" | "text"; prompt: string; options?: string[] }[];
+  strengthCopy: Record<number, { title: string; copy: string }>;
+  discussCopy: Record<number, { title: string; copy: string }>;
+  prompts: Record<number, string[]>;
+  intro: { title: string; body: string; beforeYouStart: string; questionsCount: string; duration: string; canGoBack: string; freeTextOptional: string; privacyHeading: string; privacyBody: string; startButton: string };
+  results: { title: string; subtitle: string; strongestHeading: string; discussHeading: string; discussEmptyBody: string; promptsHeading: string; shareImageButton: string; shareButton: string; noScoreShort: string; nextStepQuestions: string; nextStepPlan: string; nextStepAskAi: string; nextStepAgreement: string; nextStepInvite: string; aiInsightButton: string; aiInsightLoading: string; aiInsightTitle: string; aiInsightLimited: string; aiInsightError: string; downloadImageError: string; preparingImage: string };
+  question: { progressLabel: string; hintSelect: string; hintText: string; back: string; next: string; seeResults: string; note: string };
+};
+
+const QUIZ_TEXT: Record<CookieLocale, QuizLocaleText> = {
+  en: {
+    sections: ["Why parent?", "Parenting", "Everyday life", "Money", "Communication", "Boundaries", "Future", "Important questions"],
+    questions: [{"section": 1, "type": "select", "prompt": "Why do you want to become a parent?", "options": ["I've always wanted to raise a child", "I want to build a family before it's too late for me", "I want to give a child a loving home, however that looks", "I'm honestly still exploring why"]}, {"section": 1, "type": "select", "prompt": "How would you describe the kind of parent you hope to be?", "options": ["Hands-on and involved in the daily details", "Present, but giving my child independence", "Guided by structure and routine", "Still figuring this out"]}, {"section": 1, "type": "select", "prompt": "What matters most to you about becoming a parent right now?", "options": ["Timing - I don't want to wait much longer", "Finding the right situation, whenever that happens", "Doing it in a way that feels stable and prepared", "I'm not sure yet, I'm exploring my options"]}, {"section": 2, "type": "select", "prompt": "How would you ideally share parenting responsibilities?", "options": ["As equally as possible", "Based on schedules", "Based on income", "Decide together", "I'm not sure yet"]}, {"section": 2, "type": "select", "prompt": "What's your view on discipline?", "options": ["Clear rules and consistent consequences", "Gentle guidance, talking things through", "Depends on the situation", "Something we'd need to agree on together"]}, {"section": 2, "type": "select", "prompt": "How involved do you want the other parent to be in day-to-day decisions?", "options": ["Involved in everything, always", "Involved in the big decisions, independent on the small ones", "Mostly independent, checking in occasionally", "I'm still working this out"]}, {"section": 2, "type": "select", "prompt": "How do you feel about extended family being involved in parenting?", "options": ["Very involved - grandparents and family close by", "Involved sometimes, but we set the boundaries", "Minimal involvement, we'd raise the child mostly ourselves", "Depends entirely on the family, I'd need to think it through"]}, {"section": 3, "type": "select", "prompt": "Where would you ideally want your child to grow up?", "options": ["Close to where I live now", "Open to moving somewhere new", "Close to family, wherever they are", "Haven't thought about it yet"]}, {"section": 3, "type": "select", "prompt": "How would you divide everyday routines like school runs, meals and bedtime?", "options": ["Split evenly by default", "Whoever's schedule allows it that day", "One of us takes the lead, the other supports", "We'd figure it out as we go"]}, {"section": 3, "type": "select", "prompt": "How much flexibility do you want in your day-to-day parenting schedule?", "options": ["A clear, consistent routine works best for me", "I like flexibility and adapting as needed", "A mix of both", "Not sure yet"]}, {"section": 4, "type": "select", "prompt": "How do you feel about splitting child-related costs?", "options": ["Equally, no matter what we each earn", "Proportional to what we each earn", "One of us takes on more financially", "We'd need to talk this through"]}, {"section": 4, "type": "select", "prompt": "How would you handle a large, unexpected expense for your child?", "options": ["Split it immediately, no discussion needed", "Talk it through and decide together first", "Whoever has the means covers it, for now", "Honestly not sure yet"]}, {"section": 4, "type": "select", "prompt": "How comfortable are you discussing money with a co-parent before you commit to anything?", "options": ["Very comfortable - I'd want this settled early", "Comfortable, but I'd ease into it", "A bit uneasy, but I know it's necessary", "I tend to avoid money conversations"]}, {"section": 5, "type": "select", "prompt": "How often do you expect to communicate with a co-parent about your child?", "options": ["Daily updates, even for small things", "Regularly, for anything that matters", "Only when a decision needs to be made", "I'm not sure what's realistic yet"]}, {"section": 5, "type": "select", "prompt": "What's your preferred way to handle a disagreement?", "options": ["Talk it out immediately, in person if possible", "Take some time to think, then talk", "Write it out first so I can be clear", "I tend to avoid conflict when I can"]}, {"section": 5, "type": "select", "prompt": "How do you feel about being asked hard questions early on?", "options": ["I'd rather know everything upfront", "I'm fine with it once there's some trust", "I'd prefer to ease into deeper topics", "It makes me a little uncomfortable"]}, {"section": 6, "type": "select", "prompt": "How do you feel about a co-parent dating other people?", "options": ["Completely fine, as long as it's respectful", "Fine, but I'd want some boundaries in place", "I'd want to discuss this before it happens", "I haven't thought this through yet"]}, {"section": 6, "type": "select", "prompt": "What personal information are you comfortable sharing early in a co-parenting conversation?", "options": ["Pretty much everything relevant", "The basics, more as trust builds", "Only what's directly related to parenting", "I'm naturally private about most things"]}, {"section": 6, "type": "select", "prompt": "How do you feel about a co-parent setting limits on how involved you are?", "options": ["Completely fair, we should each be able to set limits", "Depends on what the limit is", "I'd want to be as involved as possible, always", "Haven't considered this yet"]}, {"section": 7, "type": "select", "prompt": "How do you picture your family five years from now?", "options": ["A clear, stable routine we've settled into", "Still adapting as things change", "Depends a lot on where life takes us", "Honestly, I haven't pictured it yet"]}, {"section": 7, "type": "select", "prompt": "What happens if one of you wants to relocate someday?", "options": ["We'd need to agree on this before starting", "We'd figure it out together when it comes up", "I'd want the flexibility to move if needed", "Not sure how I'd handle this"]}, {"section": 7, "type": "select", "prompt": "How do you feel about the arrangement changing as your child gets older?", "options": ["I expect it to evolve, and I'm comfortable with that", "I'd want to keep things as consistent as possible", "A bit of both, depending on what's needed", "Haven't thought that far ahead"]}, {"section": 8, "type": "select", "prompt": "What would make you decide not to move forward with a potential co-parent?", "options": ["A mismatch in core values around parenting", "Feeling pressured or rushed into decisions", "Concerns about reliability or follow-through", "I'd know it when I felt it"]}, {"section": 8, "type": "text", "prompt": "What do you most want a potential co-parent to understand about you before you move forward together?"}, {"section": 8, "type": "text", "prompt": "What's one question you're afraid to ask, but know you should?"}, {"section": 8, "type": "text", "prompt": "Is there anything else about your situation or expectations you'd want to share?"}],
+    strengthCopy: {"1": {"title": "Why parent?", "copy": "You seem clear on why you want to become a parent - that clarity is worth naming out loud early in a conversation."}, "2": {"title": "Parenting", "copy": "You appear to have a settled sense of how you'd want to co-parent day to day."}, "3": {"title": "Everyday life", "copy": "You have a fairly clear picture of what daily life and routines could look like."}, "4": {"title": "Money", "copy": "You seem comfortable and decisive about how money and costs would be handled."}, "5": {"title": "Communication", "copy": "You appear comfortable discussing difficult subjects and looking for solutions together."}, "6": {"title": "Boundaries", "copy": "You have a clear sense of the boundaries that matter to you."}, "7": {"title": "Future", "copy": "You seem to have thought through how things might change as your family grows."}, "8": {"title": "Important questions", "copy": "You have a clear sense of what would - and wouldn't - work for you."}},
+    discussCopy: {"1": {"title": "Why parent?", "copy": "Your answers suggest your reasons for parenthood are still taking shape - worth putting into words before you go much further."}, "2": {"title": "Parenting", "copy": "How day-to-day parenting responsibilities would actually be split looks like an area worth a deeper conversation."}, "3": {"title": "Everyday life", "copy": "Living arrangements and daily routines - your answers show an area where you may want a deeper conversation."}, "4": {"title": "Money", "copy": "How costs would be shared seems less settled for you - a good one to raise early, not after the fact."}, "5": {"title": "Communication", "copy": "How you'd communicate day to day, especially during disagreements, is worth talking through explicitly."}, "6": {"title": "Boundaries", "copy": "Where your boundaries sit isn't fully settled yet - worth clarifying for yourself, then with a potential co-parent."}, "7": {"title": "Future", "copy": "How things might change over the years is still uncertain for you - worth revisiting as the relationship develops."}, "8": {"title": "Important questions", "copy": "Some of the harder questions are still open for you - they're worth sitting with before you commit to anything."}},
+    prompts: {"1": ["Why are you both considering this now, specifically?", "What would make this feel like the wrong decision in hindsight?"], "2": ["How would you split decisions on schooling, healthcare and discipline?", "What happens if you disagree on a parenting decision?"], "3": ["Where would you each ideally want to live, and how close to each other?", "How would a typical week actually be divided?"], "4": ["How would you divide costs if one of you earns significantly more?", "Who would cover an unplanned, larger expense?"], "5": ["How often do you expect to check in with each other?", "What does a fair way to disagree look like to each of you?"], "6": ["What would you want to know about each other's other relationships?", "What information do you each consider private?"], "7": ["What would you do if one of you wanted to move away?", "How do you imagine this arrangement evolving over 10+ years?"], "8": ["What would be a dealbreaker for each of you?", "Is there anything you're hesitant to bring up right now?"]},
+    intro: {"title": "Could you see yourself parenting well with this person?", "body": "This quiz won't tell you whether you should co-parent. It helps you see where expectations align - and what's worth discussing further.", "beforeYouStart": "Before you start", "questionsCount": "{count} questions", "duration": "About 5 minutes", "canGoBack": "You can go back and edit answers", "freeTextOptional": "Free-text answers are optional", "privacyHeading": "Privacy", "privacyBody": "Your answers stay in this browser session and are never shared automatically. Create a free account if you'd like to save or share your results.", "startButton": "Start the quiz"},
+    results: {"title": "What your answers suggest", "subtitle": "A reflection of your priorities - not a verdict.", "strongestHeading": "Your strongest areas", "discussHeading": "Worth discussing", "discussEmptyBody": "You answered fairly decisively across the board - that's a good sign, but it's still worth having these conversations out loud with a potential co-parent, not just with yourself.", "promptsHeading": "Questions to explore together", "shareImageButton": "Share as image", "shareButton": "Share as text", "noScoreShort": "No compatibility %", "nextStepQuestions": "Questions to Ask a Potential Co-Parent", "nextStepPlan": "Create a Co-Parenting Plan", "nextStepAskAi": "Ask AI a donor or legal question", "nextStepAgreement": "Get an AI agreement draft", "nextStepInvite": "Invite your potential co-parent", "aiInsightButton": "Get your personalized AI reflection", "aiInsightLoading": "Writing your personalized reflection…", "aiInsightTitle": "Your personalized reflection", "aiInsightLimited": "You've reached today's free limit for this tool - please try again tomorrow.", "aiInsightError": "Could not generate your reflection right now. Please try again.", "downloadImageError": "Could not create the image right now. Please try again.", "preparingImage": "Preparing image…"},
+    question: {"progressLabel": "Section {n} of 8 - {section}", "hintSelect": "Choose the answer that feels closest to you.", "hintText": "Optional - write as much or as little as you like.", "back": "Back", "next": "Next", "seeResults": "See results", "note": "Answers can be changed before you reach your results."},
+  },
+  ru: {
+    sections: ["Зачем становиться родителем?", "Воспитание", "Повседневная жизнь", "Деньги", "Общение", "Границы", "Будущее", "Важные вопросы"],
+    questions: [{"section": 1, "type": "select", "prompt": "Почему вы хотите стать родителем?", "options": ["Я всегда хотел(а) воспитывать ребёнка", "Я хочу создать семью, пока не стало слишком поздно", "Я хочу дать ребёнку любящий дом, каким бы он ни был", "Честно говоря, я всё ещё разбираюсь, почему"]}, {"section": 1, "type": "select", "prompt": "Как бы вы описали родителя, которым надеетесь стать?", "options": ["Активно вовлечённый(ая) во все повседневные детали", "Присутствующий(ая), но дающий(ая) ребёнку самостоятельность", "Ориентированный(ая) на структуру и режим", "Пока ещё не определился(лась)"]}, {"section": 1, "type": "select", "prompt": "Что для вас сейчас важнее всего в том, чтобы стать родителем?", "options": ["Время — я не хочу ждать намного дольше", "Найти подходящую ситуацию, когда бы это ни случилось", "Сделать это так, чтобы чувствовать стабильность и готовность", "Пока не уверен(а), я изучаю свои варианты"]}, {"section": 2, "type": "select", "prompt": "Как бы вы в идеале хотели делить обязанности по воспитанию?", "options": ["Максимально поровну", "В зависимости от графика", "В зависимости от дохода", "Решать вместе, по ситуации", "Пока не уверен(а)"]}, {"section": 2, "type": "select", "prompt": "Как вы относитесь к дисциплине?", "options": ["Чёткие правила и последовательные последствия", "Мягкое руководство, обсуждение ситуаций", "Зависит от ситуации", "Это то, о чём нам нужно договориться вместе"]}, {"section": 2, "type": "select", "prompt": "Насколько вовлечённым вы хотите видеть второго родителя в повседневных решениях?", "options": ["Вовлечён(а) во всё, всегда", "Вовлечён(а) в важные решения, независимость в мелочах", "В основном независимо, с редкими сверками", "Я пока ещё не разобрался(лась) с этим"]}, {"section": 2, "type": "select", "prompt": "Как вы относитесь к участию расширенной семьи в воспитании?", "options": ["Активное участие — бабушки, дедушки и родные рядом", "Иногда участвуют, но границы определяем мы", "Минимальное участие, мы бы растили ребёнка в основном сами", "Полностью зависит от семьи, мне нужно это обдумать"]}, {"section": 3, "type": "select", "prompt": "Где бы вы хотели, чтобы рос ваш ребёнок?", "options": ["Там, где я живу сейчас", "Открыт(а) к переезду куда-то ещё", "Рядом с семьёй, где бы она ни была", "Ещё не думал(а) об этом"]}, {"section": 3, "type": "select", "prompt": "Как бы вы делили повседневные дела — отвозить в школу, готовить еду, укладывать спать?", "options": ["По умолчанию поровну", "В зависимости от того, у кого какой график в этот день", "Один(а) берёт на себя основное, другой(ая) поддерживает", "Разберёмся по ходу дела"]}, {"section": 3, "type": "select", "prompt": "Насколько гибким вы хотите видеть ваш повседневный родительский график?", "options": ["Чёткий, последовательный режим — то, что мне подходит лучше всего", "Мне нравится гибкость и адаптация по необходимости", "Немного того и другого", "Пока не уверен(а)"]}, {"section": 4, "type": "select", "prompt": "Как вы относитесь к разделению расходов на ребёнка?", "options": ["Поровну, независимо от того, кто сколько зарабатывает", "Пропорционально доходу каждого", "Один(а) из нас берёт на себя больше финансово", "Нам нужно было бы это обсудить"]}, {"section": 4, "type": "select", "prompt": "Как бы вы справились с крупным непредвиденным расходом на ребёнка?", "options": ["Разделили бы сразу, без лишних обсуждений", "Сначала обсудили бы и решили вместе", "Пока покрывает тот, у кого есть возможность", "Честно говоря, пока не уверен(а)"]}, {"section": 4, "type": "select", "prompt": "Насколько вам комфортно обсуждать деньги с со-родителем до того, как вы возьмёте на себя обязательства?", "options": ["Очень комфортно — я бы хотел(а) прояснить это заранее", "Комфортно, но я бы подходил(а) к этому постепенно", "Немного неловко, но понимаю, что это необходимо", "Обычно я избегаю разговоров о деньгах"]}, {"section": 5, "type": "select", "prompt": "Как часто вы ожидаете общаться с со-родителем по поводу ребёнка?", "options": ["Ежедневные новости, даже по мелочам", "Регулярно, по всему, что имеет значение", "Только когда нужно принять решение", "Пока не уверен(а), что реалистично"]}, {"section": 5, "type": "select", "prompt": "Как вы предпочитаете разрешать разногласия?", "options": ["Обсудить сразу же, лично, если возможно", "Взять время подумать, а потом поговорить", "Сначала записать мысли, чтобы выразиться яснее", "Обычно я избегаю конфликтов, когда это возможно"]}, {"section": 5, "type": "select", "prompt": "Как вы относитесь к тому, что вам могут задавать сложные вопросы на раннем этапе?", "options": ["Я предпочитаю знать всё сразу", "Мне это нормально, как только появится немного доверия", "Я бы предпочёл(ла) постепенно переходить к более глубоким темам", "Это вызывает у меня лёгкий дискомфорт"]}, {"section": 6, "type": "select", "prompt": "Как вы относитесь к тому, что со-родитель встречается с другими людьми?", "options": ["Совершенно нормально, если это делается с уважением", "Нормально, но я бы хотел(а) установить некоторые границы", "Я бы хотел(а) обсудить это заранее", "Я пока не продумал(а) это"]}, {"section": 6, "type": "select", "prompt": "Какой личной информацией вам комфортно делиться на раннем этапе разговора о со-родительстве?", "options": ["Практически всем, что имеет значение", "Основным, а дальше — по мере роста доверия", "Только тем, что напрямую связано с воспитанием", "По природе я довольно закрытый(ая) человек"]}, {"section": 6, "type": "select", "prompt": "Как вы относитесь к тому, что со-родитель устанавливает ограничения на степень вашего участия?", "options": ["Совершенно справедливо, каждый должен иметь право устанавливать границы", "Зависит от того, что это за ограничение", "Я бы всегда хотел(а) быть максимально вовлечён(а)", "Пока не задумывался(лась) об этом"]}, {"section": 7, "type": "select", "prompt": "Как вы представляете свою семью через пять лет?", "options": ["Чёткий, стабильный уклад, к которому мы пришли", "Всё ещё адаптируемся по мере изменений", "Во многом зависит от того, куда нас приведёт жизнь", "Честно говоря, я пока это не представлял(а)"]}, {"section": 7, "type": "select", "prompt": "Что произойдёт, если однажды один из вас захочет переехать?", "options": ["Нам нужно было бы договориться об этом заранее", "Мы бы разобрались с этим вместе, когда возникнет такая необходимость", "Я бы хотел(а) сохранить гибкость на случай переезда", "Не уверен(а), как бы я с этим справился(лась)"]}, {"section": 7, "type": "select", "prompt": "Как вы относитесь к тому, что договорённости будут меняться по мере взросления ребёнка?", "options": ["Я ожидаю, что всё будет меняться, и мне это комфортно", "Я бы хотел(а) сохранять максимальную стабильность", "Немного и того, и другого, в зависимости от ситуации", "Пока не заглядывал(а) так далеко вперёд"]}, {"section": 8, "type": "select", "prompt": "Что заставило бы вас отказаться от продолжения отношений с потенциальным со-родителем?", "options": ["Несовпадение базовых ценностей в вопросах воспитания", "Ощущение давления или спешки в принятии решений", "Сомнения в надёжности или готовности довести дело до конца", "Я бы просто это почувствовал(а)"]}, {"section": 8, "type": "text", "prompt": "Что вы больше всего хотели бы, чтобы потенциальный со-родитель понял о вас, прежде чем вы продолжите вместе?"}, {"section": 8, "type": "text", "prompt": "Какой вопрос вы боитесь задать, но знаете, что должны?"}, {"section": 8, "type": "text", "prompt": "Есть ли что-то ещё о вашей ситуации или ожиданиях, чем вы хотели бы поделиться?"}],
+    strengthCopy: {"1": {"title": "Зачем становиться родителем?", "copy": "Похоже, вы чётко понимаете, почему хотите стать родителем — эту ясность стоит озвучить вслух в самом начале разговора."}, "2": {"title": "Воспитание", "copy": "Похоже, у вас уже сложилось чёткое представление о том, как вы хотели бы совместно воспитывать ребёнка изо дня в день."}, "3": {"title": "Повседневная жизнь", "copy": "У вас довольно чёткое представление о том, как могла бы выглядеть повседневная жизнь и режим."}, "4": {"title": "Деньги", "copy": "Похоже, вам комфортно и вы уверенно представляете, как будут решаться финансовые вопросы."}, "5": {"title": "Общение", "copy": "Похоже, вам комфортно обсуждать сложные темы и искать решения вместе."}, "6": {"title": "Границы", "copy": "У вас есть чёткое понимание того, какие границы для вас важны."}, "7": {"title": "Будущее", "copy": "Похоже, вы уже продумали, как всё может измениться по мере роста вашей семьи."}, "8": {"title": "Важные вопросы", "copy": "У вас есть чёткое понимание того, что вам подходит, а что нет."}},
+    discussCopy: {"1": {"title": "Зачем становиться родителем?", "copy": "Ваши ответы говорят о том, что причины стать родителем у вас пока формируются — стоит облечь их в слова, прежде чем двигаться дальше."}, "2": {"title": "Воспитание", "copy": "То, как на самом деле будут распределяться повседневные обязанности по воспитанию, — тема, которую стоит обсудить глубже."}, "3": {"title": "Повседневная жизнь", "copy": "Условия проживания и повседневный распорядок — судя по вашим ответам, это область, которую стоит обсудить подробнее."}, "4": {"title": "Деньги", "copy": "Вопрос о том, как будут делиться расходы, выглядит менее определённым для вас — его стоит поднять заранее, а не постфактум."}, "5": {"title": "Общение", "copy": "То, как вы будете общаться изо дня в день, особенно во время разногласий, стоит обсудить явно и открыто."}, "6": {"title": "Границы", "copy": "Ваши границы пока не до конца определены — стоит прояснить их сначала для себя, а затем с потенциальным со-родителем."}, "7": {"title": "Будущее", "copy": "То, как всё может измениться с годами, пока остаётся для вас неопределённым — стоит возвращаться к этому по мере развития отношений."}, "8": {"title": "Важные вопросы", "copy": "Некоторые из более сложных вопросов пока остаются для вас открытыми — стоит подумать над ними, прежде чем брать на себя обязательства."}},
+    prompts: {"1": ["Почему вы оба рассматриваете это именно сейчас?", "Что заставило бы вас оглянуться назад и почувствовать, что решение было неверным?"], "2": ["Как вы будете делить решения по образованию, здравоохранению и дисциплине?", "Что произойдёт, если вы не согласитесь друг с другом по поводу решения о воспитании?"], "3": ["Где бы каждый из вас в идеале хотел жить и насколько близко друг к другу?", "Как на самом деле будет делиться обычная неделя?"], "4": ["Как вы будете делить расходы, если один из вас зарабатывает значительно больше?", "Кто покроет крупный незапланированный расход?"], "5": ["Как часто вы ожидаете быть на связи друг с другом?", "Как, по мнению каждого из вас, выглядит справедливый способ не соглашаться?"], "6": ["Что бы вы хотели знать об отношениях друг друга с другими людьми?", "Какую информацию каждый из вас считает личной?"], "7": ["Что бы вы сделали, если бы один из вас захотел переехать?", "Как вы представляете развитие этой договорённости через 10+ лет?"], "8": ["Что стало бы для каждого из вас решающим фактором отказа?", "Есть ли что-то, что вам сейчас неловко поднять?"]},
+    intro: {"title": "Смогли бы вы хорошо воспитывать ребёнка с этим человеком?", "body": "Этот тест не скажет вам, стоит ли становиться со-родителями. Он помогает увидеть, где совпадают ваши ожидания — и что стоит обсудить подробнее.", "beforeYouStart": "Прежде чем начать", "questionsCount": "{count} вопросов", "duration": "Около 5 минут", "canGoBack": "Вы можете вернуться назад и изменить ответы", "freeTextOptional": "Ответы в свободной форме необязательны", "privacyHeading": "Конфиденциальность", "privacyBody": "Ваши ответы сохраняются только в этой сессии браузера и никогда не передаются автоматически. Создайте бесплатный аккаунт, если хотите сохранить или поделиться результатами.", "startButton": "Начать тест"},
+    results: {"title": "Что говорят ваши ответы", "subtitle": "Отражение ваших приоритетов — не вердикт.", "strongestHeading": "Ваши сильные стороны", "discussHeading": "Стоит обсудить", "discussEmptyBody": "Вы отвечали довольно решительно почти на всё — это хороший знак, но всё равно стоит обсудить эти темы вслух с потенциальным со-родителем, а не только с самим собой.", "promptsHeading": "Вопросы для совместного обсуждения", "shareImageButton": "Поделиться картинкой", "shareButton": "Поделиться текстом", "noScoreShort": "Без процента совместимости", "nextStepQuestions": "Вопросы потенциальному со-родителю", "nextStepPlan": "Создать план совместного воспитания", "nextStepAskAi": "Задайте ИИ вопрос о доноре или юридический вопрос", "nextStepAgreement": "Получите черновик соглашения от ИИ", "nextStepInvite": "Пригласите потенциального со-родителя", "aiInsightButton": "Получить персональный ИИ-отклик", "aiInsightLoading": "Пишем ваш персональный отклик…", "aiInsightTitle": "Ваш персональный отклик", "aiInsightLimited": "Вы достигли сегодняшнего бесплатного лимита для этого инструмента — попробуйте завтра.", "aiInsightError": "Не удалось создать отклик прямо сейчас. Попробуйте ещё раз.", "downloadImageError": "Не удалось создать изображение. Попробуйте ещё раз.", "preparingImage": "Готовим картинку…"},
+    question: {"progressLabel": "Раздел {n} из 8 — {section}", "hintSelect": "Выберите ответ, который вам ближе всего.", "hintText": "Необязательно — напишите столько, сколько захотите.", "back": "Назад", "next": "Далее", "seeResults": "Посмотреть результаты", "note": "Ответы можно изменить, пока вы не дойдёте до результатов."},
+  },
+  es: {
+    sections: ["¿Por qué ser padre/madre?", "Crianza", "Vida cotidiana", "Dinero", "Comunicación", "Límites", "Futuro", "Preguntas importantes"],
+    questions: [{"section": 1, "type": "select", "prompt": "¿Por qué quieres ser padre/madre?", "options": ["Siempre he querido criar a un hijo/a", "Quiero formar una familia antes de que sea demasiado tarde para mí", "Quiero darle a un niño/a un hogar lleno de amor, sea como sea", "Sinceramente, todavía estoy explorando por qué"]}, {"section": 1, "type": "select", "prompt": "¿Cómo describirías al padre o madre que esperas ser?", "options": ["Muy involucrado/a en los detalles del día a día", "Presente, pero dando independencia a mi hijo/a", "Guiado/a por la estructura y la rutina", "Todavía lo estoy descubriendo"]}, {"section": 1, "type": "select", "prompt": "¿Qué es lo más importante para ti ahora mismo respecto a ser padre/madre?", "options": ["El momento: no quiero esperar mucho más", "Encontrar la situación adecuada, cuando sea que llegue", "Hacerlo de una manera que se sienta estable y preparada", "Aún no estoy seguro/a, estoy explorando mis opciones"]}, {"section": 2, "type": "select", "prompt": "¿Cómo te gustaría idealmente repartir las responsabilidades de crianza?", "options": ["Lo más equitativamente posible", "Según los horarios", "Según los ingresos", "Decidirlo juntos", "Aún no estoy seguro/a"]}, {"section": 2, "type": "select", "prompt": "¿Cuál es tu opinión sobre la disciplina?", "options": ["Reglas claras y consecuencias consistentes", "Orientación suave, hablando las cosas", "Depende de la situación", "Es algo que tendríamos que acordar juntos"]}, {"section": 2, "type": "select", "prompt": "¿Qué tan involucrado/a quieres que esté el otro padre o madre en las decisiones del día a día?", "options": ["Involucrado/a en todo, siempre", "Involucrado/a en las decisiones grandes, independiente en las pequeñas", "Mayormente independiente, consultando de vez en cuando", "Todavía lo estoy pensando"]}, {"section": 2, "type": "select", "prompt": "¿Qué opinas sobre la participación de la familia extendida en la crianza?", "options": ["Muy involucrada: abuelos y familia cerca", "Involucrada a veces, pero nosotros ponemos los límites", "Participación mínima, criaríamos al niño/a mayormente nosotros", "Depende totalmente de la familia, tendría que pensarlo"]}, {"section": 3, "type": "select", "prompt": "¿Dónde te gustaría idealmente que creciera tu hijo/a?", "options": ["Cerca de donde vivo ahora", "Abierto/a a mudarme a un lugar nuevo", "Cerca de la familia, esté donde esté", "Todavía no lo he pensado"]}, {"section": 3, "type": "select", "prompt": "¿Cómo dividirían las rutinas diarias, como llevar al colegio, las comidas y la hora de dormir?", "options": ["Repartido de forma equitativa por defecto", "Quien tenga el horario disponible ese día", "Uno/a de nosotros lidera, el otro/a apoya", "Lo iríamos resolviendo sobre la marcha"]}, {"section": 3, "type": "select", "prompt": "¿Cuánta flexibilidad quieres en tu rutina diaria de crianza?", "options": ["Una rutina clara y constante es lo que mejor me funciona", "Me gusta la flexibilidad y adaptarme según haga falta", "Una mezcla de ambas", "Aún no estoy seguro/a"]}, {"section": 4, "type": "select", "prompt": "¿Cómo te sientes respecto a dividir los gastos relacionados con el niño/a?", "options": ["Por igual, sin importar cuánto gane cada uno", "Proporcional a lo que gane cada uno", "Uno/a de nosotros asume más responsabilidad económica", "Tendríamos que hablarlo"]}, {"section": 4, "type": "select", "prompt": "¿Cómo manejarías un gasto grande e inesperado para tu hijo/a?", "options": ["Lo dividiríamos de inmediato, sin necesidad de discutirlo", "Lo hablaríamos y decidiríamos juntos primero", "Quien tenga los medios lo cubre, por ahora", "Sinceramente, aún no lo sé"]}, {"section": 4, "type": "select", "prompt": "¿Qué tan cómodo/a te sientes hablando de dinero con un co-padre o co-madre antes de comprometerte a algo?", "options": ["Muy cómodo/a: querría dejarlo claro desde el principio", "Cómodo/a, pero iría poco a poco", "Un poco incómodo/a, pero sé que es necesario", "Tiendo a evitar las conversaciones sobre dinero"]}, {"section": 5, "type": "select", "prompt": "¿Con qué frecuencia esperas comunicarte con un co-padre o co-madre sobre tu hijo/a?", "options": ["Actualizaciones diarias, incluso por cosas pequeñas", "Con regularidad, para todo lo que importa", "Solo cuando haya que tomar una decisión", "Aún no sé qué es realista"]}, {"section": 5, "type": "select", "prompt": "¿Cuál es tu forma preferida de manejar un desacuerdo?", "options": ["Hablarlo de inmediato, en persona si es posible", "Tomarme un tiempo para pensar y después hablarlo", "Escribirlo primero para poder expresarme con claridad", "Tiendo a evitar el conflicto cuando puedo"]}, {"section": 5, "type": "select", "prompt": "¿Cómo te sientes si te hacen preguntas difíciles desde el principio?", "options": ["Prefiero saberlo todo desde el inicio", "Me parece bien una vez que hay algo de confianza", "Prefiero ir entrando poco a poco en temas más profundos", "Me incomoda un poco"]}, {"section": 6, "type": "select", "prompt": "¿Qué opinas de que un co-padre o co-madre salga con otras personas?", "options": ["Totalmente bien, siempre que sea con respeto", "Bien, pero querría establecer algunos límites", "Querría hablarlo antes de que suceda", "Todavía no lo he pensado bien"]}, {"section": 6, "type": "select", "prompt": "¿Qué información personal te sientes cómodo/a compartiendo al principio de una conversación sobre co-crianza?", "options": ["Prácticamente todo lo relevante", "Lo básico, y más a medida que se genera confianza", "Solo lo directamente relacionado con la crianza", "Por naturaleza soy bastante reservado/a"]}, {"section": 6, "type": "select", "prompt": "¿Cómo te sientes si un co-padre o co-madre pone límites a tu nivel de participación?", "options": ["Totalmente justo, cada uno debería poder poner límites", "Depende de cuál sea el límite", "Siempre querría estar lo más involucrado/a posible", "Aún no lo he considerado"]}, {"section": 7, "type": "select", "prompt": "¿Cómo imaginas a tu familia dentro de cinco años?", "options": ["Una rutina clara y estable en la que ya nos hemos asentado", "Todavía adaptándonos a medida que cambian las cosas", "Depende mucho de hacia dónde nos lleve la vida", "Sinceramente, todavía no lo he imaginado"]}, {"section": 7, "type": "select", "prompt": "¿Qué pasaría si uno/a de ustedes quisiera mudarse algún día?", "options": ["Tendríamos que acordar esto antes de empezar", "Lo resolveríamos juntos cuando surja", "Querría tener la flexibilidad de mudarme si fuera necesario", "No estoy seguro/a de cómo lo manejaría"]}, {"section": 7, "type": "select", "prompt": "¿Cómo te sientes respecto a que el acuerdo cambie a medida que tu hijo/a crece?", "options": ["Espero que evolucione, y me siento cómodo/a con eso", "Querría mantener las cosas lo más estables posible", "Un poco de ambas, según lo que se necesite", "Todavía no lo he pensado tan a futuro"]}, {"section": 8, "type": "select", "prompt": "¿Qué te haría decidir no seguir adelante con un posible co-padre o co-madre?", "options": ["Una discrepancia en los valores fundamentales sobre la crianza", "Sentirme presionado/a o apresurado/a a tomar decisiones", "Dudas sobre su fiabilidad o compromiso", "Simplemente lo sabría al sentirlo"]}, {"section": 8, "type": "text", "prompt": "¿Qué es lo que más te gustaría que un posible co-padre o co-madre entendiera de ti antes de seguir adelante juntos?"}, {"section": 8, "type": "text", "prompt": "¿Cuál es una pregunta que temes hacer, pero sabes que deberías?"}, {"section": 8, "type": "text", "prompt": "¿Hay algo más sobre tu situación o tus expectativas que te gustaría compartir?"}],
+    strengthCopy: {"1": {"title": "¿Por qué ser padre/madre?", "copy": "Pareces tener claro por qué quieres ser padre o madre; vale la pena expresar esa claridad en voz alta al principio de la conversación."}, "2": {"title": "Crianza", "copy": "Pareces tener una idea clara de cómo te gustaría co-criar día a día."}, "3": {"title": "Vida cotidiana", "copy": "Tienes una idea bastante clara de cómo podría ser la vida diaria y las rutinas."}, "4": {"title": "Dinero", "copy": "Pareces sentirte cómodo/a y decidido/a sobre cómo se manejarían el dinero y los gastos."}, "5": {"title": "Comunicación", "copy": "Pareces sentirte cómodo/a hablando de temas difíciles y buscando soluciones juntos."}, "6": {"title": "Límites", "copy": "Tienes una idea clara de los límites que son importantes para ti."}, "7": {"title": "Futuro", "copy": "Pareces haber pensado en cómo podrían cambiar las cosas a medida que tu familia crece."}, "8": {"title": "Preguntas importantes", "copy": "Tienes una idea clara de lo que te funcionaría y lo que no."}},
+    discussCopy: {"1": {"title": "¿Por qué ser padre/madre?", "copy": "Tus respuestas sugieren que tus razones para ser padre o madre todavía están tomando forma; vale la pena ponerlas en palabras antes de avanzar mucho más."}, "2": {"title": "Crianza", "copy": "Cómo se repartirían realmente las responsabilidades diarias de crianza parece un tema que merece una conversación más profunda."}, "3": {"title": "Vida cotidiana", "copy": "Las condiciones de vida y las rutinas diarias: tus respuestas muestran un área donde podría valer la pena una conversación más profunda."}, "4": {"title": "Dinero", "copy": "Cómo se compartirían los gastos parece un tema menos resuelto para ti; es bueno plantearlo pronto, no después de los hechos."}, "5": {"title": "Comunicación", "copy": "Cómo te comunicarías día a día, especialmente durante los desacuerdos, vale la pena hablarlo de forma explícita."}, "6": {"title": "Límites", "copy": "Dónde están tus límites no está del todo definido; vale la pena aclararlo primero contigo mismo/a, y luego con un posible co-padre o co-madre."}, "7": {"title": "Futuro", "copy": "Cómo podrían cambiar las cosas con los años sigue siendo incierto para ti; vale la pena revisarlo a medida que la relación avanza."}, "8": {"title": "Preguntas importantes", "copy": "Algunas de las preguntas más difíciles siguen abiertas para ti; vale la pena reflexionar sobre ellas antes de comprometerte a algo."}},
+    prompts: {"1": ["¿Por qué están considerando esto específicamente ahora?", "¿Qué haría que esto se sintiera como una decisión equivocada en retrospectiva?"], "2": ["¿Cómo dividirían las decisiones sobre educación, salud y disciplina?", "¿Qué pasa si no están de acuerdo en una decisión de crianza?"], "3": ["¿Dónde le gustaría idealmente vivir a cada uno, y qué tan cerca uno del otro?", "¿Cómo se dividiría realmente una semana típica?"], "4": ["¿Cómo dividirían los gastos si uno/a de ustedes gana significativamente más?", "¿Quién cubriría un gasto grande e imprevisto?"], "5": ["¿Con qué frecuencia esperan comunicarse entre ustedes?", "¿Cómo se ve, para cada uno de ustedes, una forma justa de estar en desacuerdo?"], "6": ["¿Qué querrían saber sobre las otras relaciones de cada uno?", "¿Qué información considera privada cada uno?"], "7": ["¿Qué harían si uno/a de ustedes quisiera mudarse lejos?", "¿Cómo imaginan que evolucionará este acuerdo en más de 10 años?"], "8": ["¿Qué sería decisivo para romper el trato para cada uno de ustedes?", "¿Hay algo que dudan en mencionar ahora mismo?"]},
+    intro: {"title": "¿Podrías imaginarte criando bien a un hijo/a con esta persona?", "body": "Este test no te dirá si deberías co-criar o no. Te ayuda a ver dónde coinciden tus expectativas y qué vale la pena seguir hablando.", "beforeYouStart": "Antes de empezar", "questionsCount": "{count} preguntas", "duration": "Unos 5 minutos", "canGoBack": "Puedes volver atrás y editar tus respuestas", "freeTextOptional": "Las respuestas de texto libre son opcionales", "privacyHeading": "Privacidad", "privacyBody": "Tus respuestas permanecen solo en esta sesión del navegador y nunca se comparten automáticamente. Crea una cuenta gratuita si quieres guardar o compartir tus resultados.", "startButton": "Comenzar el test"},
+    results: {"title": "Lo que sugieren tus respuestas", "subtitle": "Un reflejo de tus prioridades, no un veredicto.", "strongestHeading": "Tus puntos más fuertes", "discussHeading": "Vale la pena hablarlo", "discussEmptyBody": "Respondiste con bastante decisión en general - es una buena señal, pero aun así vale la pena tener estas conversaciones en voz alta con un posible co-padre o co-madre, no solo contigo mismo/a.", "promptsHeading": "Preguntas para explorar juntos", "shareImageButton": "Compartir como imagen", "shareButton": "Compartir como texto", "noScoreShort": "Sin porcentaje de compatibilidad", "nextStepQuestions": "Preguntas para un posible co-padre o co-madre", "nextStepPlan": "Crear un plan de co-crianza", "nextStepAskAi": "Pregunta a la IA sobre donantes o temas legales", "nextStepAgreement": "Obtén un borrador de acuerdo con IA", "nextStepInvite": "Invita a tu posible co-padre o co-madre", "aiInsightButton": "Obtén tu reflexión personalizada con IA", "aiInsightLoading": "Escribiendo tu reflexión personalizada…", "aiInsightTitle": "Tu reflexión personalizada", "aiInsightLimited": "Has alcanzado el límite gratuito de hoy para esta herramienta - inténtalo de nuevo mañana.", "aiInsightError": "No se pudo generar tu reflexión en este momento. Inténtalo de nuevo.", "downloadImageError": "No se pudo crear la imagen ahora. Inténtalo de nuevo.", "preparingImage": "Preparando imagen…"},
+    question: {"progressLabel": "Sección {n} de 8 — {section}", "hintSelect": "Elige la respuesta que más se acerque a ti.", "hintText": "Opcional: escribe tanto o tan poco como quieras.", "back": "Atrás", "next": "Siguiente", "seeResults": "Ver resultados", "note": "Puedes cambiar las respuestas antes de llegar a tus resultados."},
+  },
+  pt: {
+    sections: ["Porquê ser pai/mãe?", "Parentalidade", "Vida quotidiana", "Dinheiro", "Comunicação", "Limites", "Futuro", "Perguntas importantes"],
+    questions: [{"section": 1, "type": "select", "prompt": "Porque quer tornar-se pai/mãe?", "options": ["Sempre quis criar um filho", "Quero constituir família antes que seja tarde demais para mim", "Quero dar a uma criança um lar cheio de amor, seja qual for a forma que isso tome", "Sinceramente, ainda estou a tentar perceber porquê"]}, {"section": 1, "type": "select", "prompt": "Como descreveria o tipo de pai/mãe que espera ser?", "options": ["Presente e envolvido(a) nos detalhes do dia a dia", "Presente, mas dando independência ao meu filho", "Guiado(a) pela estrutura e pela rotina", "Ainda estou a descobrir isso"]}, {"section": 1, "type": "select", "prompt": "O que é mais importante para si neste momento em relação a tornar-se pai/mãe?", "options": ["O timing - não quero esperar muito mais", "Encontrar a situação certa, seja quando for", "Fazê-lo de uma forma que pareça estável e preparada", "Ainda não tenho a certeza, estou a explorar as minhas opções"]}, {"section": 2, "type": "select", "prompt": "Como gostaria idealmente de partilhar as responsabilidades parentais?", "options": ["O mais equitativamente possível", "Com base nos horários", "Com base no rendimento", "Decidir em conjunto", "Ainda não tenho a certeza"]}, {"section": 2, "type": "select", "prompt": "Qual é a sua visão sobre disciplina?", "options": ["Regras claras e consequências consistentes", "Orientação suave, conversando sobre as coisas", "Depende da situação", "Algo que teríamos de acordar em conjunto"]}, {"section": 2, "type": "select", "prompt": "Até que ponto gostaria que o outro progenitor estivesse envolvido nas decisões do dia a dia?", "options": ["Envolvido em tudo, sempre", "Envolvido nas grandes decisões, autónomo nas pequenas", "Maioritariamente autónomo, com atualizações ocasionais", "Ainda estou a resolver isso"]}, {"section": 2, "type": "select", "prompt": "Como se sente em relação ao envolvimento da família alargada na educação da criança?", "options": ["Muito envolvida - avós e família por perto", "Envolvida às vezes, mas somos nós que definimos os limites", "Envolvimento mínimo, criaríamos a criança sobretudo sozinhos", "Depende inteiramente da família, teria de pensar bem nisso"]}, {"section": 3, "type": "select", "prompt": "Onde gostaria idealmente que o seu filho crescesse?", "options": ["Perto de onde vivo atualmente", "Aberto(a) a mudar-me para outro sítio", "Perto da família, onde quer que esteja", "Ainda não pensei nisso"]}, {"section": 3, "type": "select", "prompt": "Como dividiria as rotinas diárias, como levar à escola, refeições e a hora de deitar?", "options": ["Divididas de forma igual por defeito", "Consoante o horário de cada um nesse dia", "Um de nós assume a liderança, o outro apoia", "Iríamos descobrindo à medida que avançássemos"]}, {"section": 3, "type": "select", "prompt": "Quanta flexibilidade deseja na sua rotina parental do dia a dia?", "options": ["Uma rotina clara e consistente é o que mais me convém", "Gosto de flexibilidade e de me adaptar conforme necessário", "Uma mistura das duas coisas", "Ainda não tenho a certeza"]}, {"section": 4, "type": "select", "prompt": "Como se sente em relação à divisão dos custos relacionados com a criança?", "options": ["Igualmente, independentemente do que cada um ganha", "Proporcionalmente ao que cada um ganha", "Um de nós assume uma parte maior financeiramente", "Teríamos de falar sobre isso"]}, {"section": 4, "type": "select", "prompt": "Como lidaria com uma despesa grande e inesperada com o seu filho?", "options": ["Dividi-la imediatamente, sem necessidade de discussão", "Falar sobre o assunto e decidir em conjunto primeiro", "Quem tiver possibilidades cobre-a, por agora", "Sinceramente, ainda não tenho a certeza"]}, {"section": 4, "type": "select", "prompt": "Até que ponto se sente confortável a falar de dinheiro com um coparente antes de se comprometer com algo?", "options": ["Muito confortável - gostaria de resolver isto cedo", "Confortável, mas iria abordando o assunto aos poucos", "Um pouco incomodado(a), mas sei que é necessário", "Tenho tendência a evitar conversas sobre dinheiro"]}, {"section": 5, "type": "select", "prompt": "Com que frequência espera comunicar com um coparente sobre o seu filho?", "options": ["Atualizações diárias, mesmo para pequenas coisas", "Regularmente, para tudo o que for importante", "Apenas quando for preciso tomar uma decisão", "Ainda não sei o que é realista"]}, {"section": 5, "type": "select", "prompt": "Qual é a sua forma preferida de lidar com um desacordo?", "options": ["Falar sobre isso imediatamente, pessoalmente se possível", "Reservar algum tempo para pensar e depois falar", "Escrever primeiro para conseguir ser claro(a)", "Tenho tendência a evitar o conflito quando posso"]}, {"section": 5, "type": "select", "prompt": "Como se sente em relação a receber perguntas difíceis logo no início?", "options": ["Prefiro saber tudo desde o início", "Não me importo assim que existir alguma confiança", "Preferia abordar os temas mais profundos aos poucos", "Isso deixa-me um pouco desconfortável"]}, {"section": 6, "type": "select", "prompt": "Como se sente em relação a um coparente namorar outras pessoas?", "options": ["Completamente à vontade, desde que seja feito com respeito", "Tudo bem, mas gostaria de ter alguns limites definidos", "Gostaria de discutir isto antes de acontecer", "Ainda não pensei bem nisso"]}, {"section": 6, "type": "select", "prompt": "Que informação pessoal se sente confortável a partilhar logo no início de uma conversa sobre coparentalidade?", "options": ["Praticamente tudo o que for relevante", "O essencial, mais à medida que a confiança se constrói", "Apenas o que estiver diretamente relacionado com a parentalidade", "Sou naturalmente reservado(a) sobre a maioria das coisas"]}, {"section": 6, "type": "select", "prompt": "Como se sente se um coparente definir limites quanto ao seu envolvimento?", "options": ["Perfeitamente justo, cada um deveria poder definir limites", "Depende de qual seja o limite", "Gostaria de estar o mais envolvido(a) possível, sempre", "Ainda não pensei nisso"]}, {"section": 7, "type": "select", "prompt": "Como imagina a sua família daqui a cinco anos?", "options": ["Uma rotina clara e estável em que já estaríamos instalados", "Ainda a adaptar-nos à medida que as coisas mudam", "Depende muito do rumo que a vida nos der", "Sinceramente, ainda não a imaginei"]}, {"section": 7, "type": "select", "prompt": "O que acontece se um de vocês quiser mudar-se de cidade ou país algum dia?", "options": ["Teríamos de chegar a acordo sobre isto antes de começar", "Resolveríamos isso em conjunto quando surgisse", "Gostaria de ter a flexibilidade de me mudar se necessário", "Não sei ao certo como lidaria com isto"]}, {"section": 7, "type": "select", "prompt": "Como se sente em relação ao facto de o acordo mudar à medida que o seu filho cresce?", "options": ["Espero que evolua, e sinto-me confortável com isso", "Gostaria de manter as coisas o mais consistentes possível", "Um pouco das duas coisas, consoante o que for necessário", "Ainda não pensei tão à frente"]}, {"section": 8, "type": "select", "prompt": "O que o(a) levaria a decidir não avançar com um potencial coparente?", "options": ["Uma incompatibilidade de valores fundamentais sobre a parentalidade", "Sentir-se pressionado(a) ou apressado(a) a tomar decisões", "Preocupações quanto à fiabilidade ou ao cumprimento de compromissos", "Eu saberia quando sentisse isso"]}, {"section": 8, "type": "text", "prompt": "O que mais gostaria que um potencial coparente compreendesse sobre si antes de avançarem juntos?"}, {"section": 8, "type": "text", "prompt": "Qual é a pergunta que tem receio de fazer, mas sabe que devia?"}, {"section": 8, "type": "text", "prompt": "Há mais alguma coisa sobre a sua situação ou as suas expectativas que gostaria de partilhar?"}],
+    strengthCopy: {"1": {"title": "Porquê ser pai/mãe?", "copy": "Parece ter clareza sobre porque quer tornar-se pai/mãe - essa clareza vale a pena ser dita em voz alta logo no início de uma conversa."}, "2": {"title": "Parentalidade", "copy": "Parece ter uma noção bem definida de como gostaria de coparentar no dia a dia."}, "3": {"title": "Vida quotidiana", "copy": "Tem uma ideia bastante clara de como poderiam ser a vida quotidiana e as rotinas."}, "4": {"title": "Dinheiro", "copy": "Parece sentir-se confortável e decidido(a) quanto à forma como o dinheiro e os custos seriam geridos."}, "5": {"title": "Comunicação", "copy": "Parece sentir-se confortável a discutir temas difíceis e a procurar soluções em conjunto."}, "6": {"title": "Limites", "copy": "Tem uma noção clara dos limites que são importantes para si."}, "7": {"title": "Futuro", "copy": "Parece ter refletido sobre como as coisas poderão mudar à medida que a sua família cresce."}, "8": {"title": "Perguntas importantes", "copy": "Tem uma noção clara do que funcionaria - e do que não funcionaria - para si."}},
+    discussCopy: {"1": {"title": "Porquê ser pai/mãe?", "copy": "As suas respostas sugerem que as suas razões para ser pai/mãe ainda estão a tomar forma - vale a pena colocá-las em palavras antes de avançar muito mais."}, "2": {"title": "Parentalidade", "copy": "A forma como as responsabilidades parentais do dia a dia seriam efetivamente divididas parece ser uma área que merece uma conversa mais aprofundada."}, "3": {"title": "Vida quotidiana", "copy": "Condições de vida e rotinas diárias - as suas respostas mostram uma área em que poderá valer a pena uma conversa mais aprofundada."}, "4": {"title": "Dinheiro", "copy": "A forma como os custos seriam partilhados parece menos definida para si - um bom assunto para abordar cedo, não depois de acontecer."}, "5": {"title": "Comunicação", "copy": "A forma como comunicariam no dia a dia, especialmente durante desacordos, vale a pena ser discutida explicitamente."}, "6": {"title": "Limites", "copy": "Onde se situam os seus limites ainda não está totalmente definido - vale a pena esclarecer isso primeiro consigo mesmo(a), depois com um potencial coparente."}, "7": {"title": "Futuro", "copy": "A forma como as coisas poderão mudar ao longo dos anos ainda é incerta para si - vale a pena revisitar este tema à medida que a relação se desenvolve."}, "8": {"title": "Perguntas importantes", "copy": "Algumas das perguntas mais difíceis ainda estão em aberto para si - vale a pena refletir sobre elas antes de se comprometer com algo."}},
+    prompts: {"1": ["Porque é que ambos estão a considerar isto agora, especificamente?", "O que faria com que, em retrospetiva, isto parecesse a decisão errada?"], "2": ["Como dividiriam as decisões sobre a escola, os cuidados de saúde e a disciplina?", "O que acontece se discordarem numa decisão parental?"], "3": ["Onde é que cada um gostaria idealmente de viver, e a que distância um do outro?", "Como seria efetivamente dividida uma semana típica?"], "4": ["Como dividiriam os custos se um de vocês ganhar significativamente mais?", "Quem cobriria uma despesa maior e não planeada?"], "5": ["Com que frequência esperam falar um com o outro?", "O que é, para cada um de vocês, uma forma justa de discordar?"], "6": ["O que gostariam de saber sobre as outras relações um do outro?", "Que informação cada um de vocês considera privada?"], "7": ["O que fariam se um de vocês quisesse mudar-se para longe?", "Como imaginam que este acordo evoluirá ao longo de mais de 10 anos?"], "8": ["O que seria um ponto de rutura para cada um de vocês?", "Há algo que hesitem em abordar neste momento?"]},
+    intro: {"title": "Consegue imaginar-se a coparentar bem com esta pessoa?", "body": "Este questionário não lhe vai dizer se deve ou não coparentar. Ajuda-o(a) a perceber onde as expectativas se alinham - e o que vale a pena discutir mais.", "beforeYouStart": "Antes de começar", "questionsCount": "{count} perguntas", "duration": "Cerca de 5 minutos", "canGoBack": "Pode voltar atrás e editar respostas", "freeTextOptional": "As respostas de texto livre são opcionais", "privacyHeading": "Privacidade", "privacyBody": "As tuas respostas ficam apenas nesta sessão do navegador e nunca são partilhadas automaticamente. Cria uma conta gratuita se quiseres guardar ou partilhar os teus resultados.", "startButton": "Iniciar o questionário"},
+    results: {"title": "O que as suas respostas sugerem", "subtitle": "Um reflexo das suas prioridades - não um veredito.", "strongestHeading": "Os seus pontos mais fortes", "discussHeading": "Vale a pena discutir", "discussEmptyBody": "Respondeu de forma bastante decisiva em todos os pontos - isso é um bom sinal, mas continua a valer a pena ter estas conversas em voz alta com um potencial coparente, não só consigo mesmo(a).", "promptsHeading": "Perguntas para explorar juntos", "shareImageButton": "Partilhar como imagem", "shareButton": "Partilhar como texto", "noScoreShort": "Sem percentagem de compatibilidade", "nextStepQuestions": "Perguntas a Fazer a um Potencial Coparente", "nextStepPlan": "Criar um Plano de Coparentalidade", "nextStepAskAi": "Pergunta à IA sobre dador ou questões legais", "nextStepAgreement": "Obtém um rascunho de acordo com IA", "nextStepInvite": "Convida o teu potencial co-parente", "aiInsightButton": "Obter a tua reflexão personalizada com IA", "aiInsightLoading": "A escrever a tua reflexão personalizada…", "aiInsightTitle": "A tua reflexão personalizada", "aiInsightLimited": "Atingiste o limite gratuito de hoje para esta ferramenta - tenta novamente amanhã.", "aiInsightError": "Não foi possível gerar a tua reflexão agora. Tenta novamente.", "downloadImageError": "Não foi possível criar a imagem agora. Tenta novamente.", "preparingImage": "A preparar imagem…"},
+    question: {"progressLabel": "Secção {n} de 8 - {section}", "hintSelect": "Escolha a resposta que sente mais próxima de si.", "hintText": "Opcional - escreva tanto ou tão pouco quanto quiser.", "back": "Voltar", "next": "Seguinte", "seeResults": "Ver resultados", "note": "As respostas podem ser alteradas até chegar aos seus resultados."},
+  },
+  fr: {
+    sections: ["Pourquoi devenir parent ?", "Parentalité", "Vie quotidienne", "Argent", "Communication", "Limites", "Avenir", "Questions importantes"],
+    questions: [{"section": 1, "type": "select", "prompt": "Pourquoi voulez-vous devenir parent ?", "options": ["J'ai toujours voulu élever un enfant", "Je veux fonder une famille avant qu'il ne soit trop tard pour moi", "Je veux offrir à un enfant un foyer aimant, quelle qu'en soit la forme", "Honnêtement, je cherche encore à comprendre pourquoi"]}, {"section": 1, "type": "select", "prompt": "Comment décririez-vous le type de parent que vous espérez être ?", "options": ["Impliqué(e) au quotidien, dans les moindres détails", "Présent(e), tout en laissant de l'indépendance à mon enfant", "Guidé(e) par la structure et la routine", "Je suis encore en train d'y réfléchir"]}, {"section": 1, "type": "select", "prompt": "Qu'est-ce qui compte le plus pour vous en ce moment dans votre projet de devenir parent ?", "options": ["Le timing - je ne veux pas attendre beaucoup plus longtemps", "Trouver la bonne situation, quel que soit le moment", "Le faire d'une manière qui me semble stable et réfléchie", "Je ne suis pas encore sûr(e), j'explore mes options"]}, {"section": 2, "type": "select", "prompt": "Dans l'idéal, comment souhaiteriez-vous répartir les responsabilités parentales ?", "options": ["Le plus équitablement possible", "En fonction des emplois du temps", "En fonction des revenus", "En décider ensemble", "Je ne suis pas encore sûr(e)"]}, {"section": 2, "type": "select", "prompt": "Quelle est votre vision de la discipline ?", "options": ["Des règles claires et des conséquences cohérentes", "Un accompagnement bienveillant, en discutant des choses", "Cela dépend de la situation", "Quelque chose que nous devrions décider ensemble"]}, {"section": 2, "type": "select", "prompt": "À quel point souhaitez-vous que l'autre parent soit impliqué dans les décisions du quotidien ?", "options": ["Impliqué en tout, toujours", "Impliqué dans les grandes décisions, autonome pour les petites", "Plutôt autonome, avec un point de temps en temps", "Je suis encore en train d'y réfléchir"]}, {"section": 2, "type": "select", "prompt": "Que pensez-vous de l'implication de la famille élargie dans l'éducation de l'enfant ?", "options": ["Très impliquée - grands-parents et famille à proximité", "Impliquée parfois, mais c'est nous qui fixons les limites", "Une implication minimale, nous élèverions l'enfant principalement nous-mêmes", "Cela dépend entièrement de la famille, il faudrait que j'y réfléchisse"]}, {"section": 3, "type": "select", "prompt": "Où souhaiteriez-vous idéalement que votre enfant grandisse ?", "options": ["Près de l'endroit où je vis actuellement", "Ouvert(e) à déménager ailleurs", "Près de la famille, où qu'elle se trouve", "Je n'y ai pas encore réfléchi"]}, {"section": 3, "type": "select", "prompt": "Comment répartiriez-vous les tâches quotidiennes comme les trajets à l'école, les repas et le coucher ?", "options": ["Réparties équitablement par défaut", "Selon l'emploi du temps de chacun ce jour-là", "L'un(e) de nous prend les devants, l'autre soutient", "Nous verrions cela au fur et à mesure"]}, {"section": 3, "type": "select", "prompt": "Quel degré de flexibilité souhaitez-vous dans votre emploi du temps parental quotidien ?", "options": ["Une routine claire et cohérente me convient le mieux", "J'aime la flexibilité et m'adapter selon les besoins", "Un mélange des deux", "Pas encore sûr(e)"]}, {"section": 4, "type": "select", "prompt": "Que pensez-vous du partage des coûts liés à l'enfant ?", "options": ["À parts égales, quels que soient nos revenus respectifs", "Proportionnellement à ce que chacun gagne", "L'un(e) de nous en assume une plus grande part financièrement", "Nous devrions en discuter"]}, {"section": 4, "type": "select", "prompt": "Comment géreriez-vous une dépense importante et imprévue pour votre enfant ?", "options": ["La partager immédiatement, sans discussion nécessaire", "En parler et décider ensemble d'abord", "Celui ou celle qui en a les moyens la couvre, pour l'instant", "Honnêtement, pas encore sûr(e)"]}, {"section": 4, "type": "select", "prompt": "À quel point êtes-vous à l'aise pour parler d'argent avec un coparent avant de vous engager ?", "options": ["Très à l'aise - je voudrais que ce soit réglé tôt", "À l'aise, mais j'y viendrais progressivement", "Un peu mal à l'aise, mais je sais que c'est nécessaire", "J'ai tendance à éviter les conversations sur l'argent"]}, {"section": 5, "type": "select", "prompt": "À quelle fréquence pensez-vous communiquer avec un coparent au sujet de votre enfant ?", "options": ["Des nouvelles quotidiennes, même pour de petites choses", "Régulièrement, pour tout ce qui compte", "Seulement quand une décision doit être prise", "Je ne sais pas encore ce qui serait réaliste"]}, {"section": 5, "type": "select", "prompt": "Quelle est votre façon préférée de gérer un désaccord ?", "options": ["En parler immédiatement, en personne si possible", "Prendre le temps d'y réfléchir, puis en parler", "L'écrire d'abord pour être clair(e)", "J'ai tendance à éviter le conflit quand je le peux"]}, {"section": 5, "type": "select", "prompt": "Que ressentez-vous à l'idée qu'on vous pose des questions difficiles dès le début ?", "options": ["Je préfère tout savoir dès le départ", "Cela me convient une fois qu'une certaine confiance s'est installée", "Je préfère aborder les sujets plus profonds progressivement", "Cela me met un peu mal à l'aise"]}, {"section": 6, "type": "select", "prompt": "Que ressentez-vous à l'idée qu'un coparent fréquente d'autres personnes ?", "options": ["Tout à fait à l'aise, tant que c'est fait avec respect", "À l'aise, mais je voudrais fixer certaines limites", "Je voudrais en discuter avant que cela n'arrive", "Je n'y ai pas encore réfléchi"]}, {"section": 6, "type": "select", "prompt": "Quelles informations personnelles êtes-vous à l'aise de partager tôt dans une conversation de coparentalité ?", "options": ["À peu près tout ce qui est pertinent", "Les bases, puis davantage à mesure que la confiance s'installe", "Seulement ce qui concerne directement la parentalité", "Je suis naturellement discret(ète) sur la plupart des sujets"]}, {"section": 6, "type": "select", "prompt": "Que ressentez-vous si un coparent fixe des limites à votre implication ?", "options": ["Tout à fait juste, chacun devrait pouvoir fixer des limites", "Cela dépend de la limite en question", "Je voudrais être impliqué(e) autant que possible, toujours", "Je n'y ai pas encore réfléchi"]}, {"section": 7, "type": "select", "prompt": "Comment imaginez-vous votre famille dans cinq ans ?", "options": ["Une routine claire et stable dans laquelle nous nous serions installés", "Toujours en train de s'adapter aux changements", "Cela dépend beaucoup de ce que la vie nous réserve", "Honnêtement, je ne me la suis pas encore imaginée"]}, {"section": 7, "type": "select", "prompt": "Que se passe-t-il si l'un(e) de vous souhaite un jour déménager ?", "options": ["Il faudrait se mettre d'accord là-dessus avant de commencer", "Nous trouverions une solution ensemble le moment venu", "Je voudrais avoir la flexibilité de déménager si nécessaire", "Je ne sais pas comment je gérerais cela"]}, {"section": 7, "type": "select", "prompt": "Que ressentez-vous à l'idée que l'arrangement évolue à mesure que votre enfant grandit ?", "options": ["Je m'attends à ce qu'il évolue, et cela me convient", "Je voudrais garder les choses aussi stables que possible", "Un peu des deux, selon les besoins", "Je n'y ai pas réfléchi aussi loin"]}, {"section": 8, "type": "select", "prompt": "Qu'est-ce qui vous amènerait à décider de ne pas poursuivre avec un coparent potentiel ?", "options": ["Un décalage dans les valeurs fondamentales autour de la parentalité", "Le sentiment d'être poussé(e) ou précipité(e) dans des décisions", "Des doutes sur la fiabilité ou la capacité à tenir ses engagements", "Je le saurais en le ressentant"]}, {"section": 8, "type": "text", "prompt": "Qu'aimeriez-vous le plus qu'un coparent potentiel comprenne à votre sujet avant d'avancer ensemble ?"}, {"section": 8, "type": "text", "prompt": "Quelle est une question que vous avez peur de poser, mais que vous savez devoir poser ?"}, {"section": 8, "type": "text", "prompt": "Y a-t-il autre chose concernant votre situation ou vos attentes que vous aimeriez partager ?"}],
+    strengthCopy: {"1": {"title": "Pourquoi devenir parent ?", "copy": "Vous semblez avoir une idée claire des raisons pour lesquelles vous voulez devenir parent - cette clarté mérite d'être exprimée dès le début d'une conversation."}, "2": {"title": "Parentalité", "copy": "Vous semblez avoir une vision bien établie de la façon dont vous souhaiteriez coparent au quotidien."}, "3": {"title": "Vie quotidienne", "copy": "Vous avez une image assez claire de ce à quoi pourraient ressembler la vie quotidienne et les routines."}, "4": {"title": "Argent", "copy": "Vous semblez à l'aise et déterminé(e) quant à la façon dont l'argent et les coûts seraient gérés."}, "5": {"title": "Communication", "copy": "Vous semblez à l'aise pour aborder des sujets difficiles et chercher des solutions ensemble."}, "6": {"title": "Limites", "copy": "Vous avez une idée claire des limites qui comptent pour vous."}, "7": {"title": "Avenir", "copy": "Vous semblez avoir réfléchi à la façon dont les choses pourraient évoluer à mesure que votre famille grandit."}, "8": {"title": "Questions importantes", "copy": "Vous avez une idée claire de ce qui fonctionnerait - et ne fonctionnerait pas - pour vous."}},
+    discussCopy: {"1": {"title": "Pourquoi devenir parent ?", "copy": "Vos réponses suggèrent que vos raisons de devenir parent sont encore en train de se préciser - cela vaut la peine de les mettre en mots avant d'aller plus loin."}, "2": {"title": "Parentalité", "copy": "La façon dont les responsabilités parentales quotidiennes seraient réellement réparties semble être un sujet qui mérite une conversation plus approfondie."}, "3": {"title": "Vie quotidienne", "copy": "Le mode de vie et les routines quotidiennes - vos réponses montrent un domaine où une conversation plus approfondie pourrait être utile."}, "4": {"title": "Argent", "copy": "La façon dont les coûts seraient partagés semble moins établie pour vous - un bon sujet à aborder tôt, pas après coup."}, "5": {"title": "Communication", "copy": "La façon dont vous communiqueriez au quotidien, en particulier lors des désaccords, mérite d'être abordée explicitement."}, "6": {"title": "Limites", "copy": "L'endroit où se situent vos limites n'est pas encore totalement clair - cela vaut la peine de le clarifier pour vous-même, puis avec un coparent potentiel."}, "7": {"title": "Avenir", "copy": "La façon dont les choses pourraient évoluer au fil des ans reste incertaine pour vous - à revisiter à mesure que la relation évolue."}, "8": {"title": "Questions importantes", "copy": "Certaines des questions les plus difficiles restent encore ouvertes pour vous - elles méritent d'être approfondies avant de vous engager."}},
+    prompts: {"1": ["Pourquoi envisagez-vous tous les deux cela maintenant, spécifiquement ?", "Qu'est-ce qui, avec le recul, donnerait l'impression que c'était la mauvaise décision ?"], "2": ["Comment répartiriez-vous les décisions concernant la scolarité, la santé et la discipline ?", "Que se passe-t-il si vous n'êtes pas d'accord sur une décision parentale ?"], "3": ["Où souhaiteriez-vous idéalement vivre chacun(e), et à quelle distance l'un de l'autre ?", "Comment une semaine type serait-elle réellement répartie ?"], "4": ["Comment répartiriez-vous les coûts si l'un(e) de vous gagne nettement plus ?", "Qui prendrait en charge une dépense imprévue et importante ?"], "5": ["À quelle fréquence pensez-vous prendre des nouvelles l'un de l'autre ?", "À quoi ressemble, pour chacun(e) de vous, une façon équitable d'être en désaccord ?"], "6": ["Que voudriez-vous savoir sur les autres relations de chacun(e) ?", "Quelles informations chacun(e) de vous considère-t-il/elle comme privées ?"], "7": ["Que feriez-vous si l'un(e) de vous voulait déménager loin ?", "Comment imaginez-vous cet arrangement évoluer sur plus de 10 ans ?"], "8": ["Qu'est-ce qui serait un point de rupture pour chacun(e) de vous ?", "Y a-t-il quelque chose que vous hésitez à aborder en ce moment ?"]},
+    intro: {"title": "Pourriez-vous vous imaginer bien coparenter avec cette personne ?", "body": "Ce quiz ne vous dira pas si vous devriez coparenter. Il vous aide à voir où vos attentes s'alignent - et ce qui mérite d'être approfondi.", "beforeYouStart": "Avant de commencer", "questionsCount": "{count} questions", "duration": "Environ 5 minutes", "canGoBack": "Vous pouvez revenir en arrière et modifier vos réponses", "freeTextOptional": "Les réponses en texte libre sont facultatives", "privacyHeading": "Confidentialité", "privacyBody": "Vos réponses restent uniquement dans cette session de navigateur et ne sont jamais partagées automatiquement. Créez un compte gratuit si vous souhaitez enregistrer ou partager vos résultats.", "startButton": "Commencer le quiz"},
+    results: {"title": "Ce que suggèrent vos réponses", "subtitle": "Un reflet de vos priorités - pas un verdict.", "strongestHeading": "Vos points forts", "discussHeading": "À approfondir", "discussEmptyBody": "Vous avez répondu de façon assez tranchée dans l'ensemble - c'est bon signe, mais il vaut quand même la peine d'avoir ces conversations à voix haute avec un coparent potentiel, pas seulement avec vous-même.", "promptsHeading": "Questions à explorer ensemble", "shareImageButton": "Partager en image", "shareButton": "Partager en texte", "noScoreShort": "Aucun pourcentage de compatibilité", "nextStepQuestions": "Questions à poser à un coparent potentiel", "nextStepPlan": "Créer un plan de coparentalité", "nextStepAskAi": "Posez à l'IA une question sur le don ou le droit", "nextStepAgreement": "Obtenez un brouillon d'accord par IA", "nextStepInvite": "Invitez votre potentiel coparent", "aiInsightButton": "Obtenir votre réflexion personnalisée par IA", "aiInsightLoading": "Rédaction de votre réflexion personnalisée…", "aiInsightTitle": "Votre réflexion personnalisée", "aiInsightLimited": "Vous avez atteint la limite gratuite du jour pour cet outil - veuillez réessayer demain.", "aiInsightError": "Impossible de générer votre réflexion pour le moment. Veuillez réessayer.", "downloadImageError": "Impossible de créer l'image pour le moment. Veuillez réessayer.", "preparingImage": "Préparation de l'image…"},
+    question: {"progressLabel": "Section {n} sur 8 - {section}", "hintSelect": "Choisissez la réponse qui vous correspond le plus.", "hintText": "Facultatif - écrivez autant ou aussi peu que vous le souhaitez.", "back": "Retour", "next": "Suivant", "seeResults": "Voir les résultats", "note": "Les réponses peuvent être modifiées avant d'accéder à vos résultats."},
+  },
+  de: {
+    sections: ["Warum Elternteil werden?", "Elternschaft", "Alltag", "Geld", "Kommunikation", "Grenzen", "Zukunft", "Wichtige Fragen"],
+    questions: [{"section": 1, "type": "select", "prompt": "Warum möchten Sie Elternteil werden?", "options": ["Ich wollte schon immer ein Kind großziehen", "Ich möchte eine Familie gründen, bevor es für mich zu spät ist", "Ich möchte einem Kind ein liebevolles Zuhause geben, in welcher Form auch immer", "Ehrlich gesagt suche ich noch nach dem Warum"]}, {"section": 1, "type": "select", "prompt": "Wie würden Sie die Art von Elternteil beschreiben, die Sie sein möchten?", "options": ["Hands-on und in die täglichen Details involviert", "Präsent, aber meinem Kind Unabhängigkeit gebend", "Von Struktur und Routine geleitet", "Das finde ich noch heraus"]}, {"section": 1, "type": "select", "prompt": "Was ist Ihnen im Moment am wichtigsten in Bezug auf Ihren Wunsch, Elternteil zu werden?", "options": ["Das Timing - ich möchte nicht mehr viel länger warten", "Die richtige Situation zu finden, wann immer das geschieht", "Es auf eine Weise zu tun, die sich stabil und vorbereitet anfühlt", "Ich bin mir noch nicht sicher, ich erkunde meine Möglichkeiten"]}, {"section": 2, "type": "select", "prompt": "Wie würden Sie im Idealfall die Erziehungsverantwortung aufteilen?", "options": ["So gleichmäßig wie möglich", "Nach Zeitplänen", "Nach Einkommen", "Gemeinsam entscheiden", "Ich bin mir noch nicht sicher"]}, {"section": 2, "type": "select", "prompt": "Wie stehen Sie zum Thema Erziehung und Disziplin?", "options": ["Klare Regeln und konsequente Folgen", "Sanfte Anleitung, Dinge gemeinsam besprechen", "Kommt auf die Situation an", "Etwas, das wir gemeinsam vereinbaren müssten"]}, {"section": 2, "type": "select", "prompt": "Wie stark soll der andere Elternteil in alltägliche Entscheidungen eingebunden sein?", "options": ["Immer in alles eingebunden", "In die großen Entscheidungen eingebunden, bei kleinen eigenständig", "Meist eigenständig, gelegentlich Rücksprache", "Das arbeite ich noch aus"]}, {"section": 2, "type": "select", "prompt": "Wie stehen Sie dazu, dass die Großfamilie in die Erziehung eingebunden wird?", "options": ["Sehr eingebunden - Großeltern und Familie in der Nähe", "Manchmal eingebunden, aber wir setzen die Grenzen", "Minimale Einbindung, wir würden das Kind größtenteils selbst großziehen", "Kommt ganz auf die Familie an, das müsste ich mir überlegen"]}, {"section": 3, "type": "select", "prompt": "Wo sollte Ihr Kind idealerweise aufwachsen?", "options": ["In der Nähe meines jetzigen Wohnorts", "Offen dafür, irgendwohin neu zu ziehen", "In der Nähe der Familie, wo auch immer sie ist", "Darüber habe ich noch nicht nachgedacht"]}, {"section": 3, "type": "select", "prompt": "Wie würden Sie alltägliche Routinen wie Schulweg, Mahlzeiten und Schlafenszeit aufteilen?", "options": ["Standardmäßig gleichmäßig aufgeteilt", "Je nachdem, wessen Zeitplan es an diesem Tag zulässt", "Eine(r) von uns übernimmt die Führung, der/die andere unterstützt", "Das würden wir im Laufe der Zeit herausfinden"]}, {"section": 3, "type": "select", "prompt": "Wie viel Flexibilität wünschen Sie sich in Ihrem täglichen Erziehungsalltag?", "options": ["Eine klare, gleichbleibende Routine passt am besten zu mir", "Ich mag Flexibilität und mich nach Bedarf anzupassen", "Eine Mischung aus beidem", "Noch nicht sicher"]}, {"section": 4, "type": "select", "prompt": "Wie stehen Sie zur Aufteilung kindbezogener Kosten?", "options": ["Gleichmäßig, unabhängig davon, was jede(r) von uns verdient", "Proportional zu dem, was jede(r) von uns verdient", "Eine(r) von uns übernimmt finanziell mehr", "Das müssten wir besprechen"]}, {"section": 4, "type": "select", "prompt": "Wie würden Sie mit einer großen, unerwarteten Ausgabe für Ihr Kind umgehen?", "options": ["Sofort aufteilen, keine Diskussion nötig", "Erst besprechen und gemeinsam entscheiden", "Wer gerade die Mittel dafür hat, übernimmt es vorerst", "Ehrlich gesagt, noch nicht sicher"]}, {"section": 4, "type": "select", "prompt": "Wie wohl fühlen Sie sich dabei, mit einem Co-Elternteil über Geld zu sprechen, bevor Sie sich auf etwas festlegen?", "options": ["Sehr wohl - ich würde das gerne frühzeitig klären", "Wohl, aber ich würde mich langsam herantasten", "Etwas unwohl, aber ich weiß, dass es notwendig ist", "Ich neige dazu, Gespräche über Geld zu vermeiden"]}, {"section": 5, "type": "select", "prompt": "Wie oft erwarten Sie, mit einem Co-Elternteil über Ihr Kind zu kommunizieren?", "options": ["Tägliche Updates, auch bei Kleinigkeiten", "Regelmäßig, bei allem, was wichtig ist", "Nur wenn eine Entscheidung getroffen werden muss", "Ich weiß noch nicht, was realistisch ist"]}, {"section": 5, "type": "select", "prompt": "Wie gehen Sie am liebsten mit Meinungsverschiedenheiten um?", "options": ["Sofort darüber sprechen, wenn möglich persönlich", "Sich etwas Zeit zum Nachdenken nehmen, dann sprechen", "Es zuerst aufschreiben, um klar zu sein", "Ich neige dazu, Konflikte zu vermeiden, wenn ich kann"]}, {"section": 5, "type": "select", "prompt": "Wie fühlen Sie sich dabei, schon früh schwierige Fragen gestellt zu bekommen?", "options": ["Ich möchte lieber alles von Anfang an wissen", "Das ist für mich in Ordnung, sobald etwas Vertrauen besteht", "Ich würde tiefere Themen lieber schrittweise angehen", "Das macht mich etwas unwohl"]}, {"section": 6, "type": "select", "prompt": "Wie fühlen Sie sich dabei, wenn ein Co-Elternteil andere Menschen datet?", "options": ["Völlig in Ordnung, solange es respektvoll geschieht", "In Ordnung, aber ich würde gerne gewisse Grenzen setzen", "Ich würde das gerne besprechen, bevor es passiert", "Darüber habe ich noch nicht nachgedacht"]}, {"section": 6, "type": "select", "prompt": "Welche persönlichen Informationen teilen Sie zu Beginn eines Gesprächs über Co-Elternschaft gerne mit?", "options": ["So ziemlich alles Relevante", "Das Wesentliche, mehr mit wachsendem Vertrauen", "Nur das, was direkt mit der Erziehung zu tun hat", "Ich bin von Natur aus zurückhaltend bei den meisten Dingen"]}, {"section": 6, "type": "select", "prompt": "Wie fühlen Sie sich dabei, wenn ein Co-Elternteil Grenzen für Ihre Einbindung setzt?", "options": ["Völlig fair, jede(r) sollte Grenzen setzen können", "Kommt darauf an, worum es bei der Grenze geht", "Ich möchte immer so eingebunden wie möglich sein", "Darüber habe ich noch nicht nachgedacht"]}, {"section": 7, "type": "select", "prompt": "Wie stellen Sie sich Ihre Familie in fünf Jahren vor?", "options": ["Eine klare, stabile Routine, in der wir uns eingelebt haben", "Immer noch in Anpassung an Veränderungen", "Hängt stark davon ab, wohin das Leben uns führt", "Ehrlich gesagt habe ich mir das noch nicht vorgestellt"]}, {"section": 7, "type": "select", "prompt": "Was passiert, wenn einer von Ihnen beiden eines Tages umziehen möchte?", "options": ["Darauf müssten wir uns einigen, bevor wir starten", "Wir würden das gemeinsam klären, wenn es so weit ist", "Ich hätte gerne die Flexibilität umzuziehen, falls nötig", "Nicht sicher, wie ich damit umgehen würde"]}, {"section": 7, "type": "select", "prompt": "Wie fühlen Sie sich dabei, dass sich die Vereinbarung ändert, wenn Ihr Kind älter wird?", "options": ["Ich erwarte, dass sie sich weiterentwickelt, und das ist für mich in Ordnung", "Ich möchte die Dinge so beständig wie möglich halten", "Etwas von beidem, je nach Bedarf", "So weit habe ich noch nicht gedacht"]}, {"section": 8, "type": "select", "prompt": "Was würde Sie dazu bringen, sich gegen einen möglichen Co-Elternteil zu entscheiden?", "options": ["Eine Diskrepanz bei grundlegenden Werten rund um die Erziehung", "Das Gefühl, zu Entscheidungen gedrängt oder gehetzt zu werden", "Bedenken hinsichtlich Zuverlässigkeit oder Konsequenz", "Ich würde es spüren, wenn es so weit ist"]}, {"section": 8, "type": "text", "prompt": "Was möchten Sie am meisten, dass ein möglicher Co-Elternteil über Sie versteht, bevor Sie gemeinsam weitergehen?"}, {"section": 8, "type": "text", "prompt": "Welche Frage haben Sie Angst zu stellen, obwohl Sie wissen, dass Sie es sollten?"}, {"section": 8, "type": "text", "prompt": "Gibt es noch etwas zu Ihrer Situation oder Ihren Erwartungen, das Sie mitteilen möchten?"}],
+    strengthCopy: {"1": {"title": "Warum Elternteil werden?", "copy": "Sie scheinen sich darüber im Klaren zu sein, warum Sie Elternteil werden möchten - diese Klarheit lohnt es sich, früh in einem Gespräch auszusprechen."}, "2": {"title": "Elternschaft", "copy": "Sie scheinen ein gefestigtes Gefühl dafür zu haben, wie Sie sich die gemeinsame Erziehung im Alltag vorstellen."}, "3": {"title": "Alltag", "copy": "Sie haben ein recht klares Bild davon, wie der Alltag und die Routinen aussehen könnten."}, "4": {"title": "Geld", "copy": "Sie wirken entspannt und entschlossen, wenn es darum geht, wie Geld und Kosten gehandhabt würden."}, "5": {"title": "Kommunikation", "copy": "Sie scheinen sich wohl dabei zu fühlen, schwierige Themen zu besprechen und gemeinsam nach Lösungen zu suchen."}, "6": {"title": "Grenzen", "copy": "Sie haben ein klares Gefühl dafür, welche Grenzen Ihnen wichtig sind."}, "7": {"title": "Zukunft", "copy": "Sie scheinen darüber nachgedacht zu haben, wie sich die Dinge verändern könnten, während Ihre Familie wächst."}, "8": {"title": "Wichtige Fragen", "copy": "Sie haben ein klares Gefühl dafür, was für Sie funktionieren würde - und was nicht."}},
+    discussCopy: {"1": {"title": "Warum Elternteil werden?", "copy": "Ihre Antworten deuten darauf hin, dass sich Ihre Gründe für die Elternschaft noch formen - es lohnt sich, diese in Worte zu fassen, bevor Sie weitergehen."}, "2": {"title": "Elternschaft", "copy": "Wie die alltäglichen Erziehungsaufgaben tatsächlich aufgeteilt würden, scheint ein Bereich zu sein, der ein tieferes Gespräch verdient."}, "3": {"title": "Alltag", "copy": "Wohnsituation und Alltagsroutinen - Ihre Antworten zeigen einen Bereich, in dem ein tieferes Gespräch sinnvoll sein könnte."}, "4": {"title": "Geld", "copy": "Wie die Kosten aufgeteilt würden, scheint bei Ihnen weniger festzustehen - ein Thema, das man besser früh anspricht als nachträglich."}, "5": {"title": "Kommunikation", "copy": "Wie Sie im Alltag kommunizieren würden, besonders bei Meinungsverschiedenheiten, lohnt sich, ausdrücklich zu besprechen."}, "6": {"title": "Grenzen", "copy": "Wo Ihre Grenzen liegen, ist noch nicht ganz geklärt - es lohnt sich, das zunächst für sich selbst zu klären und dann mit einem möglichen Co-Elternteil."}, "7": {"title": "Zukunft", "copy": "Wie sich die Dinge im Laufe der Jahre verändern könnten, ist für Sie noch ungewiss - ein Thema, das man mit der Zeit erneut aufgreifen sollte."}, "8": {"title": "Wichtige Fragen", "copy": "Einige der schwierigeren Fragen sind für Sie noch offen - es lohnt sich, sich damit auseinanderzusetzen, bevor Sie sich festlegen."}},
+    prompts: {"1": ["Warum ziehen Sie beide das gerade jetzt in Betracht, ganz konkret?", "Was würde im Nachhinein das Gefühl geben, dass es die falsche Entscheidung war?"], "2": ["Wie würden Sie Entscheidungen zu Schule, Gesundheitsversorgung und Erziehung aufteilen?", "Was passiert, wenn Sie bei einer Erziehungsentscheidung nicht einer Meinung sind?"], "3": ["Wo würden Sie beide idealerweise leben wollen, und wie nah beieinander?", "Wie würde eine typische Woche tatsächlich aufgeteilt?"], "4": ["Wie würden Sie die Kosten aufteilen, wenn einer von Ihnen deutlich mehr verdient?", "Wer würde eine ungeplante, größere Ausgabe übernehmen?"], "5": ["Wie oft erwarten Sie, sich gegenseitig auf dem Laufenden zu halten?", "Wie sieht für jede(n) von Ihnen eine faire Art aus, anderer Meinung zu sein?"], "6": ["Was möchten Sie über die anderen Beziehungen des jeweils anderen wissen?", "Welche Informationen betrachtet jede(r) von Ihnen als privat?"], "7": ["Was würden Sie tun, wenn einer von Ihnen wegziehen wollte?", "Wie stellen Sie sich vor, dass sich diese Vereinbarung über mehr als 10 Jahre entwickelt?"], "8": ["Was wäre für jede(n) von Ihnen ein Ausschlusskriterium?", "Gibt es etwas, das Sie im Moment zögern anzusprechen?"]},
+    intro: {"title": "Könnten Sie sich vorstellen, mit dieser Person gut zusammen zu erziehen?", "body": "Dieses Quiz sagt Ihnen nicht, ob Sie gemeinsam erziehen sollten. Es hilft Ihnen zu erkennen, wo Ihre Erwartungen übereinstimmen - und was sich zu besprechen lohnt.", "beforeYouStart": "Bevor Sie beginnen", "questionsCount": "{count} Fragen", "duration": "Etwa 5 Minuten", "canGoBack": "Sie können zurückgehen und Antworten bearbeiten", "freeTextOptional": "Freitextantworten sind optional", "privacyHeading": "Datenschutz", "privacyBody": "Deine Antworten bleiben nur in dieser Browsersitzung und werden nie automatisch geteilt. Erstelle ein kostenloses Konto, wenn du deine Ergebnisse speichern oder teilen möchtest.", "startButton": "Quiz starten"},
+    results: {"title": "Was Ihre Antworten nahelegen", "subtitle": "Eine Widerspiegelung Ihrer Prioritäten - kein Urteil.", "strongestHeading": "Ihre stärksten Bereiche", "discussHeading": "Wert, besprochen zu werden", "discussEmptyBody": "Sie haben insgesamt recht eindeutig geantwortet - das ist ein gutes Zeichen, aber es lohnt sich trotzdem, diese Themen laut mit einem potenziellen Co-Elternteil zu besprechen, nicht nur mit sich selbst.", "promptsHeading": "Fragen zum gemeinsamen Erkunden", "shareImageButton": "Als Bild teilen", "shareButton": "Als Text teilen", "noScoreShort": "Keine Kompatibilitäts-Prozentzahl", "nextStepQuestions": "Fragen an einen potenziellen Co-Elternteil", "nextStepPlan": "Co-Parenting-Plan erstellen", "nextStepAskAi": "Frag die KI zu Spende oder rechtlichen Fragen", "nextStepAgreement": "Hol dir einen KI-Vertragsentwurf", "nextStepInvite": "Lade deine mögliche Co-Eltern-Person ein", "aiInsightButton": "Deine persönliche KI-Reflexion erhalten", "aiInsightLoading": "Deine persönliche Reflexion wird geschrieben…", "aiInsightTitle": "Deine persönliche Reflexion", "aiInsightLimited": "Du hast das heutige kostenlose Limit für dieses Tool erreicht - bitte versuche es morgen erneut.", "aiInsightError": "Deine Reflexion konnte gerade nicht erstellt werden. Bitte erneut versuchen.", "downloadImageError": "Das Bild konnte gerade nicht erstellt werden. Bitte erneut versuchen.", "preparingImage": "Bild wird vorbereitet…"},
+    question: {"progressLabel": "Abschnitt {n} von 8 - {section}", "hintSelect": "Wählen Sie die Antwort, die Ihnen am nächsten kommt.", "hintText": "Optional - schreiben Sie so viel oder so wenig, wie Sie möchten.", "back": "Zurück", "next": "Weiter", "seeResults": "Ergebnisse ansehen", "note": "Antworten können geändert werden, bevor Sie Ihre Ergebnisse erreichen."},
+  },
+  it: {
+    sections: ["Perché diventare genitore?", "Genitorialità", "Vita quotidiana", "Denaro", "Comunicazione", "Limiti", "Futuro", "Domande importanti"],
+    questions: [{"section": 1, "type": "select", "prompt": "Perché desidera diventare genitore?", "options": ["Ho sempre desiderato crescere un figlio", "Voglio costruire una famiglia prima che sia troppo tardi per me", "Voglio dare a un bambino una casa piena d'amore, in qualunque forma essa sia", "Onestamente, sto ancora cercando di capire il perché"]}, {"section": 1, "type": "select", "prompt": "Come descriverebbe il tipo di genitore che spera di essere?", "options": ["Presente e coinvolto nei dettagli quotidiani", "Presente, ma lasciando indipendenza a mio figlio", "Guidato/a da struttura e routine", "Lo sto ancora capendo"]}, {"section": 1, "type": "select", "prompt": "Cosa conta di più per Lei in questo momento riguardo al diventare genitore?", "options": ["Il tempismo - non voglio aspettare ancora molto", "Trovare la situazione giusta, qualunque momento sia", "Farlo in un modo che risulti stabile e ponderato", "Non sono ancora sicuro/a, sto esplorando le mie opzioni"]}, {"section": 2, "type": "select", "prompt": "Come vorrebbe idealmente condividere le responsabilità genitoriali?", "options": ["Nel modo più paritario possibile", "In base agli orari", "In base al reddito", "Deciderlo insieme", "Non sono ancora sicuro/a"]}, {"section": 2, "type": "select", "prompt": "Qual è la Sua idea di disciplina?", "options": ["Regole chiare e conseguenze coerenti", "Guida gentile, parlandone insieme", "Dipende dalla situazione", "Qualcosa da concordare insieme"]}, {"section": 2, "type": "select", "prompt": "Quanto vorrebbe che l'altro genitore fosse coinvolto nelle decisioni quotidiane?", "options": ["Coinvolto in tutto, sempre", "Coinvolto nelle grandi decisioni, autonomo per quelle piccole", "Perlopiù autonomo, con aggiornamenti occasionali", "Lo sto ancora definendo"]}, {"section": 2, "type": "select", "prompt": "Cosa pensa del coinvolgimento della famiglia allargata nella crescita di un figlio?", "options": ["Molto coinvolta - nonni e famiglia vicini", "Coinvolta a volte, ma i limiti li fissiamo noi", "Coinvolgimento minimo, cresceremmo il bambino soprattutto da soli", "Dipende interamente dalla famiglia, dovrei rifletterci"]}, {"section": 3, "type": "select", "prompt": "Dove vorrebbe idealmente che Suo figlio crescesse?", "options": ["Vicino a dove vivo ora", "Aperto/a a trasferirmi altrove", "Vicino alla famiglia, ovunque essa sia", "Non ci ho ancora pensato"]}, {"section": 3, "type": "select", "prompt": "Come dividerebbe le routine quotidiane come accompagnare a scuola, i pasti e l'ora di andare a letto?", "options": ["Divise equamente per impostazione predefinita", "In base a chi ha l'orario libero quel giorno", "Uno di noi guida, l'altro supporta", "Lo capiremmo strada facendo"]}, {"section": 3, "type": "select", "prompt": "Quanta flessibilità desidera nella Sua routine genitoriale quotidiana?", "options": ["Una routine chiara e costante mi si addice di più", "Mi piace la flessibilità e adattarmi secondo necessità", "Un misto di entrambe", "Non ancora sicuro/a"]}, {"section": 4, "type": "select", "prompt": "Cosa pensa della suddivisione delle spese legate al bambino?", "options": ["In parti uguali, indipendentemente da quanto guadagniamo ciascuno", "In proporzione a quanto guadagniamo ciascuno", "Uno di noi si assume una parte maggiore economicamente", "Dovremmo parlarne"]}, {"section": 4, "type": "select", "prompt": "Come gestirebbe una spesa importante e imprevista per Suo figlio?", "options": ["Dividerla subito, senza bisogno di discuterne", "Parlarne e decidere insieme prima", "Chi ha i mezzi la copre, per ora", "Onestamente, non ancora sicuro/a"]}, {"section": 4, "type": "select", "prompt": "Quanto si sente a proprio agio a parlare di soldi con un co-genitore prima di impegnarsi in qualcosa?", "options": ["Molto a mio agio - vorrei chiarirlo presto", "A mio agio, ma ci arriverei gradualmente", "Un po' a disagio, ma so che è necessario", "Tendo a evitare le conversazioni sui soldi"]}, {"section": 5, "type": "select", "prompt": "Con quale frequenza si aspetta di comunicare con un co-genitore riguardo a Suo figlio?", "options": ["Aggiornamenti quotidiani, anche per piccole cose", "Regolarmente, per tutto ciò che conta", "Solo quando bisogna prendere una decisione", "Non so ancora cosa sia realistico"]}, {"section": 5, "type": "select", "prompt": "Qual è il Suo modo preferito di gestire un disaccordo?", "options": ["Parlarne subito, di persona se possibile", "Prendersi del tempo per riflettere, poi parlarne", "Scriverlo prima per essere chiaro/a", "Tendo a evitare il conflitto quando posso"]}, {"section": 5, "type": "select", "prompt": "Cosa prova all'idea di ricevere domande difficili fin dall'inizio?", "options": ["Preferisco sapere tutto fin da subito", "Mi va bene una volta stabilita una certa fiducia", "Preferirei avvicinarmi gradualmente ai temi più profondi", "Mi mette un po' a disagio"]}, {"section": 6, "type": "select", "prompt": "Cosa prova all'idea che un co-genitore frequenti altre persone?", "options": ["Completamente a mio agio, purché avvenga con rispetto", "Va bene, ma vorrei fissare alcuni limiti", "Vorrei discuterne prima che accada", "Non ci ho ancora riflettuto"]}, {"section": 6, "type": "select", "prompt": "Quali informazioni personali si sente a proprio agio a condividere all'inizio di una conversazione sulla co-genitorialità?", "options": ["Praticamente tutto ciò che è rilevante", "Le basi, di più man mano che la fiducia cresce", "Solo ciò che riguarda direttamente la genitorialità", "Sono naturalmente riservato/a sulla maggior parte delle cose"]}, {"section": 6, "type": "select", "prompt": "Cosa prova se un co-genitore stabilisce dei limiti a quanto Lei è coinvolto/a?", "options": ["Completamente giusto, ognuno dovrebbe poter fissare dei limiti", "Dipende da quale sia il limite", "Vorrei essere coinvolto/a il più possibile, sempre", "Non ci ho ancora riflettuto"]}, {"section": 7, "type": "select", "prompt": "Come immagina la Sua famiglia tra cinque anni?", "options": ["Una routine chiara e stabile in cui ci siamo assestati", "Ancora in fase di adattamento ai cambiamenti", "Dipende molto da dove ci porterà la vita", "Onestamente, non me la sono ancora immaginata"]}, {"section": 7, "type": "select", "prompt": "Cosa succede se uno di voi due desidera trasferirsi un giorno?", "options": ["Dovremmo essere d'accordo su questo prima di iniziare", "Lo capiremmo insieme quando si presenterà", "Vorrei avere la flessibilità di trasferirmi se necessario", "Non sono sicuro/a di come lo gestirei"]}, {"section": 7, "type": "select", "prompt": "Cosa prova all'idea che l'accordo cambi man mano che Suo figlio cresce?", "options": ["Mi aspetto che si evolva, e questo mi va bene", "Vorrei mantenere le cose il più costanti possibile", "Un po' di entrambe le cose, a seconda delle necessità", "Non ci ho pensato così in là"]}, {"section": 8, "type": "select", "prompt": "Cosa La porterebbe a decidere di non proseguire con un potenziale co-genitore?", "options": ["Una discrepanza nei valori fondamentali sulla genitorialità", "Sentirsi sotto pressione o spinto/a verso decisioni affrettate", "Preoccupazioni sull'affidabilità o sulla capacità di mantenere gli impegni", "Lo saprei nel momento in cui lo sentissi"]}, {"section": 8, "type": "text", "prompt": "Cosa vorrebbe di più che un potenziale co-genitore capisse di Lei prima di andare avanti insieme?"}, {"section": 8, "type": "text", "prompt": "Qual è una domanda che ha paura di fare, ma sa che dovrebbe?"}, {"section": 8, "type": "text", "prompt": "C'è qualcos'altro sulla Sua situazione o sulle Sue aspettative che vorrebbe condividere?"}],
+    strengthCopy: {"1": {"title": "Perché diventare genitore?", "copy": "Sembra avere le idee chiare sul perché desidera diventare genitore - questa chiarezza vale la pena di essere espressa apertamente fin dall'inizio di una conversazione."}, "2": {"title": "Genitorialità", "copy": "Sembra avere un'idea consolidata di come vorrebbe gestire la co-genitorialità giorno per giorno."}, "3": {"title": "Vita quotidiana", "copy": "Ha un'immagine abbastanza chiara di come potrebbero essere la vita quotidiana e le routine."}, "4": {"title": "Denaro", "copy": "Sembra a proprio agio e deciso/a su come verrebbero gestiti il denaro e le spese."}, "5": {"title": "Comunicazione", "copy": "Sembra a proprio agio nell'affrontare argomenti difficili e nel cercare soluzioni insieme."}, "6": {"title": "Limiti", "copy": "Ha un'idea chiara dei limiti che contano per Lei."}, "7": {"title": "Futuro", "copy": "Sembra aver riflettuto su come le cose potrebbero cambiare man mano che la Sua famiglia cresce."}, "8": {"title": "Domande importanti", "copy": "Ha un'idea chiara di ciò che funzionerebbe - e ciò che non funzionerebbe - per Lei."}},
+    discussCopy: {"1": {"title": "Perché diventare genitore?", "copy": "Le Sue risposte suggeriscono che le ragioni per cui desidera diventare genitore sono ancora in fase di definizione - vale la pena metterle in parole prima di andare oltre."}, "2": {"title": "Genitorialità", "copy": "Come verrebbero effettivamente suddivise le responsabilità genitoriali quotidiane sembra un'area che merita una conversazione più approfondita."}, "3": {"title": "Vita quotidiana", "copy": "Sistemazione abitativa e routine quotidiane - le Sue risposte mostrano un'area in cui potrebbe essere utile una conversazione più approfondita."}, "4": {"title": "Denaro", "copy": "Come verrebbero condivise le spese sembra meno definito per Lei - un buon argomento da sollevare presto, non dopo il fatto."}, "5": {"title": "Comunicazione", "copy": "Come comunicherebbe giorno per giorno, specialmente durante i disaccordi, merita di essere discusso esplicitamente."}, "6": {"title": "Limiti", "copy": "Dove si collocano i Suoi limiti non è ancora del tutto definito - vale la pena chiarirlo prima con Se stesso/a, poi con un potenziale co-genitore."}, "7": {"title": "Futuro", "copy": "Come le cose potrebbero cambiare nel corso degli anni resta incerto per Lei - un tema da rivisitare man mano che la relazione si sviluppa."}, "8": {"title": "Domande importanti", "copy": "Alcune delle domande più difficili sono ancora aperte per Lei - vale la pena rifletterci prima di impegnarsi in qualcosa."}},
+    prompts: {"1": ["Perché state considerando entrambi questa scelta proprio ora, nello specifico?", "Cosa, col senno di poi, darebbe la sensazione che sia stata la decisione sbagliata?"], "2": ["Come dividereste le decisioni su istruzione, salute e disciplina?", "Cosa succede se siete in disaccordo su una decisione genitoriale?"], "3": ["Dove vorreste idealmente vivere ciascuno, e quanto vicini l'uno all'altro?", "Come sarebbe effettivamente divisa una settimana tipo?"], "4": ["Come dividereste le spese se uno di voi guadagna significativamente di più?", "Chi coprirebbe una spesa importante e non pianificata?"], "5": ["Con quale frequenza vi aspettate di sentirvi l'un l'altro?", "Come appare, per ciascuno di voi, un modo equo di essere in disaccordo?"], "6": ["Cosa vorreste sapere sulle altre relazioni di ciascuno?", "Quali informazioni ciascuno di voi considera private?"], "7": ["Cosa fareste se uno di voi volesse trasferirsi lontano?", "Come immaginate che questo accordo si evolva nell'arco di oltre 10 anni?"], "8": ["Cosa sarebbe un punto di rottura per ciascuno di voi?", "C'è qualcosa che esitate a sollevare in questo momento?"]},
+    intro: {"title": "Riesce a immaginarsi come un buon genitore insieme a questa persona?", "body": "Questo quiz non Le dirà se dovrebbe diventare co-genitore. La aiuta a capire dove le aspettative si allineano - e cosa vale la pena approfondire.", "beforeYouStart": "Prima di iniziare", "questionsCount": "{count} domande", "duration": "Circa 5 minuti", "canGoBack": "Può tornare indietro e modificare le risposte", "freeTextOptional": "Le risposte a testo libero sono facoltative", "privacyHeading": "Privacy", "privacyBody": "Le tue risposte restano solo in questa sessione del browser e non vengono mai condivise automaticamente. Crea un account gratuito se desideri salvare o condividere i tuoi risultati.", "startButton": "Inizia il quiz"},
+    results: {"title": "Cosa suggeriscono le Sue risposte", "subtitle": "Un riflesso delle Sue priorità - non un verdetto.", "strongestHeading": "I Suoi punti di forza", "discussHeading": "Da approfondire", "discussEmptyBody": "Ha risposto in modo abbastanza deciso su tutti i fronti - è un buon segno, ma vale comunque la pena affrontare questi argomenti ad alta voce con un potenziale co-genitore, non solo con Lei stesso/a.", "promptsHeading": "Domande da esplorare insieme", "shareImageButton": "Condividi come immagine", "shareButton": "Condividi come testo", "noScoreShort": "Nessuna percentuale di compatibilità", "nextStepQuestions": "Domande da fare a un potenziale co-genitore", "nextStepPlan": "Crea un Piano di co-genitorialità", "nextStepAskAi": "Chiedi all'IA una domanda su donatore o aspetti legali", "nextStepAgreement": "Ottieni una bozza di accordo con IA", "nextStepInvite": "Invita il tuo potenziale co-genitore", "aiInsightButton": "Ottieni la tua riflessione personalizzata con IA", "aiInsightLoading": "Scrittura della tua riflessione personalizzata…", "aiInsightTitle": "La tua riflessione personalizzata", "aiInsightLimited": "Hai raggiunto il limite gratuito di oggi per questo strumento - riprova domani.", "aiInsightError": "Impossibile generare la tua riflessione in questo momento. Riprova.", "downloadImageError": "Impossibile creare l'immagine in questo momento. Riprova.", "preparingImage": "Preparazione immagine…"},
+    question: {"progressLabel": "Sezione {n} di 8 - {section}", "hintSelect": "Scelga la risposta che sente più vicina a Lei.", "hintText": "Facoltativo - scriva quanto desidera.", "back": "Indietro", "next": "Avanti", "seeResults": "Vedi risultati", "note": "Le risposte possono essere modificate prima di arrivare ai risultati."},
+  },
+  pl: {
+    sections: ["Dlaczego rodzicielstwo?", "Rodzicielstwo", "Życie codzienne", "Pieniądze", "Komunikacja", "Granice", "Przyszłość", "Ważne pytania"],
+    questions: [{"section": 1, "type": "select", "prompt": "Dlaczego chcesz zostać rodzicem?", "options": ["Zawsze chciałem/chciałam wychować dziecko", "Chcę założyć rodzinę, zanim będzie dla mnie za późno", "Chcę dać dziecku kochający dom, niezależnie od tego, jak będzie wyglądał", "Szczerze mówiąc, wciąż zastanawiam się dlaczego"]}, {"section": 1, "type": "select", "prompt": "Jak opisałbyś/opisałabyś rodzica, jakim chciałbyś/chciałabyś być?", "options": ["Zaangażowany/zaangażowana w codzienne szczegóły", "Obecny/obecna, ale dający/dająca dziecku niezależność", "Kierujący/kierująca się strukturą i rutyną", "Wciąż to sobie ustalam"]}, {"section": 1, "type": "select", "prompt": "Co jest dla Ciebie teraz najważniejsze w kwestii zostania rodzicem?", "options": ["Czas - nie chcę czekać dużo dłużej", "Znalezienie odpowiedniej sytuacji, niezależnie od tego, kiedy to nastąpi", "Zrobienie tego w sposób, który wydaje się stabilny i przemyślany", "Jeszcze nie jestem pewny/pewna, rozważam różne opcje"]}, {"section": 2, "type": "select", "prompt": "Jak idealnie chciałbyś/chciałabyś dzielić obowiązki rodzicielskie?", "options": ["Jak najbardziej równo", "Na podstawie grafików", "Na podstawie dochodów", "Decydować razem", "Jeszcze nie jestem pewny/pewna"]}, {"section": 2, "type": "select", "prompt": "Jak zapatrujesz się na dyscyplinę?", "options": ["Jasne zasady i konsekwentne konsekwencje", "Łagodne prowadzenie, rozmowa o sprawach", "Zależy od sytuacji", "Coś, co musielibyśmy wspólnie ustalić"]}, {"section": 2, "type": "select", "prompt": "Jak bardzo chciałbyś/chciałabyś, żeby drugi rodzic był zaangażowany w codzienne decyzje?", "options": ["Zaangażowany we wszystko, zawsze", "Zaangażowany w ważne decyzje, samodzielny w drobnych", "W większości samodzielny, z okazjonalnym kontaktem", "Wciąż to sobie ustalam"]}, {"section": 2, "type": "select", "prompt": "Co sądzisz o zaangażowaniu dalszej rodziny w wychowanie dziecka?", "options": ["Bardzo zaangażowana - dziadkowie i rodzina blisko", "Czasem zaangażowana, ale to my wyznaczamy granice", "Minimalne zaangażowanie, sami wychowywalibyśmy dziecko", "Zależy całkowicie od rodziny, musiałbym/musiałabym się nad tym zastanowić"]}, {"section": 3, "type": "select", "prompt": "Gdzie idealnie chciałbyś/chciałabyś, żeby Twoje dziecko dorastało?", "options": ["Blisko miejsca, w którym teraz mieszkam", "Jestem otwarty/otwarta na przeprowadzkę gdzie indziej", "Blisko rodziny, gdziekolwiek by nie była", "Jeszcze o tym nie myślałem/myślałam"]}, {"section": 3, "type": "select", "prompt": "Jak podzieliłbyś/podzieliłabyś codzienne obowiązki, takie jak odwożenie do szkoły, posiłki i kładzenie spać?", "options": ["Domyślnie po równo", "W zależności od tego, kto ma tego dnia czas", "Jedno z nas przejmuje prowadzenie, drugie wspiera", "Ustalilibyśmy to na bieżąco"]}, {"section": 3, "type": "select", "prompt": "Ile elastyczności chcesz mieć w swoim codziennym harmonogramie rodzicielskim?", "options": ["Jasna, stała rutyna sprawdza się u mnie najlepiej", "Lubię elastyczność i dostosowywanie się w razie potrzeby", "Trochę jednego i drugiego", "Jeszcze nie jestem pewny/pewna"]}, {"section": 4, "type": "select", "prompt": "Co sądzisz o podziale kosztów związanych z dzieckiem?", "options": ["Po równo, niezależnie od tego, ile każde z nas zarabia", "Proporcjonalnie do tego, ile każde z nas zarabia", "Jedno z nas bierze na siebie więcej finansowo", "Musielibyśmy o tym porozmawiać"]}, {"section": 4, "type": "select", "prompt": "Jak poradziłbyś/poradziłabyś sobie z dużym, nieoczekiwanym wydatkiem na dziecko?", "options": ["Podzielić go od razu, bez potrzeby dyskusji", "Najpierw porozmawiać i wspólnie zdecydować", "Na razie pokrywa go to z nas, które ma taką możliwość", "Szczerze mówiąc, jeszcze nie jestem pewny/pewna"]}, {"section": 4, "type": "select", "prompt": "Na ile czujesz się komfortowo, rozmawiając o pieniądzach ze współrodzicem, zanim się na coś zdecydujesz?", "options": ["Bardzo komfortowo - chciałbym/chciałabym to ustalić wcześnie", "Komfortowo, ale podchodziłbym/podchodziłabym do tego stopniowo", "Trochę niekomfortowo, ale wiem, że to konieczne", "Mam tendencję do unikania rozmów o pieniądzach"]}, {"section": 5, "type": "select", "prompt": "Jak często spodziewasz się kontaktować ze współrodzicem w sprawach dotyczących dziecka?", "options": ["Codzienne aktualizacje, nawet w drobnych sprawach", "Regularnie, w każdej ważnej sprawie", "Tylko wtedy, gdy trzeba podjąć decyzję", "Jeszcze nie wiem, co będzie realistyczne"]}, {"section": 5, "type": "select", "prompt": "Jaki jest Twój preferowany sposób radzenia sobie z niezgodą?", "options": ["Porozmawiać o tym od razu, najlepiej osobiście", "Poświęcić trochę czasu na przemyślenie, a potem porozmawiać", "Najpierw to zapisać, żeby móc jasno się wyrazić", "Mam tendencję do unikania konfliktów, kiedy tylko mogę"]}, {"section": 5, "type": "select", "prompt": "Co czujesz na myśl o tym, że ktoś zadaje Ci trudne pytania na wczesnym etapie?", "options": ["Wolę wiedzieć wszystko od razu", "Jest mi z tym dobrze, gdy pojawi się już trochę zaufania", "Wolałbym/wolałabym stopniowo przechodzić do głębszych tematów", "Czuję się z tym trochę niekomfortowo"]}, {"section": 6, "type": "select", "prompt": "Co czujesz na myśl o tym, że współrodzic spotyka się z innymi osobami?", "options": ["Całkowicie w porządku, o ile jest to robione z szacunkiem", "W porządku, ale chciałbym/chciałabym ustalić pewne granice", "Chciałbym/chciałabym to omówić, zanim to się wydarzy", "Jeszcze się nad tym nie zastanawiałem/zastanawiałam"]}, {"section": 6, "type": "select", "prompt": "Jakimi informacjami osobistymi czujesz się komfortowo dzielić na wczesnym etapie rozmowy o współrodzicielstwie?", "options": ["Praktycznie wszystkim, co istotne", "Podstawami, a więcej w miarę budowania zaufania", "Tylko tym, co bezpośrednio dotyczy rodzicielstwa", "Z natury jestem dyskretny/dyskretna w większości spraw"]}, {"section": 6, "type": "select", "prompt": "Co czujesz, gdy współrodzic ustala granice tego, jak bardzo jesteś zaangażowany/zaangażowana?", "options": ["Całkowicie uczciwe, każde z nas powinno móc ustalać granice", "Zależy, jaka to granica", "Zawsze chciałbym/chciałabym być zaangażowany/zaangażowana najbardziej, jak to możliwe", "Jeszcze się nad tym nie zastanawiałem/zastanawiałam"]}, {"section": 7, "type": "select", "prompt": "Jak wyobrażasz sobie swoją rodzinę za pięć lat?", "options": ["Jasna, stabilna rutyna, w którą już weszliśmy", "Wciąż dostosowujemy się do zmian", "Bardzo zależy od tego, dokąd zaprowadzi nas życie", "Szczerze mówiąc, jeszcze sobie tego nie wyobraziłem/wyobraziłam"]}, {"section": 7, "type": "select", "prompt": "Co się stanie, jeśli jedno z was zechce pewnego dnia się przeprowadzić?", "options": ["Musielibyśmy uzgodnić to przed rozpoczęciem", "Ustalilibyśmy to razem, gdy sprawa się pojawi", "Chciałbym/chciałabym mieć elastyczność, by się przeprowadzić w razie potrzeby", "Nie jestem pewny/pewna, jak bym sobie z tym poradził/poradziła"]}, {"section": 7, "type": "select", "prompt": "Co czujesz na myśl o tym, że ustalenia będą się zmieniać w miarę dorastania dziecka?", "options": ["Spodziewam się, że będą ewoluować, i jest mi z tym dobrze", "Chciałbym/chciałabym, żeby rzeczy pozostały jak najbardziej stałe", "Trochę jedno i drugie, zależnie od potrzeb", "Jeszcze nie myślałem/myślałam tak daleko naprzód"]}, {"section": 8, "type": "select", "prompt": "Co sprawiłoby, że zdecydowałbyś/zdecydowałabyś się nie kontynuować relacji z potencjalnym współrodzicem?", "options": ["Niezgodność w podstawowych wartościach dotyczących rodzicielstwa", "Poczucie presji lub pospieszania do podejmowania decyzji", "Obawy dotyczące wiarygodności lub dotrzymywania zobowiązań", "Poznałbym/poznałabym to po tym, co bym poczuł/poczuła"]}, {"section": 8, "type": "text", "prompt": "Co najbardziej chciałbyś/chciałabyś, żeby potencjalny współrodzic zrozumiał na Twój temat, zanim ruszycie razem dalej?"}, {"section": 8, "type": "text", "prompt": "Jakie jest jedno pytanie, które boisz się zadać, ale wiesz, że powinieneś/powinnaś?"}, {"section": 8, "type": "text", "prompt": "Czy jest coś jeszcze na temat Twojej sytuacji lub oczekiwań, czym chciałbyś/chciałabyś się podzielić?"}],
+    strengthCopy: {"1": {"title": "Dlaczego rodzicielstwo?", "copy": "Wydajesz się mieć jasność co do tego, dlaczego chcesz zostać rodzicem - warto nazwać to na głos na wczesnym etapie rozmowy."}, "2": {"title": "Rodzicielstwo", "copy": "Wydaje się, że masz ugruntowane wyobrażenie o tym, jak chciałbyś/chciałabyś dzielić się rodzicielstwem na co dzień."}, "3": {"title": "Życie codzienne", "copy": "Masz dość jasny obraz tego, jak mogłoby wyglądać codzienne życie i rutyna."}, "4": {"title": "Pieniądze", "copy": "Wydajesz się komfortowo i zdecydowanie podchodzić do tego, jak byłyby zarządzane pieniądze i koszty."}, "5": {"title": "Komunikacja", "copy": "Wydaje się, że dobrze radzisz sobie z omawianiem trudnych tematów i wspólnym szukaniem rozwiązań."}, "6": {"title": "Granice", "copy": "Masz jasne poczucie granic, które są dla Ciebie ważne."}, "7": {"title": "Przyszłość", "copy": "Wydaje się, że przemyślałeś/przemyślałaś, jak sprawy mogą się zmieniać w miarę rozwoju Twojej rodziny."}, "8": {"title": "Ważne pytania", "copy": "Masz jasne poczucie tego, co by się sprawdziło - a co nie - w Twoim przypadku."}},
+    discussCopy: {"1": {"title": "Dlaczego rodzicielstwo?", "copy": "Twoje odpowiedzi sugerują, że Twoje powody, by zostać rodzicem, wciąż się kształtują - warto ubrać je w słowa, zanim pójdziesz dalej."}, "2": {"title": "Rodzicielstwo", "copy": "Sposób, w jaki codzienne obowiązki rodzicielskie byłyby faktycznie podzielone, wydaje się tematem wartym głębszej rozmowy."}, "3": {"title": "Życie codzienne", "copy": "Warunki życia i codzienna rutyna - Twoje odpowiedzi pokazują obszar, w którym warto przeprowadzić głębszą rozmowę."}, "4": {"title": "Pieniądze", "copy": "Sposób podziału kosztów wydaje się u Ciebie mniej ustalony - dobrze poruszyć ten temat wcześnie, a nie po fakcie."}, "5": {"title": "Komunikacja", "copy": "Sposób, w jaki komunikowałbyś/komunikowałabyś się na co dzień, zwłaszcza podczas niezgody, warto wyraźnie omówić."}, "6": {"title": "Granice", "copy": "Twoje granice nie są jeszcze w pełni ustalone - warto to najpierw wyjaśnić sobie, a potem z potencjalnym współrodzicem."}, "7": {"title": "Przyszłość", "copy": "To, jak sprawy mogą się zmieniać na przestrzeni lat, wciąż jest dla Ciebie niepewne - warto do tego wracać w miarę rozwoju relacji."}, "8": {"title": "Ważne pytania", "copy": "Niektóre z trudniejszych pytań wciąż pozostają dla Ciebie otwarte - warto się z nimi zmierzyć, zanim się na coś zdecydujesz."}},
+    prompts: {"1": ["Dlaczego oboje rozważacie to właśnie teraz - konkretnie?", "Co sprawiłoby, że z perspektywy czasu wydawałoby się to złą decyzją?"], "2": ["Jak podzielilibyście decyzje dotyczące edukacji, opieki zdrowotnej i dyscypliny?", "Co się stanie, jeśli nie zgodzicie się co do decyzji rodzicielskiej?"], "3": ["Gdzie każde z Was idealnie chciałoby mieszkać i jak blisko siebie?", "Jak faktycznie wyglądałby podział typowego tygodnia?"], "4": ["Jak podzielilibyście koszty, gdyby jedno z Was zarabiało znacznie więcej?", "Kto pokryłby nieplanowany, większy wydatek?"], "5": ["Jak często spodziewacie się kontaktować ze sobą?", "Jak wygląda dla każdego z Was uczciwy sposób na wyrażanie niezgody?"], "6": ["Co chcielibyście wiedzieć o innych relacjach drugiej osoby?", "Jakie informacje każde z Was uważa za prywatne?"], "7": ["Co zrobilibyście, gdyby jedno z Was chciało się przeprowadzić daleko?", "Jak wyobrażacie sobie rozwój tego układu na przestrzeni ponad 10 lat?"], "8": ["Co byłoby dla każdego z Was warunkiem nie do przyjęcia?", "Czy jest coś, o czym wahacie się teraz powiedzieć?"]},
+    intro: {"title": "Czy widzisz siebie jako dobrego współrodzica z tą osobą?", "body": "Ten quiz nie powie, czy powinniście zostać współrodzicami. Pomaga zobaczyć, gdzie oczekiwania się pokrywają - i co warto jeszcze omówić.", "beforeYouStart": "Zanim zaczniesz", "questionsCount": "{count} pytań", "duration": "Około 5 minut", "canGoBack": "Można wrócić i edytować odpowiedzi", "freeTextOptional": "Odpowiedzi tekstowe są opcjonalne", "privacyHeading": "Prywatność", "privacyBody": "Twoje odpowiedzi pozostają tylko w tej sesji przeglądarki i nigdy nie są udostępniane automatycznie. Załóż darmowe konto, jeśli chcesz zapisać lub udostępnić swoje wyniki.", "startButton": "Rozpocznij quiz"},
+    results: {"title": "Co sugerują odpowiedzi", "subtitle": "Odzwierciedlenie priorytetów - nie wyrok.", "strongestHeading": "Najsilniejsze obszary", "discussHeading": "Warto omówić", "discussEmptyBody": "Odpowiedzi były dość zdecydowane na każdym etapie - to dobry znak, ale nadal warto przeprowadzić te rozmowy na głos z potencjalnym współrodzicem, a nie tylko z samym(ą) sobą.", "promptsHeading": "Pytania do wspólnego omówienia", "shareImageButton": "Udostępnij jako obraz", "shareButton": "Udostępnij jako tekst", "noScoreShort": "Bez procentu kompatybilności", "nextStepQuestions": "Pytania do potencjalnego współrodzica", "nextStepPlan": "Utwórz Plan współrodzicielstwa", "nextStepAskAi": "Zapytaj AI o dawcę lub kwestie prawne", "nextStepAgreement": "Uzyskaj szkic umowy od AI", "nextStepInvite": "Zaproś potencjalnego współrodzica", "aiInsightButton": "Uzyskaj spersonalizowaną refleksję AI", "aiInsightLoading": "Piszemy Twoją spersonalizowaną refleksję…", "aiInsightTitle": "Twoja spersonalizowana refleksja", "aiInsightLimited": "Osiągnięto dzisiejszy bezpłatny limit dla tego narzędzia - spróbuj ponownie jutro.", "aiInsightError": "Nie udało się teraz wygenerować refleksji. Spróbuj ponownie.", "downloadImageError": "Nie udało się teraz utworzyć obrazu. Spróbuj ponownie.", "preparingImage": "Przygotowywanie obrazu…"},
+    question: {"progressLabel": "Sekcja {n} z 8 - {section}", "hintSelect": "Wybierz odpowiedź, która jest Ci najbliższa.", "hintText": "Opcjonalnie - napisz tyle, ile chcesz.", "back": "Wstecz", "next": "Dalej", "seeResults": "Zobacz wyniki", "note": "Odpowiedzi można zmieniać do momentu wyświetlenia wyników."},
+  },
+};
+
+// questions/prompts are passed in (from QUIZ_TEXT[locale]) rather than read from the
+// module-level English QUIZ_QUESTIONS/QUIZ_PROMPTS, since the stored answer strings are
+// in whatever language the visitor took the quiz in - comparing against the wrong
+// language's "still deciding" option text would silently miscount every non-English answer.
+function computeQuizResults(answers: (string | null)[], questions: QuizQuestion[], prompts: Record<number, string[]>) {
   const bySection = new Map<number, { decisive: number; total: number }>();
-  QUIZ_QUESTIONS.forEach((q, i) => {
+  questions.forEach((q, i) => {
     if (q.type !== "select" || !q.options) return;
     const entry = bySection.get(q.section) ?? { decisive: 0, total: 0 };
     entry.total += 1;
@@ -6779,32 +11783,59 @@ function computeQuizResults(answers: (string | null)[]) {
   const byStrength = [...ranked].sort((a, b) => b.ratio - a.ratio);
   const strongest = byStrength.filter((r) => r.ratio >= 0.66).slice(0, 2).map((r) => r.section);
   const discuss = [...ranked].sort((a, b) => a.ratio - b.ratio).filter((r) => r.ratio < 0.66 && !strongest.includes(r.section)).slice(0, 2).map((r) => r.section);
-  const prompts = discuss.flatMap((section) => QUIZ_PROMPTS[section] ?? []).slice(0, 3);
-  return { strongest, discuss, prompts };
+  const resultPrompts = discuss.flatMap((section) => prompts[section] ?? []).slice(0, 3);
+  return { strongest, discuss, prompts: resultPrompts };
 }
 
 function CompatibilityQuiz() {
   const locale = localeOf();
+  const qt = QUIZ_TEXT[locale] ?? QUIZ_TEXT.en;
   const [step, setStep] = useState<"intro" | number | "results">("intro");
-  const [answers, setAnswers] = useState<(string | null)[]>(() => QUIZ_QUESTIONS.map(() => null));
-  const totalQuestions = QUIZ_QUESTIONS.length;
+  const [answers, setAnswers] = useState<(string | null)[]>(() => qt.questions.map(() => null));
+  const totalQuestions = qt.questions.length;
+  // Personalized AI reflection (Sept 2026 growth push) - POST
+  // /public/quiz-insight, on top of the existing static bucketed results
+  // below. Fetched on demand (not automatically) so a visitor who never
+  // clicks the button never spends an Anthropic call.
+  const [aiInsight, setAiInsight] = useState("");
+  const [aiInsightStatus, setAiInsightStatus] = useState<"idle" | "loading" | "ok" | "limited" | "error">("idle");
+  // Shareable result image card (item 26 - Alena: "и после квиза отсылается
+  // красивая картикна?") - the plain-text downloadResults() below stays as
+  // an option, this adds an actual branded PNG rendered server-side.
+  const [cardStatus, setCardStatus] = useState<"idle" | "loading" | "error">("idle");
 
   const setAnswer = (index: number, value: string) => {
     setAnswers((prev) => prev.map((a, i) => (i === index ? value : a)));
   };
 
+  const fetchAiInsight = async (results: ReturnType<typeof computeQuizResults>) => {
+    setAiInsightStatus("loading");
+    try {
+      const res = await api.post<{ ok: true; insight: string }>("/public/quiz-insight", {
+        locale,
+        strongestTitles: results.strongest.map((s) => qt.strengthCopy[s].title),
+        discussTitles: results.discuss.map((s) => qt.discussCopy[s].title),
+        answers: answers.filter((a): a is string => Boolean(a)),
+      });
+      setAiInsight(res.insight);
+      setAiInsightStatus("ok");
+    } catch (err) {
+      setAiInsightStatus(err instanceof ApiError && err.status === 429 ? "limited" : "error");
+    }
+  };
+
   const downloadResults = (results: ReturnType<typeof computeQuizResults>) => {
-    const lines: string[] = ["LetsBeParents - Co-Parenting Compatibility Quiz", "A reflection of your priorities, not a verdict.", ""];
-    QUIZ_QUESTIONS.forEach((q, i) => {
-      lines.push(`${QUIZ_SECTIONS[q.section - 1]} - ${q.prompt}`);
+    const lines: string[] = ["LetsBeParents - Co-Parenting Compatibility Quiz", qt.results.subtitle, ""];
+    qt.questions.forEach((q, i) => {
+      lines.push(`${qt.sections[q.section - 1]} - ${q.prompt}`);
       lines.push(`> ${answers[i] || "(not answered)"}`);
       lines.push("");
     });
-    lines.push("Your strongest areas:");
-    results.strongest.forEach((s) => lines.push(`- ${QUIZ_STRENGTH_COPY[s].title}: ${QUIZ_STRENGTH_COPY[s].copy}`));
+    lines.push(`${qt.results.strongestHeading}:`);
+    results.strongest.forEach((s) => lines.push(`- ${qt.strengthCopy[s].title}: ${qt.strengthCopy[s].copy}`));
     lines.push("");
-    lines.push("Worth discussing:");
-    results.discuss.forEach((s) => lines.push(`- ${QUIZ_DISCUSS_COPY[s].title}: ${QUIZ_DISCUSS_COPY[s].copy}`));
+    lines.push(`${qt.results.discussHeading}:`);
+    results.discuss.forEach((s) => lines.push(`- ${qt.discussCopy[s].title}: ${qt.discussCopy[s].copy}`));
     const blob = new Blob([lines.join("\n")], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -6816,92 +11847,141 @@ function CompatibilityQuiz() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadResultCard = async (results: ReturnType<typeof computeQuizResults>) => {
+    setCardStatus("loading");
+    try {
+      const params = new URLSearchParams({ locale });
+      results.strongest.forEach((s) => params.append("strongest", qt.strengthCopy[s].title));
+      results.discuss.forEach((s) => params.append("discuss", qt.discussCopy[s].title));
+      const response = await fetch(`/api/public/quiz-result-card?${params.toString()}`);
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "LetsBeParents-Compatibility-Quiz-Results.png";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setCardStatus("idle");
+    } catch {
+      setCardStatus("error");
+    }
+  };
+
   if (step === "intro") {
     return (
       <div className="quiz-intro">
-        <h2>Could you see yourself parenting well with this person?</h2>
-        <p>This quiz won't tell you whether you should co-parent. It helps you see where expectations align - and what's worth discussing further.</p>
+        <h2>{qt.intro.title}</h2>
+        <p>{qt.intro.body}</p>
         <div className="quiz-intro-grid">
           <div>
-            <h3>Before you start</h3>
+            <h3>{qt.intro.beforeYouStart}</h3>
             <ul>
-              <li>{totalQuestions} questions</li>
-              <li>About 5 minutes</li>
-              <li>You can go back and edit answers</li>
-              <li>Free-text answers are optional</li>
+              <li>{qt.intro.questionsCount.replace("{count}", String(totalQuestions))}</li>
+              <li>{qt.intro.duration}</li>
+              <li>{qt.intro.canGoBack}</li>
+              <li>{qt.intro.freeTextOptional}</li>
             </ul>
           </div>
           <div>
-            <h3>Privacy</h3>
-            <p>Your answers stay in this browser session and are never shared automatically. Create a free account if you'd like to save or share your results.</p>
+            <h3>{qt.intro.privacyHeading}</h3>
+            <p>{qt.intro.privacyBody}</p>
           </div>
         </div>
-        <button type="button" className="landing-gradient-button" onClick={() => setStep(0)}>Start the quiz {resourceArrow()}</button>
+        <button type="button" className="landing-gradient-button" onClick={() => setStep(0)}>{qt.intro.startButton} {resourceArrow()}</button>
       </div>
     );
   }
 
   if (step === "results") {
-    const results = computeQuizResults(answers);
+    const results = computeQuizResults(answers, qt.questions, qt.prompts);
     return (
       <div className="quiz-results">
         <div className="quiz-results-head">
-          <h2>What your answers suggest</h2>
-          <p>A reflection of your priorities - not a verdict.</p>
+          <h2>{qt.results.title}</h2>
+          <p>{qt.results.subtitle}</p>
         </div>
         {results.strongest.length > 0 && (
           <div className="quiz-result-group strong">
-            <h3>Your strongest areas</h3>
+            <h3>{qt.results.strongestHeading}</h3>
             {results.strongest.map((s) => (
               <div key={s} className="quiz-result-card">
-                <strong>{QUIZ_STRENGTH_COPY[s].title}</strong>
-                <p>{QUIZ_STRENGTH_COPY[s].copy}</p>
+                <strong>{qt.strengthCopy[s].title}</strong>
+                <p>{qt.strengthCopy[s].copy}</p>
               </div>
             ))}
           </div>
         )}
         {results.discuss.length > 0 ? (
           <div className="quiz-result-group discuss">
-            <h3>Worth discussing</h3>
+            <h3>{qt.results.discussHeading}</h3>
             {results.discuss.map((s) => (
               <div key={s} className="quiz-result-card">
-                <strong>{QUIZ_DISCUSS_COPY[s].title}</strong>
-                <p>{QUIZ_DISCUSS_COPY[s].copy}</p>
+                <strong>{qt.discussCopy[s].title}</strong>
+                <p>{qt.discussCopy[s].copy}</p>
               </div>
             ))}
           </div>
         ) : (
           <div className="quiz-result-group discuss">
-            <h3>Worth discussing</h3>
+            <h3>{qt.results.discussHeading}</h3>
             <div className="quiz-result-card">
-              <p>You answered fairly decisively across the board - that's a good sign, but it's still worth having these conversations out loud with a potential co-parent, not just with yourself.</p>
+              <p>{qt.results.discussEmptyBody}</p>
             </div>
           </div>
         )}
         {results.prompts.length > 0 && (
           <div className="quiz-result-prompts">
-            <h3>Questions to explore together</h3>
+            <h3>{qt.results.promptsHeading}</h3>
             {results.prompts.map((prompt) => (
               <span key={prompt}>{resourceArrow()} {prompt}</span>
             ))}
           </div>
         )}
-        <div className="quiz-result-actions quiz-no-print">
-          <button type="button" className="landing-gradient-button" onClick={() => downloadResults(results)}>Download results</button>
-          <button type="button" className="resources-pro-button" onClick={() => window.print()}>Print</button>
-          <span className="quiz-no-score">No compatibility %</span>
+        <div className="quiz-ai-insight quiz-no-print">
+          {aiInsightStatus === "idle" && (
+            <button type="button" className="landing-gradient-button" onClick={() => void fetchAiInsight(results)}>
+              {qt.results.aiInsightButton}
+            </button>
+          )}
+          {aiInsightStatus === "loading" && <p className="notice">{qt.results.aiInsightLoading}</p>}
+          {aiInsightStatus === "ok" && (
+            <div className="quiz-result-card ai-reflection">
+              <strong>{qt.results.aiInsightTitle}</strong>
+              <p>{aiInsight}</p>
+            </div>
+          )}
+          {aiInsightStatus === "limited" && (
+            <p className="error">{qt.results.aiInsightLimited}</p>
+          )}
+          {aiInsightStatus === "error" && (
+            <p className="error">{qt.results.aiInsightError}</p>
+          )}
         </div>
+        <div className="quiz-result-actions quiz-no-print">
+          <button type="button" className="landing-gradient-button" onClick={() => void downloadResultCard(results)} disabled={cardStatus === "loading"}>
+            {cardStatus === "loading" ? qt.results.preparingImage : qt.results.shareImageButton}
+          </button>
+          <button type="button" className="resources-pro-button" onClick={() => downloadResults(results)}>{qt.results.shareButton}</button>
+          <button type="button" className="resources-pro-button" onClick={() => window.print()}>Print</button>
+          <span className="quiz-no-score">{qt.results.noScoreShort}</span>
+        </div>
+        {cardStatus === "error" && <p className="error quiz-no-print">{qt.results.downloadImageError}</p>}
         <div className="quiz-next-steps quiz-no-print">
-          <Link to={`/${locale}/resources/co-parenting/questions-to-ask`}>Questions to Ask a Potential Co-Parent {resourceArrow()}</Link>
-          <Link to={`/${locale}/resources/co-parenting/planning-template`}>Create a Co-Parenting Plan {resourceArrow()}</Link>
-          <Link to={`/${locale}/auth/register`}>Invite your potential co-parent {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/co-parenting/questions-to-ask`}>{qt.results.nextStepQuestions} {resourceArrow()}</Link>
+          <Link to={`/${locale}/resources/co-parenting/planning-template`}>{qt.results.nextStepPlan} {resourceArrow()}</Link>
+          <Link to={`/${locale}/tools/ask-ai`}>{qt.results.nextStepAskAi} {resourceArrow()}</Link>
+          <Link to={`/${locale}/tools/agreement-draft`}>{qt.results.nextStepAgreement} {resourceArrow()}</Link>
+          <Link to={`/${locale}/auth/register`}>{qt.results.nextStepInvite} {resourceArrow()}</Link>
         </div>
       </div>
     );
   }
 
   const index = step;
-  const question = QUIZ_QUESTIONS[index];
+  const question = qt.questions[index];
   const answer = answers[index];
   const canAdvance = question.type === "text" || Boolean(answer);
   const isLast = index === totalQuestions - 1;
@@ -6918,11 +11998,11 @@ function CompatibilityQuiz() {
       <div className="quiz-progress">
         <div className="quiz-progress-fill" style={{ width: `${((index + 1) / totalQuestions) * 100}%` }} />
       </div>
-      <span className="quiz-progress-label">Section {question.section} of 8 - {QUIZ_SECTIONS[question.section - 1]}</span>
+      <span className="quiz-progress-label">{qt.question.progressLabel.replace("{n}", String(question.section)).replace("{section}", qt.sections[question.section - 1])}</span>
       <h2>{question.prompt}</h2>
       {question.type === "select" ? (
         <>
-          <p className="quiz-question-hint">Choose the answer that feels closest to you.</p>
+          <p className="quiz-question-hint">{qt.question.hintSelect}</p>
           <div className="quiz-options">
             {question.options?.map((option) => (
               <button
@@ -6938,7 +12018,7 @@ function CompatibilityQuiz() {
         </>
       ) : (
         <>
-          <p className="quiz-question-hint">Optional - write as much or as little as you like.</p>
+          <p className="quiz-question-hint">{qt.question.hintText}</p>
           <textarea
             className="quiz-textarea"
             value={answer ?? ""}
@@ -6948,53 +12028,56 @@ function CompatibilityQuiz() {
         </>
       )}
       <div className="quiz-nav">
-        <button type="button" className="quiz-back" onClick={goBack}>Back</button>
+        <button type="button" className="quiz-back" onClick={goBack}>{qt.question.back}</button>
         <button type="button" className="landing-gradient-button" disabled={!canAdvance} onClick={goNext}>
-          {isLast ? "See results" : "Next"} {resourceArrow()}
+          {isLast ? qt.question.seeResults : qt.question.next} {resourceArrow()}
         </button>
       </div>
-      <p className="quiz-nav-note">Answers can be changed before you reach your results.</p>
+      <p className="quiz-nav-note">{qt.question.note}</p>
     </div>
   );
 }
 
 function ResourceTool() {
   const locale = localeOf();
+  const text = RESOURCES_TEXT[locale] ?? RESOURCES_TEXT.en;
   const { category = "", tool: toolSlug = "" } = useParams();
-  const cat = RESOURCES_CATEGORIES.find((item) => item.slug === category);
-  if (!cat) {
+  const baseCat = RESOURCES_CATEGORIES.find((item) => item.slug === category);
+  if (!baseCat) {
     return (
       <div className="resources-page">
         <section className="resources-hero">
-          <h1>Resource not found</h1>
-          <Link className="landing-gradient-button" to={`/${locale}/resources`}>Back to Resources & Tools {resourceArrow()}</Link>
+          <h1>{text.notFoundTitle}</h1>
+          <Link className="landing-gradient-button" to={`/${locale}/resources`}>{text.backToResources} {resourceArrow()}</Link>
         </section>
       </div>
     );
   }
+  const cat = localizedCategory(baseCat, locale);
   if (toolSlug === "compatibility-quiz" && cat.slug === "co-parenting") {
     return (
       <div className="resources-page quiz-page">
         <section className="resources-hero resource-detail-hero quiz-hero">
           <span className="resources-category-icon large">{resourceQuizIcon()}</span>
-          <h1>Co-Parenting Compatibility Quiz</h1>
-          <p>See where your expectations line up, and what's worth discussing further. It won't tell you whether you're a "match."</p>
+          <h1>{text.index.startCard3Title}</h1>
+          <p>{text.index.startCard3Body}</p>
         </section>
         <CompatibilityQuiz />
       </div>
     );
   }
-  const tool = cat.tools.find((item) => item.slug === toolSlug);
-  if (!tool) {
+  const baseTool = cat.tools.find((item) => item.slug === toolSlug);
+  if (!baseTool) {
     return (
       <div className="resources-page">
         <section className="resources-hero">
-          <h1>Resource not found</h1>
-          <Link className="landing-gradient-button" to={`/${locale}/resources/${cat.slug}`}>Back to {cat.eyebrow} {resourceArrow()}</Link>
+          <h1>{text.notFoundTitle}</h1>
+          <Link className="landing-gradient-button" to={`/${locale}/resources/${cat.slug}`}>{text.backToPrefix} {cat.eyebrow} {resourceArrow()}</Link>
         </section>
       </div>
     );
   }
+  const tool = localizedTool(cat, baseTool, locale);
   return (
     <div className="resources-page">
       <section className="resources-hero resource-detail-hero">
@@ -7004,20 +12087,20 @@ function ResourceTool() {
         {tool.downloadUrl ? (
           <div className="resources-tool-actions">
             <a className="landing-gradient-button" href={tool.downloadUrl} download={tool.downloadName}>
-              Download the template {resourceArrow()}
+              {text.index.startCard1Link} {resourceArrow()}
             </a>
-            {tool.format && <span className="resources-tool-format">{tool.format}</span>}
+            {tool.sections && <span className="resources-tool-format">{resourceFormatLabel(tool.sections.length, locale, text.freeWord)}</span>}
           </div>
         ) : (
-          <span className="resources-tool-tag soon">Coming soon</span>
+          <span className="resources-tool-tag soon">{text.comingSoonTag}</span>
         )}
       </section>
       {tool.sections ? (
         <div className="resources-tool-layout">
           <div className="resources-tool-main">
             <div className="resources-tool-preview">
-              <h2>What's inside</h2>
-              <p>{tool.sections.length} sections, each with open questions for both of you to answer - independently first, then together.</p>
+              <h2>{text.whatsInsideHeading}</h2>
+              <p>{text.sectionsIntro.replace("{count}", String(tool.sections.length))}</p>
               <ol className="resources-tool-sections">
                 {tool.sections.map((section, index) => (
                   <li key={section}><span>{String(index + 1).padStart(2, "0")}</span>{section}</li>
@@ -7025,7 +12108,7 @@ function ResourceTool() {
               </ol>
               {tool.sampleQuestions && (
                 <div className="resources-tool-samples">
-                  <span>A few sample questions from section 1</span>
+                  <span>{text.sampleQuestionsLabel}</span>
                   <div className="resources-tool-sample-list">
                     {tool.sampleQuestions.map((question) => <span key={question}>{question}</span>)}
                   </div>
@@ -7036,22 +12119,23 @@ function ResourceTool() {
           </div>
           <aside className="resources-tool-sidebar">
             <div className="resources-tool-related">
-              <h3>Related resources</h3>
-              {cat.tools.filter((item) => item.slug !== tool.slug).slice(0, 3).map((item) => (
-                <Link key={item.slug} to={`/${locale}/resources/${cat.slug}/${item.slug}`}>{item.title} {resourceArrow()}</Link>
-              ))}
+              <h3>{text.relatedResourcesHeading}</h3>
+              {cat.tools.filter((item) => item.slug !== tool.slug).slice(0, 3).map((baseItem) => {
+                const item = localizedTool(cat, baseItem, locale);
+                return <Link key={item.slug} to={`/${locale}/resources/${cat.slug}/${item.slug}`}>{item.title} {resourceArrow()}</Link>;
+              })}
             </div>
             <div className="resources-tool-cta">
-              <h3>Ready to take the next step?</h3>
-              <p>Create a free account to save your answers and build a shared Family Plan on LetsBeParents.</p>
-              <Link className="landing-gradient-button" to={`/${locale}/auth/register`}>Create free account {resourceArrow()}</Link>
+              <h3>{text.toolCtaHeading}</h3>
+              <p>{text.toolCtaBody}</p>
+              <Link className="landing-gradient-button" to={`/${locale}/auth/register`}>{text.index.ctaButton} {resourceArrow()}</Link>
             </div>
           </aside>
         </div>
       ) : (
         <div className="resources-coming-soon">
-          <p>We're finishing this resource - check back soon, or explore what's already available in {cat.eyebrow}.</p>
-          <Link className="landing-gradient-button" to={`/${locale}/resources/${cat.slug}`}>Back to {cat.eyebrow} {resourceArrow()}</Link>
+          <p>{text.comingSoonBody.replace("{category}", cat.eyebrow)}</p>
+          <Link className="landing-gradient-button" to={`/${locale}/resources/${cat.slug}`}>{text.backToPrefix} {cat.eyebrow} {resourceArrow()}</Link>
         </div>
       )}
     </div>
@@ -7322,6 +12406,406 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
       },
     ],
   },
+  pt: {
+    eyebrow: "Encontre o seu caminho",
+    whatThisLooksLike: "Como é esse caminho na prática",
+    resourcesTitle: "Recursos para este caminho",
+    resourcesAllTitle: "Ainda não tem certeza? Veja tudo",
+    resourcesAllCopy: "Explore o conjunto completo de checklists, planilhas e modelos para cada caminho - coparentalidade, fertilidade, concepção com doador e planejamento futuro.",
+    resourcesAllCta: "Ver todos os recursos e ferramentas",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Encontrar o coparceiro certo começa por saber o que você quer",
+        subtitle: "Coparentalidade significa criar um filho juntos sem uma relação romântica. Funciona quando ambas as pessoas estão claras sobre as expectativas desde o início.",
+        paragraphs: [
+          "A coparentalidade na LetsBeParents significa construir uma família com alguém com quem você não tem uma relação romântica - duas casas separadas, decisões compartilhadas sobre a vida do seu filho. Funciona melhor quando ambas as pessoas são honestas sobre o que querem antes de começar a procurar, não depois de já terem encontrado alguém de quem gostam.",
+          "Em vez de um feed baseado em swipe, a compatibilização aqui começa com um questionário baseado em valores e uma Pontuação de Compatibilidade que mostra onde você e um possível coparceiro realmente se alinham - em estilo de criação, envolvimento, prazos e limites - para que você compare o que importa, não apenas uma foto.",
+          "Depois da primeira conversa, os próximos passos são os mesmos que qualquer decisão de coparentalidade bem pensada exige: mais conversas, um plano por escrito e, quando estiver pronto, aconselhamento jurídico independente.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Criar o seu perfil", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Encontre o doador certo para a sua família",
+        subtitle: "Quer esteja à procura de um doador conhecido ou anônimo, a LetsBeParents ajuda você a filtrar pelo que mais importa.",
+        paragraphs: [
+          "Escolher um doador é uma das decisões mais pessoais na construção de uma família, com implicações médicas, jurídicas e de longo prazo reais. Algumas pessoas querem um doador conhecido, com uma relação contínua com a criança; outras preferem o anonimato através de uma clínica. Ambos os caminhos são válidos e levam a perguntas diferentes.",
+          "Na LetsBeParents, os perfis de doadores incluem as informações que realmente importam para essa decisão, e cada doador passa por verificação de identidade antes que você possa entrar em contato. Você define os filtros que importam para você - histórico médico, abertura ao contato, localização - em vez de percorrer perfis às cegas.",
+          "Antes de avançar com qualquer doador, vale a pena esclarecer as questões práticas com uma clínica de fertilidade e, quando relevante, com um advogado, fazendo isso cedo, em vez de depois de já ter tomado uma decisão emocional.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Ver perfis de doadores", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Construa uma família com um parceiro que compartilhe a sua visão",
+        subtitle: "Um parceiro de construção familiar não é um doador nem um coparceiro à distância - é alguém com quem você constrói uma vida familiar compartilhada.",
+        paragraphs: [
+          "Um parceiro de construção familiar é diferente tanto de um coparceiro quanto de um doador: é alguém com quem você construiria um lar e uma vida diária compartilhados, como faria um casal - só que com a parentalidade como objetivo explícito e compartilhado desde o início, em vez de algo que você espera que surja.",
+          "Como isso está mais próximo de uma parceria de vida do que de uma transação, a LetsBeParents não trata isso como um app de namoro. Aqui não há swipe - tudo começa com um breve questionário de compatibilidade que revela como cada um de vocês pensa sobre parentalidade, compromisso e vida cotidiana, para que as primeiras conversas comecem a partir de um alinhamento real, e não de uma foto de perfil.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Fazer o questionário de compatibilidade", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Encontrem um doador juntos, como casal",
+        subtitle: "Procurar um doador como casal traz suas próprias questões - desde a filiação legal até o quanto vocês querem que o doador esteja envolvido.",
+        paragraphs: [
+          "Procurar um doador como casal levanta perguntas que uma busca individual não traz: o quanto (ou o quão pouco) vocês querem que o doador esteja envolvido, como funcionará a filiação legal para ambos, e como vocês tomarão decisões juntos ao longo do processo. Alinhar-se com o parceiro antes de começar a procurar poupa muito atrito depois.",
+          "A LetsBeParents permite que vocês dois explorem e filtrem perfis de doadores juntos, com o mesmo grupo de doadores com identidade verificada e os mesmos filtros - histórico médico, abertura ao contato e mais - disponíveis quer estejam procurando sozinhos ou em dupla.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Criar o seu perfil", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Ainda está definindo o seu caminho? Comece aqui.",
+        subtitle: "Você não precisa ter tudo resolvido. A maioria das pessoas começa explorando as suas opções antes de decidir um caminho.",
+        paragraphs: [
+          "A maioria das pessoas que acaba construindo uma família com a LetsBeParents não começou com certeza de como seria exatamente. Se você ainda está pesando coparentalidade contra concepção com doador, ou um parceiro contra seguir sozinho, esse é um lugar completamente normal em que estar - e não algo que precise resolver antes de começar.",
+          "O melhor próximo passo não é uma decisão, é informação: leia o que cada caminho realmente envolve e faça o Questionário de Compatibilidade para ter uma ideia mais clara do que você procura. Não há pressão para se cadastrar ou se comprometer com nada enquanto você ainda está explorando.",
+        ],
+        resources: "all",
+        ctaLabel: "Fazer o Questionário de Compatibilidade de Coparentalidade", ctaType: "quiz",
+      },
+    ],
+  },
+  fr: {
+    eyebrow: "Trouvez votre voie",
+    whatThisLooksLike: "À quoi ressemble ce parcours",
+    resourcesTitle: "Ressources pour ce parcours",
+    resourcesAllTitle: "Pas encore sûr(e) ? Explorez tout",
+    resourcesAllCopy: "Découvrez l'ensemble des checklists, fiches pratiques et modèles pour chaque parcours - coparentalité, fertilité, conception avec donneur et planification.",
+    resourcesAllCta: "Voir toutes les ressources et tous les outils",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Trouver le bon coparent commence par savoir ce que vous voulez",
+        subtitle: "La coparentalité, c'est élever un enfant ensemble sans relation amoureuse. Cela fonctionne quand les deux personnes sont claires sur leurs attentes dès le départ.",
+        paragraphs: [
+          "La coparentalité sur LetsBeParents signifie construire une famille avec une personne avec qui vous n'avez pas de relation amoureuse - deux foyers distincts, des décisions partagées concernant la vie de votre enfant. Cela fonctionne mieux quand les deux personnes sont honnêtes sur ce qu'elles veulent avant de commencer à chercher, et non après avoir déjà trouvé quelqu'un qui leur plaît.",
+          "Plutôt qu'un fil basé sur le swipe, la mise en relation commence ici par un questionnaire basé sur les valeurs et un Score de Compatibilité qui montre où vous et un coparent potentiel êtes réellement alignés - style parental, implication, calendrier et limites - pour que vous compariez ce qui compte vraiment, pas seulement une photo.",
+          "Après une première conversation, les étapes suivantes sont les mêmes que pour toute décision de coparentalité réfléchie : davantage de discussions, un plan écrit et, le moment venu, un avis juridique indépendant.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Créer votre profil", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Trouvez le bon donneur pour votre famille",
+        subtitle: "Que vous recherchiez un donneur connu ou anonyme, LetsBeParents vous aide à filtrer selon ce qui compte le plus pour vous.",
+        paragraphs: [
+          "Choisir un donneur est l'une des décisions les plus personnelles dans la construction d'une famille, avec de réelles implications médicales, juridiques et à long terme. Certaines personnes souhaitent un donneur connu avec une relation continue avec l'enfant ; d'autres préfèrent l'anonymat via une clinique. Les deux voies sont légitimes et soulèvent des questions différentes.",
+          "Sur LetsBeParents, les profils de donneurs incluent les informations qui comptent réellement pour cette décision, et chaque donneur passe par une vérification d'identité avant que vous puissiez le contacter. Vous définissez les filtres qui vous importent - antécédents médicaux, ouverture au contact, localisation - au lieu de parcourir des profils à l'aveugle.",
+          "Avant d'avancer avec un donneur, il est utile de traiter les questions pratiques avec une clinique de fertilité et, le cas échéant, avec un avocat, et de le faire tôt plutôt qu'après avoir déjà pris une décision sur le plan émotionnel.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Parcourir les profils de donneurs", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Construisez une famille avec un partenaire qui partage votre vision",
+        subtitle: "Un partenaire de construction familiale n'est ni un donneur ni un coparent à distance - c'est une personne avec qui vous bâtissez une vie de famille partagée.",
+        paragraphs: [
+          "Un partenaire de construction familiale est différent à la fois d'un coparent et d'un donneur : c'est une personne avec qui vous construiriez un foyer et une vie quotidienne partagés, comme le ferait un couple - sauf que la parentalité est l'objectif explicite et partagé dès le départ, plutôt qu'une chose que vous espérez voir émerger.",
+          "Comme cela se rapproche davantage d'un partenariat de vie que d'une transaction, LetsBeParents ne traite pas cela comme un site de rencontres. Il n'y a pas de swipe ici - tout commence par un court questionnaire de compatibilité qui met en évidence la façon dont chacun de vous envisage la parentalité, l'engagement et la vie quotidienne, afin que les premières conversations partent d'un véritable alignement plutôt que d'une photo de profil.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Faire le questionnaire de compatibilité", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Trouvez un donneur ensemble, en couple",
+        subtitle: "Chercher un donneur en couple soulève ses propres questions - de la filiation légale au degré d'implication que vous souhaitez pour le donneur.",
+        paragraphs: [
+          "Chercher un donneur en couple soulève des questions qu'une recherche en solo ne pose pas : à quel point (ou non) vous souhaitez que le donneur soit impliqué, comment la filiation légale fonctionnera pour vous deux, et comment vous prendrez les décisions ensemble en cours de route. S'accorder avec son ou sa partenaire avant de commencer à chercher évite bien des frictions par la suite.",
+          "LetsBeParents vous permet, à tous les deux, de parcourir et de filtrer les profils de donneurs ensemble, avec le même vivier de donneurs à identité vérifiée et les mêmes filtres - antécédents médicaux, ouverture au contact et plus - que vous cherchiez seul(e) ou à deux.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Créer votre profil", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Vous cherchez encore votre voie ? Commencez ici.",
+        subtitle: "Vous n'avez pas besoin d'avoir tout résolu. La plupart des gens commencent par explorer leurs options avant de choisir une voie.",
+        paragraphs: [
+          "La plupart des personnes qui finissent par construire une famille avec LetsBeParents ne savaient pas exactement, au départ, à quoi cela ressemblerait. Si vous hésitez encore entre la coparentalité et la conception avec donneur, ou entre un partenaire et le fait de vous lancer seul(e), c'est une situation tout à fait normale - et ce n'est pas quelque chose que vous devez résoudre avant de commencer.",
+          "La meilleure prochaine étape n'est pas une décision, c'est de l'information : lisez ce que chaque voie implique réellement, et faites le Questionnaire de Compatibilité pour mieux cerner ce que vous recherchez. Il n'y a aucune pression pour vous inscrire ou vous engager tant que vous êtes encore en phase d'exploration.",
+        ],
+        resources: "all",
+        ctaLabel: "Faire le Questionnaire de Compatibilité de Coparentalité", ctaType: "quiz",
+      },
+    ],
+  },
+  de: {
+    eyebrow: "Finden Sie Ihren Weg",
+    whatThisLooksLike: "So sieht dieser Weg in der Praxis aus",
+    resourcesTitle: "Ressourcen für diesen Weg",
+    resourcesAllTitle: "Noch nicht sicher? Alles durchstöbern",
+    resourcesAllCopy: "Entdecken Sie die vollständige Sammlung an Checklisten, Arbeitsblättern und Vorlagen für jeden Weg - Co-Parenting, Kinderwunschbehandlung, Samenspende und Zukunftsplanung.",
+    resourcesAllCta: "Alle Ressourcen und Tools durchstöbern",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Den richtigen Co-Elternteil zu finden beginnt damit, zu wissen, was man will",
+        subtitle: "Co-Parenting bedeutet, gemeinsam ein Kind großzuziehen, ohne romantisch liiert zu sein. Es funktioniert, wenn beide von Anfang an klar über ihre Erwartungen sind.",
+        paragraphs: [
+          "Co-Parenting auf LetsBeParents bedeutet, mit jemandem eine Familie aufzubauen, mit dem man nicht romantisch liiert ist - zwei getrennte Haushalte, gemeinsame Entscheidungen über das Leben des Kindes. Es funktioniert am besten, wenn beide ehrlich darüber sind, was sie wollen, bevor sie mit der Suche beginnen - nicht erst, nachdem sie bereits jemanden gefunden haben, der ihnen gefällt.",
+          "Statt eines Swipe-Feeds beginnt das Matching hier mit einem werteorientierten Quiz und einem Compatibility Score, der zeigt, wo Sie und ein möglicher Co-Elternteil tatsächlich übereinstimmen - bei Erziehungsstil, Engagement, Zeitplan und Grenzen -, sodass Sie das vergleichen, was wirklich zählt, und nicht nur ein Foto.",
+          "Nach dem ersten Gespräch folgen dieselben Schritte, die jede durchdachte Co-Parenting-Entscheidung braucht: weitere Gespräche, ein schriftlicher Plan und, sobald Sie bereit sind, unabhängige Rechtsberatung.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Profil erstellen", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Finden Sie den richtigen Samenspender für Ihre Familie",
+        subtitle: "Ob Sie einen bekannten oder anonymen Spender suchen - LetsBeParents hilft Ihnen, nach dem zu filtern, was Ihnen am wichtigsten ist.",
+        paragraphs: [
+          "Die Wahl eines Spenders ist eine der persönlichsten Entscheidungen beim Aufbau einer Familie, mit realen medizinischen, rechtlichen und langfristigen Folgen. Manche Menschen wünschen sich einen bekannten Spender mit fortlaufendem Kontakt zum Kind; andere bevorzugen Anonymität über eine Klinik. Beide Wege sind legitim und führen zu unterschiedlichen Fragen.",
+          "Bei LetsBeParents enthalten Spenderprofile die Informationen, die für diese Entscheidung wirklich zählen, und jeder Spender durchläuft eine Identitätsprüfung, bevor Sie Kontakt aufnehmen können. Sie legen selbst fest, welche Filter für Sie wichtig sind - Krankengeschichte, Offenheit für Kontakt, Standort - statt blind zu suchen.",
+          "Bevor Sie mit einem Spender weitermachen, lohnt es sich, die praktischen Fragen frühzeitig mit einer Kinderwunschklinik und, wo relevant, mit einem Anwalt zu klären - statt erst, nachdem Sie sich bereits emotional entschieden haben.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Spenderprofile durchstöbern", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Bauen Sie eine Familie mit einem Partner auf, der Ihre Vision teilt",
+        subtitle: "Ein Partner für den Familienaufbau ist weder ein Spender noch ein Co-Elternteil auf Distanz - es ist jemand, mit dem Sie ein gemeinsames Familienleben aufbauen.",
+        paragraphs: [
+          "Ein Partner für den Familienaufbau unterscheidet sich sowohl von einem Co-Elternteil als auch von einem Spender: Es ist jemand, mit dem Sie einen gemeinsamen Haushalt und Alltag aufbauen würden, wie es ein Paar tun würde - nur dass die Elternschaft von Anfang an das ausdrückliche, gemeinsame Ziel ist, statt etwas, von dem Sie hoffen, dass es sich ergibt.",
+          "Weil dies eher einer Lebenspartnerschaft als einer Transaktion ähnelt, behandelt LetsBeParents es nicht wie Dating. Hier gibt es kein Swipen - es beginnt mit einem kurzen Kompatibilitätsquiz, das zeigt, wie jeder von Ihnen über Elternschaft, Verbindlichkeit und den Alltag denkt, sodass die ersten Gespräche von echter Übereinstimmung ausgehen und nicht von einem Profilfoto.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Kompatibilitätsquiz machen", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Finden Sie gemeinsam als Paar einen Spender",
+        subtitle: "Die Suche nach einem Spender als Paar wirft eigene Fragen auf - von der rechtlichen Elternschaft bis dazu, wie eingebunden der Spender sein soll.",
+        paragraphs: [
+          "Die Suche nach einem Spender als Paar wirft Fragen auf, die eine Einzelsuche nicht stellt: wie eingebunden (oder nicht) der Spender sein soll, wie die rechtliche Elternschaft für Sie beide funktioniert und wie Sie unterwegs gemeinsam Entscheidungen treffen. Sich mit dem Partner abzustimmen, bevor die Suche beginnt, erspart später viel Reibung.",
+          "LetsBeParents ermöglicht es Ihnen beiden, Spenderprofile gemeinsam zu durchstöbern und zu filtern - mit demselben identitätsgeprüften Spenderpool und denselben Filtern (Krankengeschichte, Offenheit für Kontakt und mehr), egal ob Sie allein oder zu zweit suchen.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Profil erstellen", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Noch auf der Suche nach Ihrem Weg? Fangen Sie hier an.",
+        subtitle: "Sie müssen nicht schon alles wissen. Die meisten Menschen beginnen damit, ihre Möglichkeiten zu erkunden, bevor sie sich für einen Weg entscheiden.",
+        paragraphs: [
+          "Die meisten Menschen, die am Ende mit LetsBeParents eine Familie aufbauen, wussten anfangs nicht genau, wie das aussehen würde. Wenn Sie noch zwischen Co-Parenting und Samenspende abwägen, oder zwischen einem Partner und dem Alleingang, ist das ein völlig normaler Zustand - und nichts, das Sie klären müssen, bevor Sie starten.",
+          "Der beste nächste Schritt ist keine Entscheidung, sondern Information: Lesen Sie, was jeder Weg wirklich bedeutet, und machen Sie das Compatibility Quiz, um ein klareres Bild davon zu bekommen, wonach Sie suchen. Solange Sie noch erkunden, besteht kein Druck, sich zu registrieren oder sich auf etwas festzulegen.",
+        ],
+        resources: "all",
+        ctaLabel: "Co-Parenting-Kompatibilitätsquiz machen", ctaType: "quiz",
+      },
+    ],
+  },
+  it: {
+    eyebrow: "Trova il tuo percorso",
+    whatThisLooksLike: "Com'è questo percorso nella pratica",
+    resourcesTitle: "Risorse per questo percorso",
+    resourcesAllTitle: "Non sei ancora sicuro/a? Esplora tutto",
+    resourcesAllCopy: "Scopri l'intera raccolta di checklist, schede pratiche e modelli per ogni percorso - co-parenting, fertilità, concepimento con donatore e pianificazione futura.",
+    resourcesAllCta: "Sfoglia tutte le risorse e gli strumenti",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Trovare il co-genitore giusto inizia dal sapere cosa vuoi",
+        subtitle: "Il co-parenting significa crescere un figlio insieme senza una relazione romantica. Funziona quando entrambe le persone sono chiare fin dall'inizio sulle proprie aspettative.",
+        paragraphs: [
+          "Il co-parenting su LetsBeParents significa costruire una famiglia con qualcuno con cui non hai una relazione romantica - due case separate, decisioni condivise sulla vita di tuo figlio. Funziona meglio quando entrambe le persone sono oneste su ciò che vogliono prima di iniziare a cercare, non dopo aver già trovato qualcuno che piace.",
+          "Invece di un feed basato sullo swipe, l'abbinamento qui inizia con un quiz basato sui valori e un Compatibility Score che mostra dove tu e un potenziale co-genitore vi allineate davvero - stile genitoriale, coinvolgimento, tempistiche e confini - così confronti ciò che conta, non solo una foto.",
+          "Dopo una prima conversazione, i passi successivi sono gli stessi richiesti da qualsiasi decisione di co-parenting ponderata: altre conversazioni, un piano scritto e, quando sarai pronto/a, una consulenza legale indipendente.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Crea il tuo profilo", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Trova il donatore giusto per la tua famiglia",
+        subtitle: "Che tu stia cercando un donatore conosciuto o anonimo, LetsBeParents ti aiuta a filtrare in base a ciò che conta di più per te.",
+        paragraphs: [
+          "Scegliere un donatore è una delle decisioni più personali nella costruzione di una famiglia, con reali implicazioni mediche, legali e a lungo termine. Alcune persone desiderano un donatore conosciuto, con una relazione continuativa con il bambino; altre preferiscono l'anonimato tramite una clinica. Entrambi i percorsi sono validi e portano a domande diverse.",
+          "Su LetsBeParents, i profili dei donatori includono le informazioni che contano davvero per questa decisione, e ogni donatore passa attraverso una verifica dell'identità prima che tu possa contattarlo. Sei tu a impostare i filtri importanti per te - anamnesi medica, apertura al contatto, posizione - invece di scorrere alla cieca.",
+          "Prima di procedere con qualsiasi donatore, vale la pena affrontare presto le domande pratiche con una clinica della fertilità e, dove rilevante, con un avvocato, piuttosto che dopo aver già preso una decisione sul piano emotivo.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Sfoglia i profili dei donatori", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Costruisci una famiglia con un partner che condivide la tua visione",
+        subtitle: "Un partner per costruire una famiglia non è un donatore né un co-genitore a distanza - è qualcuno con cui costruisci una vita familiare condivisa.",
+        paragraphs: [
+          "Un partner per costruire una famiglia è diverso sia da un co-genitore sia da un donatore: è qualcuno con cui costruiresti una casa e una vita quotidiana condivise, come farebbe una coppia - solo che la genitorialità è l'obiettivo esplicito e condiviso fin dall'inizio, invece di qualcosa che speri emerga.",
+          "Poiché questo si avvicina più a un'unione di vita che a una transazione, LetsBeParents non lo tratta come un'app di incontri. Qui non c'è swipe - si parte con un breve quiz di compatibilità che fa emergere come ciascuno di voi pensa alla genitorialità, all'impegno e alla vita quotidiana, così le prime conversazioni partono da un allineamento reale e non da una foto profilo.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Fai il quiz di compatibilità", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Trovate un donatore insieme, come coppia",
+        subtitle: "Cercare un donatore in coppia porta con sé domande proprie - dalla genitorialità legale a quanto volete che il donatore sia coinvolto.",
+        paragraphs: [
+          "Cercare un donatore in coppia solleva domande che una ricerca individuale non pone: quanto (o quanto poco) volete che il donatore sia coinvolto, come funzionerà la genitorialità legale per entrambi, e come prenderete le decisioni insieme lungo il percorso. Allinearvi con il partner prima di iniziare a cercare risparmia molti attriti in seguito.",
+          "LetsBeParents permette a entrambi di sfogliare e filtrare i profili dei donatori insieme, con lo stesso pool di donatori a identità verificata e gli stessi filtri - anamnesi medica, apertura al contatto e altro - disponibili sia che cerchiate da soli sia in coppia.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Crea il tuo profilo", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Stai ancora definendo il tuo percorso? Inizia da qui.",
+        subtitle: "Non devi avere già tutto chiaro. La maggior parte delle persone inizia esplorando le proprie opzioni prima di scegliere un percorso.",
+        paragraphs: [
+          "La maggior parte delle persone che finisce per costruire una famiglia con LetsBeParents non sapeva esattamente, all'inizio, come sarebbe stato. Se stai ancora valutando il co-parenting rispetto al concepimento con donatore, o un partner rispetto a procedere da solo/a, è una condizione del tutto normale - e non qualcosa che devi risolvere prima di iniziare.",
+          "Il passo successivo migliore non è una decisione, è informazione: leggi cosa comporta davvero ogni percorso, e fai il Compatibility Quiz per avere un'idea più chiara di ciò che stai cercando. Non c'è alcuna pressione a registrarti o a impegnarti in qualcosa mentre stai ancora esplorando.",
+        ],
+        resources: "all",
+        ctaLabel: "Fai il Quiz di Compatibilità per il Co-Parenting", ctaType: "quiz",
+      },
+    ],
+  },
+  pl: {
+    eyebrow: "Znajdź swoją drogę",
+    whatThisLooksLike: "Jak wygląda ta droga w praktyce",
+    resourcesTitle: "Zasoby dla tej drogi",
+    resourcesAllTitle: "Jeszcze nie masz pewności? Zobacz wszystko",
+    resourcesAllCopy: "Poznaj pełny zestaw list kontrolnych, arkuszy i szablonów dla każdej drogi - co-parenting, płodność, poczęcie z dawcą i planowanie na przyszłość.",
+    resourcesAllCta: "Zobacz wszystkie zasoby i narzędzia",
+    paths: [
+      {
+        slug: "co-parenting", registerKey: "coparent",
+        h1: "Znalezienie odpowiedniego co-rodzica zaczyna się od wiedzy, czego chcesz",
+        subtitle: "Co-parenting oznacza wspólne wychowywanie dziecka bez związku romantycznego. Sprawdza się, gdy oboje od początku jasno określają swoje oczekiwania.",
+        paragraphs: [
+          "Co-parenting na LetsBeParents oznacza budowanie rodziny z osobą, z którą nie łączy cię związek romantyczny - dwa oddzielne gospodarstwa domowe, wspólne decyzje dotyczące życia dziecka. Działa najlepiej, gdy oboje są szczerzy co do tego, czego chcą, zanim zaczną szukać - a nie dopiero po tym, jak już znaleźli kogoś, kto im się podoba.",
+          "Zamiast kanału opartego na przesuwaniu profili, dopasowywanie zaczyna się tu od quizu opartego na wartościach i Wskaźnika Kompatybilności, który pokazuje, w czym Ty i potencjalny co-rodzic naprawdę się zgadzacie - styl wychowania, zaangażowanie, harmonogram i granice - dzięki czemu porównujecie to, co ważne, a nie tylko zdjęcie.",
+          "Po pierwszej rozmowie kolejne kroki są takie same jak przy każdej przemyślanej decyzji o co-parentingu: więcej rozmów, spisany plan i, gdy będziecie gotowi, niezależna porada prawna.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "questions-to-ask" },
+          { category: "co-parenting", tool: "red-flags-checklist" },
+          { category: "co-parenting", tool: "planning-template" },
+        ],
+        ctaLabel: "Utwórz swój profil", ctaType: "register",
+      },
+      {
+        slug: "donor", registerKey: "donor",
+        h1: "Znajdź odpowiedniego dawcę dla swojej rodziny",
+        subtitle: "Niezależnie od tego, czy szukasz dawcy znanego, czy anonimowego, LetsBeParents pomaga filtrować według tego, co jest dla Ciebie najważniejsze.",
+        paragraphs: [
+          "Wybór dawcy to jedna z najbardziej osobistych decyzji przy budowaniu rodziny, z realnymi konsekwencjami medycznymi, prawnymi i długoterminowymi. Niektórzy chcą dawcy znanego, z ciągłą relacją z dzieckiem; inni wolą anonimowość za pośrednictwem kliniki. Obie drogi są uzasadnione i prowadzą do różnych pytań.",
+          "Na LetsBeParents profile dawców zawierają informacje, które naprawdę mają znaczenie przy tej decyzji, a każdy dawca przechodzi weryfikację tożsamości, zanim będziesz mógł się z nim skontaktować. To Ty ustawiasz filtry, które są dla Ciebie ważne - historię medyczną, otwartość na kontakt, lokalizację - zamiast przeglądać na oślep.",
+          "Zanim zdecydujesz się na konkretnego dawcę, warto wcześnie omówić praktyczne kwestie z kliniką leczenia niepłodności, a tam, gdzie to istotne, także z prawnikiem - zamiast robić to dopiero po podjęciu decyzji emocjonalnej.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "fertility-consultation-questions" },
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "fertility-donor", tool: "fertility-clinic-checklist" },
+        ],
+        ctaLabel: "Przeglądaj profile dawców", ctaType: "register",
+      },
+      {
+        slug: "partner", registerKey: "partner",
+        h1: "Zbuduj rodzinę z partnerem, który podziela Twoją wizję",
+        subtitle: "Partner do budowania rodziny to nie dawca ani co-rodzic na odległość - to ktoś, z kim budujesz wspólne życie rodzinne.",
+        paragraphs: [
+          "Partner do budowania rodziny różni się zarówno od co-rodzica, jak i od dawcy: to ktoś, z kim zbudowałbyś/zbudowałabyś wspólny dom i codzienne życie, tak jak robi to para - z tą różnicą, że rodzicielstwo jest jawnym, wspólnym celem od samego początku, a nie czymś, czego się mamy nadzieję dorobić.",
+          "Ponieważ jest to bliższe partnerstwu życiowemu niż transakcji, LetsBeParents nie traktuje tego jak randkowania. Nie ma tu przesuwania profili - zaczyna się od krótkiego quizu kompatybilności, który pokazuje, jak każde z Was myśli o rodzicielstwie, zaangażowaniu i codziennym życiu, dzięki czemu pierwsze rozmowy zaczynają się od prawdziwego dopasowania, a nie od zdjęcia profilowego.",
+        ],
+        resources: [
+          { category: "co-parenting", tool: "parenting-values-worksheet" },
+        ],
+        ctaLabel: "Wypełnij quiz kompatybilności", ctaType: "quiz",
+      },
+      {
+        slug: "couple-donor", registerKey: "couple-donor",
+        h1: "Znajdźcie dawcę razem, jako para",
+        subtitle: "Szukanie dawcy jako para wiąże się z własnymi pytaniami - od prawnego rodzicielstwa po to, jak bardzo zaangażowany ma być dawca.",
+        paragraphs: [
+          "Szukanie dawcy jako para rodzi pytania, których nie ma przy szukaniu w pojedynkę: jak bardzo (lub jak mało) zaangażowany ma być dawca, jak będzie wyglądać prawne rodzicielstwo dla Was obojga i jak będziecie razem podejmować decyzje w trakcie tego procesu. Ustalenie wspólnego stanowiska z partnerem/partnerką przed rozpoczęciem poszukiwań oszczędza wiele napięć później.",
+          "LetsBeParents pozwala Wam obojgu wspólnie przeglądać i filtrować profile dawców, z tą samą pulą dawców o zweryfikowanej tożsamości i tymi samymi filtrami - historią medyczną, otwartością na kontakt i innymi - dostępnymi bez względu na to, czy szukacie sami, czy we dwoje.",
+        ],
+        resources: [
+          { category: "fertility-donor", tool: "donor-conception-questions" },
+          { category: "parenthood-planning", tool: "financial-planning" },
+        ],
+        ctaLabel: "Utwórz swój profil", ctaType: "register",
+      },
+      {
+        slug: "exploring", registerKey: "exploring",
+        h1: "Wciąż zastanawiasz się nad swoją drogą? Zacznij tutaj.",
+        subtitle: "Nie musisz mieć wszystkiego ustalonego. Większość osób zaczyna od zapoznania się z opcjami, zanim wybierze drogę.",
+        paragraphs: [
+          "Większość osób, które ostatecznie budują rodzinę z LetsBeParents, na początku nie była pewna, jak dokładnie będzie to wyglądać. Jeśli wciąż rozważasz co-parenting w porównaniu z poczęciem z dawcą, albo partnera w porównaniu z samodzielną drogą, to zupełnie normalny etap - i nie musisz go rozstrzygać, zanim zaczniesz.",
+          "Najlepszym kolejnym krokiem nie jest decyzja, lecz informacja: przeczytaj, co naprawdę wiąże się z każdą drogą, i wypełnij Quiz Kompatybilności, aby lepiej zrozumieć, czego szukasz. Nie ma presji, by się rejestrować czy się do czegokolwiek zobowiązywać, dopóki wciąż eksplorujesz możliwości.",
+        ],
+        resources: "all",
+        ctaLabel: "Wypełnij Quiz Kompatybilności Co-Parentingu", ctaType: "quiz",
+      },
+    ],
+  },
 };
 
 function FindYourPath() {
@@ -7528,6 +13012,156 @@ const PROFESSIONALS_TEXT: Record<CookieLocale, {
     closingSubtitle: "Crea tu cuenta gratuita para desbloquear perfiles completos y reservar tu primera consulta.",
     closingCta: "Crear cuenta gratuita",
   },
+  pt: {
+    eyebrow: "Apoio profissional",
+    heroTitle: "Especialistas de confiança em cada etapa da sua jornada",
+    heroSubtitle: "Clínicas de fertilidade, advogados de família, terapeutas e consultores financeiros - avaliados, verificados e disponíveis quando você estiver pronto para conversar.",
+    heroCtaPrimary: "Cadastre-se grátis",
+    heroCtaSecondary: "Veja como funciona a verificação",
+    categoriesEyebrow: "Quem está na plataforma",
+    categoriesTitle: "Apoio para cada parte da construção de uma família",
+    categoriesSubtitle: "Explore as categorias publicamente - os perfis completos e o agendamento são desbloqueados ao criar uma conta gratuita.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Clínicas de fertilidade", description: "Compare clínicas de fertilidade verificadas em todo o mundo. Agende videoconsultas depois de entrar na sua conta.", statSuffix: "clínicas parceiras", available: true },
+      { key: "lawyers", icon: "scale", title: "Advogados de família", description: "Especialistas em direito reprodutivo para contratos, filiação e acordos de coparentalidade.", statSuffix: "advogados", available: true },
+      { key: "therapists", icon: "support", title: "Terapeutas e conselheiros", description: "Converse sobre o lado emocional de construir uma família - antes, durante e depois de encontrar o seu match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Consultores financeiros", description: "Entenda o custo real da concepção com doador, da barriga de aluguel ou da adoção antes de se comprometer.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Em breve",
+    stepsEyebrow: "Como funciona",
+    stepsTitle: "Da busca ao agendamento, em três passos",
+    steps: [
+      ["01", "Explore as categorias", "Veja quem está disponível no seu país, nas quatro categorias.", "clinic"],
+      ["02", "Cadastre-se grátis", "Crie a sua conta para desbloquear perfis completos e detalhes.", "profile"],
+      ["03", "Agende uma consulta", "Converse por chat ou videochamada, direto na LetsBeParents.", "match"],
+    ],
+    trustTitle: "Todo profissional é verificado antes de ser listado",
+    trustDescription: "Licenças e credenciais são verificadas antes que uma clínica ou advogado apareça na LetsBeParents. Veja exatamente o que verificamos e o que ainda cabe a você confirmar.",
+    trustCta: "Veja o que verificamos",
+    closingTitle: "Pronto para se conectar com o especialista certo?",
+    closingSubtitle: "Crie a sua conta gratuita para desbloquear perfis completos e agendar a sua primeira consulta.",
+    closingCta: "Criar conta gratuita",
+  },
+  fr: {
+    eyebrow: "Accompagnement professionnel",
+    heroTitle: "Des experts de confiance à chaque étape de votre parcours",
+    heroSubtitle: "Cliniques de fertilité, avocats spécialisés en droit de la famille, thérapeutes et conseillers financiers - vérifiés et disponibles dès que vous êtes prêt(e) à en parler.",
+    heroCtaPrimary: "Inscrivez-vous gratuitement",
+    heroCtaSecondary: "Découvrir comment fonctionne la vérification",
+    categoriesEyebrow: "Qui est présent sur la plateforme",
+    categoriesTitle: "Un accompagnement pour chaque étape de la construction d'une famille",
+    categoriesSubtitle: "Parcourez les catégories librement - les profils complets et la réservation se débloquent dès la création d'un compte gratuit.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Cliniques de fertilité", description: "Comparez des cliniques de fertilité vérifiées dans le monde entier. Réservez des consultations vidéo une fois connecté(e).", statSuffix: "cliniques partenaires", available: true },
+      { key: "lawyers", icon: "scale", title: "Avocats spécialisés en droit de la famille", description: "Spécialistes du droit de la reproduction pour les contrats, la filiation et les accords de coparentalité.", statSuffix: "avocats", available: true },
+      { key: "therapists", icon: "support", title: "Thérapeutes et conseillers", description: "Parlez de la dimension émotionnelle de la construction d'une famille - avant, pendant et après avoir trouvé votre match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Conseillers financiers", description: "Comprenez le coût réel de la conception avec donneur, de la GPA ou de l'adoption avant de vous engager.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Bientôt disponible",
+    stepsEyebrow: "Comment ça marche",
+    stepsTitle: "De la recherche à la réservation, en trois étapes",
+    steps: [
+      ["01", "Parcourez les catégories", "Découvrez qui est disponible dans votre pays, dans les quatre catégories.", "clinic"],
+      ["02", "Inscrivez-vous gratuitement", "Créez votre compte pour débloquer les profils complets et tous les détails.", "profile"],
+      ["03", "Réservez une consultation", "Chat ou appel vidéo, directement au sein de LetsBeParents.", "match"],
+    ],
+    trustTitle: "Chaque professionnel est vérifié avant d'être référencé",
+    trustDescription: "Les licences et qualifications sont vérifiées avant qu'une clinique ou un avocat n'apparaisse sur LetsBeParents. Découvrez exactement ce que nous vérifions et ce qu'il vous reste à confirmer vous-même.",
+    trustCta: "Voir ce que nous vérifions",
+    closingTitle: "Prêt(e) à entrer en contact avec le bon expert ?",
+    closingSubtitle: "Créez votre compte gratuit pour débloquer les profils complets et réserver votre première consultation.",
+    closingCta: "Créer un compte gratuit",
+  },
+  de: {
+    eyebrow: "Professionelle Unterstützung",
+    heroTitle: "Vertrauenswürdige Expertinnen und Experten für jeden Schritt Ihrer Reise",
+    heroSubtitle: "Kinderwunschkliniken, Familienanwälte, Therapeutinnen und Finanzberater - geprüft, verifiziert und verfügbar, sobald Sie bereit sind zu sprechen.",
+    heroCtaPrimary: "Kostenlos registrieren",
+    heroCtaSecondary: "So funktioniert die Verifizierung",
+    categoriesEyebrow: "Wer auf der Plattform vertreten ist",
+    categoriesTitle: "Unterstützung für jeden Teil des Familienaufbaus",
+    categoriesSubtitle: "Kategorien können öffentlich durchstöbert werden - vollständige Profile und Buchung werden freigeschaltet, sobald Sie ein kostenloses Konto erstellen.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Kinderwunschkliniken", description: "Vergleichen Sie verifizierte Kinderwunschkliniken weltweit. Buchen Sie Videoberatungen, sobald Sie angemeldet sind.", statSuffix: "Partnerkliniken", available: true },
+      { key: "lawyers", icon: "scale", title: "Familienanwälte", description: "Spezialisten für Reproduktionsrecht - Verträge, Elternschaft und Co-Parenting-Vereinbarungen.", statSuffix: "Anwälte", available: true },
+      { key: "therapists", icon: "support", title: "Therapeuten & Beraterinnen", description: "Sprechen Sie über die emotionale Seite des Familienaufbaus - davor, währenddessen und nachdem Sie Ihr Match gefunden haben.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Finanzberater", description: "Verstehen Sie die tatsächlichen Kosten von Samenspende, Leihmutterschaft oder Adoption, bevor Sie sich festlegen.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Demnächst verfügbar",
+    stepsEyebrow: "So funktioniert's",
+    stepsTitle: "Vom Stöbern bis zur Buchung in drei Schritten",
+    steps: [
+      ["01", "Kategorien durchstöbern", "Sehen Sie, wer in Ihrem Land verfügbar ist - in allen vier Kategorien.", "clinic"],
+      ["02", "Kostenlos registrieren", "Erstellen Sie Ihr Konto, um vollständige Profile und Details freizuschalten.", "profile"],
+      ["03", "Beratung buchen", "Chat oder Videoanruf, direkt in LetsBeParents.", "match"],
+    ],
+    trustTitle: "Jede Fachperson wird vor der Aufnahme verifiziert",
+    trustDescription: "Lizenzen und Qualifikationen werden geprüft, bevor eine Klinik oder ein Anwalt auf LetsBeParents erscheint. Erfahren Sie genau, was wir prüfen und was Sie selbst noch bestätigen sollten.",
+    trustCta: "Sehen, was wir prüfen",
+    closingTitle: "Bereit, die richtige Fachperson kennenzulernen?",
+    closingSubtitle: "Erstellen Sie Ihr kostenloses Konto, um vollständige Profile freizuschalten und Ihre erste Beratung zu buchen.",
+    closingCta: "Kostenloses Konto erstellen",
+  },
+  it: {
+    eyebrow: "Supporto professionale",
+    heroTitle: "Esperti di fiducia per ogni fase del tuo percorso",
+    heroSubtitle: "Cliniche della fertilità, avvocati di famiglia, terapeuti e consulenti finanziari - verificati e disponibili quando sei pronto/a a parlarne.",
+    heroCtaPrimary: "Iscriviti gratis",
+    heroCtaSecondary: "Scopri come funziona la verifica",
+    categoriesEyebrow: "Chi è presente sulla piattaforma",
+    categoriesTitle: "Supporto per ogni fase della costruzione di una famiglia",
+    categoriesSubtitle: "Sfoglia le categorie pubblicamente - i profili completi e la prenotazione si sbloccano creando un account gratuito.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Cliniche della fertilità", description: "Confronta cliniche della fertilità verificate in tutto il mondo. Prenota videoconsulti una volta effettuato l'accesso.", statSuffix: "cliniche partner", available: true },
+      { key: "lawyers", icon: "scale", title: "Avvocati di famiglia", description: "Specialisti in diritto della riproduzione per contratti, genitorialità legale e accordi di co-parenting.", statSuffix: "avvocati", available: true },
+      { key: "therapists", icon: "support", title: "Terapeuti e consulenti", description: "Parla del lato emotivo della costruzione di una famiglia - prima, durante e dopo aver trovato il tuo match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Consulenti finanziari", description: "Comprendi il costo reale del concepimento con donatore, della maternità surrogata o dell'adozione prima di impegnarti.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Prossimamente",
+    stepsEyebrow: "Come funziona",
+    stepsTitle: "Dalla ricerca alla prenotazione, in tre passi",
+    steps: [
+      ["01", "Sfoglia le categorie", "Scopri chi è disponibile nel tuo paese, in tutte e quattro le categorie.", "clinic"],
+      ["02", "Iscriviti gratis", "Crea il tuo account per sbloccare profili completi e dettagli.", "profile"],
+      ["03", "Prenota una consulenza", "Chat o videochiamata, direttamente dentro LetsBeParents.", "match"],
+    ],
+    trustTitle: "Ogni professionista viene verificato prima di essere inserito nell'elenco",
+    trustDescription: "Licenze e credenziali vengono controllate prima che una clinica o un avvocato compaia su LetsBeParents. Scopri esattamente cosa verifichiamo noi e cosa spetta a te confermare.",
+    trustCta: "Scopri cosa verifichiamo",
+    closingTitle: "Pronto/a a entrare in contatto con l'esperto giusto?",
+    closingSubtitle: "Crea il tuo account gratuito per sbloccare i profili completi e prenotare la tua prima consulenza.",
+    closingCta: "Crea account gratuito",
+  },
+  pl: {
+    eyebrow: "Wsparcie profesjonalistów",
+    heroTitle: "Zaufani eksperci na każdym etapie Twojej drogi",
+    heroSubtitle: "Kliniki leczenia niepłodności, prawnicy rodzinni, terapeuci i doradcy finansowi - zweryfikowani i dostępni, gdy będziesz gotowy/a porozmawiać.",
+    heroCtaPrimary: "Zarejestruj się za darmo",
+    heroCtaSecondary: "Zobacz, jak działa weryfikacja",
+    categoriesEyebrow: "Kto jest na platformie",
+    categoriesTitle: "Wsparcie na każdym etapie budowania rodziny",
+    categoriesSubtitle: "Przeglądaj kategorie publicznie - pełne profile i możliwość rezerwacji odblokowują się po założeniu darmowego konta.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Kliniki leczenia niepłodności", description: "Porównuj zweryfikowane kliniki leczenia niepłodności na całym świecie. Rezerwuj konsultacje wideo po zalogowaniu.", statSuffix: "klinik partnerskich", available: true },
+      { key: "lawyers", icon: "scale", title: "Prawnicy rodzinni", description: "Specjaliści prawa reprodukcyjnego - umowy, ustalanie rodzicielstwa i porozumienia dotyczące co-parentingu.", statSuffix: "prawników", available: true },
+      { key: "therapists", icon: "support", title: "Terapeuci i doradcy", description: "Porozmawiaj o emocjonalnej stronie budowania rodziny - przed, w trakcie i po znalezieniu dopasowania.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Doradcy finansowi", description: "Poznaj rzeczywisty koszt poczęcia z dawcą, surogacji lub adopcji, zanim podejmiesz decyzję.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Wkrótce",
+    stepsEyebrow: "Jak to działa",
+    stepsTitle: "Od przeglądania do rezerwacji w trzech krokach",
+    steps: [
+      ["01", "Przeglądaj kategorie", "Zobacz, kto jest dostępny w Twoim kraju, we wszystkich czterech kategoriach.", "clinic"],
+      ["02", "Zarejestruj się za darmo", "Utwórz konto, aby odblokować pełne profile i szczegóły.", "profile"],
+      ["03", "Zarezerwuj konsultację", "Czat lub rozmowa wideo - bezpośrednio w LetsBeParents.", "match"],
+    ],
+    trustTitle: "Każdy profesjonalista jest weryfikowany, zanim trafi na listę",
+    trustDescription: "Licencje i kwalifikacje są sprawdzane, zanim klinika lub prawnik pojawią się na LetsBeParents. Zobacz dokładnie, co weryfikujemy, a co nadal musisz potwierdzić samodzielnie.",
+    trustCta: "Zobacz, co weryfikujemy",
+    closingTitle: "Gotowy/a, by skontaktować się z odpowiednim ekspertem?",
+    closingSubtitle: "Załóż darmowe konto, aby odblokować pełne profile i zarezerwować pierwszą konsultację.",
+    closingCta: "Załóż darmowe konto",
+  },
 };
 
 function Professionals() {
@@ -7583,7 +13217,13 @@ function Professionals() {
         </div>
         <div className="professionals-steps-row">
           {t.steps.map(([number, title, description, icon]) => (
-            <article key={number} className="professionals-step-card">
+            <article key={number} className={`professionals-step-card${number === "03" ? " is-soon" : ""}`}>
+              {/* Booking a consultation isn't live yet - only browsing and
+                  signing up are (Alena: "здесь надо написать soon" on this
+                  step). Reuses the same "Coming soon" tag already shown on
+                  the not-yet-available categories above instead of a new
+                  style. */}
+              {number === "03" && <span className="resources-tool-tag soon professionals-soon-tag">{t.comingSoonLabel}</span>}
               <div className="landing-step-icon">{professionalStepIcon(icon)}</div>
               <div className="landing-step-number">{number}</div>
               <h3>{title}</h3>
@@ -7668,6 +13308,96 @@ const TRUST_TEXT = {
     ctaTitle: "¿Tienes dudas sobre la seguridad en LetsBeParents?",
     ctaButton: "Contactar con nuestro equipo",
   },
+  pt: {
+    pill: "Confiança e Segurança",
+    title: "Todos os perfis têm identidade verificada - veja exatamente o que verificamos.",
+    intro: "Construir uma família significa confiar nas pessoas que você conhece pelo caminho. Veja o que a LetsBeParents verifica antes de você se conectar, e o que ainda cabe a você conferir por conta própria.",
+    checks: [
+      ["Verificação de identidade", "Antes de desbloquear acesso completo às combinações, os membros confirmam sua identidade por meio de uma verificação segura de documentos, realizada por nosso parceiro de verificação, a Didit. Não armazenamos seu documento de identidade ou selfie nos servidores da LetsBeParents - esses dados são processados e mantidos pela Didit conforme seus próprios termos de privacidade, e podem ser excluídos mediante solicitação."],
+      ["Revisão de fotos", "Cada foto de perfil é analisada automaticamente em busca de violações das políticas, e qualquer foto denunciada é revisada por nossa equipe."],
+      ["Mensagens e vídeo privados", "Conversas e chamadas de vídeo acontecem dentro da LetsBeParents. Seu telefone e e-mail permanecem privados até você decidir compartilhá-los."],
+      ["Clínicas e advogados avaliados", "Cada clínica e advogado em nosso diretório é avaliado antes de ser listado, para que você nunca precise adivinhar com quem está falando."],
+      ["Denuncie e bloqueie, a qualquer momento", "Você pode denunciar ou bloquear qualquer membro com um toque. Cada denúncia é revisada por nossa equipe, não por um robô."],
+      ["Proteção de dados", "Seus dados são criptografados em trânsito e em repouso. Nunca vendemos suas informações, e você controla o que é visível no seu perfil."],
+    ],
+    diditLinks: { privacy: "Política de Privacidade da Didit", terms: "Termos de Verificação de Identidade da Didit" },
+    noteTitle: "O que a verificação significa - e o que não significa",
+    noteCopy: "As verificações de identidade e de fotos reduzem perfis falsos e duplicados, mas não são uma garantia médica, jurídica ou de verificação de antecedentes. Recomendamos fortemente buscar aconselhamento jurídico independente antes de qualquer acordo de doação ou coparentalidade, e encontrar novas conexões pela primeira vez em um local público.",
+    ctaTitle: "Dúvidas sobre segurança na LetsBeParents?",
+    ctaButton: "Fale com nossa equipe",
+  },
+  fr: {
+    pill: "Confiance et sécurité",
+    title: "Chaque profil a une identité vérifiée - découvrez exactement ce que nous contrôlons.",
+    intro: "Fonder une famille, c'est faire confiance aux personnes que vous rencontrez en chemin. Voici ce que LetsBeParents vérifie avant que vous entriez en contact, et ce qu'il vous reste à vérifier vous-même.",
+    checks: [
+      ["Vérification d'identité", "Avant de débloquer l'accès complet aux mises en relation, les membres confirment leur identité via une vérification sécurisée de documents, assurée par notre partenaire de vérification, Didit. Nous ne conservons pas votre pièce d'identité ni votre selfie sur les serveurs de LetsBeParents - ces données sont traitées et conservées par Didit selon ses propres conditions de confidentialité, et peuvent être supprimées sur demande."],
+      ["Contrôle des photos", "Chaque photo de profil est automatiquement analysée pour détecter les violations des règles, et toute photo signalée est examinée par notre équipe."],
+      ["Messagerie et vidéo privées", "Les discussions et appels vidéo se déroulent au sein de LetsBeParents. Votre numéro de téléphone et votre e-mail restent privés jusqu'à ce que vous choisissiez de les partager."],
+      ["Cliniques et avocats vérifiés", "Chaque clinique et avocat de notre annuaire est examiné avant d'être répertorié, afin que vous n'ayez jamais à deviner à qui vous vous adressez."],
+      ["Signaler et bloquer, à tout moment", "Vous pouvez signaler ou bloquer n'importe quel membre en un geste. Chaque signalement est examiné par notre équipe, pas par un robot."],
+      ["Protection des données", "Vos données sont chiffrées en transit et au repos. Nous ne vendons jamais vos informations, et vous contrôlez ce qui est visible sur votre profil."],
+    ],
+    diditLinks: { privacy: "Politique de confidentialité de Didit", terms: "Conditions de vérification d'identité de Didit" },
+    noteTitle: "Ce que signifie la vérification - et ce qu'elle ne signifie pas",
+    noteCopy: "Les vérifications d'identité et de photos réduisent les profils faux et en double, mais elles ne constituent pas une garantie médicale, juridique ou de vérification des antécédents. Nous recommandons vivement de consulter un conseil juridique indépendant avant tout accord de don ou de coparentalité, et de rencontrer une nouvelle personne pour la première fois dans un lieu public.",
+    ctaTitle: "Des questions sur la sécurité sur LetsBeParents ?",
+    ctaButton: "Contacter notre équipe",
+  },
+  de: {
+    pill: "Vertrauen & Sicherheit",
+    title: "Jedes Profil ist identitätsgeprüft - sehen Sie genau, was wir kontrollieren.",
+    intro: "Eine Familie zu gründen bedeutet, den Menschen zu vertrauen, die Sie auf diesem Weg treffen. Hier erfahren Sie, was LetsBeParents prüft, bevor Sie in Kontakt treten, und was Sie selbst noch überprüfen sollten.",
+    checks: [
+      ["Identitätsprüfung", "Bevor Mitglieder vollen Zugriff auf Matches erhalten, bestätigen sie ihre Identität durch eine sichere Dokumentenprüfung, die von unserem Verifizierungspartner Didit durchgeführt wird. Wir speichern Ihr Ausweisdokument oder Selfie nicht auf den eigenen Servern von LetsBeParents - diese Daten werden von Didit gemäß dessen eigenen Datenschutzbestimmungen verarbeitet und gespeichert und können auf Anfrage gelöscht werden."],
+      ["Fotoprüfung", "Jedes Profilfoto wird automatisch auf Regelverstöße geprüft, und jedes gemeldete Foto wird von unserem Team überprüft."],
+      ["Private Nachrichten & Video", "Chats und Videoanrufe finden innerhalb von LetsBeParents statt. Ihre Telefonnummer und E-Mail-Adresse bleiben privat, bis Sie sich entscheiden, sie zu teilen."],
+      ["Geprüfte Kliniken & Anwälte", "Jede Klinik und jeder Anwalt in unserem Verzeichnis wird vor der Aufnahme überprüft, sodass Sie nie raten müssen, mit wem Sie es zu tun haben."],
+      ["Jederzeit melden & blockieren", "Sie können jedes Mitglied mit einem Tippen melden oder blockieren. Jede Meldung wird von unserem Team geprüft, nicht von einem Bot."],
+      ["Datenschutz", "Ihre Daten werden bei der Übertragung und Speicherung verschlüsselt. Wir verkaufen Ihre Informationen niemals, und Sie bestimmen, was in Ihrem Profil sichtbar ist."],
+    ],
+    diditLinks: { privacy: "Datenschutzrichtlinie von Didit", terms: "Bedingungen zur Identitätsprüfung von Didit" },
+    noteTitle: "Was die Verifizierung bedeutet - und was nicht",
+    noteCopy: "Identitäts- und Fotoprüfungen verringern gefälschte und doppelte Profile, sind aber keine medizinische, rechtliche oder Background-Check-Garantie. Wir empfehlen dringend, vor jeder Samenspende- oder Co-Elternschaftsvereinbarung unabhängigen rechtlichen Rat einzuholen und neue Kontakte zum ersten Mal an einem öffentlichen Ort zu treffen.",
+    ctaTitle: "Fragen zur Sicherheit auf LetsBeParents?",
+    ctaButton: "Unser Team kontaktieren",
+  },
+  it: {
+    pill: "Fiducia e sicurezza",
+    title: "Ogni profilo ha l'identità verificata - scopri esattamente cosa controlliamo.",
+    intro: "Costruire una famiglia significa fidarsi delle persone che incontri lungo il percorso. Ecco cosa verifica LetsBeParents prima che tu ti metta in contatto, e cosa spetta ancora a te controllare.",
+    checks: [
+      ["Verifica dell'identità", "Prima di sbloccare l'accesso completo agli abbinamenti, i membri confermano la propria identità tramite un controllo sicuro dei documenti, gestito dal nostro partner di verifica, Didit. Non conserviamo il tuo documento d'identità o il selfie sui server di LetsBeParents - questi dati vengono elaborati e conservati da Didit secondo i propri termini sulla privacy, e possono essere cancellati su richiesta."],
+      ["Revisione delle foto", "Ogni foto del profilo viene controllata automaticamente per individuare violazioni delle regole, e ogni foto segnalata viene rivista dal nostro team."],
+      ["Messaggi e video privati", "Chat e videochiamate avvengono all'interno di LetsBeParents. Il tuo numero di telefono e la tua email restano privati finché non decidi di condividerli."],
+      ["Cliniche e avvocati verificati", "Ogni clinica e avvocato nella nostra directory viene esaminato prima di essere inserito, così non devi mai indovinare con chi stai parlando."],
+      ["Segnala e blocca, in qualsiasi momento", "Puoi segnalare o bloccare qualsiasi membro con un tocco. Ogni segnalazione viene esaminata dal nostro team, non da un bot."],
+      ["Protezione dei dati", "I tuoi dati sono crittografati in transito e a riposo. Non vendiamo mai le tue informazioni, e sei tu a controllare cosa è visibile nel tuo profilo."],
+    ],
+    diditLinks: { privacy: "Informativa sulla privacy di Didit", terms: "Termini di verifica dell'identità di Didit" },
+    noteTitle: "Cosa significa la verifica - e cosa non significa",
+    noteCopy: "I controlli sull'identità e sulle foto riducono i profili falsi e duplicati, ma non sono una garanzia medica, legale o di controllo dei precedenti. Consigliamo vivamente di richiedere una consulenza legale indipendente prima di qualsiasi accordo di donazione o co-genitorialità, e di incontrare per la prima volta nuove persone in un luogo pubblico.",
+    ctaTitle: "Domande sulla sicurezza su LetsBeParents?",
+    ctaButton: "Contatta il nostro team",
+  },
+  pl: {
+    pill: "Zaufanie i bezpieczeństwo",
+    title: "Każdy profil ma zweryfikowaną tożsamość - zobacz dokładnie, co sprawdzamy.",
+    intro: "Budowanie rodziny oznacza zaufanie do osób, które spotykasz po drodze. Oto, co LetsBeParents weryfikuje, zanim się skontaktujesz, i co nadal warto sprawdzić samodzielnie.",
+    checks: [
+      ["Weryfikacja tożsamości", "Zanim członkowie odblokują pełny dostęp do dopasowań, potwierdzają swoją tożsamość poprzez bezpieczną weryfikację dokumentów, przeprowadzaną przez naszego partnera weryfikacyjnego, Didit. Nie przechowujemy Twojego dokumentu tożsamości ani selfie na własnych serwerach LetsBeParents - te dane są przetwarzane i przechowywane przez Didit zgodnie z ich własnymi zasadami prywatności i mogą zostać usunięte na żądanie."],
+      ["Weryfikacja zdjęć", "Każde zdjęcie profilowe jest automatycznie sprawdzane pod kątem naruszeń zasad, a każde zgłoszone zdjęcie jest sprawdzane przez nasz zespół."],
+      ["Prywatne wiadomości i wideo", "Czaty i połączenia wideo odbywają się w ramach LetsBeParents. Twój numer telefonu i e-mail pozostają prywatne, dopóki sam(a) nie zdecydujesz się je udostępnić."],
+      ["Zweryfikowane kliniki i prawnicy", "Każda klinika i prawnik w naszym katalogu są sprawdzani, zanim zostaną dodani do listy, więc nigdy nie musisz zgadywać, z kim się kontaktujesz."],
+      ["Zgłoś i zablokuj w każdej chwili", "Możesz zgłosić lub zablokować dowolnego członka jednym dotknięciem. Każde zgłoszenie jest sprawdzane przez nasz zespół, a nie przez bota."],
+      ["Ochrona danych", "Twoje dane są szyfrowane podczas przesyłania i przechowywania. Nigdy nie sprzedajemy Twoich informacji, a Ty decydujesz, co jest widoczne w Twoim profilu."],
+    ],
+    diditLinks: { privacy: "Polityka prywatności Didit", terms: "Warunki weryfikacji tożsamości Didit" },
+    noteTitle: "Co oznacza weryfikacja - a czego nie oznacza",
+    noteCopy: "Weryfikacja tożsamości i zdjęć zmniejsza liczbę fałszywych i zduplikowanych profili, ale nie stanowi gwarancji medycznej, prawnej ani sprawdzenia przeszłości. Zdecydowanie zalecamy skorzystanie z niezależnej porady prawnej przed zawarciem jakiejkolwiek umowy dawstwa lub co-rodzicielstwa oraz spotykanie się z nowo poznanymi osobami po raz pierwszy w miejscu publicznym.",
+    ctaTitle: "Masz pytania dotyczące bezpieczeństwa na LetsBeParents?",
+    ctaButton: "Skontaktuj się z naszym zespołem",
+  },
 } satisfies Record<CookieLocale, Record<string, unknown>>;
 
 function TrustSafety() {
@@ -7718,7 +13448,612 @@ function TrustSafety() {
   );
 }
 
+
+const PARTNER_LOGIN_TEXT: Record<CookieLocale, {
+  heading: string;
+  emailLabel: string;
+  passwordLabel: string;
+  signIn: string;
+  error: string;
+}> = {
+  en: {
+    heading: "Partner sign in",
+    emailLabel: "Email",
+    passwordLabel: "Password",
+    signIn: "Sign in",
+    error: "Could not sign in as a partner.",
+  },
+  ru: {
+    heading: "Вход для партнёров",
+    emailLabel: "Email",
+    passwordLabel: "Пароль",
+    signIn: "Войти",
+    error: "Не удалось войти как партнёр.",
+  },
+  es: {
+    heading: "Acceso para socios",
+    emailLabel: "Email",
+    passwordLabel: "Contraseña",
+    signIn: "Iniciar sesión",
+    error: "No se pudo iniciar sesión como socio.",
+  },
+  pt: {
+    heading: "Acesso para parceiros",
+    emailLabel: "Email",
+    passwordLabel: "Senha",
+    signIn: "Entrar",
+    error: "Não foi possível entrar como parceiro.",
+  },
+  fr: {
+    heading: "Connexion partenaire",
+    emailLabel: "Email",
+    passwordLabel: "Mot de passe",
+    signIn: "Se connecter",
+    error: "Impossible de vous connecter en tant que partenaire.",
+  },
+  de: {
+    heading: "Partner-Anmeldung",
+    emailLabel: "E-Mail",
+    passwordLabel: "Passwort",
+    signIn: "Anmelden",
+    error: "Anmeldung als Partner nicht möglich.",
+  },
+  it: {
+    heading: "Accesso partner",
+    emailLabel: "Email",
+    passwordLabel: "Password",
+    signIn: "Accedi",
+    error: "Non è stato possibile accedere come partner.",
+  },
+  pl: {
+    heading: "Logowanie dla partnerów",
+    emailLabel: "Email",
+    passwordLabel: "Hasło",
+    signIn: "Zaloguj się",
+    error: "Nie udało się zalogować jako partner.",
+  },
+};
+
+const PARTNER_DASHBOARD_TEXT: Record<CookieLocale, {
+  authRequired: string;
+  portalEyebrow: string;
+  dashboardFallback: string;
+  addClinic: string;
+  signIn: string;
+  clinicsHeading: string;
+  chatsHeading: string;
+  noChats: string;
+}> = {
+  en: {
+    authRequired: "Partner authentication is required.",
+    portalEyebrow: "Partner portal",
+    dashboardFallback: "Partner dashboard",
+    addClinic: "Add clinic",
+    signIn: "Sign in",
+    clinicsHeading: "Clinics",
+    chatsHeading: "Chats",
+    noChats: "No partner chats yet.",
+  },
+  ru: {
+    authRequired: "Нужна авторизация партнёра.",
+    portalEyebrow: "Портал партнёра",
+    dashboardFallback: "Панель партнёра",
+    addClinic: "Добавить клинику",
+    signIn: "Войти",
+    clinicsHeading: "Клиники",
+    chatsHeading: "Чаты",
+    noChats: "Пока нет чатов с партнёром.",
+  },
+  es: {
+    authRequired: "Necesitas iniciar sesión como socio.",
+    portalEyebrow: "Portal de socios",
+    dashboardFallback: "Panel del socio",
+    addClinic: "Añadir clínica",
+    signIn: "Iniciar sesión",
+    clinicsHeading: "Clínicas",
+    chatsHeading: "Chats",
+    noChats: "Aún no tienes chats de socio.",
+  },
+  pt: {
+    authRequired: "É necessário fazer login como parceiro.",
+    portalEyebrow: "Portal do parceiro",
+    dashboardFallback: "Painel do parceiro",
+    addClinic: "Adicionar clínica",
+    signIn: "Entrar",
+    clinicsHeading: "Clínicas",
+    chatsHeading: "Conversas",
+    noChats: "Ainda não há conversas de parceiro.",
+  },
+  fr: {
+    authRequired: "Une authentification partenaire est requise.",
+    portalEyebrow: "Portail partenaire",
+    dashboardFallback: "Tableau de bord partenaire",
+    addClinic: "Ajouter une clinique",
+    signIn: "Se connecter",
+    clinicsHeading: "Cliniques",
+    chatsHeading: "Discussions",
+    noChats: "Aucune discussion partenaire pour l'instant.",
+  },
+  de: {
+    authRequired: "Eine Partner-Anmeldung ist erforderlich.",
+    portalEyebrow: "Partnerportal",
+    dashboardFallback: "Partner-Dashboard",
+    addClinic: "Klinik hinzufügen",
+    signIn: "Anmelden",
+    clinicsHeading: "Kliniken",
+    chatsHeading: "Chats",
+    noChats: "Noch keine Partner-Chats vorhanden.",
+  },
+  it: {
+    authRequired: "È necessario accedere come partner.",
+    portalEyebrow: "Portale partner",
+    dashboardFallback: "Dashboard partner",
+    addClinic: "Aggiungi clinica",
+    signIn: "Accedi",
+    clinicsHeading: "Cliniche",
+    chatsHeading: "Chat",
+    noChats: "Ancora nessuna chat come partner.",
+  },
+  pl: {
+    authRequired: "Wymagane jest zalogowanie jako partner.",
+    portalEyebrow: "Portal partnera",
+    dashboardFallback: "Panel partnera",
+    addClinic: "Dodaj klinikę",
+    signIn: "Zaloguj się",
+    clinicsHeading: "Kliniki",
+    chatsHeading: "Czaty",
+    noChats: "Nie masz jeszcze żadnych czatów partnera.",
+  },
+};
+
+const PARTNER_CHATS_TEXT: Record<CookieLocale, {
+  heading: string;
+  clinicsLink: string;
+  tabs: { all: string; unanswered: string };
+  loadError: string;
+  empty: string;
+}> = {
+  en: {
+    heading: "Chats",
+    clinicsLink: "Clinics",
+    tabs: { all: "All", unanswered: "Unanswered" },
+    loadError: "Could not load partner chats.",
+    empty: "No chats in this section.",
+  },
+  ru: {
+    heading: "Чаты",
+    clinicsLink: "Клиники",
+    tabs: { all: "Все", unanswered: "Без ответа" },
+    loadError: "Не удалось загрузить чаты партнёра.",
+    empty: "В этом разделе пока нет чатов.",
+  },
+  es: {
+    heading: "Chats",
+    clinicsLink: "Clínicas",
+    tabs: { all: "Todos", unanswered: "Sin responder" },
+    loadError: "No se pudieron cargar los chats del socio.",
+    empty: "No hay chats en esta sección.",
+  },
+  pt: {
+    heading: "Conversas",
+    clinicsLink: "Clínicas",
+    tabs: { all: "Todas", unanswered: "Sem resposta" },
+    loadError: "Não foi possível carregar as conversas do parceiro.",
+    empty: "Não há conversas nesta seção.",
+  },
+  fr: {
+    heading: "Discussions",
+    clinicsLink: "Cliniques",
+    tabs: { all: "Toutes", unanswered: "Sans réponse" },
+    loadError: "Impossible de charger les discussions partenaire.",
+    empty: "Aucune discussion dans cette section.",
+  },
+  de: {
+    heading: "Chats",
+    clinicsLink: "Kliniken",
+    tabs: { all: "Alle", unanswered: "Unbeantwortet" },
+    loadError: "Die Partner-Chats konnten nicht geladen werden.",
+    empty: "Keine Chats in diesem Bereich.",
+  },
+  it: {
+    heading: "Chat",
+    clinicsLink: "Cliniche",
+    tabs: { all: "Tutte", unanswered: "Senza risposta" },
+    loadError: "Non è stato possibile caricare le chat partner.",
+    empty: "Nessuna chat in questa sezione.",
+  },
+  pl: {
+    heading: "Czaty",
+    clinicsLink: "Kliniki",
+    tabs: { all: "Wszystkie", unanswered: "Bez odpowiedzi" },
+    loadError: "Nie udało się wczytać czatów partnera.",
+    empty: "Brak czatów w tej sekcji.",
+  },
+};
+
+const PARTNER_CLINIC_TEXT: Record<CookieLocale, {
+  loadError: string;
+  saveSuccess: string;
+  saveError: string;
+  logoSuccess: string;
+  logoError: string;
+  backToPortal: string;
+  addClinicTitle: string;
+  fields: {
+    name: string;
+    website: string;
+    email: string;
+    phone: string;
+    address: string;
+    city: string;
+    country: string;
+    region: string;
+    workingHours: string;
+  };
+  createIntro: string;
+  about: string;
+  createButton: string;
+  logoHeading: string;
+  uploadLogo: string;
+  generalInfoHeading: string;
+  saveChanges: string;
+  clinicStatusActive: string;
+  clinicStatusInactive: string;
+  statusControlCopy: string;
+  deactivate: string;
+  activate: string;
+  info: string;
+  services: string;
+  saveServices: string;
+  languages: string;
+  saveLanguages: string;
+  saveAbout: string;
+  visitors: string;
+  noVisitors: string;
+  statusActive: string;
+  statusInactive: string;
+}> = {
+  en: {
+    loadError: "Could not load clinic.",
+    saveSuccess: "Clinic saved.",
+    saveError: "Could not save the clinic.",
+    logoSuccess: "Logo uploaded.",
+    logoError: "Could not upload this logo.",
+    backToPortal: "← Back to partner portal",
+    addClinicTitle: "Add clinic",
+    fields: {
+      name: "Name",
+      website: "Website",
+      email: "Email",
+      phone: "Phone",
+      address: "Address",
+      city: "City",
+      country: "Country",
+      region: "Region",
+      workingHours: "Working hours",
+    },
+    createIntro: "Create a clinic with all required information, services and languages.",
+    about: "About",
+    createButton: "Create clinic",
+    logoHeading: "Logo",
+    uploadLogo: "Upload logo",
+    generalInfoHeading: "General information",
+    saveChanges: "Save changes",
+    clinicStatusActive: "Clinic status: active",
+    clinicStatusInactive: "Clinic status: inactive",
+    statusControlCopy: "Control whether this clinic is visible in the public catalogue.",
+    deactivate: "Deactivate",
+    activate: "Activate",
+    info: "Info",
+    services: "Services",
+    saveServices: "Save services",
+    languages: "Languages",
+    saveLanguages: "Save languages",
+    saveAbout: "Save about",
+    visitors: "Visitors",
+    noVisitors: "No clinic visitors yet.",
+    statusActive: "Active",
+    statusInactive: "Inactive",
+  },
+  ru: {
+    loadError: "Не удалось загрузить клинику.",
+    saveSuccess: "Клиника сохранена.",
+    saveError: "Не удалось сохранить клинику.",
+    logoSuccess: "Логотип загружен.",
+    logoError: "Не удалось загрузить этот логотип.",
+    backToPortal: "← Назад в партнёрский портал",
+    addClinicTitle: "Добавить клинику",
+    fields: {
+      name: "Название",
+      website: "Сайт",
+      email: "Email",
+      phone: "Телефон",
+      address: "Адрес",
+      city: "Город",
+      country: "Страна",
+      region: "Регион",
+      workingHours: "Часы работы",
+    },
+    createIntro: "Создай клинику, указав всю необходимую информацию, услуги и языки.",
+    about: "О клинике",
+    createButton: "Создать клинику",
+    logoHeading: "Логотип",
+    uploadLogo: "Загрузить логотип",
+    generalInfoHeading: "Общая информация",
+    saveChanges: "Сохранить изменения",
+    clinicStatusActive: "Статус клиники: активна",
+    clinicStatusInactive: "Статус клиники: неактивна",
+    statusControlCopy: "Управляй тем, видна ли эта клиника в публичном каталоге.",
+    deactivate: "Деактивировать",
+    activate: "Активировать",
+    info: "Информация",
+    services: "Услуги",
+    saveServices: "Сохранить услуги",
+    languages: "Языки",
+    saveLanguages: "Сохранить языки",
+    saveAbout: "Сохранить описание",
+    visitors: "Посетители",
+    noVisitors: "Пока нет посетителей клиники.",
+    statusActive: "Активна",
+    statusInactive: "Неактивна",
+  },
+  es: {
+    loadError: "No se pudo cargar la clínica.",
+    saveSuccess: "Clínica guardada.",
+    saveError: "No se pudo guardar la clínica.",
+    logoSuccess: "Logo subido.",
+    logoError: "No se pudo subir este logo.",
+    backToPortal: "← Volver al portal de socios",
+    addClinicTitle: "Añadir clínica",
+    fields: {
+      name: "Nombre",
+      website: "Sitio web",
+      email: "Email",
+      phone: "Teléfono",
+      address: "Dirección",
+      city: "Ciudad",
+      country: "País",
+      region: "Región",
+      workingHours: "Horario",
+    },
+    createIntro: "Crea una clínica con toda la información, los servicios y los idiomas necesarios.",
+    about: "Sobre la clínica",
+    createButton: "Crear clínica",
+    logoHeading: "Logo",
+    uploadLogo: "Subir logo",
+    generalInfoHeading: "Información general",
+    saveChanges: "Guardar cambios",
+    clinicStatusActive: "Estado de la clínica: activa",
+    clinicStatusInactive: "Estado de la clínica: inactiva",
+    statusControlCopy: "Controla si esta clínica es visible en el catálogo público.",
+    deactivate: "Desactivar",
+    activate: "Activar",
+    info: "Información",
+    services: "Servicios",
+    saveServices: "Guardar servicios",
+    languages: "Idiomas",
+    saveLanguages: "Guardar idiomas",
+    saveAbout: "Guardar descripción",
+    visitors: "Visitantes",
+    noVisitors: "Aún no hay visitantes en la clínica.",
+    statusActive: "Activa",
+    statusInactive: "Inactiva",
+  },
+  pt: {
+    loadError: "Não foi possível carregar a clínica.",
+    saveSuccess: "Clínica salva.",
+    saveError: "Não foi possível salvar a clínica.",
+    logoSuccess: "Logo enviado.",
+    logoError: "Não foi possível enviar este logo.",
+    backToPortal: "← Voltar ao portal do parceiro",
+    addClinicTitle: "Adicionar clínica",
+    fields: {
+      name: "Nome",
+      website: "Site",
+      email: "Email",
+      phone: "Telefone",
+      address: "Endereço",
+      city: "Cidade",
+      country: "País",
+      region: "Região",
+      workingHours: "Horário de funcionamento",
+    },
+    createIntro: "Crie uma clínica com todas as informações, serviços e idiomas necessários.",
+    about: "Sobre a clínica",
+    createButton: "Criar clínica",
+    logoHeading: "Logo",
+    uploadLogo: "Enviar logo",
+    generalInfoHeading: "Informações gerais",
+    saveChanges: "Salvar alterações",
+    clinicStatusActive: "Status da clínica: ativa",
+    clinicStatusInactive: "Status da clínica: inativa",
+    statusControlCopy: "Controle se esta clínica fica visível no catálogo público.",
+    deactivate: "Desativar",
+    activate: "Ativar",
+    info: "Informações",
+    services: "Serviços",
+    saveServices: "Salvar serviços",
+    languages: "Idiomas",
+    saveLanguages: "Salvar idiomas",
+    saveAbout: "Salvar descrição",
+    visitors: "Visitantes",
+    noVisitors: "Ainda não há visitantes na clínica.",
+    statusActive: "Ativa",
+    statusInactive: "Inativa",
+  },
+  fr: {
+    loadError: "Impossible de charger la clinique.",
+    saveSuccess: "Clinique enregistrée.",
+    saveError: "Impossible d'enregistrer la clinique.",
+    logoSuccess: "Logo importé.",
+    logoError: "Impossible d'importer ce logo.",
+    backToPortal: "← Retour au portail partenaire",
+    addClinicTitle: "Ajouter une clinique",
+    fields: {
+      name: "Nom",
+      website: "Site web",
+      email: "Email",
+      phone: "Téléphone",
+      address: "Adresse",
+      city: "Ville",
+      country: "Pays",
+      region: "Région",
+      workingHours: "Horaires d'ouverture",
+    },
+    createIntro: "Créez une clinique avec toutes les informations, tous les services et toutes les langues requis.",
+    about: "À propos",
+    createButton: "Créer la clinique",
+    logoHeading: "Logo",
+    uploadLogo: "Importer un logo",
+    generalInfoHeading: "Informations générales",
+    saveChanges: "Enregistrer les modifications",
+    clinicStatusActive: "Statut de la clinique : active",
+    clinicStatusInactive: "Statut de la clinique : inactive",
+    statusControlCopy: "Choisissez si cette clinique est visible dans le catalogue public.",
+    deactivate: "Désactiver",
+    activate: "Activer",
+    info: "Infos",
+    services: "Services",
+    saveServices: "Enregistrer les services",
+    languages: "Langues",
+    saveLanguages: "Enregistrer les langues",
+    saveAbout: "Enregistrer la description",
+    visitors: "Visiteurs",
+    noVisitors: "Aucun visiteur pour cette clinique pour le moment.",
+    statusActive: "Active",
+    statusInactive: "Inactive",
+  },
+  de: {
+    loadError: "Die Klinik konnte nicht geladen werden.",
+    saveSuccess: "Klinik gespeichert.",
+    saveError: "Die Klinik konnte nicht gespeichert werden.",
+    logoSuccess: "Logo hochgeladen.",
+    logoError: "Dieses Logo konnte nicht hochgeladen werden.",
+    backToPortal: "← Zurück zum Partnerportal",
+    addClinicTitle: "Klinik hinzufügen",
+    fields: {
+      name: "Name",
+      website: "Website",
+      email: "E-Mail",
+      phone: "Telefon",
+      address: "Adresse",
+      city: "Stadt",
+      country: "Land",
+      region: "Region",
+      workingHours: "Öffnungszeiten",
+    },
+    createIntro: "Erstellen Sie eine Klinik mit allen erforderlichen Informationen, Leistungen und Sprachen.",
+    about: "Über uns",
+    createButton: "Klinik erstellen",
+    logoHeading: "Logo",
+    uploadLogo: "Logo hochladen",
+    generalInfoHeading: "Allgemeine Informationen",
+    saveChanges: "Änderungen speichern",
+    clinicStatusActive: "Klinikstatus: aktiv",
+    clinicStatusInactive: "Klinikstatus: inaktiv",
+    statusControlCopy: "Legen Sie fest, ob diese Klinik im öffentlichen Verzeichnis sichtbar ist.",
+    deactivate: "Deaktivieren",
+    activate: "Aktivieren",
+    info: "Info",
+    services: "Leistungen",
+    saveServices: "Leistungen speichern",
+    languages: "Sprachen",
+    saveLanguages: "Sprachen speichern",
+    saveAbout: "Beschreibung speichern",
+    visitors: "Besucher",
+    noVisitors: "Noch keine Besucher für diese Klinik.",
+    statusActive: "Aktiv",
+    statusInactive: "Inaktiv",
+  },
+  it: {
+    loadError: "Non è stato possibile caricare la clinica.",
+    saveSuccess: "Clinica salvata.",
+    saveError: "Non è stato possibile salvare la clinica.",
+    logoSuccess: "Logo caricato.",
+    logoError: "Non è stato possibile caricare questo logo.",
+    backToPortal: "← Torna al portale partner",
+    addClinicTitle: "Aggiungi clinica",
+    fields: {
+      name: "Nome",
+      website: "Sito web",
+      email: "Email",
+      phone: "Telefono",
+      address: "Indirizzo",
+      city: "Città",
+      country: "Paese",
+      region: "Regione",
+      workingHours: "Orario di apertura",
+    },
+    createIntro: "Crei una clinica con tutte le informazioni, i servizi e le lingue richiesti.",
+    about: "Chi siamo",
+    createButton: "Crea clinica",
+    logoHeading: "Logo",
+    uploadLogo: "Carica logo",
+    generalInfoHeading: "Informazioni generali",
+    saveChanges: "Salva modifiche",
+    clinicStatusActive: "Stato della clinica: attiva",
+    clinicStatusInactive: "Stato della clinica: non attiva",
+    statusControlCopy: "Controlli se questa clinica è visibile nel catalogo pubblico.",
+    deactivate: "Disattiva",
+    activate: "Attiva",
+    info: "Info",
+    services: "Servizi",
+    saveServices: "Salva servizi",
+    languages: "Lingue",
+    saveLanguages: "Salva lingue",
+    saveAbout: "Salva descrizione",
+    visitors: "Visitatori",
+    noVisitors: "Nessun visitatore per questa clinica al momento.",
+    statusActive: "Attiva",
+    statusInactive: "Non attiva",
+  },
+  pl: {
+    loadError: "Nie udało się wczytać kliniki.",
+    saveSuccess: "Klinika zapisana.",
+    saveError: "Nie udało się zapisać kliniki.",
+    logoSuccess: "Logo przesłane.",
+    logoError: "Nie udało się przesłać tego logo.",
+    backToPortal: "← Wróć do portalu partnera",
+    addClinicTitle: "Dodaj klinikę",
+    fields: {
+      name: "Nazwa",
+      website: "Strona internetowa",
+      email: "Email",
+      phone: "Telefon",
+      address: "Adres",
+      city: "Miasto",
+      country: "Kraj",
+      region: "Region",
+      workingHours: "Godziny pracy",
+    },
+    createIntro: "Utwórz klinikę, podając wszystkie wymagane informacje, usługi i języki.",
+    about: "O klinice",
+    createButton: "Utwórz klinikę",
+    logoHeading: "Logo",
+    uploadLogo: "Prześlij logo",
+    generalInfoHeading: "Informacje ogólne",
+    saveChanges: "Zapisz zmiany",
+    clinicStatusActive: "Status kliniki: aktywna",
+    clinicStatusInactive: "Status kliniki: nieaktywna",
+    statusControlCopy: "Zdecyduj, czy ta klinika jest widoczna w publicznym katalogu.",
+    deactivate: "Dezaktywuj",
+    activate: "Aktywuj",
+    info: "Informacje",
+    services: "Usługi",
+    saveServices: "Zapisz usługi",
+    languages: "Języki",
+    saveLanguages: "Zapisz języki",
+    saveAbout: "Zapisz opis",
+    visitors: "Odwiedzający",
+    noVisitors: "Klinika nie ma jeszcze odwiedzających.",
+    statusActive: "Aktywna",
+    statusInactive: "Nieaktywna",
+  },
+};
+
 function PartnerLogin() {
+  const locale = localeOf();
+  const text = PARTNER_LOGIN_TEXT[locale] ?? PARTNER_LOGIN_TEXT.en;
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -7733,15 +14068,15 @@ function PartnerLogin() {
       window.localStorage.setItem("lbp_partner_token", response.token);
       navigate("/partner");
     } catch {
-      setError("Could not sign in as a partner.");
+      setError(text.error);
     }
   };
   return (
     <section className="auth-page">
       <form onSubmit={submit}>
-        <h1>Partner sign in</h1>
+        <h1>{text.heading}</h1>
         <label>
-          Email
+          {text.emailLabel}
           <input
             type="email"
             value={email}
@@ -7750,7 +14085,7 @@ function PartnerLogin() {
           />
         </label>
         <label>
-          Password
+          {text.passwordLabel}
           <input
             type="password"
             value={password}
@@ -7759,13 +14094,14 @@ function PartnerLogin() {
           />
         </label>
         {error && <p className="error">{error}</p>}
-        <button className="primary">Sign in</button>
+        <button className="primary">{text.signIn}</button>
       </form>
     </section>
   );
 }
-
 function PartnerDashboard() {
+  const locale = localeOf();
+  const text = PARTNER_DASHBOARD_TEXT[locale] ?? PARTNER_DASHBOARD_TEXT.en;
   const [me, setMe] = useState<Row | null>(null);
   const [clinics, setClinics] = useState<Row[]>([]);
   const [chats, setChats] = useState<Row[]>([]);
@@ -7774,7 +14110,7 @@ function PartnerDashboard() {
     api
       .get<{ user: Row }>("/partner/me")
       .then((data) => setMe(data.user))
-      .catch(() => setNotice("Partner authentication is required."));
+      .catch(() => setNotice(text.authRequired));
     api
       .get<{ items: Row[] }>("/partner/clinics")
       .then((data) => setClinics(data.items || []))
@@ -7787,10 +14123,10 @@ function PartnerDashboard() {
   if (notice)
     return (
       <section className="access-card">
-        <h1>Partner portal</h1>
+        <h1>{text.portalEyebrow}</h1>
         <p className="error">{notice}</p>
         <Link className="primary" to="/partner/login">
-          Sign in
+          {text.signIn}
         </Link>
       </section>
     );
@@ -7798,14 +14134,14 @@ function PartnerDashboard() {
     <section>
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Partner portal</p>
-          <h1>{asText(me?.displayName ?? me?.email ?? "Partner dashboard")}</h1>
+          <p className="eyebrow">{text.portalEyebrow}</p>
+          <h1>{asText(me?.displayName ?? me?.email ?? text.dashboardFallback)}</h1>
         </div>
         <Link className="primary" to="/partner/clinics/new">
-          Add clinic
+          {text.addClinic}
         </Link>
       </div>
-      <h2>Clinics</h2>
+      <h2>{text.clinicsHeading}</h2>
       <div className="directory-grid">
         {clinics.map((clinic) => (
           <Link
@@ -7829,7 +14165,7 @@ function PartnerDashboard() {
           </Link>
         ))}
       </div>
-      <h2>Chats</h2>
+      <h2>{text.chatsHeading}</h2>
       <div className="list-card">
         {chats.map((chat) => (
           <p key={asText(chat.id)}>
@@ -7839,13 +14175,14 @@ function PartnerDashboard() {
             — {asText(chat.lastMessageBody ?? chat.status)}
           </p>
         ))}
-        {!chats.length && <p>No partner chats yet.</p>}
+        {!chats.length && <p>{text.noChats}</p>}
       </div>
     </section>
   );
 }
-
 function PartnerChats() {
+  const locale = localeOf();
+  const text = PARTNER_CHATS_TEXT[locale] ?? PARTNER_CHATS_TEXT.en;
   const [status, setStatus] = useState("all");
   const [items, setItems] = useState<Row[]>([]);
   const [notice, setNotice] = useState("");
@@ -7855,20 +14192,20 @@ function PartnerChats() {
         `/partner/chats?status=${encodeURIComponent(status)}`,
       )
       .then((data) => setItems(data.items || []))
-      .catch(() => setNotice("Could not load partner chats."));
+      .catch(() => setNotice(text.loadError));
   }, [status]);
   return (
     <section>
       <div className="section-heading">
-        <h1>Chats</h1>
+        <h1>{text.heading}</h1>
         <Link className="secondary" to="/partner">
-          Clinics
+          {text.clinicsLink}
         </Link>
       </div>
       <nav className="member-tabs">
         {[
-          ["all", "All"],
-          ["unanswered", "Unanswered"],
+          ["all", text.tabs.all],
+          ["unanswered", text.tabs.unanswered],
         ].map(([key, title]) => (
           <button
             key={key}
@@ -7889,13 +14226,14 @@ function PartnerChats() {
             <p>{asText(chat.lastMessageBody ?? chat.status)}</p>
           </article>
         ))}
-        {!items.length && <p>No chats in this section.</p>}
+        {!items.length && <p>{text.empty}</p>}
       </div>
     </section>
   );
 }
-
 function PartnerClinic() {
+  const locale = localeOf();
+  const text = PARTNER_CLINIC_TEXT[locale] ?? PARTNER_CLINIC_TEXT.en;
   const { id = "new" } = useParams();
   const navigate = useNavigate();
   const [search, setSearch] = useSearchParams();
@@ -7913,7 +14251,7 @@ function PartnerClinic() {
       api
         .get<Row>(`/partner/clinics/${encodeURIComponent(id)}`)
         .then(setDraft)
-        .catch(() => setNotice("Could not load clinic."));
+        .catch(() => setNotice(text.loadError));
     api
       .get<{ items: Row[] }>("/partner/services")
       .then((data) => setServiceGroups(data.items || []))
@@ -7937,13 +14275,13 @@ function PartnerClinic() {
             { values },
           )
         : await api.post<{ clinic: Row }>("/partner/clinics", { values });
-      setNotice("Clinic saved.");
+      setNotice(text.saveSuccess);
       const clinic = response.clinic;
       if (!editing && clinic?.id)
         navigate(`/partner/clinics/${encodeURIComponent(asText(clinic.id))}`);
       else if (clinic) setDraft(clinic);
     } catch {
-      setNotice("Could not save the clinic.");
+      setNotice(text.saveError);
     }
   };
   const selectedServices = new Set(
@@ -7982,81 +14320,81 @@ function PartnerClinic() {
         body,
       );
       if (result.clinic) setDraft(result.clinic);
-      setNotice("Logo uploaded.");
+      setNotice(text.logoSuccess);
     } catch {
-      setNotice("Could not upload this logo.");
+      setNotice(text.logoError);
     }
   };
   const tabs = [
-    ["info", "Info"],
-    ["services", `Services (${selectedServices.size})`],
-    ["languages", `Languages (${selectedLanguages.size})`],
-    ["about", "About"],
+    ["info", text.info],
+    ["services", `${text.services} (${selectedServices.size})`],
+    ["languages", `${text.languages} (${selectedLanguages.size})`],
+    ["about", text.about],
     [
       "visitors",
-      `Visitors (${asText(draft.visitorsCount === "—" ? 0 : draft.visitorsCount)})`,
+      `${text.visitors} (${asText(draft.visitorsCount === "—" ? 0 : draft.visitorsCount)})`,
     ],
   ];
   const details = (
     <>
       <label>
-        Name
+        {text.fields.name}
         <input
           value={field("name")}
           onChange={(event) => setField("name", event.target.value)}
         />
       </label>
       <label>
-        Website
+        {text.fields.website}
         <input
           value={field("website")}
           onChange={(event) => setField("website", event.target.value)}
         />
       </label>
       <label>
-        Email
+        {text.fields.email}
         <input
           value={field("email")}
           onChange={(event) => setField("email", event.target.value)}
         />
       </label>
       <label>
-        Phone
+        {text.fields.phone}
         <input
           value={field("phone")}
           onChange={(event) => setField("phone", event.target.value)}
         />
       </label>
       <label>
-        Address
+        {text.fields.address}
         <input
           value={field("location")}
           onChange={(event) => setField("location", event.target.value)}
         />
       </label>
       <label>
-        City
+        {text.fields.city}
         <input
           value={field("city")}
           onChange={(event) => setField("city", event.target.value)}
         />
       </label>
       <label>
-        Country
+        {text.fields.country}
         <input
           value={field("country")}
           onChange={(event) => setField("country", event.target.value)}
         />
       </label>
       <label>
-        Region
+        {text.fields.region}
         <input
           value={field("region")}
           onChange={(event) => setField("region", event.target.value)}
         />
       </label>
       <label>
-        Working hours
+        {text.fields.workingHours}
         <input
           value={field("workingHours")}
           onChange={(event) => setField("workingHours", event.target.value)}
@@ -8067,11 +14405,11 @@ function PartnerClinic() {
   const form = !editing ? (
     <>
       <p>
-        Create a clinic with all required information, services and languages.
+        {text.createIntro}
       </p>
       {details}
       <label>
-        About
+        {text.about}
         <textarea
           rows={7}
           value={field("aboutHtml")}
@@ -8079,7 +14417,7 @@ function PartnerClinic() {
         />
       </label>
       <button className="primary" onClick={() => void save()}>
-        Create clinic
+        {text.createButton}
       </button>
     </>
   ) : (
@@ -8098,7 +14436,7 @@ function PartnerClinic() {
       {tab === "info" && (
         <>
           <section className="detail-card">
-            <h2>Logo</h2>
+            <h2>{text.logoHeading}</h2>
             {draft.logoUrl ? (
               <img
                 className="partner-clinic-logo"
@@ -8111,7 +14449,7 @@ function PartnerClinic() {
               </div>
             )}
             <label>
-              Upload logo
+              {text.uploadLogo}
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
@@ -8120,35 +14458,35 @@ function PartnerClinic() {
             </label>
           </section>
           <section className="member-form detail-card">
-            <h2>General information</h2>
+            <h2>{text.generalInfoHeading}</h2>
             {details}
             <button className="primary" onClick={() => void save()}>
-              Save changes
+              {text.saveChanges}
             </button>
           </section>
           <section className="detail-card action-row">
             <div>
               <h2>
                 {draft.isActive
-                  ? "Clinic status: active"
-                  : "Clinic status: inactive"}
+                  ? text.clinicStatusActive
+                  : text.clinicStatusInactive}
               </h2>
               <p>
-                Control whether this clinic is visible in the public catalogue.
+                {text.statusControlCopy}
               </p>
             </div>
             <button
               className={draft.isActive ? "danger" : "primary"}
               onClick={() => void save({ isActive: !draft.isActive })}
             >
-              {draft.isActive ? "Deactivate" : "Activate"}
+              {draft.isActive ? text.deactivate : text.activate}
             </button>
           </section>
         </>
       )}
       {tab === "services" && (
         <section className="detail-card">
-          <h2>Services</h2>
+          <h2>{text.services}</h2>
           {serviceGroups.map((group) => {
             const entries = (
               Array.isArray(group.services)
@@ -8184,13 +14522,13 @@ function PartnerClinic() {
             className="primary"
             onClick={() => void save({ services: [...selectedServices] })}
           >
-            Save services
+            {text.saveServices}
           </button>
         </section>
       )}
       {tab === "languages" && (
         <section className="detail-card">
-          <h2>Languages</h2>
+          <h2>{text.languages}</h2>
           <div className="check-grid">
             {["en", "de", "fr", "es", "it", "ru", "nl", "pt", "pl", "uk"].map(
               (language) => (
@@ -8211,15 +14549,15 @@ function PartnerClinic() {
             className="primary"
             onClick={() => void save({ languages: [...selectedLanguages] })}
           >
-            Save languages
+            {text.saveLanguages}
           </button>
         </section>
       )}
       {tab === "about" && (
         <section className="member-form detail-card">
-          <h2>About</h2>
+          <h2>{text.about}</h2>
           <label>
-            About
+            {text.about}
             <textarea
               rows={12}
               value={field("aboutHtml")}
@@ -8230,13 +14568,13 @@ function PartnerClinic() {
             className="primary"
             onClick={() => void save({ aboutHtml: draft.aboutHtml })}
           >
-            Save about
+            {text.saveAbout}
           </button>
         </section>
       )}
       {tab === "visitors" && (
         <section className="detail-card">
-          <h2>Visitors</h2>
+          <h2>{text.visitors}</h2>
           <div className="list-card">
             {visitors.map((visitor, index) => (
               <p key={asText(visitor.id ?? index)}>
@@ -8250,7 +14588,7 @@ function PartnerClinic() {
                   .join(", ") || "—"}
               </p>
             ))}
-            {!visitors.length && <p>No clinic visitors yet.</p>}
+            {!visitors.length && <p>{text.noVisitors}</p>}
           </div>
         </section>
       )}
@@ -8258,10 +14596,10 @@ function PartnerClinic() {
   );
   return (
     <section className="partner-clinic member-form">
-      <Link to="/partner">← Back to partner portal</Link>
+      <Link to="/partner">{text.backToPortal}</Link>
       <div className="section-heading">
         <div>
-          <h1>{editing ? field("name") : "Add clinic"}</h1>
+          <h1>{editing ? field("name") : text.addClinicTitle}</h1>
           {editing && (
             <p>
               {[draft.city, draft.country]
@@ -8273,7 +14611,7 @@ function PartnerClinic() {
         </div>
         {editing && (
           <span className={draft.isActive ? "status active" : "status"}>
-            {draft.isActive ? "Active" : "Inactive"}
+            {draft.isActive ? text.statusActive : text.statusInactive}
           </span>
         )}
       </div>
@@ -8282,9 +14620,9 @@ function PartnerClinic() {
     </section>
   );
 }
-
 function Boost({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = BOOST_TEXT[locale] ?? BOOST_TEXT.en;
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [active, setActive] = useState(false);
   const [activeUntil, setActiveUntil] = useState<string | null>(null);
@@ -8322,13 +14660,13 @@ function Boost({ session }: { session: Session }) {
         requestId?: number;
         message?: string;
       }>("/member/boost", {});
-      setNotice(data.message || "Boost requested.");
+      setNotice(data.message || text.defaultRequestedMessage);
       load();
     } catch (err) {
       setErrorMsg(
         err instanceof ApiError && err.status === 403
-          ? "You need to be verified before requesting a Boost."
-          : "Could not request a Boost right now.",
+          ? text.verifyRequiredError
+          : text.requestGenericError,
       );
     } finally {
       setRequesting(false);
@@ -8336,32 +14674,31 @@ function Boost({ session }: { session: Session }) {
   };
 
   return (
-    <section className="member-form">
-      <h1>Boost</h1>
+    <section className="member-form tool-page tool-page-boost">
+      <h1>{text.title}</h1>
       <MemberLinks locale={locale} />
       <p>
-        Boost puts your profile near the top of Catalog results for a
-        limited time, so more people see you first.
+        {text.intro}
       </p>
-      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "loading" && <p className="notice">{text.loading}</p>}
       {status === "error" && (
-        <p className="error">Could not load your Boost status.</p>
+        <p className="error">{text.loadError}</p>
       )}
       {status === "ok" && (
         <>
           {active ? (
             <p className="notice">
-              Your Boost is active until {asText(activeUntil)}.
+              {text.activeUntil.replace("{date}", asText(activeUntil))}
             </p>
           ) : pendingRequestId ? (
-            <p className="notice">Your Boost request is under review.</p>
+            <p className="notice">{text.pendingReview}</p>
           ) : (
             <button
               className="primary"
               onClick={() => void requestBoost()}
               disabled={requesting}
             >
-              {requesting ? "Requesting…" : "Request a Boost"}
+              {requesting ? text.requesting : text.requestButton}
             </button>
           )}
         </>
@@ -8374,6 +14711,7 @@ function Boost({ session }: { session: Session }) {
 
 function Referral({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = REFERRAL_TEXT[locale] ?? REFERRAL_TEXT.en;
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [code, setCode] = useState("");
   const [referredCount, setReferredCount] = useState(0);
@@ -8415,53 +14753,81 @@ function Referral({ session }: { session: Session }) {
     setErrorMsg("");
     try {
       await api.post("/member/referral/redeem", { code: value });
-      setNotice("Invite code redeemed.");
+      setNotice(text.redeemSuccess);
       setInputCode("");
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 409)
-        setErrorMsg("You've already used an invite code.");
+        setErrorMsg(text.errorAlreadyUsed);
       else if (err instanceof ApiError && err.status === 404)
-        setErrorMsg("That invite code was not found.");
+        setErrorMsg(text.errorNotFound);
       else if (err instanceof ApiError && err.status === 422)
-        setErrorMsg("You can't use your own invite code.");
-      else setErrorMsg("Could not redeem that code.");
+        setErrorMsg(text.errorOwnCode);
+      else setErrorMsg(text.errorGeneric);
     } finally {
       setRedeeming(false);
     }
   };
 
+  // Alena: "а почему нельзя прислать ссылку просто для регистрации" - the
+  // code alone made a friend type it in by hand on the "Have an invite
+  // code?" field below. A link is much lower-friction: Signup (see the
+  // Signup() component above) now reads ?invite=CODE from the URL and
+  // redeems it automatically right after the friend's account is created,
+  // so sharing this link is a true one-click flow. The raw code is kept
+  // too - some people prefer to just read it out loud or paste it in a
+  // message rather than a link.
+  const inviteLink = typeof window !== "undefined" && code
+    ? `${window.location.origin}/${locale}/auth/register?invite=${encodeURIComponent(code)}`
+    : "";
+  const [linkCopied, setLinkCopied] = useState(false);
+  const copyInviteLink = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2500);
+    } catch {
+      setErrorMsg(text.copyLinkError);
+    }
+  };
+
   return (
-    <section className="member-form">
-      <h1>Referral</h1>
+    <section className="member-form tool-page tool-page-referral">
+      <h1>{text.title}</h1>
       <MemberLinks locale={locale} />
       <p>
-        Invite friends to LetsBeParents - when they join and get verified,
-        you earn a profile Boost.
+        {text.intro}
       </p>
-      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "loading" && <p className="notice">{text.loading}</p>}
       {status === "error" && (
-        <p className="error">Could not load your referral info.</p>
+        <p className="error">{text.loadError}</p>
       )}
       {status === "ok" && (
         <>
-          <div className="list-card">
-            <p>Your invite code</p>
-            <p>
-              <strong>{code}</strong>
+          <div className="list-card referral-code-card">
+            <p>{text.yourInviteLink}</p>
+            <div className="referral-link-row">
+              <input className="referral-link-field" value={inviteLink} readOnly onFocus={(event) => event.target.select()} />
+              <button type="button" className="primary" onClick={() => void copyInviteLink()}>
+                {linkCopied ? text.copied : text.copyLink}
+              </button>
+            </div>
+            <p className="referral-code-fallback">
+              {text.codeFallbackPrefix} <strong>{code}</strong>
             </p>
             <p>
-              {referredCount} friend(s) invited - {rewardedCount} rewarded
+              {text.friendsInvited.replace("{referredCount}", String(referredCount)).replace("{rewardedCount}", String(rewardedCount))}
             </p>
           </div>
           {!redeemedCode ? (
             <>
               <label>
-                Have an invite code?
+                {text.haveInviteCode}
                 <input
                   value={inputCode}
                   onChange={(event) => setInputCode(event.target.value)}
-                  placeholder="Enter invite code"
+                  placeholder={text.inviteCodePlaceholder}
                 />
               </label>
               <button
@@ -8469,12 +14835,12 @@ function Referral({ session }: { session: Session }) {
                 onClick={() => void redeem()}
                 disabled={!inputCode.trim() || redeeming}
               >
-                {redeeming ? "Redeeming…" : "Redeem code"}
+                {redeeming ? text.redeeming : text.redeemButton}
               </button>
             </>
           ) : (
             <p className="notice">
-              You've already redeemed an invite code ({redeemedCode}).
+              {text.alreadyRedeemed.replace("{redeemedCode}", redeemedCode)}
             </p>
           )}
         </>
@@ -8485,8 +14851,1079 @@ function Referral({ session }: { session: Session }) {
   );
 }
 
+
+type SafetyCheckinHourOption = { value: number; label: string };
+type SafetyCheckinLocaleText = {
+  heading: string;
+  intro: string;
+  loading: string;
+  errorLoad: string;
+  meetingWithLabel: string;
+  meetingWithPlaceholder: string;
+  planLabel: string;
+  planPlaceholder: string;
+  hoursLabel: string;
+  hourOptions: SafetyCheckinHourOption[];
+  scheduleButton: string;
+  schedulingButton: string;
+  noticeScheduled: string;
+  errorSchedule: string;
+  errorMarkSafe: string;
+  errorCancel: string;
+  yourCheckinsHeading: string;
+  noCheckinsYet: string;
+  withPrefix: string;
+  imSafeButton: string;
+  cancelButton: string;
+};
+
+const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
+  en: {
+    heading: "Safety Check-In",
+    intro:
+      "Meeting someone in person for the first time? Set a check-in - it stays on your record here as a reminder to follow up with yourself by the deadline.",
+    loading: "Loading…",
+    errorLoad: "Could not load your check-ins.",
+    meetingWithLabel: "Meeting with (optional)",
+    meetingWithPlaceholder: "Who are you meeting?",
+    planLabel: "Plan",
+    planPlaceholder: "Where and when, in case someone needs to check on you",
+    hoursLabel: "Check in with yourself after",
+    hourOptions: [
+      { value: 1, label: "1 hour" },
+      { value: 2, label: "2 hours" },
+      { value: 3, label: "3 hours" },
+      { value: 6, label: "6 hours" },
+      { value: 12, label: "12 hours" },
+      { value: 24, label: "24 hours" },
+      { value: 48, label: "48 hours" },
+      { value: 72, label: "72 hours" },
+    ],
+    scheduleButton: "Schedule check-in",
+    schedulingButton: "Scheduling…",
+    noticeScheduled: "Check-in scheduled.",
+    errorSchedule: "Could not schedule that check-in.",
+    errorMarkSafe: "Could not mark that check-in as safe.",
+    errorCancel: "Could not cancel that check-in.",
+    yourCheckinsHeading: "Your check-ins",
+    noCheckinsYet: "No check-ins yet.",
+    withPrefix: " - with ",
+    imSafeButton: "I'm safe",
+    cancelButton: "Cancel",
+  },
+  ru: {
+    heading: "Safety Check-In",
+    intro:
+      "Встречаешься с кем-то лично в первый раз? Настрой чек-ин — он останется здесь, в твоей записи, как напоминание отметиться о своей безопасности к назначенному сроку.",
+    loading: "Загрузка…",
+    errorLoad: "Не удалось загрузить твои чек-ины.",
+    meetingWithLabel: "С кем встречаешься (необязательно)",
+    meetingWithPlaceholder: "С кем ты встречаешься?",
+    planLabel: "План",
+    planPlaceholder: "Где и когда — на случай, если кому-то нужно будет тебя проверить",
+    hoursLabel: "Отметься о своей безопасности через",
+    hourOptions: [
+      { value: 1, label: "1 час" },
+      { value: 2, label: "2 часа" },
+      { value: 3, label: "3 часа" },
+      { value: 6, label: "6 часов" },
+      { value: 12, label: "12 часов" },
+      { value: 24, label: "24 часа" },
+      { value: 48, label: "48 часов" },
+      { value: 72, label: "72 часа" },
+    ],
+    scheduleButton: "Запланировать чек-ин",
+    schedulingButton: "Планирование…",
+    noticeScheduled: "Чек-ин запланирован.",
+    errorSchedule: "Не удалось запланировать этот чек-ин.",
+    errorMarkSafe: "Не удалось отметить этот чек-ин как безопасный.",
+    errorCancel: "Не удалось отменить этот чек-ин.",
+    yourCheckinsHeading: "Твои чек-ины",
+    noCheckinsYet: "Пока нет ни одного чек-ина.",
+    withPrefix: " - с ",
+    imSafeButton: "Я в порядке",
+    cancelButton: "Отменить",
+  },
+  es: {
+    heading: "Safety Check-In",
+    intro:
+      "¿Vas a conocer a alguien en persona por primera vez? Configura un check-in - se queda registrado aquí como un recordatorio para que confirmes que estás bien antes de la fecha límite.",
+    loading: "Cargando…",
+    errorLoad: "No se pudieron cargar tus check-ins.",
+    meetingWithLabel: "Con quién te reúnes (opcional)",
+    meetingWithPlaceholder: "¿Con quién te vas a reunir?",
+    planLabel: "Plan",
+    planPlaceholder: "Dónde y cuándo, por si alguien necesita comprobar que estás bien",
+    hoursLabel: "Confirma que estás bien después de",
+    hourOptions: [
+      { value: 1, label: "1 hora" },
+      { value: 2, label: "2 horas" },
+      { value: 3, label: "3 horas" },
+      { value: 6, label: "6 horas" },
+      { value: 12, label: "12 horas" },
+      { value: 24, label: "24 horas" },
+      { value: 48, label: "48 horas" },
+      { value: 72, label: "72 horas" },
+    ],
+    scheduleButton: "Programar check-in",
+    schedulingButton: "Programando…",
+    noticeScheduled: "Check-in programado.",
+    errorSchedule: "No se pudo programar ese check-in.",
+    errorMarkSafe: "No se pudo marcar ese check-in como seguro.",
+    errorCancel: "No se pudo cancelar ese check-in.",
+    yourCheckinsHeading: "Tus check-ins",
+    noCheckinsYet: "Aún no tienes check-ins.",
+    withPrefix: " - con ",
+    imSafeButton: "Estoy bien",
+    cancelButton: "Cancelar",
+  },
+  pt: {
+    heading: "Safety Check-In",
+    intro:
+      "Vai encontrar alguém pessoalmente pela primeira vez? Configure um check-in - ele fica registrado aqui como um lembrete para você confirmar que está bem até o prazo definido.",
+    loading: "Carregando…",
+    errorLoad: "Não foi possível carregar seus check-ins.",
+    meetingWithLabel: "Com quem você vai se encontrar (opcional)",
+    meetingWithPlaceholder: "Com quem você vai se encontrar?",
+    planLabel: "Plano",
+    planPlaceholder: "Onde e quando, caso alguém precise verificar se você está bem",
+    hoursLabel: "Confirme que está bem depois de",
+    hourOptions: [
+      { value: 1, label: "1 hora" },
+      { value: 2, label: "2 horas" },
+      { value: 3, label: "3 horas" },
+      { value: 6, label: "6 horas" },
+      { value: 12, label: "12 horas" },
+      { value: 24, label: "24 horas" },
+      { value: 48, label: "48 horas" },
+      { value: 72, label: "72 horas" },
+    ],
+    scheduleButton: "Agendar check-in",
+    schedulingButton: "Agendando…",
+    noticeScheduled: "Check-in agendado.",
+    errorSchedule: "Não foi possível agendar esse check-in.",
+    errorMarkSafe: "Não foi possível marcar esse check-in como seguro.",
+    errorCancel: "Não foi possível cancelar esse check-in.",
+    yourCheckinsHeading: "Seus check-ins",
+    noCheckinsYet: "Você ainda não tem check-ins.",
+    withPrefix: " - com ",
+    imSafeButton: "Estou bem",
+    cancelButton: "Cancelar",
+  },
+  fr: {
+    heading: "Safety Check-In",
+    intro:
+      "Tu rencontres quelqu'un en personne pour la première fois ? Configure un check-in - il reste enregistré ici comme rappel pour que tu confirmes que tout va bien avant l'échéance.",
+    loading: "Chargement…",
+    errorLoad: "Impossible de charger tes check-ins.",
+    meetingWithLabel: "Avec qui (facultatif)",
+    meetingWithPlaceholder: "Avec qui vas-tu te rencontrer ?",
+    planLabel: "Plan",
+    planPlaceholder: "Où et quand, au cas où quelqu'un doive s'assurer que tout va bien pour toi",
+    hoursLabel: "Confirme que tout va bien après",
+    hourOptions: [
+      { value: 1, label: "1 heure" },
+      { value: 2, label: "2 heures" },
+      { value: 3, label: "3 heures" },
+      { value: 6, label: "6 heures" },
+      { value: 12, label: "12 heures" },
+      { value: 24, label: "24 heures" },
+      { value: 48, label: "48 heures" },
+      { value: 72, label: "72 heures" },
+    ],
+    scheduleButton: "Programmer le check-in",
+    schedulingButton: "Programmation…",
+    noticeScheduled: "Check-in programmé.",
+    errorSchedule: "Impossible de programmer ce check-in.",
+    errorMarkSafe: "Impossible de marquer ce check-in comme sûr.",
+    errorCancel: "Impossible d'annuler ce check-in.",
+    yourCheckinsHeading: "Tes check-ins",
+    noCheckinsYet: "Pas encore de check-in.",
+    withPrefix: " - avec ",
+    imSafeButton: "Je vais bien",
+    cancelButton: "Annuler",
+  },
+  de: {
+    heading: "Safety Check-In",
+    intro:
+      "Triffst du jemanden zum ersten Mal persönlich? Richte einen Check-in ein - er bleibt hier in deinem Verlauf als Erinnerung, dich bis zur Frist bei dir selbst zurückzumelden.",
+    loading: "Wird geladen…",
+    errorLoad: "Deine Check-ins konnten nicht geladen werden.",
+    meetingWithLabel: "Treffen mit (optional)",
+    meetingWithPlaceholder: "Mit wem triffst du dich?",
+    planLabel: "Plan",
+    planPlaceholder: "Wo und wann, falls sich jemand nach dir erkundigen muss",
+    hoursLabel: "Melde dich bei dir selbst zurück nach",
+    hourOptions: [
+      { value: 1, label: "1 Stunde" },
+      { value: 2, label: "2 Stunden" },
+      { value: 3, label: "3 Stunden" },
+      { value: 6, label: "6 Stunden" },
+      { value: 12, label: "12 Stunden" },
+      { value: 24, label: "24 Stunden" },
+      { value: 48, label: "48 Stunden" },
+      { value: 72, label: "72 Stunden" },
+    ],
+    scheduleButton: "Check-in planen",
+    schedulingButton: "Wird geplant…",
+    noticeScheduled: "Check-in geplant.",
+    errorSchedule: "Dieser Check-in konnte nicht geplant werden.",
+    errorMarkSafe: "Dieser Check-in konnte nicht als sicher markiert werden.",
+    errorCancel: "Dieser Check-in konnte nicht storniert werden.",
+    yourCheckinsHeading: "Deine Check-ins",
+    noCheckinsYet: "Noch keine Check-ins.",
+    withPrefix: " - mit ",
+    imSafeButton: "Mir geht's gut",
+    cancelButton: "Stornieren",
+  },
+  it: {
+    heading: "Safety Check-In",
+    intro:
+      "Sta per incontrare qualcuno di persona per la prima volta? Imposti un check-in - resterà qui nel suo registro come promemoria per confermare di stare bene entro la scadenza.",
+    loading: "Caricamento…",
+    errorLoad: "Non è stato possibile caricare i suoi check-in.",
+    meetingWithLabel: "Con chi si incontra (facoltativo)",
+    meetingWithPlaceholder: "Con chi si incontrerà?",
+    planLabel: "Piano",
+    planPlaceholder: "Dove e quando, nel caso qualcuno debba controllare che stia bene",
+    hoursLabel: "Confermi di stare bene dopo",
+    hourOptions: [
+      { value: 1, label: "1 ora" },
+      { value: 2, label: "2 ore" },
+      { value: 3, label: "3 ore" },
+      { value: 6, label: "6 ore" },
+      { value: 12, label: "12 ore" },
+      { value: 24, label: "24 ore" },
+      { value: 48, label: "48 ore" },
+      { value: 72, label: "72 ore" },
+    ],
+    scheduleButton: "Pianifica check-in",
+    schedulingButton: "Pianificazione…",
+    noticeScheduled: "Check-in pianificato.",
+    errorSchedule: "Non è stato possibile pianificare questo check-in.",
+    errorMarkSafe: "Non è stato possibile contrassegnare questo check-in come sicuro.",
+    errorCancel: "Non è stato possibile annullare questo check-in.",
+    yourCheckinsHeading: "I suoi check-in",
+    noCheckinsYet: "Ancora nessun check-in.",
+    withPrefix: " - con ",
+    imSafeButton: "Sto bene",
+    cancelButton: "Annulla",
+  },
+  pl: {
+    heading: "Safety Check-In",
+    intro:
+      "Spotykasz się z kimś osobiście po raz pierwszy? Ustaw check-in - zostanie on zapisany tutaj jako przypomnienie, abyś potwierdziła/potwierdził, że wszystko w porządku, do wyznaczonego terminu.",
+    loading: "Ładowanie…",
+    errorLoad: "Nie udało się wczytać Twoich check-inów.",
+    meetingWithLabel: "Z kim się spotykasz (opcjonalnie)",
+    meetingWithPlaceholder: "Z kim się spotykasz?",
+    planLabel: "Plan",
+    planPlaceholder: "Gdzie i kiedy, na wypadek gdyby ktoś musiał się upewnić, że wszystko z Tobą w porządku",
+    hoursLabel: "Potwierdź, że wszystko w porządku po",
+    hourOptions: [
+      { value: 1, label: "1 godzina" },
+      { value: 2, label: "2 godziny" },
+      { value: 3, label: "3 godziny" },
+      { value: 6, label: "6 godzin" },
+      { value: 12, label: "12 godzin" },
+      { value: 24, label: "24 godziny" },
+      { value: 48, label: "48 godzin" },
+      { value: 72, label: "72 godziny" },
+    ],
+    scheduleButton: "Zaplanuj check-in",
+    schedulingButton: "Planowanie…",
+    noticeScheduled: "Check-in zaplanowany.",
+    errorSchedule: "Nie udało się zaplanować tego check-inu.",
+    errorMarkSafe: "Nie udało się oznaczyć tego check-inu jako bezpiecznego.",
+    errorCancel: "Nie udało się anulować tego check-inu.",
+    yourCheckinsHeading: "Twoje check-iny",
+    noCheckinsYet: "Nie masz jeszcze żadnych check-inów.",
+    withPrefix: " - z ",
+    imSafeButton: "Nic mi nie jest",
+    cancelButton: "Anuluj",
+  },
+};
+
+type VideoVerificationLocaleText = {
+  heading: string;
+  intro: string;
+  loading: string;
+  errorLoad: string;
+  verifiedNotice: string;
+  pendingNotice: string;
+  declinedError: string;
+  uploadingLabel: string;
+  uploadLabel: string;
+  noticeDefaultSubmitted: string;
+  errorUnsupportedType: string;
+  errorTooLarge: string;
+  errorGenericSubmit: string;
+};
+
+const VIDEO_VERIFICATION_TEXT: Record<CookieLocale, VideoVerificationLocaleText> = {
+  en: {
+    heading: "Video Verification",
+    intro:
+      "Record a short video of yourself to earn the video-verified badge on your profile - a human reviews every submission.",
+    loading: "Loading…",
+    errorLoad: "Could not load your video verification status.",
+    verifiedNotice: "Your profile is video-verified.",
+    pendingNotice: "Your video is under review.",
+    declinedError:
+      "Your last submission was declined - you can record a new video and try again.",
+    uploadingLabel: "Uploading…",
+    uploadLabel: "Upload a video (MP4, MOV or WebM)",
+    noticeDefaultSubmitted: "Video submitted for review.",
+    errorUnsupportedType: "Unsupported video type - use MP4, MOV or WebM.",
+    errorTooLarge: "That video is too large.",
+    errorGenericSubmit: "Could not submit your video.",
+  },
+  ru: {
+    heading: "Video Verification",
+    intro:
+      "Запиши короткое видео с собой, чтобы получить Значок Video Verification на своём профиле — каждую заявку проверяет человек.",
+    loading: "Загрузка…",
+    errorLoad: "Не удалось загрузить статус Video Verification.",
+    verifiedNotice: "Твой профиль прошёл видеоверификацию.",
+    pendingNotice: "Твоё видео на проверке.",
+    declinedError:
+      "Твоя последняя заявка была отклонена — ты можешь записать новое видео и попробовать снова.",
+    uploadingLabel: "Загрузка…",
+    uploadLabel: "Загрузить видео (MP4, MOV или WebM)",
+    noticeDefaultSubmitted: "Видео отправлено на проверку.",
+    errorUnsupportedType: "Неподдерживаемый формат видео — используй MP4, MOV или WebM.",
+    errorTooLarge: "Это видео слишком большое.",
+    errorGenericSubmit: "Не удалось отправить видео.",
+  },
+  es: {
+    heading: "Video Verification",
+    intro:
+      "Graba un breve video de ti para obtener la Insignia Video Verification en tu perfil - una persona revisa cada envío.",
+    loading: "Cargando…",
+    errorLoad: "No se pudo cargar tu estado de Video Verification.",
+    verifiedNotice: "Tu perfil está verificado por video.",
+    pendingNotice: "Tu video está en revisión.",
+    declinedError:
+      "Tu último envío fue rechazado - puedes grabar un nuevo video e intentarlo de nuevo.",
+    uploadingLabel: "Subiendo…",
+    uploadLabel: "Sube un video (MP4, MOV o WebM)",
+    noticeDefaultSubmitted: "Video enviado para revisión.",
+    errorUnsupportedType: "Tipo de video no compatible - usa MP4, MOV o WebM.",
+    errorTooLarge: "Ese video es demasiado grande.",
+    errorGenericSubmit: "No se pudo enviar tu video.",
+  },
+  pt: {
+    heading: "Verificação em Vídeo",
+    intro:
+      "Grave um vídeo curto de você para conquistar o Selo de Verificação em Vídeo no seu perfil - uma pessoa analisa cada envio.",
+    loading: "Carregando…",
+    errorLoad: "Não foi possível carregar o seu status de Verificação em Vídeo.",
+    verifiedNotice: "Seu perfil está verificado por vídeo.",
+    pendingNotice: "Seu vídeo está em análise.",
+    declinedError:
+      "Seu último envio foi recusado - você pode gravar um novo vídeo e tentar novamente.",
+    uploadingLabel: "Enviando…",
+    uploadLabel: "Envie um vídeo (MP4, MOV ou WebM)",
+    noticeDefaultSubmitted: "Vídeo enviado para análise.",
+    errorUnsupportedType: "Tipo de vídeo não compatível - use MP4, MOV ou WebM.",
+    errorTooLarge: "Esse vídeo é muito grande.",
+    errorGenericSubmit: "Não foi possível enviar seu vídeo.",
+  },
+  fr: {
+    heading: "Vérification vidéo",
+    intro:
+      "Enregistre une courte vidéo de toi pour obtenir le Badge de vérification vidéo sur ton profil - une personne examine chaque envoi.",
+    loading: "Chargement…",
+    errorLoad: "Impossible de charger ton statut de vérification vidéo.",
+    verifiedNotice: "Ton profil est vérifié par vidéo.",
+    pendingNotice: "Ta vidéo est en cours d'examen.",
+    declinedError:
+      "Ton dernier envoi a été refusé - tu peux enregistrer une nouvelle vidéo et réessayer.",
+    uploadingLabel: "Envoi…",
+    uploadLabel: "Envoie une vidéo (MP4, MOV ou WebM)",
+    noticeDefaultSubmitted: "Vidéo envoyée pour examen.",
+    errorUnsupportedType: "Type de vidéo non pris en charge - utilise MP4, MOV ou WebM.",
+    errorTooLarge: "Cette vidéo est trop volumineuse.",
+    errorGenericSubmit: "Impossible d'envoyer ta vidéo.",
+  },
+  de: {
+    heading: "Video-Verifizierung",
+    intro:
+      "Nimm ein kurzes Video von dir auf, um das Video-Verifizierungs-Abzeichen für dein Profil zu erhalten - jede Einreichung wird von einem Menschen geprüft.",
+    loading: "Wird geladen…",
+    errorLoad: "Dein Video-Verifizierungsstatus konnte nicht geladen werden.",
+    verifiedNotice: "Dein Profil ist videoverifiziert.",
+    pendingNotice: "Dein Video wird gerade geprüft.",
+    declinedError:
+      "Deine letzte Einreichung wurde abgelehnt - du kannst ein neues Video aufnehmen und es erneut versuchen.",
+    uploadingLabel: "Wird hochgeladen…",
+    uploadLabel: "Video hochladen (MP4, MOV oder WebM)",
+    noticeDefaultSubmitted: "Video zur Prüfung eingereicht.",
+    errorUnsupportedType: "Nicht unterstütztes Videoformat - verwende MP4, MOV oder WebM.",
+    errorTooLarge: "Dieses Video ist zu groß.",
+    errorGenericSubmit: "Dein Video konnte nicht eingereicht werden.",
+  },
+  it: {
+    heading: "Verifica Video",
+    intro:
+      "Registri un breve video di sé stesso/a per ottenere il Badge di Verifica Video sul proprio profilo - ogni invio viene esaminato da una persona.",
+    loading: "Caricamento…",
+    errorLoad: "Non è stato possibile caricare il suo stato di Verifica Video.",
+    verifiedNotice: "Il suo profilo è verificato tramite video.",
+    pendingNotice: "Il suo video è in fase di revisione.",
+    declinedError:
+      "Il suo ultimo invio è stato rifiutato - può registrare un nuovo video e riprovare.",
+    uploadingLabel: "Caricamento in corso…",
+    uploadLabel: "Carichi un video (MP4, MOV o WebM)",
+    noticeDefaultSubmitted: "Video inviato per la revisione.",
+    errorUnsupportedType: "Tipo di video non supportato - utilizzi MP4, MOV o WebM.",
+    errorTooLarge: "Questo video è troppo grande.",
+    errorGenericSubmit: "Non è stato possibile inviare il suo video.",
+  },
+  pl: {
+    heading: "Weryfikacja wideo",
+    intro:
+      "Nagraj krótkie wideo z samą/samym sobą, aby zdobyć Odznakę weryfikacji wideo na swoim profilu - każde zgłoszenie sprawdza człowiek.",
+    loading: "Ładowanie…",
+    errorLoad: "Nie udało się wczytać Twojego statusu weryfikacji wideo.",
+    verifiedNotice: "Twój profil jest zweryfikowany wideo.",
+    pendingNotice: "Twoje wideo jest w trakcie weryfikacji.",
+    declinedError:
+      "Twoje ostatnie zgłoszenie zostało odrzucone - możesz nagrać nowe wideo i spróbować ponownie.",
+    uploadingLabel: "Przesyłanie…",
+    uploadLabel: "Prześlij wideo (MP4, MOV lub WebM)",
+    noticeDefaultSubmitted: "Wideo zostało przesłane do weryfikacji.",
+    errorUnsupportedType: "Nieobsługiwany format wideo - użyj MP4, MOV lub WebM.",
+    errorTooLarge: "To wideo jest za duże.",
+    errorGenericSubmit: "Nie udało się przesłać Twojego wideo.",
+  },
+};
+
+type CostCalculatorPathText = { title: string; desc: string; tip: string };
+type CostCalculatorLocaleText = {
+  heading: string;
+  intro: string;
+  roughEstimateNotice: string;
+  choosePathHeading: string;
+  cyclesQuestion: string;
+  estimatedTotalPrefix: string;
+  perCycleSuffix: string;
+  oneTimeSuffix: string;
+  costBreakdownHeading: string;
+  perCycleShort: string;
+  worksheetLinkText: string;
+  aiAdvisorLinkText: string;
+  disclaimer: string;
+  itemLabels: Record<string, string>;
+  paths: Record<string, CostCalculatorPathText>;
+};
+
+const COST_CALCULATOR_TEXT: Record<CookieLocale, CostCalculatorLocaleText> = {
+  en: {
+    heading: "Cost of Parenthood Calculator",
+    intro:
+      "Rough reference ranges for the most common paths to parenthood, so you can start budgeting with realistic numbers.",
+    roughEstimateNotice:
+      "These are rough US-market reference ranges only, not quotes. Real costs vary enormously by country, provider and individual circumstances - always get a written quote before committing to anything.",
+    choosePathHeading: "Choose a path",
+    cyclesQuestion: "How many cycles to plan for?",
+    estimatedTotalPrefix: "Estimated total:",
+    perCycleSuffix: "for {n} cycles",
+    oneTimeSuffix: "one-time total for this path",
+    costBreakdownHeading: "Cost breakdown",
+    perCycleShort: " / cycle",
+    worksheetLinkText: "Full worksheet: Financial Planning for Future Parents",
+    aiAdvisorLinkText: "Ask the AI Family Advisor about your situation",
+    disclaimer:
+      "Not financial, legal or medical advice. For planning and discussion purposes only.",
+    itemLabels: {
+      legalFees: "Legal fees",
+      agencyFees: "Agency / program fees",
+      programFees: "Program & country fees",
+      medicalFees: "Medical & clinic fees",
+      medications: "Medications",
+      screening: "Screening & testing",
+      donorCompensation: "Donor compensation",
+      surrogateCompensation: "Surrogate compensation",
+      travel: "Travel",
+      insurance: "Insurance & contingency",
+      homeStudy: "Home study & training",
+      postPlacement: "Post-placement / finalization",
+      monitoring: "Monitoring & procedure fee",
+    },
+    paths: {
+      knownDonor: {
+        title: "Known donor (home insemination)",
+        desc: "Conceiving with a donor you already know, without a fertility clinic.",
+        tip: "A known-donor legal agreement, even between friends, protects everyone's parental rights later - don't skip it.",
+      },
+      cryobankIui: {
+        title: "Sperm bank + IUI",
+        desc: "A donor vial from a licensed bank, inseminated at a clinic.",
+        tip: "Many people need 3-6 cycles before a pregnancy - budgeting for several attempts up front avoids surprises.",
+      },
+      ivfOwnEggs: {
+        title: "IVF (your own eggs)",
+        desc: "In-vitro fertilization using your own eggs and sperm or a donor's.",
+        tip: "Ask every clinic for an itemized quote - a flat 'IVF package' price often excludes medications and genetic testing.",
+      },
+      ivfDonorEggs: {
+        title: "IVF with donor eggs",
+        desc: "In-vitro fertilization using eggs from a donor.",
+        tip: "Frozen (bank) donor eggs are typically cheaper than a fresh cycle matched specifically to you - worth asking both prices.",
+      },
+      surrogacy: {
+        title: "Gestational surrogacy",
+        desc: "A surrogate carries a pregnancy created with your embryo.",
+        tip: "Get separate legal counsel for yourself and the surrogate - nearly every country/state requires it, and it protects both sides.",
+      },
+      domesticAdoption: {
+        title: "Domestic adoption",
+        desc: "Adopting a child born in your own country.",
+        tip: "Costs vary hugely by agency - get a full written fee schedule before committing to one.",
+      },
+      internationalAdoption: {
+        title: "International adoption",
+        desc: "Adopting a child from another country.",
+        tip: "Timelines can run 1-3 years - factor in multiple trips and possible extended stays abroad.",
+      },
+      fosterAdopt: {
+        title: "Foster-to-adopt",
+        desc: "Fostering a child through the state system, with adoption as the goal.",
+        tip: "In many countries this path is state-subsidized and dramatically cheaper than private paths - worth exploring if cost is the main barrier.",
+      },
+    },
+  },
+  ru: {
+    heading: "Калькулятор стоимости родительства",
+    intro:
+      "Примерные ориентировочные диапазоны стоимости для самых распространённых путей к родительству, чтобы ты могла начать планировать бюджет с реалистичными цифрами.",
+    roughEstimateNotice:
+      "Это только примерные ориентировочные диапазоны по рынку США, а не точные расценки. Реальная стоимость сильно различается в зависимости от страны, провайдера и индивидуальных обстоятельств — всегда получай письменную смету, прежде чем на что-либо соглашаться.",
+    choosePathHeading: "Выбери путь",
+    cyclesQuestion: "Сколько циклов запланировать?",
+    estimatedTotalPrefix: "Примерная общая сумма:",
+    perCycleSuffix: "за {n} циклов",
+    oneTimeSuffix: "разовая общая сумма по этому пути",
+    costBreakdownHeading: "Разбивка расходов",
+    perCycleShort: " / цикл",
+    worksheetLinkText: "Полный рабочий лист: Финансовое планирование для будущих родителей",
+    aiAdvisorLinkText: "Спроси AI Family Advisor о своей ситуации",
+    disclaimer:
+      "Это не финансовая, юридическая или медицинская консультация. Только для планирования и обсуждения.",
+    itemLabels: {
+      legalFees: "Юридические услуги",
+      agencyFees: "Услуги агентства / программы",
+      programFees: "Расходы на программу и страну",
+      medicalFees: "Медицинские услуги и клиника",
+      medications: "Медикаменты",
+      screening: "Обследования и анализы",
+      donorCompensation: "Компенсация донору",
+      surrogateCompensation: "Компенсация суррогатной матери",
+      travel: "Поездки",
+      insurance: "Страховка и непредвиденные расходы",
+      homeStudy: "Оценка условий проживания и обучение",
+      postPlacement: "Пост-плейсмент / оформление",
+      monitoring: "Мониторинг и процедуры",
+    },
+    paths: {
+      knownDonor: {
+        title: "Известный донор (домашняя инсеминация)",
+        desc: "Зачатие с донором, которого ты уже знаешь, без обращения в клинику репродукции.",
+        tip: "Юридическое соглашение с известным донором — даже между друзьями — защищает родительские права всех сторон в будущем: не пропускай этот шаг.",
+      },
+      cryobankIui: {
+        title: "Банк спермы + ВМИ",
+        desc: "Донорская доза из лицензированного банка, введённая в клинике.",
+        tip: "Многим требуется 3-6 циклов до наступления беременности — заложи в бюджет несколько попыток заранее, чтобы избежать сюрпризов.",
+      },
+      ivfOwnEggs: {
+        title: "ЭКО (собственные яйцеклетки)",
+        desc: "Экстракорпоральное оплодотворение с использованием твоих собственных яйцеклеток и спермы партнёра или донора.",
+        tip: "Проси у каждой клиники детализированную смету — фиксированная цена «пакета ЭКО» часто не включает медикаменты и генетическое тестирование.",
+      },
+      ivfDonorEggs: {
+        title: "ЭКО с донорскими яйцеклетками",
+        desc: "Экстракорпоральное оплодотворение с использованием донорских яйцеклеток.",
+        tip: "Замороженные (банковские) донорские яйцеклетки обычно дешевле, чем свежий цикл, подобранный именно под тебя — стоит уточнить обе цены.",
+      },
+      surrogacy: {
+        title: "Гестационное суррогатное материнство",
+        desc: "Суррогатная мать вынашивает беременность, созданную с использованием твоего эмбриона.",
+        tip: "Найми отдельных юристов для себя и для суррогатной матери — этого требует практически каждая страна/штат, и это защищает обе стороны.",
+      },
+      domesticAdoption: {
+        title: "Внутренняя адопция (усыновление в своей стране)",
+        desc: "Усыновление ребёнка, рождённого в твоей стране.",
+        tip: "Стоимость сильно различается в зависимости от агентства — получи полный письменный прейскурант, прежде чем выбирать агентство.",
+      },
+      internationalAdoption: {
+        title: "Международное усыновление",
+        desc: "Усыновление ребёнка из другой страны.",
+        tip: "Сроки могут растянуться на 1-3 года — заложи в план несколько поездок и возможное длительное пребывание за границей.",
+      },
+      fosterAdopt: {
+        title: "Патронатное воспитание с последующим усыновлением",
+        desc: "Воспитание ребёнка через государственную систему опеки с целью последующего усыновления.",
+        tip: "Во многих странах этот путь субсидируется государством и значительно дешевле частных вариантов — стоит рассмотреть, если стоимость — главное препятствие.",
+      },
+    },
+  },
+  es: {
+    heading: "Calculadora del costo de la paternidad",
+    intro:
+      "Rangos de referencia aproximados para los caminos más comunes hacia la paternidad, para que puedas empezar a presupuestar con cifras realistas.",
+    roughEstimateNotice:
+      "Estos son solo rangos de referencia aproximados del mercado de EE. UU., no presupuestos. Los costos reales varían enormemente según el país, el proveedor y las circunstancias individuales - consigue siempre un presupuesto por escrito antes de comprometerte a algo.",
+    choosePathHeading: "Elige un camino",
+    cyclesQuestion: "¿Cuántos ciclos quieres planificar?",
+    estimatedTotalPrefix: "Total estimado:",
+    perCycleSuffix: "para {n} ciclos",
+    oneTimeSuffix: "total único para este camino",
+    costBreakdownHeading: "Desglose de costos",
+    perCycleShort: " / ciclo",
+    worksheetLinkText: "Hoja de trabajo completa: Planificación financiera para futuros padres",
+    aiAdvisorLinkText: "Pregúntale al AI Family Advisor sobre tu situación",
+    disclaimer:
+      "No es asesoramiento financiero, legal ni médico. Solo para fines de planificación y conversación.",
+    itemLabels: {
+      legalFees: "Honorarios legales",
+      agencyFees: "Honorarios de agencia / programa",
+      programFees: "Gastos de programa y país",
+      medicalFees: "Gastos médicos y de clínica",
+      medications: "Medicamentos",
+      screening: "Pruebas y evaluaciones",
+      donorCompensation: "Compensación al donante",
+      surrogateCompensation: "Compensación a la gestante subrogada",
+      travel: "Viajes",
+      insurance: "Seguro e imprevistos",
+      homeStudy: "Estudio del hogar y formación",
+      postPlacement: "Post-colocación / finalización",
+      monitoring: "Seguimiento y tasa del procedimiento",
+    },
+    paths: {
+      knownDonor: {
+        title: "Donante conocido (inseminación en casa)",
+        desc: "Concebir con un donante que ya conoces, sin pasar por una clínica de fertilidad.",
+        tip: "Un acuerdo legal con el donante conocido, incluso entre amigos, protege más adelante los derechos parentales de todos - no te lo saltes.",
+      },
+      cryobankIui: {
+        title: "Banco de esperma + IIU",
+        desc: "Un vial de donante de un banco autorizado, inseminado en una clínica.",
+        tip: "Muchas personas necesitan de 3 a 6 ciclos antes de lograr un embarazo - presupuestar varios intentos desde el principio evita sorpresas.",
+      },
+      ivfOwnEggs: {
+        title: "FIV (tus propios óvulos)",
+        desc: "Fecundación in vitro con tus propios óvulos y espermatozoides propios o de un donante.",
+        tip: "Pide a cada clínica un presupuesto detallado - un precio fijo de 'paquete de FIV' a menudo excluye medicamentos y pruebas genéticas.",
+      },
+      ivfDonorEggs: {
+        title: "FIV con óvulos de donante",
+        desc: "Fecundación in vitro con óvulos de una donante.",
+        tip: "Los óvulos de donante congelados (de banco) suelen ser más baratos que un ciclo en fresco emparejado específicamente contigo - vale la pena preguntar ambos precios.",
+      },
+      surrogacy: {
+        title: "Gestación subrogada",
+        desc: "Una gestante subrogada lleva un embarazo creado con tu embrión.",
+        tip: "Consigue asesoría legal independiente para ti y para la gestante subrogada - casi todos los países/estados lo exigen, y protege a ambas partes.",
+      },
+      domesticAdoption: {
+        title: "Adopción nacional",
+        desc: "Adoptar a un niño nacido en tu propio país.",
+        tip: "Los costos varían enormemente según la agencia - consigue un listado de tarifas por escrito y completo antes de comprometerte con una.",
+      },
+      internationalAdoption: {
+        title: "Adopción internacional",
+        desc: "Adoptar a un niño de otro país.",
+        tip: "Los plazos pueden llevar de 1 a 3 años - ten en cuenta varios viajes y posibles estancias prolongadas en el extranjero.",
+      },
+      fosterAdopt: {
+        title: "Acogida con vía a la adopción",
+        desc: "Acoger a un niño a través del sistema estatal, con la adopción como objetivo.",
+        tip: "En muchos países esta vía está subvencionada por el estado y es mucho más barata que las vías privadas - vale la pena explorarla si el costo es el principal obstáculo.",
+      },
+    },
+  },
+  pt: {
+    heading: "Calculadora do custo da parentalidade",
+    intro:
+      "Faixas de referência aproximadas para os caminhos mais comuns até a parentalidade, para você começar a planejar o orçamento com números realistas.",
+    roughEstimateNotice:
+      "Estas são apenas faixas de referência aproximadas do mercado dos EUA, não orçamentos. Os custos reais variam enormemente conforme o país, o prestador de serviço e as circunstâncias individuais - sempre peça um orçamento por escrito antes de se comprometer com algo.",
+    choosePathHeading: "Escolha um caminho",
+    cyclesQuestion: "Quantos ciclos você quer planejar?",
+    estimatedTotalPrefix: "Total estimado:",
+    perCycleSuffix: "para {n} ciclos",
+    oneTimeSuffix: "total único para este caminho",
+    costBreakdownHeading: "Detalhamento de custos",
+    perCycleShort: " / ciclo",
+    worksheetLinkText: "Planilha completa: Planejamento financeiro para futuros pais",
+    aiAdvisorLinkText: "Pergunte ao AI Family Advisor sobre a sua situação",
+    disclaimer:
+      "Não é aconselhamento financeiro, jurídico ou médico. Apenas para fins de planejamento e discussão.",
+    itemLabels: {
+      legalFees: "Honorários legais",
+      agencyFees: "Taxas de agência / programa",
+      programFees: "Taxas de programa e país",
+      medicalFees: "Despesas médicas e de clínica",
+      medications: "Medicamentos",
+      screening: "Exames e triagem",
+      donorCompensation: "Compensação ao doador",
+      surrogateCompensation: "Compensação à barriga de aluguel",
+      travel: "Viagens",
+      insurance: "Seguro e contingência",
+      homeStudy: "Estudo do lar e formação",
+      postPlacement: "Pós-colocação / finalização",
+      monitoring: "Monitoramento e taxa do procedimento",
+    },
+    paths: {
+      knownDonor: {
+        title: "Doador conhecido (inseminação caseira)",
+        desc: "Conceber com um doador que você já conhece, sem passar por uma clínica de fertilidade.",
+        tip: "Um acordo legal com o doador conhecido, mesmo entre amigos, protege os direitos parentais de todos mais tarde - não pule essa etapa.",
+      },
+      cryobankIui: {
+        title: "Banco de sêmen + IIU",
+        desc: "Um frasco de doador de um banco licenciado, inseminado em uma clínica.",
+        tip: "Muitas pessoas precisam de 3 a 6 ciclos antes de engravidar - orçar várias tentativas desde o início evita surpresas.",
+      },
+      ivfOwnEggs: {
+        title: "FIV (seus próprios óvulos)",
+        desc: "Fertilização in vitro usando seus próprios óvulos e espermatozoides próprios ou de um doador.",
+        tip: "Peça a cada clínica um orçamento detalhado - um preço fixo de 'pacote de FIV' costuma excluir medicamentos e testes genéticos.",
+      },
+      ivfDonorEggs: {
+        title: "FIV com óvulos de doadora",
+        desc: "Fertilização in vitro usando óvulos de uma doadora.",
+        tip: "Óvulos de doadora congelados (de banco) costumam ser mais baratos do que um ciclo a fresco combinado especificamente com você - vale a pena perguntar os dois preços.",
+      },
+      surrogacy: {
+        title: "Gestação de substituição",
+        desc: "Uma barriga de aluguel carrega uma gravidez criada com o seu embrião.",
+        tip: "Contrate assessoria jurídica separada para você e para a barriga de aluguel - quase todo país/estado exige isso, e protege ambas as partes.",
+      },
+      domesticAdoption: {
+        title: "Adoção nacional",
+        desc: "Adotar uma criança nascida no seu próprio país.",
+        tip: "Os custos variam muito de agência para agência - peça uma tabela de taxas completa e por escrito antes de se comprometer com uma.",
+      },
+      internationalAdoption: {
+        title: "Adoção internacional",
+        desc: "Adotar uma criança de outro país.",
+        tip: "Os prazos podem levar de 1 a 3 anos - conte com várias viagens e possíveis estadias prolongadas no exterior.",
+      },
+      fosterAdopt: {
+        title: "Acolhimento familiar com vista à adoção",
+        desc: "Acolher uma criança através do sistema estatal, com a adoção como objetivo.",
+        tip: "Em muitos países esse caminho é subsidiado pelo estado e muito mais barato do que os caminhos privados - vale a pena explorar se o custo for o principal obstáculo.",
+      },
+    },
+  },
+  fr: {
+    heading: "Calculateur du coût de la parentalité",
+    intro:
+      "Fourchettes de référence approximatives pour les chemins les plus courants vers la parentalité, pour que tu puisses commencer à budgétiser avec des chiffres réalistes.",
+    roughEstimateNotice:
+      "Ce ne sont que des fourchettes de référence approximatives pour le marché américain, pas des devis. Les coûts réels varient énormément selon le pays, le prestataire et la situation individuelle - obtiens toujours un devis écrit avant de t'engager.",
+    choosePathHeading: "Choisis un chemin",
+    cyclesQuestion: "Combien de cycles veux-tu prévoir ?",
+    estimatedTotalPrefix: "Total estimé :",
+    perCycleSuffix: "pour {n} cycles",
+    oneTimeSuffix: "total unique pour ce chemin",
+    costBreakdownHeading: "Répartition des coûts",
+    perCycleShort: " / cycle",
+    worksheetLinkText: "Fiche complète : Planification financière pour futurs parents",
+    aiAdvisorLinkText: "Demande à l'AI Family Advisor à propos de ta situation",
+    disclaimer:
+      "Ceci n'est pas un conseil financier, juridique ou médical. Uniquement à des fins de planification et de discussion.",
+    itemLabels: {
+      legalFees: "Frais juridiques",
+      agencyFees: "Frais d'agence / de programme",
+      programFees: "Frais de programme et de pays",
+      medicalFees: "Frais médicaux et de clinique",
+      medications: "Médicaments",
+      screening: "Dépistages et analyses",
+      donorCompensation: "Indemnisation du donneur",
+      surrogateCompensation: "Indemnisation de la mère porteuse",
+      travel: "Déplacements",
+      insurance: "Assurance et imprévus",
+      homeStudy: "Étude du foyer et formation",
+      postPlacement: "Post-placement / finalisation",
+      monitoring: "Suivi et frais de procédure",
+    },
+    paths: {
+      knownDonor: {
+        title: "Donneur connu (insémination à domicile)",
+        desc: "Concevoir avec un donneur que tu connais déjà, sans passer par une clinique de fertilité.",
+        tip: "Un accord juridique avec un donneur connu, même entre amis, protège plus tard les droits parentaux de chacun - ne le néglige pas.",
+      },
+      cryobankIui: {
+        title: "Banque de sperme + IIU",
+        desc: "Une paillette de donneur provenant d'une banque agréée, inséminée en clinique.",
+        tip: "Beaucoup de personnes ont besoin de 3 à 6 cycles avant une grossesse - prévoir plusieurs tentatives dans le budget dès le départ évite les mauvaises surprises.",
+      },
+      ivfOwnEggs: {
+        title: "FIV (tes propres ovocytes)",
+        desc: "Fécondation in vitro avec tes propres ovocytes et du sperme, le tien ou celui d'un donneur.",
+        tip: "Demande à chaque clinique un devis détaillé - un prix forfaitaire de 'forfait FIV' exclut souvent les médicaments et les tests génétiques.",
+      },
+      ivfDonorEggs: {
+        title: "FIV avec don d'ovocytes",
+        desc: "Fécondation in vitro avec des ovocytes provenant d'une donneuse.",
+        tip: "Les ovocytes de donneuse congelés (banque) sont généralement moins chers qu'un cycle frais apparié spécifiquement pour toi - cela vaut la peine de demander les deux prix.",
+      },
+      surrogacy: {
+        title: "Gestation pour autrui (GPA)",
+        desc: "Une mère porteuse porte une grossesse créée avec ton embryon.",
+        tip: "Fais appel à des conseils juridiques distincts pour toi et pour la mère porteuse - presque tous les pays/États l'exigent, et cela protège les deux parties.",
+      },
+      domesticAdoption: {
+        title: "Adoption nationale",
+        desc: "Adopter un enfant né dans ton propre pays.",
+        tip: "Les coûts varient énormément d'une agence à l'autre - obtiens un barème de frais complet par écrit avant de t'engager avec une agence.",
+      },
+      internationalAdoption: {
+        title: "Adoption internationale",
+        desc: "Adopter un enfant venant d'un autre pays.",
+        tip: "Les délais peuvent aller de 1 à 3 ans - prévois plusieurs voyages et d'éventuels séjours prolongés à l'étranger.",
+      },
+      fosterAdopt: {
+        title: "Placement familial en vue d'adoption",
+        desc: "Accueillir un enfant via le système d'État, dans l'objectif d'une adoption.",
+        tip: "Dans de nombreux pays, cette voie est subventionnée par l'État et bien moins chère que les voies privées - à explorer si le coût est le principal obstacle.",
+      },
+    },
+  },
+  de: {
+    heading: "Kostenrechner für Elternschaft",
+    intro:
+      "Grobe Richtwerte für die häufigsten Wege zur Elternschaft, damit du mit realistischen Zahlen zu budgetieren beginnen kannst.",
+    roughEstimateNotice:
+      "Dies sind nur grobe Richtwerte für den US-Markt, keine Angebote. Die tatsächlichen Kosten variieren stark je nach Land, Anbieter und individuellen Umständen - hol dir immer ein schriftliches Angebot, bevor du dich auf etwas festlegst.",
+    choosePathHeading: "Wähle einen Weg",
+    cyclesQuestion: "Wie viele Zyklen möchtest du einplanen?",
+    estimatedTotalPrefix: "Geschätzte Gesamtkosten:",
+    perCycleSuffix: "für {n} Zyklen",
+    oneTimeSuffix: "einmalige Gesamtsumme für diesen Weg",
+    costBreakdownHeading: "Kostenaufschlüsselung",
+    perCycleShort: " / Zyklus",
+    worksheetLinkText: "Vollständiges Arbeitsblatt: Finanzplanung für zukünftige Eltern",
+    aiAdvisorLinkText: "Frag den AI Family Advisor zu deiner Situation",
+    disclaimer:
+      "Keine Finanz-, Rechts- oder medizinische Beratung. Nur zu Planungs- und Diskussionszwecken.",
+    itemLabels: {
+      legalFees: "Anwaltskosten",
+      agencyFees: "Agentur- / Programmgebühren",
+      programFees: "Programm- und Landeskosten",
+      medicalFees: "Medizinische Kosten und Klinikgebühren",
+      medications: "Medikamente",
+      screening: "Untersuchungen und Tests",
+      donorCompensation: "Entschädigung für die Spenderin/den Spender",
+      surrogateCompensation: "Entschädigung für die Leihmutter",
+      travel: "Reisekosten",
+      insurance: "Versicherung und Rücklage",
+      homeStudy: "Sozialbericht und Schulung",
+      postPlacement: "Nachbetreuung / Abschluss",
+      monitoring: "Monitoring und Verfahrensgebühr",
+    },
+    paths: {
+      knownDonor: {
+        title: "Bekannter Spender (Heiminsemination)",
+        desc: "Empfängnis mit einem Spender, den du bereits kennst, ohne Kinderwunschklinik.",
+        tip: "Eine rechtliche Vereinbarung mit einem bekannten Spender schützt später die Elternrechte aller Beteiligten, selbst unter Freunden - verzichte nicht darauf.",
+      },
+      cryobankIui: {
+        title: "Samenbank + IUI",
+        desc: "Eine Spenderprobe aus einer lizenzierten Bank, die in einer Klinik inseminiert wird.",
+        tip: "Viele Menschen brauchen 3-6 Zyklen bis zur Schwangerschaft - plane von Anfang an mehrere Versuche ein, um Überraschungen zu vermeiden.",
+      },
+      ivfOwnEggs: {
+        title: "IVF (eigene Eizellen)",
+        desc: "In-vitro-Fertilisation mit deinen eigenen Eizellen und Samenzellen, deinen eigenen oder denen eines Spenders.",
+        tip: "Bitte jede Klinik um ein detailliertes Angebot - ein pauschaler 'IVF-Paketpreis' schließt Medikamente und Gentests oft aus.",
+      },
+      ivfDonorEggs: {
+        title: "IVF mit Spender-Eizellen",
+        desc: "In-vitro-Fertilisation mit Eizellen einer Spenderin.",
+        tip: "Tiefgefrorene (Bank-)Spender-Eizellen sind meist günstiger als ein frischer, speziell für dich zusammengestellter Zyklus - es lohnt sich, beide Preise zu erfragen.",
+      },
+      surrogacy: {
+        title: "Leihmutterschaft",
+        desc: "Eine Leihmutter trägt eine mit deinem Embryo entstandene Schwangerschaft aus.",
+        tip: "Hole dir eine getrennte Rechtsberatung für dich und die Leihmutter - fast jedes Land/jeder Bundesstaat verlangt das, und es schützt beide Seiten.",
+      },
+      domesticAdoption: {
+        title: "Inlandsadoption",
+        desc: "Adoption eines Kindes, das im eigenen Land geboren wurde.",
+        tip: "Die Kosten unterscheiden sich stark je nach Agentur - hol dir eine vollständige schriftliche Gebührenübersicht, bevor du dich für eine entscheidest.",
+      },
+      internationalAdoption: {
+        title: "Auslandsadoption",
+        desc: "Adoption eines Kindes aus einem anderen Land.",
+        tip: "Der Zeitrahmen kann 1-3 Jahre betragen - plane mehrere Reisen und mögliche längere Auslandsaufenthalte ein.",
+      },
+      fosterAdopt: {
+        title: "Pflegschaft mit Adoptionsziel",
+        desc: "Ein Kind über das staatliche System in Pflege nehmen, mit dem Ziel der späteren Adoption.",
+        tip: "In vielen Ländern wird dieser Weg staatlich bezuschusst und ist deutlich günstiger als private Wege - lohnt sich zu prüfen, wenn die Kosten das Haupthindernis sind.",
+      },
+    },
+  },
+  it: {
+    heading: "Calcolatore del costo della genitorialità",
+    intro:
+      "Intervalli di riferimento approssimativi per i percorsi più comuni verso la genitorialità, così può iniziare a pianificare il budget con cifre realistiche.",
+    roughEstimateNotice:
+      "Questi sono solo intervalli di riferimento approssimativi per il mercato statunitense, non preventivi. I costi reali variano enormemente in base al paese, al fornitore e alle circostanze individuali - richieda sempre un preventivo scritto prima di impegnarsi in qualsiasi cosa.",
+    choosePathHeading: "Scelga un percorso",
+    cyclesQuestion: "Quanti cicli desidera pianificare?",
+    estimatedTotalPrefix: "Totale stimato:",
+    perCycleSuffix: "per {n} cicli",
+    oneTimeSuffix: "totale una tantum per questo percorso",
+    costBreakdownHeading: "Ripartizione dei costi",
+    perCycleShort: " / ciclo",
+    worksheetLinkText: "Scheda completa: Pianificazione finanziaria per futuri genitori",
+    aiAdvisorLinkText: "Chieda all'AI Family Advisor informazioni sulla sua situazione",
+    disclaimer:
+      "Non costituisce consulenza finanziaria, legale o medica. Solo a scopo di pianificazione e discussione.",
+    itemLabels: {
+      legalFees: "Spese legali",
+      agencyFees: "Spese di agenzia / programma",
+      programFees: "Spese di programma e paese",
+      medicalFees: "Spese mediche e di clinica",
+      medications: "Farmaci",
+      screening: "Esami e screening",
+      donorCompensation: "Compenso al donatore",
+      surrogateCompensation: "Compenso alla madre surrogata",
+      travel: "Viaggi",
+      insurance: "Assicurazione e imprevisti",
+      homeStudy: "Valutazione dell'idoneità familiare e formazione",
+      postPlacement: "Post-affidamento / finalizzazione",
+      monitoring: "Monitoraggio e spese di procedura",
+    },
+    paths: {
+      knownDonor: {
+        title: "Donatore conosciuto (inseminazione domestica)",
+        desc: "Concepire con un donatore che già conosce, senza passare da una clinica della fertilità.",
+        tip: "Un accordo legale con un donatore conosciuto, anche tra amici, protegge in seguito i diritti genitoriali di tutti - non lo tralasci.",
+      },
+      cryobankIui: {
+        title: "Banca del seme + IUI",
+        desc: "Una fiala di donatore proveniente da una banca autorizzata, inseminata in clinica.",
+        tip: "Molte persone hanno bisogno di 3-6 cicli prima di ottenere una gravidanza - prevedere nel budget più tentativi fin dall'inizio evita sorprese.",
+      },
+      ivfOwnEggs: {
+        title: "FIVET (con i propri ovociti)",
+        desc: "Fecondazione in vitro con i propri ovociti e con il proprio seme o quello di un donatore.",
+        tip: "Chieda a ogni clinica un preventivo dettagliato - un prezzo forfettario per il 'pacchetto FIVET' spesso esclude farmaci e test genetici.",
+      },
+      ivfDonorEggs: {
+        title: "FIVET con ovociti di donatrice",
+        desc: "Fecondazione in vitro con ovociti provenienti da una donatrice.",
+        tip: "Gli ovociti di donatrice congelati (da banca) sono in genere più economici di un ciclo fresco abbinato appositamente a lei - vale la pena chiedere entrambi i prezzi.",
+      },
+      surrogacy: {
+        title: "Maternità surrogata gestazionale",
+        desc: "Una madre surrogata porta avanti una gravidanza creata con il suo embrione.",
+        tip: "Si rivolga a consulenti legali separati per sé e per la madre surrogata - quasi ogni paese/stato lo richiede, e questo tutela entrambe le parti.",
+      },
+      domesticAdoption: {
+        title: "Adozione nazionale",
+        desc: "Adottare un bambino nato nel proprio paese.",
+        tip: "I costi variano enormemente da agenzia ad agenzia - richieda un elenco completo delle tariffe per iscritto prima di impegnarsi con una di esse.",
+      },
+      internationalAdoption: {
+        title: "Adozione internazionale",
+        desc: "Adottare un bambino proveniente da un altro paese.",
+        tip: "I tempi possono variare da 1 a 3 anni - consideri più viaggi e possibili soggiorni prolungati all'estero.",
+      },
+      fosterAdopt: {
+        title: "Affido con finalità adottiva",
+        desc: "Accogliere un bambino attraverso il sistema statale, con l'adozione come obiettivo.",
+        tip: "In molti paesi questo percorso è sovvenzionato dallo stato ed è molto più economico dei percorsi privati - vale la pena valutarlo se il costo è l'ostacolo principale.",
+      },
+    },
+  },
+  pl: {
+    heading: "Kalkulator kosztów rodzicielstwa",
+    intro:
+      "Przybliżone zakresy referencyjne dla najczęstszych ścieżek do rodzicielstwa, dzięki którym możesz zacząć planować budżet w oparciu o realistyczne liczby.",
+    roughEstimateNotice:
+      "To tylko przybliżone zakresy referencyjne dla rynku USA, a nie wyceny. Rzeczywiste koszty różnią się ogromnie w zależności od kraju, dostawcy usług i indywidualnych okoliczności - zawsze poproś o pisemną wycenę, zanim się na coś zdecydujesz.",
+    choosePathHeading: "Wybierz ścieżkę",
+    cyclesQuestion: "Ile cykli chcesz zaplanować?",
+    estimatedTotalPrefix: "Szacowana suma całkowita:",
+    perCycleSuffix: "za {n} cykli",
+    oneTimeSuffix: "jednorazowa suma całkowita dla tej ścieżki",
+    costBreakdownHeading: "Podział kosztów",
+    perCycleShort: " / cykl",
+    worksheetLinkText: "Pełny arkusz: Planowanie finansowe dla przyszłych rodziców",
+    aiAdvisorLinkText: "Zapytaj AI Family Advisor o swoją sytuację",
+    disclaimer:
+      "To nie jest porada finansowa, prawna ani medyczna. Wyłącznie do celów planowania i dyskusji.",
+    itemLabels: {
+      legalFees: "Opłaty prawne",
+      agencyFees: "Opłaty agencyjne / programowe",
+      programFees: "Opłaty programowe i krajowe",
+      medicalFees: "Opłaty medyczne i kliniczne",
+      medications: "Leki",
+      screening: "Badania i testy",
+      donorCompensation: "Wynagrodzenie dla dawcy",
+      surrogateCompensation: "Wynagrodzenie dla matki zastępczej",
+      travel: "Podróże",
+      insurance: "Ubezpieczenie i rezerwa na nieprzewidziane wydatki",
+      homeStudy: "Wywiad środowiskowy i szkolenie",
+      postPlacement: "Opieka poadopcyjna / finalizacja",
+      monitoring: "Monitorowanie i opłata za zabieg",
+    },
+    paths: {
+      knownDonor: {
+        title: "Znany dawca (inseminacja domowa)",
+        desc: "Poczęcie z dawcą, którego już znasz, bez udziału kliniki leczenia niepłodności.",
+        tip: "Umowa prawna ze znanym dawcą, nawet między przyjaciółmi, chroni później prawa rodzicielskie wszystkich stron - nie pomijaj tego kroku.",
+      },
+      cryobankIui: {
+        title: "Bank nasienia + inseminacja domaciczna (IUI)",
+        desc: "Fiolka od dawcy z licencjonowanego banku, podana w klinice.",
+        tip: "Wiele osób potrzebuje 3-6 cykli przed zajściem w ciążę - zaplanowanie budżetu na kilka prób z góry pozwala uniknąć niespodzianek.",
+      },
+      ivfOwnEggs: {
+        title: "In vitro (własne komórki jajowe)",
+        desc: "Zapłodnienie in vitro z użyciem własnych komórek jajowych oraz własnego nasienia lub nasienia dawcy.",
+        tip: "Poproś każdą klinikę o szczegółową wycenę - stała cena 'pakietu in vitro' często nie obejmuje leków i badań genetycznych.",
+      },
+      ivfDonorEggs: {
+        title: "In vitro z komórkami jajowymi dawczyni",
+        desc: "Zapłodnienie in vitro z użyciem komórek jajowych od dawczyni.",
+        tip: "Mrożone (bankowe) komórki jajowe dawczyni są zwykle tańsze niż świeży cykl dobrany specjalnie dla ciebie - warto zapytać o obie ceny.",
+      },
+      surrogacy: {
+        title: "Macierzyństwo zastępcze (surogacja)",
+        desc: "Matka zastępcza donosi ciążę powstałą z twojego zarodka.",
+        tip: "Skorzystaj z osobnej pomocy prawnej dla siebie i dla matki zastępczej - wymaga tego niemal każdy kraj/stan, a to chroni obie strony.",
+      },
+      domesticAdoption: {
+        title: "Adopcja krajowa",
+        desc: "Adopcja dziecka urodzonego w twoim własnym kraju.",
+        tip: "Koszty bardzo różnią się w zależności od agencji - poproś o pełny, pisemny cennik opłat, zanim się na którąś zdecydujesz.",
+      },
+      internationalAdoption: {
+        title: "Adopcja międzynarodowa",
+        desc: "Adopcja dziecka z innego kraju.",
+        tip: "Cały proces może trwać 1-3 lata - uwzględnij kilka podróży i możliwe dłuższe pobyty za granicą.",
+      },
+      fosterAdopt: {
+        title: "Piecza zastępcza z myślą o adopcji",
+        desc: "Opieka nad dzieckiem w ramach systemu państwowego, z adopcją jako celem.",
+        tip: "W wielu krajach ta ścieżka jest dofinansowana przez państwo i znacznie tańsza niż ścieżki prywatne - warto ją rozważyć, jeśli koszt jest głównym problemem.",
+      },
+    },
+  },
+};
+
 function SafetyCheckIn({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = SAFETY_CHECKIN_TEXT[locale] ?? SAFETY_CHECKIN_TEXT.en;
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [checkins, setCheckins] = useState<Row[]>([]);
   const [withWhom, setWithWhom] = useState("");
@@ -8524,10 +15961,10 @@ function SafetyCheckIn({ session }: { session: Session }) {
       });
       setPlan("");
       setWithWhom("");
-      setNotice("Check-in scheduled.");
+      setNotice(text.noticeScheduled);
       load();
     } catch {
-      setErrorMsg("Could not schedule that check-in.");
+      setErrorMsg(text.errorSchedule);
     } finally {
       setCreating(false);
     }
@@ -8541,7 +15978,7 @@ function SafetyCheckIn({ session }: { session: Session }) {
       );
       load();
     } catch {
-      setErrorMsg("Could not mark that check-in as safe.");
+      setErrorMsg(text.errorMarkSafe);
     }
   };
 
@@ -8553,54 +15990,47 @@ function SafetyCheckIn({ session }: { session: Session }) {
       );
       load();
     } catch {
-      setErrorMsg("Could not cancel that check-in.");
+      setErrorMsg(text.errorCancel);
     }
   };
 
   return (
-    <section className="member-form">
-      <h1>Safety Check-In</h1>
+    <section className="member-form tool-page tool-page-safety">
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
-      <p>
-        Meeting someone in person for the first time? Set a check-in - it
-        stays on your record here as a reminder to follow up with yourself
-        by the deadline.
-      </p>
-      {status === "loading" && <p className="notice">Loading…</p>}
+      <p>{text.intro}</p>
+      {status === "loading" && <p className="notice">{text.loading}</p>}
       {status === "error" && (
-        <p className="error">Could not load your check-ins.</p>
+        <p className="error">{text.errorLoad}</p>
       )}
       <label>
-        Meeting with (optional)
+        {text.meetingWithLabel}
         <input
           value={withWhom}
           onChange={(event) => setWithWhom(event.target.value)}
-          placeholder="Who are you meeting?"
+          placeholder={text.meetingWithPlaceholder}
         />
       </label>
       <label>
-        Plan
+        {text.planLabel}
         <textarea
           rows={3}
           value={plan}
           onChange={(event) => setPlan(event.target.value)}
-          placeholder="Where and when, in case someone needs to check on you"
+          placeholder={text.planPlaceholder}
         />
       </label>
       <label>
-        Check in with yourself after
+        {text.hoursLabel}
         <select
           value={hours}
           onChange={(event) => setHours(Number(event.target.value))}
         >
-          <option value={1}>1 hour</option>
-          <option value={2}>2 hours</option>
-          <option value={3}>3 hours</option>
-          <option value={6}>6 hours</option>
-          <option value={12}>12 hours</option>
-          <option value={24}>24 hours</option>
-          <option value={48}>48 hours</option>
-          <option value={72}>72 hours</option>
+          {text.hourOptions.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
         </select>
       </label>
       <button
@@ -8608,21 +16038,21 @@ function SafetyCheckIn({ session }: { session: Session }) {
         onClick={() => void create()}
         disabled={!plan.trim() || creating}
       >
-        {creating ? "Scheduling…" : "Schedule check-in"}
+        {creating ? text.schedulingButton : text.scheduleButton}
       </button>
       {notice && <p className="notice">{notice}</p>}
       {errorMsg && <p className="error">{errorMsg}</p>}
       <div className="list-card">
-        <h2>Your check-ins</h2>
+        <h2>{text.yourCheckinsHeading}</h2>
         {checkins.length === 0 ? (
-          <p className="notice">No check-ins yet.</p>
+          <p className="notice">{text.noCheckinsYet}</p>
         ) : (
           <ul className="family-room-documents">
             {checkins.map((item) => (
               <li key={asText(item.id)}>
                 <span>
                   {asText(item.plan)}
-                  {item.withWhom ? ` - with ${asText(item.withWhom)}` : ""}
+                  {item.withWhom ? `${text.withPrefix}${asText(item.withWhom)}` : ""}
                   {" - "}
                   {asText(item.status)}
                 </span>
@@ -8633,14 +16063,14 @@ function SafetyCheckIn({ session }: { session: Session }) {
                       className="link-button"
                       onClick={() => void markSafe(item)}
                     >
-                      I'm safe
+                      {text.imSafeButton}
                     </button>
                     <button
                       type="button"
                       className="link-button"
                       onClick={() => void cancelCheckin(item)}
                     >
-                      Cancel
+                      {text.cancelButton}
                     </button>
                   </>
                 )}
@@ -8655,6 +16085,7 @@ function SafetyCheckIn({ session }: { session: Session }) {
 
 function VideoVerification({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = VIDEO_VERIFICATION_TEXT[locale] ?? VIDEO_VERIFICATION_TEXT.en;
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [videoVerified, setVideoVerified] = useState(false);
   const [requestStatus, setRequestStatus] = useState<string | null>(null);
@@ -8696,15 +16127,15 @@ function VideoVerification({ session }: { session: Session }) {
         requestStatus?: string;
         message?: string;
       }>("/member/video-verification", data);
-      setNotice(res.message || "Video submitted for review.");
+      setNotice(res.message || text.noticeDefaultSubmitted);
       load();
     } catch (err) {
       setErrorMsg(
         err instanceof ApiError && err.status === 415
-          ? "Unsupported video type - use MP4, MOV or WebM."
+          ? text.errorUnsupportedType
           : err instanceof ApiError && err.status === 413
-          ? "That video is too large."
-          : "Could not submit your video.",
+          ? text.errorTooLarge
+          : text.errorGenericSubmit,
       );
     } finally {
       setUploading(false);
@@ -8712,33 +16143,27 @@ function VideoVerification({ session }: { session: Session }) {
   };
 
   return (
-    <section className="member-form">
-      <h1>Video Verification</h1>
+    <section className="member-form tool-page tool-page-video">
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
-      <p>
-        Record a short video of yourself to earn the video-verified badge
-        on your profile - a human reviews every submission.
-      </p>
-      {status === "loading" && <p className="notice">Loading…</p>}
+      <p>{text.intro}</p>
+      {status === "loading" && <p className="notice">{text.loading}</p>}
       {status === "error" && (
-        <p className="error">Could not load your video verification status.</p>
+        <p className="error">{text.errorLoad}</p>
       )}
       {status === "ok" && (
         <>
           {videoVerified ? (
-            <p className="notice">Your profile is video-verified.</p>
+            <p className="notice">{text.verifiedNotice}</p>
           ) : requestStatus === "PENDING" ? (
-            <p className="notice">Your video is under review.</p>
+            <p className="notice">{text.pendingNotice}</p>
           ) : (
             <>
               {requestStatus === "DECLINED" && (
-                <p className="error">
-                  Your last submission was declined - you can record a new
-                  video and try again.
-                </p>
+                <p className="error">{text.declinedError}</p>
               )}
               <label className="upload-control">
-                {uploading ? "Uploading…" : "Upload a video (MP4, MOV or WebM)"}
+                {uploading ? text.uploadingLabel : text.uploadLabel}
                 <input
                   type="file"
                   accept="video/mp4,video/quicktime,video/webm"
@@ -8918,12 +16343,14 @@ function formatUsdRange(low: number, high: number): string {
 
 function CostCalculator() {
   const locale = localeOf();
+  const text = COST_CALCULATOR_TEXT[locale] ?? COST_CALCULATOR_TEXT.en;
   const [selectedKey, setSelectedKey] = useState(PARENTHOOD_COST_PATHS[0].key);
   const [units, setUnits] = useState<Record<string, number>>(() =>
     Object.fromEntries(PARENTHOOD_COST_PATHS.map((path) => [path.key, path.defaultUnits])),
   );
   const selected =
     PARENTHOOD_COST_PATHS.find((path) => path.key === selectedKey) || PARENTHOOD_COST_PATHS[0];
+  const selectedText = text.paths[selected.key] ?? text.paths[PARENTHOOD_COST_PATHS[0].key];
   const selectedUnits = units[selected.key] ?? selected.defaultUnits;
   const perUnitLow = parenthoodCostSum(selected.items, "low");
   const perUnitHigh = parenthoodCostSum(selected.items, "high");
@@ -8938,21 +16365,13 @@ function CostCalculator() {
     });
   };
   return (
-    <section className="member-form">
-      <h1>Cost of Parenthood Calculator</h1>
+    <section className="member-form tool-page tool-page-calculator">
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
-      <p>
-        Rough reference ranges for the most common paths to parenthood, so
-        you can start budgeting with realistic numbers.
-      </p>
-      <p className="notice">
-        These are rough US-market reference ranges only, not quotes. Real
-        costs vary enormously by country, provider and individual
-        circumstances - always get a written quote before committing to
-        anything.
-      </p>
+      <p>{text.intro}</p>
+      <p className="notice">{text.roughEstimateNotice}</p>
       <div className="list-card">
-        <h2>Choose a path</h2>
+        <h2>{text.choosePathHeading}</h2>
         <ul className="family-room-documents">
           {PARENTHOOD_COST_PATHS.map((path) => (
             <li key={path.key}>
@@ -8961,18 +16380,18 @@ function CostCalculator() {
                 className={`link-button${path.key === selectedKey ? " active" : ""}`}
                 onClick={() => setSelectedKey(path.key)}
               >
-                {path.title}
+                {text.paths[path.key]?.title ?? path.title}
               </button>
             </li>
           ))}
         </ul>
       </div>
       <div className="list-card">
-        <h2>{selected.title}</h2>
-        <p>{selected.desc}</p>
+        <h2>{selectedText.title}</h2>
+        <p>{selectedText.desc}</p>
         {selected.perCycle && (
           <p>
-            How many cycles to plan for?{" "}
+            {text.cyclesQuestion}{" "}
             <button
               type="button"
               className="secondary"
@@ -8993,39 +16412,393 @@ function CostCalculator() {
           </p>
         )}
         <p>
-          <strong>Estimated total: {formatUsdRange(totalLow, totalHigh)}</strong>{" "}
-          {selected.perCycle ? `for ${selectedUnits} cycles` : "one-time total for this path"}
+          <strong>
+            {text.estimatedTotalPrefix} {formatUsdRange(totalLow, totalHigh)}
+          </strong>{" "}
+          {selected.perCycle
+            ? text.perCycleSuffix.replace("{n}", String(selectedUnits))
+            : text.oneTimeSuffix}
         </p>
-        <h3>Cost breakdown</h3>
+        <h3>{text.costBreakdownHeading}</h3>
         <ul className="family-room-documents">
           {selected.items.map((item) => (
             <li key={item.key}>
-              <span>{PARENTHOOD_COST_ITEM_LABELS[item.key] || item.key}</span>
+              <span>{text.itemLabels[item.key] || item.key}</span>
               <span>
                 {formatUsdRange(item.low, item.high)}
-                {selected.perCycle ? " / cycle" : ""}
+                {selected.perCycle ? text.perCycleShort : ""}
               </span>
             </li>
           ))}
         </ul>
-        <p className="notice">{selected.tip}</p>
+        <p className="notice">{selectedText.tip}</p>
       </div>
-      <Link className="link-button" to={`/${locale}/resources/parenthood-planning/financial-planning`}>
-        Full worksheet: Financial Planning for Future Parents
+      <Link
+        className="link-button"
+        to={`/${locale}/resources/parenthood-planning/financial-planning`}
+      >
+        {text.worksheetLinkText}
       </Link>
       <Link className="link-button" to={`/${locale}/ai-advisor`}>
-        Ask the AI Family Advisor about your situation
+        {text.aiAdvisorLinkText}
       </Link>
-      <p className="notice">
-        Not financial, legal or medical advice. For planning and discussion
-        purposes only.
-      </p>
+      <p className="notice">{text.disclaimer}</p>
     </section>
   );
 }
 
+
+const COMMUNITY_GROUPS_TEXT: Record<
+  CookieLocale,
+  {
+    heading: string;
+    loading: string;
+    error: string;
+    empty: string;
+    postsCountLabel: string;
+  }
+> = {
+  en: {
+    heading: "Community",
+    loading: "Loading…",
+    error: "Could not load community groups.",
+    empty: "No groups yet.",
+    postsCountLabel: "posts",
+  },
+  ru: {
+    heading: "Community",
+    loading: "Загрузка…",
+    error: "Не удалось загрузить группы Community.",
+    empty: "Групп пока нет.",
+    postsCountLabel: "постов",
+  },
+  es: {
+    heading: "Community",
+    loading: "Cargando…",
+    error: "No se pudieron cargar los grupos de Community.",
+    empty: "Todavía no hay grupos.",
+    postsCountLabel: "publicaciones",
+  },
+  pt: {
+    heading: "Community",
+    loading: "Carregando…",
+    error: "Não foi possível carregar os grupos da Community.",
+    empty: "Ainda não há grupos.",
+    postsCountLabel: "publicações",
+  },
+  fr: {
+    heading: "Community",
+    loading: "Chargement…",
+    error: "Impossible de charger les groupes de la Community.",
+    empty: "Pas encore de groupes.",
+    postsCountLabel: "publications",
+  },
+  de: {
+    heading: "Community",
+    loading: "Wird geladen…",
+    error: "Die Community-Gruppen konnten nicht geladen werden.",
+    empty: "Noch keine Gruppen.",
+    postsCountLabel: "Beiträge",
+  },
+  it: {
+    heading: "Community",
+    loading: "Caricamento…",
+    error: "Impossibile caricare i gruppi della Community.",
+    empty: "Ancora nessun gruppo.",
+    postsCountLabel: "post",
+  },
+  pl: {
+    heading: "Community",
+    loading: "Ładowanie…",
+    error: "Nie udało się załadować grup Community.",
+    empty: "Na razie brak grup.",
+    postsCountLabel: "postów",
+  },
+};
+
+const COMMUNITY_GROUP_POSTS_TEXT: Record<
+  CookieLocale,
+  {
+    heading: string;
+    backLink: string;
+    loading: string;
+    error: string;
+    newPostLabel: string;
+    placeholder: string;
+    postButton: string;
+    postingButton: string;
+    empty: string;
+    expertSuffix: string;
+    repliesCountLabel: string;
+    deleteButton: string;
+    postError: string;
+    deleteError: string;
+  }
+> = {
+  en: {
+    heading: "Community",
+    backLink: "Back to groups",
+    loading: "Loading…",
+    error: "Could not load this group's posts.",
+    newPostLabel: "New post",
+    placeholder: "Share something with the group…",
+    postButton: "Post",
+    postingButton: "Posting…",
+    empty: "No posts yet.",
+    expertSuffix: " (Expert)",
+    repliesCountLabel: "replies",
+    deleteButton: "Delete",
+    postError: "Could not post that message.",
+    deleteError: "Could not delete that post.",
+  },
+  ru: {
+    heading: "Community",
+    backLink: "Назад к группам",
+    loading: "Загрузка…",
+    error: "Не удалось загрузить посты этой группы.",
+    newPostLabel: "Новый пост",
+    placeholder: "Поделись чем-нибудь с группой…",
+    postButton: "Опубликовать",
+    postingButton: "Публикация…",
+    empty: "Постов пока нет.",
+    expertSuffix: " (Эксперт)",
+    repliesCountLabel: "ответов",
+    deleteButton: "Удалить",
+    postError: "Не удалось опубликовать это сообщение.",
+    deleteError: "Не удалось удалить этот пост.",
+  },
+  es: {
+    heading: "Community",
+    backLink: "Volver a los grupos",
+    loading: "Cargando…",
+    error: "No se pudieron cargar las publicaciones de este grupo.",
+    newPostLabel: "Nueva publicación",
+    placeholder: "Comparte algo con el grupo…",
+    postButton: "Publicar",
+    postingButton: "Publicando…",
+    empty: "Todavía no hay publicaciones.",
+    expertSuffix: " (Experto)",
+    repliesCountLabel: "respuestas",
+    deleteButton: "Eliminar",
+    postError: "No se pudo publicar ese mensaje.",
+    deleteError: "No se pudo eliminar esa publicación.",
+  },
+  pt: {
+    heading: "Community",
+    backLink: "Voltar aos grupos",
+    loading: "Carregando…",
+    error: "Não foi possível carregar as publicações deste grupo.",
+    newPostLabel: "Nova publicação",
+    placeholder: "Compartilhe algo com o grupo…",
+    postButton: "Publicar",
+    postingButton: "Publicando…",
+    empty: "Ainda não há publicações.",
+    expertSuffix: " (Especialista)",
+    repliesCountLabel: "respostas",
+    deleteButton: "Excluir",
+    postError: "Não foi possível publicar essa mensagem.",
+    deleteError: "Não foi possível excluir essa publicação.",
+  },
+  fr: {
+    heading: "Community",
+    backLink: "Retour aux groupes",
+    loading: "Chargement…",
+    error: "Impossible de charger les publications de ce groupe.",
+    newPostLabel: "Nouvelle publication",
+    placeholder: "Partage quelque chose avec le groupe…",
+    postButton: "Publier",
+    postingButton: "Publication…",
+    empty: "Pas encore de publications.",
+    expertSuffix: " (Expert)",
+    repliesCountLabel: "réponses",
+    deleteButton: "Supprimer",
+    postError: "Impossible de publier ce message.",
+    deleteError: "Impossible de supprimer cette publication.",
+  },
+  de: {
+    heading: "Community",
+    backLink: "Zurück zu den Gruppen",
+    loading: "Wird geladen…",
+    error: "Die Beiträge dieser Gruppe konnten nicht geladen werden.",
+    newPostLabel: "Neuer Beitrag",
+    placeholder: "Teile etwas mit der Gruppe…",
+    postButton: "Veröffentlichen",
+    postingButton: "Wird veröffentlicht…",
+    empty: "Noch keine Beiträge.",
+    expertSuffix: " (Experte)",
+    repliesCountLabel: "Antworten",
+    deleteButton: "Löschen",
+    postError: "Diese Nachricht konnte nicht veröffentlicht werden.",
+    deleteError: "Dieser Beitrag konnte nicht gelöscht werden.",
+  },
+  it: {
+    heading: "Community",
+    backLink: "Torna ai gruppi",
+    loading: "Caricamento…",
+    error: "Impossibile caricare i post di questo gruppo.",
+    newPostLabel: "Nuovo post",
+    placeholder: "Condivida qualcosa con il gruppo…",
+    postButton: "Pubblica",
+    postingButton: "Pubblicazione…",
+    empty: "Ancora nessun post.",
+    expertSuffix: " (Esperto)",
+    repliesCountLabel: "risposte",
+    deleteButton: "Elimina",
+    postError: "Impossibile pubblicare questo messaggio.",
+    deleteError: "Impossibile eliminare questo post.",
+  },
+  pl: {
+    heading: "Community",
+    backLink: "Powrót do grup",
+    loading: "Ładowanie…",
+    error: "Nie udało się załadować postów tej grupy.",
+    newPostLabel: "Nowy post",
+    placeholder: "Podziel się czymś z grupą…",
+    postButton: "Opublikuj",
+    postingButton: "Publikowanie…",
+    empty: "Na razie brak postów.",
+    expertSuffix: " (Ekspert)",
+    repliesCountLabel: "odpowiedzi",
+    deleteButton: "Usuń",
+    postError: "Nie udało się opublikować tej wiadomości.",
+    deleteError: "Nie udało się usunąć tego posta.",
+  },
+};
+
+const COMMUNITY_POST_DETAIL_TEXT: Record<
+  CookieLocale,
+  {
+    heading: string;
+    loading: string;
+    error: string;
+    replyLabel: string;
+    placeholder: string;
+    replyButton: string;
+    replyingButton: string;
+    empty: string;
+    expertSuffix: string;
+    deleteButton: string;
+    replyError: string;
+    deleteError: string;
+  }
+> = {
+  en: {
+    heading: "Community post",
+    loading: "Loading…",
+    error: "Could not load replies.",
+    replyLabel: "Reply",
+    placeholder: "Write a reply…",
+    replyButton: "Reply",
+    replyingButton: "Replying…",
+    empty: "No replies yet.",
+    expertSuffix: " (Expert)",
+    deleteButton: "Delete",
+    replyError: "Could not post that reply.",
+    deleteError: "Could not delete that reply.",
+  },
+  ru: {
+    heading: "Пост Community",
+    loading: "Загрузка…",
+    error: "Не удалось загрузить ответы.",
+    replyLabel: "Ответ",
+    placeholder: "Напиши ответ…",
+    replyButton: "Ответить",
+    replyingButton: "Отправка…",
+    empty: "Ответов пока нет.",
+    expertSuffix: " (Эксперт)",
+    deleteButton: "Удалить",
+    replyError: "Не удалось отправить этот ответ.",
+    deleteError: "Не удалось удалить этот ответ.",
+  },
+  es: {
+    heading: "Publicación de Community",
+    loading: "Cargando…",
+    error: "No se pudieron cargar las respuestas.",
+    replyLabel: "Respuesta",
+    placeholder: "Escribe una respuesta…",
+    replyButton: "Responder",
+    replyingButton: "Enviando…",
+    empty: "Todavía no hay respuestas.",
+    expertSuffix: " (Experto)",
+    deleteButton: "Eliminar",
+    replyError: "No se pudo publicar esa respuesta.",
+    deleteError: "No se pudo eliminar esa respuesta.",
+  },
+  pt: {
+    heading: "Publicação da Community",
+    loading: "Carregando…",
+    error: "Não foi possível carregar as respostas.",
+    replyLabel: "Resposta",
+    placeholder: "Escreva uma resposta…",
+    replyButton: "Responder",
+    replyingButton: "Enviando…",
+    empty: "Ainda não há respostas.",
+    expertSuffix: " (Especialista)",
+    deleteButton: "Excluir",
+    replyError: "Não foi possível publicar essa resposta.",
+    deleteError: "Não foi possível excluir essa resposta.",
+  },
+  fr: {
+    heading: "Publication de la Community",
+    loading: "Chargement…",
+    error: "Impossible de charger les réponses.",
+    replyLabel: "Réponse",
+    placeholder: "Écris une réponse…",
+    replyButton: "Répondre",
+    replyingButton: "Envoi…",
+    empty: "Pas encore de réponses.",
+    expertSuffix: " (Expert)",
+    deleteButton: "Supprimer",
+    replyError: "Impossible de publier cette réponse.",
+    deleteError: "Impossible de supprimer cette réponse.",
+  },
+  de: {
+    heading: "Community-Beitrag",
+    loading: "Wird geladen…",
+    error: "Die Antworten konnten nicht geladen werden.",
+    replyLabel: "Antwort",
+    placeholder: "Schreibe eine Antwort…",
+    replyButton: "Antworten",
+    replyingButton: "Wird gesendet…",
+    empty: "Noch keine Antworten.",
+    expertSuffix: " (Experte)",
+    deleteButton: "Löschen",
+    replyError: "Diese Antwort konnte nicht veröffentlicht werden.",
+    deleteError: "Diese Antwort konnte nicht gelöscht werden.",
+  },
+  it: {
+    heading: "Post della Community",
+    loading: "Caricamento…",
+    error: "Impossibile caricare le risposte.",
+    replyLabel: "Risposta",
+    placeholder: "Scriva una risposta…",
+    replyButton: "Rispondi",
+    replyingButton: "Invio…",
+    empty: "Ancora nessuna risposta.",
+    expertSuffix: " (Esperto)",
+    deleteButton: "Elimina",
+    replyError: "Impossibile pubblicare questa risposta.",
+    deleteError: "Impossibile eliminare questa risposta.",
+  },
+  pl: {
+    heading: "Post Community",
+    loading: "Ładowanie…",
+    error: "Nie udało się załadować odpowiedzi.",
+    replyLabel: "Odpowiedź",
+    placeholder: "Napisz odpowiedź…",
+    replyButton: "Odpowiedz",
+    replyingButton: "Wysyłanie…",
+    empty: "Na razie brak odpowiedzi.",
+    expertSuffix: " (Ekspert)",
+    deleteButton: "Usuń",
+    replyError: "Nie udało się opublikować tej odpowiedzi.",
+    deleteError: "Nie udało się usunąć tej odpowiedzi.",
+  },
+};
+
 function CommunityGroups({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = COMMUNITY_GROUPS_TEXT[locale] ?? COMMUNITY_GROUPS_TEXT.en;
   const [groups, setGroups] = useState<Row[]>([]);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   useEffect(() => {
@@ -9041,34 +16814,37 @@ function CommunityGroups({ session }: { session: Session }) {
   }, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
   return (
-    <section>
-      <h1>Community</h1>
+    <section className="member-form tool-page tool-page-community">
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
-      {status === "loading" && <p className="notice">Loading…</p>}
-      {status === "error" && <p className="error">Could not load community groups.</p>}
-      <div className="list-card">
-        {status === "ok" && groups.length === 0 ? (
-          <p className="notice">No groups yet.</p>
-        ) : (
-          <ul className="family-room-documents">
-            {groups.map((group) => (
-              <li key={asText(group.id)}>
-                <Link to={`/${locale}/community/${encodeURIComponent(asText(group.id))}`}>
-                  {asText(group.name)}
-                </Link>
-                <span>{asText(group.description)}</span>
-                <span>{asText(group.postCount)} posts</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {status === "loading" && <p className="notice">{text.loading}</p>}
+      {status === "error" && <p className="error">{text.error}</p>}
+      {status === "ok" && groups.length === 0 ? (
+        <p className="notice">{text.empty}</p>
+      ) : (
+        <div className="community-group-grid">
+          {groups.map((group) => (
+            <Link
+              key={asText(group.id)}
+              className="community-group-card"
+              to={`/${locale}/community/${encodeURIComponent(asText(group.id))}`}
+            >
+              <span className="community-group-card-icon" />
+              <h3>{asText(group.name)}</h3>
+              <p>{asText(group.description)}</p>
+              <span className="community-group-card-count">
+                {asText(group.postCount)} {text.postsCountLabel}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
-
 function CommunityGroupPosts({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = COMMUNITY_GROUP_POSTS_TEXT[locale] ?? COMMUNITY_GROUP_POSTS_TEXT.en;
   const { groupId = "" } = useParams();
   const [posts, setPosts] = useState<Row[]>([]);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
@@ -9103,7 +16879,7 @@ function CommunityGroupPosts({ session }: { session: Session }) {
       setDraft("");
       load();
     } catch {
-      setNotice("Could not post that message.");
+      setNotice(text.postError);
     } finally {
       setPosting(false);
     }
@@ -9115,27 +16891,27 @@ function CommunityGroupPosts({ session }: { session: Session }) {
       );
       load();
     } catch {
-      setNotice("Could not delete that post.");
+      setNotice(text.deleteError);
     }
   };
   return (
     <section>
-      <h1>Community</h1>
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
-      <Link to={`/${locale}/community`}>Back to groups</Link>
-      {status === "loading" && <p className="notice">Loading…</p>}
+      <Link to={`/${locale}/community`}>{text.backLink}</Link>
+      {status === "loading" && <p className="notice">{text.loading}</p>}
       {status === "error" && (
-        <p className="error">Could not load this group's posts.</p>
+        <p className="error">{text.error}</p>
       )}
       {notice && <p className="error">{notice}</p>}
       <div className="member-form">
         <label>
-          New post
+          {text.newPostLabel}
           <textarea
             rows={3}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Share something with the group…"
+            placeholder={text.placeholder}
           />
         </label>
         <button
@@ -9143,28 +16919,28 @@ function CommunityGroupPosts({ session }: { session: Session }) {
           onClick={() => void submitPost()}
           disabled={!draft.trim() || posting}
         >
-          {posting ? "Posting…" : "Post"}
+          {posting ? text.postingButton : text.postButton}
         </button>
       </div>
       <div className="list-card">
         {status === "ok" && posts.length === 0 ? (
-          <p className="notice">No posts yet.</p>
+          <p className="notice">{text.empty}</p>
         ) : (
           <ul className="family-room-documents">
             {posts.map((item) => (
               <li key={asText(item.id)}>
                 <Link to={`/${locale}/community/post/${encodeURIComponent(asText(item.id))}`}>
                   {asText(item.authorName)}
-                  {item.isExpert ? " (Expert)" : ""}: {asText(item.body)}
+                  {item.isExpert ? text.expertSuffix : ""}: {asText(item.body)}
                 </Link>
-                <span>{asText(item.replyCount)} replies</span>
+                <span>{asText(item.replyCount)} {text.repliesCountLabel}</span>
                 {Boolean(item.isMine) && (
                   <button
                     type="button"
                     className="link-button"
                     onClick={() => void removePost(item)}
                   >
-                    Delete
+                    {text.deleteButton}
                   </button>
                 )}
               </li>
@@ -9175,9 +16951,9 @@ function CommunityGroupPosts({ session }: { session: Session }) {
     </section>
   );
 }
-
 function CommunityPostDetail({ session }: { session: Session }) {
   const locale = localeOf();
+  const text = COMMUNITY_POST_DETAIL_TEXT[locale] ?? COMMUNITY_POST_DETAIL_TEXT.en;
   const { postId = "" } = useParams();
   const [replies, setReplies] = useState<Row[]>([]);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
@@ -9212,7 +16988,7 @@ function CommunityPostDetail({ session }: { session: Session }) {
       setDraft("");
       load();
     } catch {
-      setNotice("Could not post that reply.");
+      setNotice(text.replyError);
     } finally {
       setPosting(false);
     }
@@ -9224,24 +17000,24 @@ function CommunityPostDetail({ session }: { session: Session }) {
       );
       load();
     } catch {
-      setNotice("Could not delete that reply.");
+      setNotice(text.deleteError);
     }
   };
   return (
     <section>
-      <h1>Community post</h1>
+      <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
-      {status === "loading" && <p className="notice">Loading…</p>}
-      {status === "error" && <p className="error">Could not load replies.</p>}
+      {status === "loading" && <p className="notice">{text.loading}</p>}
+      {status === "error" && <p className="error">{text.error}</p>}
       {notice && <p className="error">{notice}</p>}
       <div className="member-form">
         <label>
-          Reply
+          {text.replyLabel}
           <textarea
             rows={3}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Write a reply…"
+            placeholder={text.placeholder}
           />
         </label>
         <button
@@ -9249,19 +17025,19 @@ function CommunityPostDetail({ session }: { session: Session }) {
           onClick={() => void submitReply()}
           disabled={!draft.trim() || posting}
         >
-          {posting ? "Replying…" : "Reply"}
+          {posting ? text.replyingButton : text.replyButton}
         </button>
       </div>
       <div className="list-card">
         {status === "ok" && replies.length === 0 ? (
-          <p className="notice">No replies yet.</p>
+          <p className="notice">{text.empty}</p>
         ) : (
           <ul className="family-room-documents">
             {replies.map((item) => (
               <li key={asText(item.id)}>
                 <span>
                   {asText(item.authorName)}
-                  {item.isExpert ? " (Expert)" : ""}: {asText(item.body)}
+                  {item.isExpert ? text.expertSuffix : ""}: {asText(item.body)}
                 </span>
                 {Boolean(item.isMine) && (
                   <button
@@ -9269,7 +17045,7 @@ function CommunityPostDetail({ session }: { session: Session }) {
                     className="link-button"
                     onClick={() => void removeReply(item)}
                   >
-                    Delete
+                    {text.deleteButton}
                   </button>
                 )}
               </li>
@@ -9283,18 +17059,45 @@ function CommunityPostDetail({ session }: { session: Session }) {
 
 export function WebApp() {
   const locale = localeOf();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [session, setSession] = useState<Session | undefined>(undefined);
   useEffect(() => {
-    api
-      .get<{ user: Row }>("/auth/me")
-      .then((response) => setSession({ user: response.user }))
-      .catch(() => setSession(null));
-  }, []);
+    let active = true;
+    const load = () => {
+      void api
+        .get<{ user: Row }>("/auth/me")
+        .then((response) => {
+          if (active) setSession({ user: response.user });
+        })
+        .catch(() => {
+          if (active) setSession(null);
+        });
+    };
+    load();
+    window.addEventListener("lbp-member-changed", load);
+    return () => {
+      active = false;
+      window.removeEventListener("lbp-member-changed", load);
+    };
+  }, [location.pathname]);
   const logout = async () => {
     await api.post("/auth/logout");
     setSession(null);
   };
-  if (session === undefined) return <LoadingIndicator fullPage />;
+  useEffect(() => {
+    if (!userNeedsProfileWizard(session)) return;
+    const allowed = new Set([
+      `/${locale}/profile/edit`,
+      `/${locale}/auth/verify-email`,
+      `/${locale}/auth/login`,
+      `/${locale}/auth/register`,
+    ]);
+    if (!allowed.has(location.pathname)) {
+      navigate(profileWizardPath(locale), { replace: true });
+    }
+  }, [session, locale, location.pathname, navigate]);
+  if (session === undefined) return <Shell session={null} onLogout={logout} pendingSession><LoadingIndicator fullPage /></Shell>;
   const content = (element: React.ReactNode) => (
     <Shell session={session} onLogout={logout}>
       {element}
@@ -9326,10 +17129,12 @@ export function WebApp() {
         element={<Navigate to="/en/knowledge-hub" replace />}
       />
       <Route path="/likes" element={<Navigate to="/en/likes" replace />} />
-      <Route path="/chat" element={<Navigate to="/en/messages" replace />} />
+      <Route path="/chat" element={<ChatLegacyRedirect />} />
+      <Route path="/chat/:conversationId" element={<ChatLegacyRedirect />} />
+      <Route path="/messages/:conversationId" element={<ChatLegacyRedirect />} />
       <Route
         path="/messages"
-        element={<Navigate to="/en/messages" replace />}
+        element={<ChatLegacyRedirect />}
       />
       <Route path="/profile" element={<Navigate to="/en/profile" replace />} />
       <Route
@@ -9379,6 +17184,10 @@ export function WebApp() {
         element={session ? content(<CatalogProfile session={session} />) : <Navigate to={`/${locale}/auth/login`} replace />}
       />
       <Route
+        path="/:locale/profile/:id"
+        element={session ? content(<CatalogProfile session={session} />) : <Navigate to={`/${locale}/auth/login`} replace />}
+      />
+      <Route
         path="/:locale/clinics"
         element={session ? content(<Directory key="clinics" kind="clinics" />) : <Navigate to={`/${locale}/auth/login`} replace />}
       />
@@ -9405,23 +17214,34 @@ export function WebApp() {
       <Route path="/:locale/contact" element={content(<Contact />)} />
       <Route path="/:locale/trust-safety" element={content(<TrustSafety />)} />
       <Route path="/:locale/pricing" element={content(<Pricing session={session} />)} />
+      <Route path="/:locale/tools/ask-ai" element={content(<AskAiTool />)} />
+      <Route path="/:locale/tools/agreement-draft" element={content(<AgreementDraftTool />)} />
       <Route path="/:locale/resources" element={content(<ResourcesIndex />)} />
       <Route path="/:locale/resources/:category" element={content(<ResourceCategory />)} />
       <Route path="/:locale/resources/:category/:tool" element={content(<ResourceTool />)} />
       <Route path="/:locale/find-your-path/:slug" element={content(<FindYourPath />)} />
       <Route path="/:locale/professionals" element={content(<Professionals />)} />
-      <Route path="/:locale/pages/:slug" element={content(<ContentPage />)} />
+      <Route path="/:locale/terms-of-use" element={content(<ContentPage forcedSlug="terms-of-use" />)} />
+      <Route path="/:locale/privacy-policy" element={content(<ContentPage forcedSlug="privacy-policy" />)} />
+      <Route path="/:locale/pages/terms-of-use" element={<LegacyLegalPageRedirect slug="terms-of-use" />} />
+      <Route path="/:locale/pages/privacy-policy" element={<LegacyLegalPageRedirect slug="privacy-policy" />} />
+      <Route path="/:locale/delete-account" element={content(<ContentPage forcedSlug="delete-account" />)} />
       <Route
         path="/:locale/likes"
         element={content(<Likes session={session} />)}
       />
       <Route
         path="/:locale/profile"
-        element={content(<Profile session={session} />)}
+        element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} />)}
       />
+ <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={legacyLocaleOf(localeOf())} />)} />
+ <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)} />
+ <Route path="/:locale/profile/verification" element={content(<MemberProfileVerification locale={legacyLocaleOf(localeOf())} />)} />
+      <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} view="notifications" />)} />
+      <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} view="blocked" />)} />
       <Route
         path="/:locale/photos"
-        element={content(<Photos session={session} />)}
+        element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)}
       />
       <Route
         path="/:locale/settings"
@@ -9429,16 +17249,18 @@ export function WebApp() {
       />
       <Route
         path="/:locale/verification"
-        element={content(<Verification session={session} />)}
+        element={content(<MemberProfileVerification locale={legacyLocaleOf(localeOf())} />)}
       />
       <Route
         path="/:locale/messages"
-        element={content(<Conversations session={session} />)}
+        element={<ChatLegacyRedirect />}
       />
       <Route
         path="/:locale/chat"
-        element={<Navigate to={`/${locale}/messages`} replace />}
+        element={content(<Conversations session={session} />)}
       />
+      <Route path="/:locale/chat/:conversationId" element={content(<Conversations session={session} />)} />
+      <Route path="/:locale/messages/:conversationId" element={<ChatLegacyRedirect />} />
       <Route
         path="/:locale/visitors"
         element={content(
@@ -9454,12 +17276,8 @@ export function WebApp() {
         element={content(<SimpleMemberList session={session} kind="blocked" />)}
       />
       <Route
-        path="/:locale/delete-account"
+        path="/:locale/account/delete"
         element={content(<AccountDeletion session={session} />)}
-      />
-      <Route
-        path="/:locale/subscription"
-        element={content(<Subscription session={session} />)}
       />
       <Route
         path="/:locale/family-room/:profileId"
@@ -9468,6 +17286,10 @@ export function WebApp() {
       <Route
         path="/:locale/ai-advisor"
         element={content(<AiAdvisor session={session} />)}
+      />
+      <Route
+        path="/:locale/subscription"
+        element={content(<Subscription session={session} />)}
       />
       <Route
         path="/:locale/compatibility"
@@ -9509,7 +17331,7 @@ export function WebApp() {
         path="/:locale/community/post/:postId"
         element={content(<CommunityPostDetail session={session} />)}
       />
-      <Route path="*" element={<Navigate to="/en" replace />} />
+      <Route path="*" element={content(<NotFoundPage locale={legacyLocaleOf(locale)} />)} />
       </Routes>
     </>
   );

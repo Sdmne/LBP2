@@ -16,6 +16,8 @@ export type PublicUser = {
   emailVerified: boolean;
   passwordLoginEnabled: boolean;
   createdAt: string | null;
+  isWizardCompleted?: boolean;
+  needsProfileWizard?: boolean;
 };
 
 // POST /api/auth/login, /api/auth/signup, /api/auth/firebase all return this

@@ -13,6 +13,9 @@ import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
+import { fetchQuizInsight } from "../api/quizInsight";
+import { ApiError } from "../api/client";
+import { API_BASE_URL } from "../config";
 
 type Step = "intro" | number | "results";
 
@@ -38,9 +41,37 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
   const [answers, setAnswers] = useState<(string | null)[]>(() => content.questions.map(() => null));
   const [sharing, setSharing] = useState(false);
   const totalQuestions = content.questions.length;
+  // Personalized AI reflection (Sept 2026 growth push) - mirrors the
+  // website's CompatibilityQuiz component exactly (see ui.tsx). Fetched on
+  // demand only, never automatically, so a person who never taps the
+  // button never spends an Anthropic call.
+  const [aiInsight, setAiInsight] = useState("");
+  const [aiInsightStatus, setAiInsightStatus] = useState<"idle" | "loading" | "ok" | "limited" | "error">("idle");
+  // Shareable result image card (item 26 - Alena: "и после квиза отсылается
+  // красивая картикна?") - mirrors the website's downloadResultCard(): the
+  // PNG itself is rendered server-side (Pillow, backend/main.py), so this
+  // just downloads it and hands it to the OS share sheet, same pattern
+  // ResourceToolScreen.tsx already uses for the .docx downloads.
+  const [sharingCard, setSharingCard] = useState(false);
 
   function setAnswer(index: number, value: string) {
     setAnswers((prev) => prev.map((a, i) => (i === index ? value : a)));
+  }
+
+  async function handleFetchAiInsight(results: ReturnType<typeof computeQuizResults>) {
+    setAiInsightStatus("loading");
+    try {
+      const res = await fetchQuizInsight({
+        locale,
+        strongestTitles: results.strongest.map((s) => content.strengthCopy[s].title),
+        discussTitles: results.discuss.map((s) => content.discussCopy[s].title),
+        answers: answers.filter((a): a is string => Boolean(a)),
+      });
+      setAiInsight(res.insight);
+      setAiInsightStatus("ok");
+    } catch (error) {
+      setAiInsightStatus(error instanceof ApiError && error.status === 429 ? "limited" : "error");
+    }
   }
 
   async function handleShareResults() {
@@ -59,6 +90,27 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
       Alert.alert(t("quiz.results.shareErrorTitle"), t("quiz.results.shareErrorBody"));
     } finally {
       setSharing(false);
+    }
+  }
+
+  async function handleShareResultCard(results: ReturnType<typeof computeQuizResults>) {
+    setSharingCard(true);
+    try {
+      const params = new URLSearchParams({ locale });
+      results.strongest.forEach((s) => params.append("strongest", content.strengthCopy[s].title));
+      results.discuss.forEach((s) => params.append("discuss", content.discussCopy[s].title));
+      const remoteUrl = `${API_BASE_URL}/api/public/quiz-result-card?${params.toString()}`;
+      const localUri = `${FileSystem.cacheDirectory}LetsBeParents-Compatibility-Quiz-Results.png`;
+      const { uri } = await FileSystem.downloadAsync(remoteUrl, localUri);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "image/png" });
+      } else {
+        Alert.alert(t("quiz.results.savedTitle"), t("quiz.results.savedBody", { uri }));
+      }
+    } catch {
+      Alert.alert(t("quiz.results.shareErrorTitle"), t("quiz.results.shareErrorBody"));
+    } finally {
+      setSharingCard(false);
     }
   }
 
@@ -134,8 +186,33 @@ export default function CompatibilityQuizScreen({ navigation }: Props) {
           </View>
         ) : null}
 
-        <Pressable style={styles.primaryButton} onPress={handleShareResults} disabled={sharing}>
-          {sharing ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{t("quiz.results.shareButton")}</Text>}
+        <View style={styles.resultGroup}>
+          {aiInsightStatus === "idle" ? (
+            <Pressable style={styles.primaryButton} onPress={() => handleFetchAiInsight(results)}>
+              <Text style={styles.primaryButtonText}>{t("quiz.results.aiInsightButton")}</Text>
+            </Pressable>
+          ) : null}
+          {aiInsightStatus === "loading" ? (
+            <View style={styles.aiInsightLoadingRow}>
+              <ActivityIndicator color={colors.gradientStart} />
+              <Text style={styles.aiInsightLoadingText}>{t("quiz.results.aiInsightLoading")}</Text>
+            </View>
+          ) : null}
+          {aiInsightStatus === "ok" ? (
+            <View style={[styles.resultCard, styles.aiInsightCard]}>
+              <Text style={styles.resultCardTitle}>{t("quiz.results.aiInsightTitle")}</Text>
+              <Text style={styles.resultCardBody}>{aiInsight}</Text>
+            </View>
+          ) : null}
+          {aiInsightStatus === "limited" ? <Text style={styles.aiInsightError}>{t("quiz.results.aiInsightLimited")}</Text> : null}
+          {aiInsightStatus === "error" ? <Text style={styles.aiInsightError}>{t("quiz.results.aiInsightError")}</Text> : null}
+        </View>
+
+        <Pressable style={styles.primaryButton} onPress={() => handleShareResultCard(results)} disabled={sharingCard}>
+          {sharingCard ? <ActivityIndicator color={colors.white} /> : <Text style={styles.primaryButtonText}>{t("quiz.results.shareImageButton")}</Text>}
+        </Pressable>
+        <Pressable style={styles.secondaryButton} onPress={handleShareResults} disabled={sharing}>
+          {sharing ? <ActivityIndicator color={colors.gradientStart} /> : <Text style={styles.secondaryButtonText}>{t("quiz.results.shareButton")}</Text>}
         </Pressable>
         <Text style={styles.noScore}>{t("quiz.results.noScore")}</Text>
 
@@ -241,6 +318,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   primaryButtonText: { color: colors.white, fontWeight: "700" },
+  secondaryButton: {
+    marginTop: spacing.sm,
+    backgroundColor: "transparent",
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.gradientStart,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  secondaryButtonText: { color: colors.gradientStart, fontWeight: "700" },
   disabledButton: { opacity: 0.5 },
   resultsTitle: { fontSize: 22, fontWeight: "800", color: colors.text },
   resultsSub: { fontSize: 13, color: colors.textMuted, marginTop: spacing.xs },
@@ -250,6 +337,10 @@ const styles = StyleSheet.create({
   resultCardTitle: { fontSize: 14, fontWeight: "700", color: colors.text },
   resultCardBody: { fontSize: 13, color: colors.textMuted, marginTop: spacing.xs, lineHeight: 18 },
   promptItem: { fontSize: 13, color: colors.text, marginTop: spacing.sm },
+  aiInsightLoadingRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  aiInsightLoadingText: { fontSize: 13, color: colors.textMuted },
+  aiInsightCard: { borderWidth: 1, borderColor: colors.gradientStart },
+  aiInsightError: { fontSize: 13, color: colors.textMuted },
   noScore: { fontSize: 11, color: colors.textMuted, textAlign: "center", marginTop: spacing.sm },
   nextSteps: { marginTop: spacing.xl, gap: spacing.sm },
   nextStepLink: { fontSize: 14, fontWeight: "700", color: colors.gradientStart, marginTop: spacing.xs },

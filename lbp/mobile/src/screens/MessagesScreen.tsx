@@ -127,7 +127,7 @@ export default function MessagesScreen(_props: Props) {
       <FlatList
         data={filtered}
         keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={[styles.list, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}
+        contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ItemSeparatorComponent={() => <View style={styles.separatorGap} />}
         ListEmptyComponent={
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   },
   searchIcon: { fontSize: 14 },
   searchInput: { flex: 1, fontSize: 14, color: colors.ink, padding: 0 },
-  list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.xl + tabBarClearance },
+  list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.xs + tabBarClearance },
   separatorGap: { height: 10 },
   row: {
     flexDirection: "row",

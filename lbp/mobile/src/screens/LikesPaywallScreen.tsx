@@ -160,8 +160,14 @@ export default function LikesPaywallScreen({ navigation }: Props) {
               <View key={index} style={[styles.dot, index === slideIndex && styles.dotActive]} />
             ))}
           </View>
+          {/* Alena: "пустое место над кнопкой закрыть" - this is presented
+              as a native-stack "modal" (see RootNavigator's LikesPaywall
+              registration), which on iOS already starts the card below the
+              status bar/notch, so adding the full insets.top on top of
+              that left a second, redundant gap above the X. A small fixed
+              offset instead of insets.top. */}
           <Pressable
-            style={[styles.closeButton, { top: insets.top + spacing.sm }]}
+            style={[styles.closeButton, { top: spacing.md }]}
             onPress={() => navigation.goBack()}
             hitSlop={10}
           >
@@ -172,14 +178,14 @@ export default function LikesPaywallScreen({ navigation }: Props) {
         <View style={styles.body}>
           <Text style={styles.sectionTitle}>{t("subscription.compareTitle")}</Text>
 
-          {/* UPDATE (Sept 2026): originally only the selected card showed
-              its feature list, expanding on tap. Alena's follow-up
-              ("Не видно сразу преимущества () как выбрать") was that
-              comparing all three meant tapping through them one at a
-              time - she picked "развернуть все карточки сразу" (show every
-              card's features at once) so the comparison is visible without
-              any tapping; tapping a card still just selects it for the CTA
-              button below. */}
+          {/* UPDATE (Sept 2026): back to an accordion - all three cards'
+              feature lists shown at once (the previous "expand all"
+              change, see the git history on this block) pushed the Buy
+              button below the fold, which was Alena's exact next
+              complaint ("все опции должны быть видны сразу вместе с
+              кнопкой купить"). Only the selected card's features expand
+              now; tapping a card both selects it (for the CTA below) and
+              opens its own feature list, closing whichever was open. */}
           {PLAN_OPTIONS.map((option, index) => {
             const isSelected = selected === index;
             return (
@@ -191,7 +197,7 @@ export default function LikesPaywallScreen({ navigation }: Props) {
                 <View style={styles.planCardTop}>
                   <View style={styles.planCardMain}>
                     <View style={styles.planCardNameRow}>
-                      <Text style={styles.planCardName}>{t(option.nameKey)}</Text>
+                      <Text style={styles.planCardName} numberOfLines={1}>{t(option.nameKey)}</Text>
                       {option.badgeKey ? (
                         <View style={styles.planBadge}>
                           <Text style={styles.planBadgeText}>{t(option.badgeKey)}</Text>
@@ -206,14 +212,16 @@ export default function LikesPaywallScreen({ navigation }: Props) {
                     color={isSelected ? colors.pink : colors.line}
                   />
                 </View>
-                <View style={styles.planCardDetails}>
-                  {option.featureKeys.map((key) => (
-                    <View key={key} style={styles.planCardDetailRow}>
-                      <Feather name="check" size={14} color={colors.pink} />
-                      <Text style={styles.planCardDetailText}>{t(key)}</Text>
-                    </View>
-                  ))}
-                </View>
+                {isSelected ? (
+                  <View style={styles.planCardDetails}>
+                    {option.featureKeys.map((key) => (
+                      <View key={key} style={styles.planCardDetailRow}>
+                        <Feather name="check" size={14} color={colors.pink} />
+                        <Text style={styles.planCardDetailText}>{t(key)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </Pressable>
             );
           })}
@@ -239,6 +247,17 @@ export default function LikesPaywallScreen({ navigation }: Props) {
             </Pressable>
           )}
 
+          {/* Item 19 - Alena screenshotted this exact screen asking "Там
+              нету про разовые покупки и их цена. Как человек их может
+              купить вообще?" - this is that answer: a visible way out to
+              the one-time Likes-unlock purchase for anyone who doesn't
+              want a recurring subscription. */}
+          {!message ? (
+            <Pressable onPress={() => navigation.navigate("Purchases")} hitSlop={8} style={styles.oneTimeLink}>
+              <Text style={styles.oneTimeLinkText}>{t("paywall.oneTimeLink")}</Text>
+            </Pressable>
+          ) : null}
+
           {!message ? (
             <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.notNow}>
               <Text style={styles.notNowText}>{t("paywall.notNow")}</Text>
@@ -253,7 +272,8 @@ export default function LikesPaywallScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   hero: { position: "relative" },
-  slide: { height: 320, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
+  // Alena: "зачем так много места для верхнего слайдера" - was 320.
+  slide: { height: 228, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
   slideIconWrap: {
     width: 64,
     height: 64,
@@ -296,7 +316,7 @@ const styles = StyleSheet.create({
   planCardDetailRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   planCardDetailText: { fontSize: 12.5, color: colors.ink, flexShrink: 1 },
   planCardNameRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  planCardName: { fontSize: 15, fontWeight: "800", color: colors.ink },
+  planCardName: { fontSize: 15, fontWeight: "800", color: colors.ink, flexShrink: 1 },
   planBadge: { backgroundColor: colors.pink, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
   planBadgeText: { fontSize: 10.5, fontWeight: "800", color: colors.white },
   planCardPrice: { fontSize: 13.5, color: colors.muted, marginTop: 2 },
@@ -307,4 +327,6 @@ const styles = StyleSheet.create({
   ctaButtonText: { color: colors.white, fontSize: 15, fontWeight: "800" },
   notNow: { alignItems: "center", marginTop: spacing.md },
   notNowText: { fontSize: 13, color: colors.muted, fontWeight: "600" },
+  oneTimeLink: { alignItems: "center", marginTop: spacing.md },
+  oneTimeLinkText: { fontSize: 13, color: colors.blueDark, fontWeight: "700" },
 });

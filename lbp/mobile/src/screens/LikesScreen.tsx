@@ -3,19 +3,19 @@ import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, S
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { BlurView } from "expo-blur";
 import { ApiError } from "../api/client";
 import { likeProfile, unlikeProfile } from "../api/catalog";
 import { createConversation } from "../api/messages";
 import { fetchLikes, fetchProfileViews, markLikesRead } from "../api/likes";
 import type { LikesResponse, ProfileSummary, ProfileVisitor } from "../api/types";
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing, tabBarClearance } from "../theme";
 import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
+import { countryName } from "../utils/countryNames";
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Likes">;
 
@@ -47,7 +47,7 @@ const FREE_PREVIEW_COUNT = 4;
 export default function LikesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [tab, setTab] = useState<Tab>("likesYou");
   const [data, setData] = useState<LikesResponse | null>(null);
   const [visitors, setVisitors] = useState<ProfileVisitor[] | null>(null);
@@ -317,10 +317,16 @@ export default function LikesScreen({ navigation }: Props) {
       >
         {tabs.map((item) => (
           <Pressable key={item.key} style={[styles.tabChip, tab === item.key && styles.tabChipActive]} onPress={() => setTab(item.key)}>
-            <Text style={[styles.tabChipText, tab === item.key && styles.tabChipTextActive]}>
-              {item.label}
-              {item.badge ? <Text style={styles.tabChipBadge}> {item.badge}</Text> : null}
-            </Text>
+            <Text style={[styles.tabChipText, tab === item.key && styles.tabChipTextActive]}>{item.label}</Text>
+            {/* Alena: "число новых лайков, мэтчев и тд - в баблы" - was
+                plain dimmed text appended inline inside the label's own
+                Text node; a real count bubble needs a View (a Text can't
+                nest one), so the count moved out to its own sibling here. */}
+            {item.badge ? (
+              <View style={[styles.tabChipBadge, tab === item.key && styles.tabChipBadgeActive]}>
+                <Text style={[styles.tabChipBadgeText, tab === item.key && styles.tabChipBadgeTextActive]}>{item.badge}</Text>
+              </View>
+            ) : null}
           </Pressable>
         ))}
       </ScrollView>
@@ -334,7 +340,7 @@ export default function LikesScreen({ navigation }: Props) {
           <Text style={styles.errorText}>{tab === "visitors" ? visitorsError : likesError}</Text>
         </View>
       ) : previewMode && profileItems.length === 0 ? (
-        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}>
+        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
           <View style={styles.premiumBanner}>
             <Text style={styles.premiumTitle}>{t("likes.premiumTitle")}</Text>
             <Text style={styles.premiumBody}>{t("likes.premiumBody")}</Text>
@@ -360,7 +366,7 @@ export default function LikesScreen({ navigation }: Props) {
         <FlatList
           data={profileItems}
           keyExtractor={(item, index) => String(item.id ?? index)}
-          contentContainerStyle={[styles.list, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}
+          contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -418,46 +424,53 @@ export default function LikesScreen({ navigation }: Props) {
                 style={styles.card}
                 onPress={() => (previewLocked ? rootNav.navigate("LikesPaywall") : rootNav.navigate("ProfileDetail", { profileId: item.id }))}
               >
-                {/* item.identityHidden: a real free-tier preview row from
-                    member_likes() (main.py) - name/city/country are never
-                    sent for these at all. avatarUrl, if present, is a
-                    server-blurred copy (blurred_preview_url_for() in
-                    main.py bakes the blur into the image itself with
-                    Pillow before it's ever sent), never the real photo -
-                    unlike the old client-side BlurView approach, there's
-                    no runtime blur step on the client left to fail open
-                    (confirmed happening on at least one Android device:
-                    lock icon showed, blur did not, real photo was fully
-                    visible underneath). Alena's reference screenshot shows
-                    an actual blurred photo, not a blank icon, so the
-                    silhouette below is now only the fallback for a row
-                    with no source photo at all (never had one, or
-                    blurring it failed server-side). */}
-                {item.identityHidden && item.avatarUrl ? (
-                  <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
-                ) : item.identityHidden ? (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <Feather name="user" size={22} color={colors.muted} />
-                  </View>
-                ) : item.avatarUrl ? (
-                  <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                    <Text style={styles.avatarPlaceholderText}>{item.displayName?.[0] ?? "?"}</Text>
-                  </View>
-                )}
+                {/* Alena, again, verbatim: "Нет замыливания!!!" - this
+                    time on the PREMIUM self-test "preview as free" toggle
+                    specifically (item.identityHidden is already false
+                    here, since her own account really is Premium and the
+                    server has no "pretend I'm free" flag to send back
+                    anonymized rows for - it only omits/masks identity for
+                    an account that's ACTUALLY free). That left this one
+                    remaining path still rendering the real avatar/name/
+                    city and relying on a runtime BlurView on top to hide
+                    it - the exact same "lock icon showed, blur did not,
+                    real photo fully visible" Android failure the
+                    identityHidden rework above already worked around for
+                    real free accounts. Folding previewLocked into the
+                    same "nothing real ever gets rendered" check removes
+                    the last place still depending on BlurView actually
+                    working: the preview-as-free toggle now shows the
+                    exact same silhouette+age-only treatment a genuinely
+                    free account already gets, instead of real data plus a
+                    blur that may or may not show up. */}
+                {(() => {
+                  const effectivelyHidden = item.identityHidden || previewLocked;
+                  return effectivelyHidden && item.avatarUrl ? (
+                    <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+                  ) : effectivelyHidden ? (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Feather name="user" size={22} color={colors.muted} />
+                    </View>
+                  ) : item.avatarUrl ? (
+                    <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+                  ) : (
+                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                      <Text style={styles.avatarPlaceholderText}>{item.displayName?.[0] ?? "?"}</Text>
+                    </View>
+                  );
+                })()}
                 <View style={styles.rowBody}>
-                  {item.identityHidden ? (
+                  {item.identityHidden || previewLocked ? (
                     <Text style={styles.name} numberOfLines={1}>
                       {item.age != null ? t("likes.anonymousAge", { age: item.age }) : t("likes.anonymousAgeUnknown")}
                     </Text>
                   ) : (
                     <>
                       <Text style={styles.name} numberOfLines={1}>
-                        {item.displayName}
+                        {item.age != null ? `${item.displayName ?? "?"}, ${item.age}` : item.displayName}
                       </Text>
                       <Text style={styles.subtitle} numberOfLines={1}>
-                        {[item.city, item.country].filter(Boolean).join(", ") || t("common.locationNotSet")}
+                        {[item.city, item.country ? countryName(item.country, locale) : null].filter(Boolean).join(", ") || t("common.locationNotSet")}
                       </Text>
                     </>
                   )}
@@ -497,38 +510,28 @@ export default function LikesScreen({ navigation }: Props) {
                 ) : previewLocked ? (
                   <Feather name="lock" size={16} color={colors.muted} />
                 ) : (
-                  <Text style={styles.heart}>♥</Text>
+                  // Alena: "сделай как в меню снизу иконка только закрасить
+                  // в красный" - the bottom tab bar's Likes icon is
+                  // Feather's "heart" outline (see MainTabs.tsx's
+                  // ICON_NAMES); Feather has no filled variant, so this
+                  // uses Ionicons' "heart" (same simple rounded heart
+                  // shape, solid) instead of the plain "♥" text glyph.
+                  <Ionicons name="heart" size={18} color={colors.pink} />
                 )}
-                {/* Frosted-glass overlay over the WHOLE row (photo AND
-                    name/location text) - not just the photo - since the
-                    point is that no part of who this is should be
-                    readable. Only needed when item.identityHidden is
-                    false - i.e. real premium data being shown through the
-                    "previewAsFree" self-test toggle (see isPreviewingFree
-                    above). A genuinely free-tier row (identityHidden=true)
-                    already has nothing real underneath to blur - the
-                    generic silhouette + age rendered above IS the safe
-                    view, no overlay needed, and skipping BlurView there
-                    also sidesteps the Android rendering gap noted below
-                    entirely for real free users (previously the ONLY
-                    protection for a real free user's data was this blur,
-                    which is exactly what silently failed to render on at
-                    least one Android device/version - lock icon showed,
-                    photo and name did not get obscured). */}
-                {previewLocked && !item.identityHidden ? (
-                  <BlurView
-                    intensity={50}
-                    tint="light"
-                    // Android's default BlurView needs API 31+ (RenderEffect)
-                    // to actually blur - on anything older it silently
-                    // renders nothing at all. This library-based method
-                    // works on Android API 21+ too; iOS ignores the prop
-                    // and uses its own native blur regardless.
-                    experimentalBlurMethod="dimezisBlurView"
-                    style={StyleSheet.absoluteFill}
-                    pointerEvents="none"
-                  />
-                ) : null}
+                {/* No BlurView overlay left here at all, on purpose. It
+                    used to be the ONLY thing hiding real data on this row
+                    for the "previewAsFree" self-test toggle, and it's an
+                    unreliable thing to depend on for that: confirmed
+                    failing to render on at least one real Android device
+                    (lock icon showed, blur did not, photo and name were
+                    fully visible underneath) even with the more
+                    compatible "dimezisBlurView" method above. Since
+                    effectivelyHidden above already substitutes the same
+                    generic silhouette+age placeholder a genuinely free
+                    account gets - instead of rendering the real data and
+                    trying to obscure it after the fact - there's nothing
+                    real left under this row for a blur to protect, on any
+                    device, blur-capable or not. */}
               </Pressable>
             );
           }}
@@ -544,6 +547,9 @@ const styles = StyleSheet.create({
   tabsScroll: { flexGrow: 0, flexShrink: 0 },
   tabsRow: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 6, alignItems: "center" },
   tabChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     paddingHorizontal: 13,
     paddingVertical: 9,
     borderRadius: radius.pill,
@@ -553,7 +559,21 @@ const styles = StyleSheet.create({
   tabChipActive: { backgroundColor: colors.ink },
   tabChipText: { fontSize: 12.5, fontWeight: "600", color: colors.muted },
   tabChipTextActive: { color: colors.white },
-  tabChipBadge: { opacity: 0.7 },
+  // Count bubble (Alena: "в баблы") - dimmed pink-on-white for an inactive
+  // chip, inverted to white-on-translucent-white for the active (dark)
+  // chip so it stays legible against colors.ink.
+  tabChipBadge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: colors.tintPink,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabChipBadgeActive: { backgroundColor: "rgba(255,255,255,0.22)" },
+  tabChipBadgeText: { fontSize: 11, fontWeight: "700", color: colors.pink },
+  tabChipBadgeTextActive: { color: colors.white },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
   errorText: { color: colors.danger, textAlign: "center" },
   emptyState: { alignItems: "center", paddingTop: 56, paddingHorizontal: spacing.lg },
@@ -584,7 +604,7 @@ const styles = StyleSheet.create({
   premiumBody: { fontSize: 13, color: colors.muted, marginTop: spacing.xs, textAlign: "center", lineHeight: 18 },
   premiumButton: { marginTop: spacing.md, backgroundColor: colors.pink, borderRadius: radius.pill, paddingHorizontal: spacing.lg, paddingVertical: 10 },
   premiumButtonText: { color: colors.white, fontWeight: "700" },
-  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl + tabBarClearance, gap: 10 },
+  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs + tabBarClearance, gap: 10 },
   // Reference mockup (#scr-likes): each row is its own white rounded card
   // floating on the gradient background, not a flat row sharing one long
   // divided list the way it was before - Alena: "белая заливка внутри 2
@@ -619,7 +639,6 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "700", color: colors.ink },
   subtitle: { fontSize: 13, color: colors.muted, marginTop: 2 },
   visitorNote: { fontSize: 12, color: colors.pink, marginTop: 2, fontWeight: "600" },
-  heart: { fontSize: 16, color: colors.pink },
   rowActions: { flexDirection: "row", gap: 8 },
   actionButtonBlue: {
     width: 40,

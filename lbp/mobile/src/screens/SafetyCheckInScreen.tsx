@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import {
   cancelSafetyCheckin,
@@ -114,7 +114,12 @@ export default function SafetyCheckInScreen() {
       plan: checkin.plan || "",
       when: formatWhen(checkin.checkInByAt),
     });
-    Share.share({ message }).catch(() => undefined);
+    // Same silent-failure fix as ReferralScreen's handleShare - see its
+    // comment for why a bare .catch(() => undefined) reads as a dead
+    // button when Share.share() rejects on a given device.
+    Share.share({ message }).catch(() => {
+      Alert.alert(t("common.shareUnavailableTitle"), message);
+    });
   }
 
   if (loading) {

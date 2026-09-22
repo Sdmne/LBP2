@@ -183,7 +183,7 @@ export default function CoParentingAgreementScreen({ route, navigation }: Props)
             <Text style={styles.cardBody}>{t("agreement.readyBody")}</Text>
 
             <Pressable style={styles.reviewToggle} onPress={() => setReviewOpen((prev) => !prev)}>
-              <Text style={styles.reviewToggleText}>{t("agreement.reviewSectionsToggle")}</Text>
+              <Text style={styles.reviewToggleText} numberOfLines={1}>{t("agreement.reviewSectionsToggle")}</Text>
               <Text style={styles.reviewToggleChevron}>{reviewOpen ? "⌃" : "⌄"}</Text>
             </Pressable>
 
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   signatureName: { fontSize: 13.5, fontWeight: "700", color: colors.ink, textAlign: "center" },
   signatureDate: { fontSize: 11.5, color: colors.muted, marginTop: 2 },
   reviewToggle: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
-  reviewToggleText: { fontSize: 13.5, fontWeight: "700", color: colors.pink },
+  reviewToggleText: { fontSize: 13.5, fontWeight: "700", color: colors.pink, flexShrink: 1, marginRight: spacing.sm },
   reviewToggleChevron: { fontSize: 14, color: colors.pink },
   nameInput: {
     height: 46,

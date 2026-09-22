@@ -540,6 +540,7 @@
 .profile-tools-surface .avatar-crop-dialog .profile-dialog-head > button:hover { opacity: 1; }
 .profile-tools-surface .avatar-crop-dialog .profile-dialog-head svg { width: 16px; height: 16px; }
 .profile-tools-surface .avatar-crop-stage { position: relative; width: 288px; height: 288px; margin: 0 auto 16px; overflow: hidden; background: #898989; cursor: grab; touch-action: none; user-select: none; }
+.profile-tools-surface .avatar-crop-stage::after { content: 'Drag the photo to choose the avatar area'; position: absolute; right: 8px; bottom: 8px; left: 8px; z-index: 3; padding: 5px 8px; border-radius: 5px; color: #fff; background: rgba(17,24,39,.68); font-size: 11px; line-height: 14px; font-weight: 600; text-align: center; pointer-events: none; }
 .profile-tools-surface .avatar-crop-stage.dragging { cursor: grabbing; }
 .profile-tools-surface .avatar-crop-stage img { position: absolute; left: 50%; top: 50%; display: block; max-width: none; pointer-events: none; will-change: transform; }
 .profile-tools-surface .avatar-crop-mask { position: absolute; left: 50%; top: 50%; border: 1px solid rgba(255,255,255,.85); border-radius: 50%; box-shadow: 0 0 0 9999px rgba(0,0,0,.48); transform: translate(-50%,-50%); pointer-events: none; }

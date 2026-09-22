@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 
-export type OptionRow = { value: string; label: string; count?: number; icon?: string };
+export type OptionRow = { value: string; label: string; count?: number; icon?: string; placeId?: string };
 
 // Shared full-screen modal list picker - single or multi-select, with an
 // optional loading spinner for async option lists (country/city). Extracted
@@ -33,7 +33,7 @@ export function OptionListPicker({
   // shorter country/city/ethnicity lists that don't pass it.
   searchable?: boolean;
   searchPlaceholder?: string;
-  onToggle: (value: string) => void;
+  onToggle: (value: string, option: OptionRow) => void;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -48,9 +48,19 @@ export function OptionListPicker({
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.title}>{title}</Text>
-        <Pressable onPress={onClose} hitSlop={8}>
-          <Text style={styles.done}>{t("filters.done")}</Text>
-        </Pressable>
+        {/* Single-select has no footer button below, so this header "Done"
+            is its only way to close. Multi-select already gets a full-width
+            footer "Done" button (see `multi ? ... : null` below) - showing
+            both read as two separate, redundant "Done" buttons on one
+            screen (Alena: two Done buttons on the Languages picker), so the
+            header one is skipped whenever the footer one will render. */}
+        {multi ? (
+          <View style={styles.headerSpacer} />
+        ) : (
+          <Pressable onPress={onClose} hitSlop={8}>
+            <Text style={styles.done}>{t("filters.done")}</Text>
+          </Pressable>
+        )}
       </View>
       {searchable ? (
         <View style={styles.searchWrap}>
@@ -74,7 +84,7 @@ export function OptionListPicker({
           {filteredOptions.map((option) => {
             const isSelected = selected.includes(option.value);
             return (
-              <Pressable key={option.value || "any"} style={styles.row} onPress={() => onToggle(option.value)}>
+              <Pressable key={option.value || "any"} style={styles.row} onPress={() => onToggle(option.value, option)}>
                 <View style={styles.rowLabelWrap}>
                   {option.icon ? <Text style={styles.rowIcon}>{option.icon}</Text> : null}
                   <Text style={styles.rowLabel}>
@@ -121,6 +131,9 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 16, fontWeight: "800", color: colors.ink },
   done: { fontSize: 14, fontWeight: "700", color: colors.pink },
+  // Keeps the title's alignment identical whether or not the header "Done"
+  // link is shown (multi-select skips it - see the render logic above).
+  headerSpacer: { width: 8, height: 1 },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   row: {
     flexDirection: "row",

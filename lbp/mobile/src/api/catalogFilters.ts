@@ -57,7 +57,7 @@ export function activeCatalogFilterCount(filters: CatalogFilters): number {
   ].filter(Boolean).length;
 }
 
-export type CatalogFilterOptionRow = { value: string; label: string; count?: number };
+export type CatalogFilterOptionRow = { value: string; label: string; count?: number; placeId?: string };
 
 export type CatalogFilterOptionsResponse = {
   countries: CatalogFilterOptionRow[];

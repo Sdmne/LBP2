@@ -76,7 +76,7 @@ export default function ExploreScreen() {
 
   return (
     <GradientBackground variant="soft">
-    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
       <AppHeader onAvatarPress={() => navigation.navigate("Me")} />
       <Text style={styles.greeting}>{t("explore.greeting", { name: user?.displayName || "" })}</Text>
       <Text style={styles.subtitle}>{t("explore.subtitle")}</Text>
@@ -194,7 +194,13 @@ export default function ExploreScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "transparent" },
-  content: { padding: spacing.lg, paddingBottom: spacing.xl + tabBarClearance },
+  // Alena: "сверху избыточное пустое пространство" - this used to be
+  // `padding: spacing.lg` (all 4 sides), stacking a 24px top pad on top of
+  // AppHeader's OWN insets.top handling (see AppHeader.tsx) - the header
+  // was landing well below the status bar with a second gap above it.
+  // Horizontal/bottom only now, matching the pattern MessagesScreen
+  // already uses around the same AppHeader.
+  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xs + tabBarClearance },
   hero: { alignItems: "flex-end" },
   avatar: {
     width: 36,

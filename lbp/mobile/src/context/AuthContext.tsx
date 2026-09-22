@@ -4,6 +4,7 @@ import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
 import { setSessionToken } from "../api/session";
 import type { PublicUser } from "../api/types";
+import { registerForPushNotifications, unregisterCurrentPushToken } from "../utils/pushNotifications";
 // TEMP DISABLED for OTA safety (2026-09-12, item 16): expo-notifications/
 // expo-device are not yet installed and the currently-installed app
 // binaries do not contain that native module - calling the real
@@ -13,10 +14,6 @@ import type { PublicUser } from "../api/types";
 // untouched - re-wire these two lines back to it together with the next
 // `eas build` (after `npx expo install expo-notifications expo-device`).
 // See pending-mobile-tasks.md item 16.
-async function registerForPushNotifications(): Promise<string | null> {
-  return null;
-}
-async function unregisterCurrentPushToken(_token: string | null): Promise<void> {}
 
 const TOKEN_STORAGE_KEY = "lbp_session_token";
 
@@ -27,7 +24,13 @@ const TOKEN_STORAGE_KEY = "lbp_session_token";
 // badge or current-plan status - both real fields the backend already
 // sends, just not exposed. Widened to match reality instead of adding a
 // second fetch.
-type AuthUser = PublicUser & { profileVerified?: boolean; isPremium?: boolean; profileCompleteness?: number };
+type AuthUser = PublicUser & {
+  profileVerified?: boolean;
+  isPremium?: boolean;
+  profileCompleteness?: number;
+  isWizardCompleted?: boolean;
+  needsProfileWizard?: boolean;
+};
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -125,7 +128,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSessionToken(res.sessionToken);
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
-        setPendingProfileWizard(false);
+        // A profile can be incomplete when this is the first login after
+        // registration, or after an administrator has reset it. In both
+        // cases the API is authoritative and the navigator must open the
+        // required onboarding flow after email verification.
+        setPendingProfileWizard(res.user.needsProfileWizard === true);
         void syncPushToken();
       },
       async signup(email, password, displayName) {
@@ -133,7 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSessionToken(res.sessionToken);
         await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
         setUser(res.user);
-        setPendingProfileWizard(true);
+        setPendingProfileWizard(res.user.needsProfileWizard !== false);
         setInitialEmailSendFailed(res.emailSent === false);
         void syncPushToken();
       },
@@ -144,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(res.user);
         // Only a brand-new social account needs the wizard - one that already
         // existed (a returning Google/Apple login) already has a profile.
-        setPendingProfileWizard(!!res.isNewUser);
+        setPendingProfileWizard(res.user.needsProfileWizard === true || (!!res.isNewUser && res.user.isWizardCompleted !== true));
         void syncPushToken();
       },
       async refreshUser() {
@@ -154,6 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       async confirmEmailCode(code) {
         const res = await authApi.confirmEmailCode(code);
         setUser(res.user);
+        setPendingProfileWizard(res.user.needsProfileWizard === true);
       },
       async resendEmailVerification(locale = "en") {
         const res = await authApi.resendEmailVerification(locale);

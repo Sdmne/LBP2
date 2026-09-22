@@ -15,6 +15,7 @@ import { NotFoundPage } from "./not-found";
 
 type Row = Record<string, unknown>;
 type Locale = keyof typeof PROFILE_COPY;
+const profileLocaleKey = (locale: Locale): 'en' | 'ru' | 'es' => locale === 'ru' || locale === 'es' ? locale : 'en';
 type Session = { user: Row } | null;
 const api = createApiClient("/api");
 const icons = { ...PROFILE_ICONS, ...PREMIUM_ICONS };
@@ -112,8 +113,10 @@ export function profileCountry(value: unknown, locale: Locale) {
   const code =
     ({ USA: "US", UK: "GB", UAE: "AE" } as Record<string, string>)[
       country.toUpperCase()
-    ] || country.toUpperCase();
-  try {
+] || country.toUpperCase();
+if (locale === "en" && code === "CZ") return "Czech Republic";
+if (locale === "en" && code === "GB") return "UK";
+try {
     return /^[A-Z]{2}$/.test(code)
       ? new Intl.DisplayNames([locale], { type: "region" }).of(code) || country
       : country;
@@ -124,14 +127,13 @@ export function profileCountry(value: unknown, locale: Locale) {
 
 export function profilePhotos(item: Row): string[] {
   const data = row(item.data);
-  const source = [
+  const photos = [
     ...profileList(item.photos),
     ...profileList(data.photos),
-    item.avatarUrl,
-    data.avatarUrl,
-    item.photoUrl,
-    data.photoUrl,
   ];
+  const source = photos.length
+    ? photos
+    : [item.avatarUrl, data.avatarUrl, item.photoUrl, data.photoUrl];
   return [
     ...new Set(
       source
@@ -342,8 +344,9 @@ export function PremiumDialog({
     common = PROFILE_COPY[locale];
   const [subscription, setSubscription] = useState<Row | null>(null);
   const [error, setError] = useState(false);
-  const [tier, setTier] = useState<1 | 2>(1);
-  const pricing = PRICING_TEXT[locale];
+  const [tier, setTier] = useState<0 | 1 | 2>(1);
+  const pricingLocale = locale === "ru" || locale === "es" ? locale : "en";
+  const pricing = PRICING_TEXT[pricingLocale];
   const selectedPlan = pricing.plans[tier];
   const [plan, setPlan] = useState("quarterly");
   const [mobile, setMobile] = useState(false);
@@ -375,6 +378,7 @@ export function PremiumDialog({
       : subscription?.status === "ACTIVE";
   const currentTier = subscription?.tier ?? (active ? "PRO" : "EXPLORE");
   const topTier = active && currentTier === "PRO";
+  const tierChoices = [0, 1, 2] as const;
   const feature = (value: string) =>
     value !== "check" && value !== "" ? (
       <span className="premium-feature-number">{value}</span>
@@ -423,13 +427,13 @@ export function PremiumDialog({
             {error ? (
               <div className="premium-current-plan">
                 <p role="alert">
-                  {
-                    {
-                      en: "Could not load your Premium access.",
-                      ru: "Не удалось загрузить данные Premium.",
-                      es: "No se pudo cargar tu acceso Premium.",
-                    }[locale]
-                  }
+            {
+              {
+                en: "Could not load your Premium access.",
+                ru: "Не удалось загрузить данные Premium.",
+                es: "No se pudo cargar tu acceso Premium.",
+              }[pricingLocale]
+            }
                 </p>
                 <button
                   type="button"
@@ -437,9 +441,9 @@ export function PremiumDialog({
                   onClick={() => setRetry((value) => value + 1)}
                 >
                   {
-                    { en: "Try again", ru: "Повторить", es: "Reintentar" }[
-                      locale
-                    ]
+              { en: "Try again", ru: "Повторить", es: "Reintentar" }[
+                pricingLocale
+              ]
                   }
                 </button>
               </div>
@@ -447,35 +451,36 @@ export function PremiumDialog({
               <div className="loading" role="status" aria-label={c.title}>
                 <span className="loading-spinner" />
               </div>
-            ) : topTier ? (
-              <section className="premium-current-plan">
-                <span>
-                  <Icon name="premiumCheckIcon" />
-                </span>
-                <div>
-                  <strong>{c.alreadyPremium}</strong>
-                  <p>{c.alreadyPremiumDesc}</p>
-                </div>
-              </section>
             ) : (
               <>
+                {active ? (
+                  <section className="premium-current-plan">
+                    <span>
+                      <Icon name="premiumCheckIcon" />
+                    </span>
+                    <div>
+                      <strong>{c.alreadyPremium}</strong>
+                      <p>{c.alreadyPremiumDesc}</p>
+                    </div>
+                  </section>
+                ) : null}
                 <div className="premium-tier-grid" role="group" aria-label={pricing.compareTitle}>
-                  {([1, 2] as const).map((value) => (
+                  {tierChoices.map((value) => (
                     <button type="button" key={value} aria-pressed={tier === value}
                       className={`premium-tier${tier === value ? " selected" : ""}`}
-                      disabled={active && currentTier === "BUILDER" && value === 1}
                       onClick={() => { setTier(value); setPlan(value === 2 ? "monthly" : "quarterly"); }}>
                       {pricing.plans[value].name}
                     </button>
                   ))}
                 </div>
                 <p className="premium-plan-tagline">{selectedPlan.tagline}</p>
-                <div
-                  className={`premium-plan-grid${tier === 2 ? " single-plan" : ""}`}
-                  role="radiogroup"
-                  aria-label={c.title}
-                >
-                  {(tier === 2 ? ["monthly"] : ["monthly", "quarterly"]).map((value) => (
+                {tier === 0 ? null : (
+                  <div
+                    className={`premium-plan-grid${tier === 2 ? " single-plan" : ""}`}
+                    role="radiogroup"
+                    aria-label={c.title}
+                  >
+                    {(tier === 2 ? ["monthly"] : ["monthly", "quarterly"]).map((value) => (
                     <button
                       key={value}
                       type="button"
@@ -518,13 +523,13 @@ export function PremiumDialog({
                         <small>{c.billedQuarterly}</small>
                       )}
                     </button>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
                 <div className="premium-comparison premium-tier-comparison">
                   <div className="premium-comparison-head">
                     <span />
-                    <strong>{pricing.plans[0].name}</strong>
-                    <strong>{selectedPlan.name}</strong>
+                    {pricing.plans.map((plan) => <strong key={plan.key}>{plan.name}</strong>)}
                   </div>
                   {pricing.matrixGroups.map((group) => (
                     <section key={group.name}>
@@ -532,8 +537,9 @@ export function PremiumDialog({
                       {group.rows.map((entry) => (
                         <div className="premium-comparison-row" key={entry.label}>
                           <span className="premium-feature-label"><span>{entry.label}</span></span>
-                          {feature(entry.values[0])}
-                          {feature(entry.values[tier])}
+                          {pricing.plans.map((plan, index) => (
+                            <span className="premium-comparison-cell" key={plan.key}>{feature(entry.values[index])}</span>
+                          ))}
                         </div>
                       ))}
                     </section>
@@ -544,7 +550,7 @@ export function PremiumDialog({
               </>
             )}
           </div>
-          {subscription && !topTier && !error && (
+          {subscription && !error && tier > 0 && !(active && ((currentTier === "BUILDER" && tier === 1) || (currentTier === "PRO" && tier === 2))) && (
             <footer className="premium-paywall-footer">
               <button type="button" onClick={() => setMobile(true)}>
                 {tier === 2 ? `${selectedPlan.cta} — ${selectedPlan.price} / ${c.perMonth}` : plan === "monthly" ? c.getMonthly : c.getQuarterly}
@@ -890,7 +896,7 @@ function ProfileScreen({
       failedDescription: "Comprueba tu conexión e inténtalo de nuevo.",
       retry: "Reintentar",
     },
-  }[locale];
+  }[profileLocaleKey(locale)];
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Row | null>(null);
   const [loadError, setLoadError] = useState<"unavailable" | "failed" | null>(null);
@@ -1044,7 +1050,7 @@ function ProfileScreen({
               kind === "like"
                 ? "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana."
                 : "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
-          }[locale],
+          }[profileLocaleKey(locale)],
         );
       else if (
         failure instanceof ApiError &&
@@ -1065,14 +1071,14 @@ function ProfileScreen({
               kind === "like"
                 ? "Este perfil ya no está disponible."
                 : "No se puede abrir esta conversación ahora mismo.",
-          }[locale],
+          }[profileLocaleKey(locale)],
         );
       else {
         let message = {
           en: "Unable to complete this action. Please try again.",
           ru: "Не удалось выполнить действие. Попробуйте ещё раз.",
           es: "No se pudo completar la acción. Inténtalo de nuevo.",
-        }[locale];
+        }[profileLocaleKey(locale)];
         if (failure instanceof ApiError && failure.status < 500) {
           try {
             const parsed = JSON.parse(failure.message);
@@ -1088,7 +1094,7 @@ function ProfileScreen({
       if (mounted.current) setPending(false);
     }
   };
-  if (loadError === "unavailable") return <NotFoundPage locale={locale} />;
+  if (loadError === "unavailable") return <NotFoundPage locale={profileLocaleKey(locale)} />;
   if (loadError)
     return (
       <section
@@ -1128,7 +1134,7 @@ function ProfileScreen({
             en: "Loading profile",
             ru: "Загрузка профиля",
             es: "Cargando perfil",
-          }[locale]
+          }[profileLocaleKey(locale)]
         }
       >
         <span className="loading-spinner" aria-hidden="true" />
@@ -1158,7 +1164,7 @@ function ProfileScreen({
   const own =
     text(String(session?.user.profileId ?? session?.user.profile_id ?? "")) ===
     text(String(profile.id ?? ""));
-  const verified = bool(profile.isVerified ?? data.isVerified);
+  const verified = bool(profile.isVerified);
   const lookingFor = (
     [
       data.lookingFor,
@@ -1259,7 +1265,7 @@ function ProfileScreen({
       "Estafa",
       "Otro",
     ],
-  }[locale];
+  }[profileLocaleKey(locale)];
   const errorNode = error && (
     <p className="member-profile-error" role="alert">
       {error}
@@ -1402,7 +1408,7 @@ function ProfileScreen({
                               en: "Donor's contact",
                               ru: "Контакт донора",
                               es: "Contacto del donante",
-                            }[locale]
+                            }[profileLocaleKey(locale)]
                           : c.childContact}
                       </h2>
                       <div className="chip-row">

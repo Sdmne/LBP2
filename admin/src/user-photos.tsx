@@ -26,7 +26,7 @@ export function photoDate(value: unknown, timeOnly = false) {
 
 // Same crop geometry used by the member profile avatar editor.
 export function photoCropGeometry(nw: number, nh: number, w: number, h: number, zoom: number, x: number, y: number) {
-  const fit = Math.min(w / nw, h / nh), width = nw * fit, height = nh * fit, size = Math.min(width, height);
+  const size = Math.min(w, h), fit = Math.max(size / nw, size / nh), width = nw * fit, height = nh * fit;
   const panX = Math.max(-(width * zoom - size) / 2, Math.min((width * zoom - size) / 2, x));
   const panY = Math.max(-(height * zoom - size) / 2, Math.min((height * zoom - size) / 2, y));
   const scale = fit * zoom, sourceSize = size / scale;

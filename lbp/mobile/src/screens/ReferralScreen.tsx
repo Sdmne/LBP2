@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { fetchReferralStatus, redeemReferralCode } from "../api/referral";
 import { ApiError } from "../api/client";
@@ -39,7 +39,18 @@ export default function ReferralScreen() {
 
   function handleShare() {
     if (!status) return;
-    Share.share({ message: t("referral.shareMessage", { code: status.code }) }).catch(() => undefined);
+    const message = t("referral.shareMessage", { code: status.code });
+    // Alena: "Здесь нет поделиться" - tapping Share visibly did nothing.
+    // Share.share() used to fail completely silently (bare .catch(() =>
+    // undefined)) on whatever error it hit, so a rejection here - a real
+    // possibility on some Android OEM builds/share-target configurations,
+    // not something this app controls - looked exactly like a dead button.
+    // Falling back to an Alert with the same message means tapping Share
+    // always visibly does SOMETHING, and she can still copy/forward the
+    // code by hand if the native sheet itself won't open on her device.
+    Share.share({ message }).catch(() => {
+      Alert.alert(t("common.shareUnavailableTitle"), message);
+    });
   }
 
   async function handleRedeem() {

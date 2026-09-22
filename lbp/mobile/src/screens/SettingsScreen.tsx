@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import * as Application from "expo-application";
-import * as Updates from "expo-updates";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import * as WebBrowser from "expo-web-browser";
 import { fetchSettings, updateSettings } from "../api/settings";
 import { ApiError } from "../api/client";
 import type { MemberSettings, NotificationSetting } from "../api/types";
@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { Feather } from "@expo/vector-icons";
+import { SITE_BASE_URL } from "../config";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Settings">;
 
@@ -144,6 +145,28 @@ export default function SettingsScreen({ navigation }: Props) {
     { icon: "video", label: t("settings.videoVerification"), onPress: () => navigation.navigate("VideoVerification") },
     { icon: "star", label: t("settings.premium"), onPress: () => navigation.navigate("Subscription") },
     { icon: "message-circle", label: t("settings.aiAdvisor"), onPress: () => navigation.navigate("AiAdvisor") },
+    // Alena: "А где эти новые фичи в кабинете приложение" - the 4 new AI
+    // tools from item 25 (quiz reflection / Ask AI / Agreement Draft /
+    // Family Plan AI-assist) previously only surfaced through the one-shot
+    // What's New screen (WhatsNewScreen.tsx), with no permanent way back to
+    // them once that screen had been dismissed once per device. Family
+    // Plan AI-assist has no standalone entry point of its own (it's a
+    // per-section button inside an existing matched Family Room, not a
+    // screen you navigate to directly - same gap WhatsNewScreen's own
+    // "familyPlanAi" case documents), so it isn't listed here either; the
+    // other three get real, permanent rows using the exact same
+    // navigation/browser-opening logic WhatsNewScreen already uses for them.
+    { icon: "sunrise", label: t("whatsnew.quizAiTitle"), onPress: () => navigation.navigate("CompatibilityQuiz") },
+    {
+      icon: "message-square",
+      label: t("whatsnew.askAiTitle"),
+      onPress: () => void WebBrowser.openBrowserAsync(`${SITE_BASE_URL}/${locale}/tools/ask-ai`),
+    },
+    {
+      icon: "edit-3",
+      label: t("whatsnew.agreementDraftTitle"),
+      onPress: () => void WebBrowser.openBrowserAsync(`${SITE_BASE_URL}/${locale}/tools/agreement-draft`),
+    },
     { icon: "slash", label: t("settings.blockedUsers"), onPress: () => navigation.navigate("BlockedUsers") },
     { icon: "bookmark", label: t("settings.savedListings"), onPress: () => navigation.navigate("Favourites") },
     { icon: "heart", label: t("settings.compatibilityProfile"), onPress: () => navigation.navigate("CompatibilityAnswers") },
@@ -256,7 +279,7 @@ export default function SettingsScreen({ navigation }: Props) {
           downloaded). Updates.updateId is null when running the embedded
           bundle (no OTA update ever applied since install), not an error. */}
       <Text style={styles.versionFooter}>
-        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"}) · {Updates.channel || "embedded"} · {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"}
+        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"})
       </Text>
     </ScrollView>
     </GradientBackground>
