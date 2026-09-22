@@ -38,6 +38,7 @@ type Dict = Record<string, string>;
 
 const en: Dict = {
   "common.cancel": "Cancel",
+  "common.back": "Back",
   "common.done": "Done",
   "common.tryAgain": "Try again",
   "common.locationNotSet": "Location not set",
@@ -120,6 +121,9 @@ const en: Dict = {
   "catalog.messageNeedsPremium": "Messaging someone before you match needs Premium.",
   "catalog.messageRateLimited": "You've reached today's limit for messaging new people.",
   "catalog.messageNeedsVerification": "Verify your profile to start messaging people.",
+  "catalog.likeNeedsVerification": "Verify your profile to start liking people.",
+  "catalog.verifyPromptTitle": "Verification needed",
+  "catalog.verifyPromptCta": "Complete verification",
   "catalog.matched.title": "Wow! Congrats!",
   "catalog.matched.headline": "You're a Match!",
   "catalog.matched.sendMessage": "Send a Message",
@@ -1153,6 +1157,7 @@ const en: Dict = {
 
 const ru: Dict = {
   "common.cancel": "Отмена",
+  "common.back": "Назад",
   "common.done": "Готово",
   "common.tryAgain": "Повторить",
   "common.locationNotSet": "Местоположение не указано",
@@ -1235,6 +1240,9 @@ const ru: Dict = {
   "catalog.messageNeedsPremium": "Чтобы написать до совпадения, нужен Premium.",
   "catalog.messageRateLimited": "Вы достигли сегодняшнего лимита сообщений новым людям.",
   "catalog.messageNeedsVerification": "Подтвердите профиль, чтобы писать людям.",
+  "catalog.likeNeedsVerification": "Подтвердите профиль, чтобы ставить лайки.",
+  "catalog.verifyPromptTitle": "Нужна верификация",
+  "catalog.verifyPromptCta": "Пройти верификацию",
   "catalog.matched.title": "Ого! Поздравляем!",
   "catalog.matched.headline": "Это совпадение!",
   "catalog.matched.sendMessage": "Написать сообщение",
@@ -2265,6 +2273,7 @@ const ru: Dict = {
 
 const es: Dict = {
   "common.cancel": "Cancelar",
+  "common.back": "Atrás",
   "common.done": "Listo",
   "common.tryAgain": "Reintentar",
   "common.locationNotSet": "Ubicación no indicada",
@@ -2347,6 +2356,9 @@ const es: Dict = {
   "catalog.messageNeedsPremium": "Escribir antes de hacer match requiere Premium.",
   "catalog.messageRateLimited": "Has alcanzado el límite diario de mensajes a personas nuevas.",
   "catalog.messageNeedsVerification": "Verifica tu perfil para poder escribir a otras personas.",
+  "catalog.likeNeedsVerification": "Verifica tu perfil para poder dar like a otras personas.",
+  "catalog.verifyPromptTitle": "Verificación necesaria",
+  "catalog.verifyPromptCta": "Completar verificación",
   "catalog.matched.title": "¡Vaya! ¡Felicidades!",
   "catalog.matched.headline": "¡Es un Match!",
   "catalog.matched.sendMessage": "Enviar un mensaje",
@@ -3378,6 +3390,7 @@ const es: Dict = {
 
 const pt: Dict = {
   "common.cancel": "Cancelar",
+  "common.back": "Voltar",
   "common.done": "Concluído",
   "common.tryAgain": "Tentar novamente",
   "common.locationNotSet": "Localização não definida",
@@ -3456,6 +3469,9 @@ const pt: Dict = {
   "catalog.messageNeedsPremium": "Enviar mensagem a alguém antes de haver correspondência requer o Premium.",
   "catalog.messageRateLimited": "Atingiu o limite diário de mensagens a novas pessoas.",
   "catalog.messageNeedsVerification": "Verifique o seu perfil para começar a enviar mensagens.",
+  "catalog.likeNeedsVerification": "Verifique o seu perfil para começar a dar like.",
+  "catalog.verifyPromptTitle": "Verificação necessária",
+  "catalog.verifyPromptCta": "Concluir verificação",
   "catalog.matched.title": "Uau! Parabéns!",
   "catalog.matched.headline": "É uma Correspondência!",
   "catalog.matched.sendMessage": "Enviar Mensagem",
@@ -4466,6 +4482,7 @@ const pt: Dict = {
 
 const fr: Dict = {
   "common.cancel": "Annuler",
+  "common.back": "Retour",
   "common.done": "Terminé",
   "common.tryAgain": "Réessayer",
   "common.locationNotSet": "Localisation non définie",
@@ -4544,6 +4561,9 @@ const fr: Dict = {
   "catalog.messageNeedsPremium": "Pour envoyer un message avant d'avoir matché, il faut Premium.",
   "catalog.messageRateLimited": "Vous avez atteint la limite du jour pour contacter de nouvelles personnes.",
   "catalog.messageNeedsVerification": "Vérifiez votre profil pour commencer à envoyer des messages.",
+  "catalog.likeNeedsVerification": "Vérifiez votre profil pour commencer à aimer des profils.",
+  "catalog.verifyPromptTitle": "Vérification nécessaire",
+  "catalog.verifyPromptCta": "Terminer la vérification",
   "catalog.matched.title": "Waouh ! Félicitations !",
   "catalog.matched.headline": "C'est un match !",
   "catalog.matched.sendMessage": "Envoyer un message",
@@ -5554,6 +5574,7 @@ const fr: Dict = {
 
 const de: Dict = {
   "common.cancel": "Abbrechen",
+  "common.back": "Zurück",
   "common.done": "Fertig",
   "common.tryAgain": "Erneut versuchen",
   "common.locationNotSet": "Standort nicht festgelegt",
@@ -5632,6 +5653,9 @@ const de: Dict = {
   "catalog.messageNeedsPremium": "Um jemanden vor dem Match anzuschreiben, benötigen Sie Premium.",
   "catalog.messageRateLimited": "Sie haben Ihr heutiges Limit für Nachrichten an neue Personen erreicht.",
   "catalog.messageNeedsVerification": "Verifizieren Sie Ihr Profil, um Nachrichten senden zu können.",
+  "catalog.likeNeedsVerification": "Verifizieren Sie Ihr Profil, um andere liken zu können.",
+  "catalog.verifyPromptTitle": "Verifizierung erforderlich",
+  "catalog.verifyPromptCta": "Verifizierung abschließen",
   "catalog.matched.title": "Wow, herzlichen Glückwunsch!",
   "catalog.matched.headline": "Es ist ein Match!",
   "catalog.matched.sendMessage": "Nachricht senden",
@@ -6642,6 +6666,7 @@ const de: Dict = {
 
 const it: Dict = {
   "common.cancel": "Annulla",
+  "common.back": "Indietro",
   "common.done": "Fatto",
   "common.tryAgain": "Riprova",
   "common.locationNotSet": "Posizione non impostata",
@@ -6720,6 +6745,9 @@ const it: Dict = {
   "catalog.messageNeedsPremium": "Per scrivere a qualcuno prima di un match è necessario Premium.",
   "catalog.messageRateLimited": "Ha raggiunto il limite giornaliero di messaggi a nuove persone.",
   "catalog.messageNeedsVerification": "Verifichi il Suo profilo per iniziare a scrivere ad altri membri.",
+  "catalog.likeNeedsVerification": "Verifichi il Suo profilo per iniziare a mettere \"mi piace\".",
+  "catalog.verifyPromptTitle": "Verifica necessaria",
+  "catalog.verifyPromptCta": "Completa la verifica",
   "catalog.matched.title": "Wow! Complimenti!",
   "catalog.matched.headline": "È un match!",
   "catalog.matched.sendMessage": "Invia un messaggio",
@@ -7730,6 +7758,7 @@ const it: Dict = {
 
 const pl: Dict = {
   "common.cancel": "Anuluj",
+  "common.back": "Wstecz",
   "common.done": "Gotowe",
   "common.tryAgain": "Spróbuj ponownie",
   "common.locationNotSet": "Lokalizacja nie ustawiona",
@@ -7808,6 +7837,9 @@ const pl: Dict = {
   "catalog.messageNeedsPremium": "Aby napisać do kogoś przed dopasowaniem, potrzebne jest konto Premium.",
   "catalog.messageRateLimited": "Osiągnięto dzienny limit wiadomości do nowych osób.",
   "catalog.messageNeedsVerification": "Zweryfikuj profil, aby móc pisać wiadomości.",
+  "catalog.likeNeedsVerification": "Zweryfikuj profil, aby polubić innych.",
+  "catalog.verifyPromptTitle": "Wymagana weryfikacja",
+  "catalog.verifyPromptCta": "Zakończ weryfikację",
   "catalog.matched.title": "Wow! Gratulacje!",
   "catalog.matched.headline": "To dopasowanie!",
   "catalog.matched.sendMessage": "Wyślij wiadomość",

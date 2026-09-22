@@ -222,7 +222,7 @@ export default function MeProfileScreen(_props: Props) {
 
   return (
     <GradientBackground variant="soft">
-    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
       {/* Was the only tab still relying on the native headerShown:true
           title bar (a plain white "Profile" bar, no brand mark) while
           Explore/Catalog/Messages all build this same in-content header -

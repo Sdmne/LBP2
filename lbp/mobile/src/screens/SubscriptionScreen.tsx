@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { Feather } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/RootNavigator";
 import { fetchSubscriptionStatus, requestSubscription } from "../api/subscription";
 import type { SubscriptionPlan, RequestableTier } from "../api/subscription";
 import { ApiError } from "../api/client";
@@ -47,6 +50,7 @@ function proPriceNote(period: SubscriptionPlan, t: Translate): string | null {
 
 export default function SubscriptionScreen() {
   const { t, locale } = useI18n();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<SubscriptionPlan>("monthly");
@@ -70,6 +74,20 @@ export default function SubscriptionScreen() {
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // Alena: "сразу должен быть переход на верификацию и окно с выбором
+  // тарифа, это лишнее" - an unverified viewer used to land here (e.g. from
+  // FiltersScreen's "See Premium" upsell) and see a dead-end static
+  // message instead of the plan picker, with no way forward except backing
+  // out and finding Settings -> Verification themselves. Now this screen
+  // just forwards straight to Verification for that case - no intermediate
+  // plan-selection screen at all. replace() (not navigate()) so backing out
+  // of Verification doesn't land the person right back on this dead end.
+  useEffect(() => {
+    if (status?.status === "VERIFICATION_REQUIRED") {
+      navigation.replace("Verification");
+    }
+  }, [status, navigation]);
 
   async function handleRequest(tier: RequestableTier) {
     setRequesting(tier);
@@ -103,10 +121,12 @@ export default function SubscriptionScreen() {
   }
 
   if (status.status === "VERIFICATION_REQUIRED") {
+    // The useEffect above already fires navigation.replace("Verification")
+    // for this case - this is just the brief frame before that navigation
+    // completes, so a spinner instead of the old static dead-end message.
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{t("subscription.verificationRequiredTitle")}</Text>
-        <Text style={styles.body}>{t("subscription.verificationRequiredBody")}</Text>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={colors.pink} />
       </View>
     );
   }

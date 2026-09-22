@@ -118,6 +118,9 @@ export default function SignupScreen({ navigation }: Props) {
             <Text style={styles.secondaryLinkText}>{t("signup.haveAccount")}</Text>
           </Pressable>
 
+          {/* See LoginScreen.tsx's identical spacer - same "pin to bottom
+              inside a ScrollView" fix, same complaint. */}
+          <View style={styles.bottomSpacer} />
           <SocialAuthButtons intent="register" />
         </View>
       </ScrollView>
@@ -135,9 +138,11 @@ function describeSignupError(err: ApiError, t: (key: string) => string): string 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.bg },
   container: { flexGrow: 1, padding: spacing.lg, paddingTop: spacing.xl },
-  logoWrap: { alignItems: "center", marginBottom: spacing.md },
-  // Prototype's .auth-logo img is 190px wide - this was 84px.
-  logo: { width: 230, height: 160 }, // logo-full.png is 900x625 - keep that aspect ratio
+  // Alena: "отступ перед названием страницы отсутствует" - see
+  // LoginScreen.tsx's identical comment.
+  logoWrap: { alignItems: "center", marginBottom: spacing.lg },
+  // Alena: "огромное лого" - see LoginScreen.tsx's identical comment.
+  logo: { width: 148, height: 103 }, // logo-full.png is 900x625 - keep that aspect ratio
   // Prototype's .ob-back: a floating 38x38 circular white pill with a
   // subtle shadow (scr-login/scr-forgot-password in
   // "Claude outputs/app-prototype-inline.html") - this screen had no back
@@ -158,8 +163,11 @@ const styles = StyleSheet.create({
   },
   backText: { fontSize: 22, color: colors.ink, marginTop: -2 },
   title: { fontSize: 25, fontWeight: "800", color: colors.ink, textAlign: "center", marginBottom: spacing.lg },
-  form: { gap: spacing.sm },
-  label: { fontSize: 14.5, fontWeight: "700", color: colors.ink, marginBottom: spacing.xs * 2 },
+  // Alena: "labels ближе к предыдущему полю, чем к своему" - see
+  // LoginScreen.tsx's identical comment/fix.
+  form: { flexGrow: 1 },
+  label: { fontSize: 14.5, fontWeight: "700", color: colors.ink, marginTop: spacing.md, marginBottom: 6 },
+  bottomSpacer: { flexGrow: 1, minHeight: spacing.lg },
   input: {
     height: 52,
     borderWidth: 1,

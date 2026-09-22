@@ -4,6 +4,7 @@ import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
 import { setSessionToken } from "../api/session";
 import type { PublicUser } from "../api/types";
+import { registerForPushNotifications, unregisterCurrentPushToken } from "../utils/pushNotifications";
 // TEMP DISABLED for OTA safety (2026-09-12, item 16): expo-notifications/
 // expo-device are not yet installed and the currently-installed app
 // binaries do not contain that native module - calling the real
@@ -13,10 +14,6 @@ import type { PublicUser } from "../api/types";
 // untouched - re-wire these two lines back to it together with the next
 // `eas build` (after `npx expo install expo-notifications expo-device`).
 // See pending-mobile-tasks.md item 16.
-async function registerForPushNotifications(): Promise<string | null> {
-  return null;
-}
-async function unregisterCurrentPushToken(_token: string | null): Promise<void> {}
 
 const TOKEN_STORAGE_KEY = "lbp_session_token";
 

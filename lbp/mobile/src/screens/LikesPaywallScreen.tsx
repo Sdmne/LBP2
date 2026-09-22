@@ -160,8 +160,14 @@ export default function LikesPaywallScreen({ navigation }: Props) {
               <View key={index} style={[styles.dot, index === slideIndex && styles.dotActive]} />
             ))}
           </View>
+          {/* Alena: "пустое место над кнопкой закрыть" - this is presented
+              as a native-stack "modal" (see RootNavigator's LikesPaywall
+              registration), which on iOS already starts the card below the
+              status bar/notch, so adding the full insets.top on top of
+              that left a second, redundant gap above the X. A small fixed
+              offset instead of insets.top. */}
           <Pressable
-            style={[styles.closeButton, { top: insets.top + spacing.sm }]}
+            style={[styles.closeButton, { top: spacing.md }]}
             onPress={() => navigation.goBack()}
             hitSlop={10}
           >
@@ -172,14 +178,14 @@ export default function LikesPaywallScreen({ navigation }: Props) {
         <View style={styles.body}>
           <Text style={styles.sectionTitle}>{t("subscription.compareTitle")}</Text>
 
-          {/* UPDATE (Sept 2026): originally only the selected card showed
-              its feature list, expanding on tap. Alena's follow-up
-              ("Не видно сразу преимущества () как выбрать") was that
-              comparing all three meant tapping through them one at a
-              time - she picked "развернуть все карточки сразу" (show every
-              card's features at once) so the comparison is visible without
-              any tapping; tapping a card still just selects it for the CTA
-              button below. */}
+          {/* UPDATE (Sept 2026): back to an accordion - all three cards'
+              feature lists shown at once (the previous "expand all"
+              change, see the git history on this block) pushed the Buy
+              button below the fold, which was Alena's exact next
+              complaint ("все опции должны быть видны сразу вместе с
+              кнопкой купить"). Only the selected card's features expand
+              now; tapping a card both selects it (for the CTA below) and
+              opens its own feature list, closing whichever was open. */}
           {PLAN_OPTIONS.map((option, index) => {
             const isSelected = selected === index;
             return (
@@ -206,14 +212,16 @@ export default function LikesPaywallScreen({ navigation }: Props) {
                     color={isSelected ? colors.pink : colors.line}
                   />
                 </View>
-                <View style={styles.planCardDetails}>
-                  {option.featureKeys.map((key) => (
-                    <View key={key} style={styles.planCardDetailRow}>
-                      <Feather name="check" size={14} color={colors.pink} />
-                      <Text style={styles.planCardDetailText}>{t(key)}</Text>
-                    </View>
-                  ))}
-                </View>
+                {isSelected ? (
+                  <View style={styles.planCardDetails}>
+                    {option.featureKeys.map((key) => (
+                      <View key={key} style={styles.planCardDetailRow}>
+                        <Feather name="check" size={14} color={colors.pink} />
+                        <Text style={styles.planCardDetailText}>{t(key)}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </Pressable>
             );
           })}
@@ -264,7 +272,8 @@ export default function LikesPaywallScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   hero: { position: "relative" },
-  slide: { height: 320, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
+  // Alena: "зачем так много места для верхнего слайдера" - was 320.
+  slide: { height: 228, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl },
   slideIconWrap: {
     width: 64,
     height: 64,

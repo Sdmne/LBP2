@@ -188,8 +188,21 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      {/* Alena: "вход с гугл не работает" - most likely cause given this
+          screen's own comments: googleConfigured comes from
+          EXPO_PUBLIC_GOOGLE_*_CLIENT_ID env vars read at BUILD time (see
+          config.ts) - if those weren't set for whatever build she's
+          testing, this button was always silently disabled with no visual
+          difference at all, so tapping it just does nothing with zero
+          feedback. Dimming it when that's the case at least makes "this
+          isn't set up yet" visible instead of looking broken - see the
+          README for what to actually check (the env vars themselves, not
+          this code). */}
       <Pressable
-        style={variant === "sheet" ? styles.googleButtonSheet : styles.googleButton}
+        style={[
+          variant === "sheet" ? styles.googleButtonSheet : styles.googleButton,
+          !googleConfigured && styles.socialButtonDisabled,
+        ]}
         onPress={handleGoogle}
         disabled={!request || !googleConfigured || !firebaseAuth || googleBusy || appleBusy}
       >
@@ -257,6 +270,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgSoft,
   },
   googleButtonText: { color: colors.text, fontSize: 15, fontWeight: "700" },
+  socialButtonDisabled: { opacity: 0.45 },
   appleButton: { height: 48 },
   appleButtonLoading: { backgroundColor: "#000", borderRadius: radius.pill, alignItems: "center", justifyContent: "center" },
 });

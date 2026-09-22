@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
+import { useMyAvatarUrl } from "../hooks/useMyAvatar";
 
 // Prototype's .app-header (see lbp-prototype-source.html): a small brand
 // mark + optional title on the left, a gradient initial-letter avatar on
@@ -40,6 +41,11 @@ export default function AppHeader({ title, onAvatarPress, badgeCount, onBackPres
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const initial = (user?.displayName?.[0] ?? "?").toUpperCase();
+  // Alena: "аватарки по сути нет, хотя фото есть" - this circle always
+  // rendered the gradient-initial fallback, never the person's real photo,
+  // even when they have one. useMyAvatarUrl() is the shared fetch (see
+  // hooks/useMyAvatar.ts) that every AppHeader instance now reads from.
+  const avatarUrl = useMyAvatarUrl();
   return (
     // None of this component's 4 callers (Explore, Catalog, Messages,
     // Knowledge Hub) ever accounted for the status bar - there's no native
@@ -67,14 +73,18 @@ export default function AppHeader({ title, onAvatarPress, badgeCount, onBackPres
             работает". Pressable's onPress is the reliable, documented way
             to make an arbitrary view tappable in RN. */}
         <Pressable hitSlop={8} onPress={onAvatarPress}>
-          <LinearGradient
-            colors={["#4e9bff", "#f070a9"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.avatar}
-          >
-            <Text style={styles.avatarText}>{initial}</Text>
-          </LinearGradient>
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+          ) : (
+            <LinearGradient
+              colors={["#4e9bff", "#f070a9"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.avatar}
+            >
+              <Text style={styles.avatarText}>{initial}</Text>
+            </LinearGradient>
+          )}
         </Pressable>
         {badgeCount ? (
           <View style={styles.badge} pointerEvents="none">
@@ -95,17 +105,22 @@ const styles = StyleSheet.create({
   },
   brand: { flexDirection: "row", alignItems: "center", gap: 8 },
   backButton: { marginRight: -2 },
-  brandIcon: { width: 26, height: 26 },
+  // Alena: "оч маленькое лого слева вверху и справа аватарка, эти элементы
+  // должны быть не меньше кнопок в нижнем меню и кнопки диалога с ИИ" -
+  // were 26/32px against a 22px tab icon inside a much bigger tappable
+  // circle (44-52px elsewhere in the app, e.g. CatalogScreen's own header
+  // circles/the AI chat FAB). Sized up to match that scale.
+  brandIcon: { width: 34, height: 34 },
   brandName: { fontWeight: "500", fontSize: 16, color: "#020817", letterSpacing: -0.2 },
   avatarWrap: { position: "relative" },
   avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  avatarText: { color: "#fff", fontWeight: "700", fontSize: 17 },
   badge: {
     position: "absolute",
     top: -4,

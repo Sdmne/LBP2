@@ -1,5 +1,7 @@
-import React, { useEffect, useLayoutEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { BlurView } from "expo-blur";
+import { Feather } from "@expo/vector-icons";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import {
@@ -48,16 +50,6 @@ export default function FiltersScreen({ navigation, route }: Props) {
   const [picker, setPicker] = useState<
     "country" | "city" | "profileTypes" | "donorTypes" | "lookingFor" | "ethnicity" | "hairColor" | "eyeColor" | "education" | "religion" | null
   >(null);
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <Pressable onPress={() => setFilters(emptyCatalogFilters())} hitSlop={8}>
-          <Text style={styles.resetText}>{t("filters.reset")}</Text>
-        </Pressable>
-      ),
-    });
-  }, [navigation, t]);
 
   useEffect(() => {
     setLoadingCountries(true);
@@ -129,6 +121,27 @@ export default function FiltersScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
+      {/* Alena: "кнопки назад и сбросить лучше сделать без кругов и тени,
+          а просто стрелка назад (можно добавить back) и слово reset" plus
+          "я бы ещё убрала границы и фон в хедере ... прозрачный фон с
+          размытием" - this used to be the native-stack header (a bare
+          Feather arrow for back, a bare "Reset" Text for headerRight - see
+          the removed useLayoutEffect above), which on this build renders
+          those as circular glass buttons that aren't controllable from
+          here. Replaced with an in-screen header we fully control: no
+          circles/shadows, just an arrow + "Back" label and a plain "Reset"
+          word, on a blurred/translucent bar instead of a solid one. */}
+      <View style={[styles.customHeader, { paddingTop: insets.top + spacing.xs }]}>
+        <BlurView intensity={60} tint="light" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(250,250,250,0.55)" }]} />
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={styles.headerBackBtn}>
+          <Feather name="arrow-left" size={19} color={colors.ink} />
+          <Text style={styles.headerBackText}>{t("common.back")}</Text>
+        </Pressable>
+        <Text style={styles.headerTitle} numberOfLines={1}>{t("nav.filtersTitle")}</Text>
+        <Pressable onPress={() => setFilters(emptyCatalogFilters())} hitSlop={8} style={styles.headerResetBtn}>
+          <Text style={styles.resetText}>{t("filters.reset")}</Text>
+        </Pressable>
+      </View>
       <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 100 + insets.bottom }]}>
         <Text style={[styles.label, styles.labelFirst]}>{t("filters.country")}</Text>
         <Pressable style={[styles.field, selectedCountry && styles.fieldFilled]} onPress={() => setPicker("country")}>
@@ -174,9 +187,14 @@ export default function FiltersScreen({ navigation, route }: Props) {
         </Pressable>
         <Text style={styles.note}>{t("filters.lookingForNote")}</Text>
 
+        {/* Alena: "огромные переключатели" - RN's Switch is the plain OS
+            control (iOS's default is 51x31), which next to this screen's
+            14px labels read as oversized. Scaling it down is the standard
+            way to shrink a native Switch (it has no size prop of its own). */}
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>{t("filters.verifiedOnly")}</Text>
           <Switch
+            style={styles.toggleSwitch}
             value={filters.verifiedOnly}
             onValueChange={(value) => setFilters((prev) => ({ ...prev, verifiedOnly: value }))}
           />
@@ -185,6 +203,7 @@ export default function FiltersScreen({ navigation, route }: Props) {
         <View style={styles.toggleRow}>
           <Text style={styles.toggleLabel}>{t("filters.videoVerifiedOnly")}</Text>
           <Switch
+            style={styles.toggleSwitch}
             value={filters.videoVerifiedOnly}
             onValueChange={(value) => setFilters((prev) => ({ ...prev, videoVerifiedOnly: value }))}
           />
@@ -334,8 +353,20 @@ export default function FiltersScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  customHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  headerBackBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
+  headerBackText: { fontSize: 14, fontWeight: "600", color: colors.ink },
+  headerTitle: { position: "absolute", left: 60, right: 60, textAlign: "center", fontSize: 15, fontWeight: "700", color: colors.ink },
+  headerResetBtn: { paddingVertical: 4, paddingLeft: 8 },
   content: { padding: spacing.lg },
   resetText: { color: colors.pink, fontSize: 13.5, fontWeight: "600" },
+  toggleSwitch: { transform: [{ scale: 0.82 }] },
   label: { fontSize: 14, fontWeight: "700", color: colors.ink, marginTop: 13, marginBottom: 7 },
   labelFirst: { marginTop: 0 },
   field: {

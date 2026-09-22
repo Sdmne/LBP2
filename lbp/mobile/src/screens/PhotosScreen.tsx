@@ -9,6 +9,7 @@ import { colors, radius, spacing } from "../theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
 import { Feather } from "@expo/vector-icons";
+import { invalidateMyAvatarCache } from "../hooks/useMyAvatar";
 
 const MAX_PROFILE_PHOTOS = 6; // matches MAX_PROFILE_PHOTOS in main.py at the time this screen was written - confirm it hasn't changed if uploads start rejecting with 409.
 
@@ -94,6 +95,10 @@ export default function PhotosScreen() {
     try {
       const photo = await uploadPhoto(result.assets[0].uri, position);
       setPhotos((prev) => [...prev.filter((p) => p.position !== position), photo]);
+      // AppHeader's avatar circle (see hooks/useMyAvatar.ts) caches this
+      // same position-0 photo - invalidate whenever it changes so the
+      // header picks up the new one instead of showing a stale/no photo.
+      if (position === 0) invalidateMyAvatarCache();
     } catch (err) {
       Alert.alert(t("photos.uploadFailedTitle"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
     } finally {
@@ -132,6 +137,7 @@ export default function PhotosScreen() {
     setUploadingAvatar(true);
     try {
       await uploadAvatar(result.assets[0].uri);
+      invalidateMyAvatarCache();
       await load();
     } catch (err) {
       Alert.alert(t("photos.uploadFailedTitle"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
@@ -144,6 +150,7 @@ export default function PhotosScreen() {
     setSettingPrimaryId(photo.id);
     try {
       await setPrimaryPhoto(photo.id);
+      invalidateMyAvatarCache();
       await load();
     } catch (err) {
       Alert.alert(t("photos.setPrimaryFailedTitle"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
@@ -165,7 +172,10 @@ export default function PhotosScreen() {
             // Deleting the primary photo makes the backend auto-promote the
             // next one in line (see member_delete_photo) - refetch so that
             // shows up here instead of leaving the Primary card empty.
-            if (photo.position === 0) load();
+            if (photo.position === 0) {
+              invalidateMyAvatarCache();
+              load();
+            }
           } catch (err) {
             load(); // out of sync with the server - just refetch
           }

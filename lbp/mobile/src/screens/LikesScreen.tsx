@@ -8,7 +8,7 @@ import { likeProfile, unlikeProfile } from "../api/catalog";
 import { createConversation } from "../api/messages";
 import { fetchLikes, fetchProfileViews, markLikesRead } from "../api/likes";
 import type { LikesResponse, ProfileSummary, ProfileVisitor } from "../api/types";
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing, tabBarClearance } from "../theme";
 import type { MainTabsParamList } from "../navigation/MainTabs";
@@ -317,10 +317,16 @@ export default function LikesScreen({ navigation }: Props) {
       >
         {tabs.map((item) => (
           <Pressable key={item.key} style={[styles.tabChip, tab === item.key && styles.tabChipActive]} onPress={() => setTab(item.key)}>
-            <Text style={[styles.tabChipText, tab === item.key && styles.tabChipTextActive]}>
-              {item.label}
-              {item.badge ? <Text style={styles.tabChipBadge}> {item.badge}</Text> : null}
-            </Text>
+            <Text style={[styles.tabChipText, tab === item.key && styles.tabChipTextActive]}>{item.label}</Text>
+            {/* Alena: "число новых лайков, мэтчев и тд - в баблы" - was
+                plain dimmed text appended inline inside the label's own
+                Text node; a real count bubble needs a View (a Text can't
+                nest one), so the count moved out to its own sibling here. */}
+            {item.badge ? (
+              <View style={[styles.tabChipBadge, tab === item.key && styles.tabChipBadgeActive]}>
+                <Text style={[styles.tabChipBadgeText, tab === item.key && styles.tabChipBadgeTextActive]}>{item.badge}</Text>
+              </View>
+            ) : null}
           </Pressable>
         ))}
       </ScrollView>
@@ -334,7 +340,7 @@ export default function LikesScreen({ navigation }: Props) {
           <Text style={styles.errorText}>{tab === "visitors" ? visitorsError : likesError}</Text>
         </View>
       ) : previewMode && profileItems.length === 0 ? (
-        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}>
+        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
           <View style={styles.premiumBanner}>
             <Text style={styles.premiumTitle}>{t("likes.premiumTitle")}</Text>
             <Text style={styles.premiumBody}>{t("likes.premiumBody")}</Text>
@@ -360,7 +366,7 @@ export default function LikesScreen({ navigation }: Props) {
         <FlatList
           data={profileItems}
           keyExtractor={(item, index) => String(item.id ?? index)}
-          contentContainerStyle={[styles.list, { paddingBottom: spacing.xl + tabBarClearance + insets.bottom }]}
+          contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -504,7 +510,13 @@ export default function LikesScreen({ navigation }: Props) {
                 ) : previewLocked ? (
                   <Feather name="lock" size={16} color={colors.muted} />
                 ) : (
-                  <Text style={styles.heart}>♥</Text>
+                  // Alena: "сделай как в меню снизу иконка только закрасить
+                  // в красный" - the bottom tab bar's Likes icon is
+                  // Feather's "heart" outline (see MainTabs.tsx's
+                  // ICON_NAMES); Feather has no filled variant, so this
+                  // uses Ionicons' "heart" (same simple rounded heart
+                  // shape, solid) instead of the plain "♥" text glyph.
+                  <Ionicons name="heart" size={18} color={colors.pink} />
                 )}
                 {/* No BlurView overlay left here at all, on purpose. It
                     used to be the ONLY thing hiding real data on this row
@@ -535,6 +547,9 @@ const styles = StyleSheet.create({
   tabsScroll: { flexGrow: 0, flexShrink: 0 },
   tabsRow: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 6, alignItems: "center" },
   tabChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     paddingHorizontal: 13,
     paddingVertical: 9,
     borderRadius: radius.pill,
@@ -544,7 +559,21 @@ const styles = StyleSheet.create({
   tabChipActive: { backgroundColor: colors.ink },
   tabChipText: { fontSize: 12.5, fontWeight: "600", color: colors.muted },
   tabChipTextActive: { color: colors.white },
-  tabChipBadge: { opacity: 0.7 },
+  // Count bubble (Alena: "в баблы") - dimmed pink-on-white for an inactive
+  // chip, inverted to white-on-translucent-white for the active (dark)
+  // chip so it stays legible against colors.ink.
+  tabChipBadge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: colors.tintPink,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabChipBadgeActive: { backgroundColor: "rgba(255,255,255,0.22)" },
+  tabChipBadgeText: { fontSize: 11, fontWeight: "700", color: colors.pink },
+  tabChipBadgeTextActive: { color: colors.white },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
   errorText: { color: colors.danger, textAlign: "center" },
   emptyState: { alignItems: "center", paddingTop: 56, paddingHorizontal: spacing.lg },
@@ -575,7 +604,7 @@ const styles = StyleSheet.create({
   premiumBody: { fontSize: 13, color: colors.muted, marginTop: spacing.xs, textAlign: "center", lineHeight: 18 },
   premiumButton: { marginTop: spacing.md, backgroundColor: colors.pink, borderRadius: radius.pill, paddingHorizontal: spacing.lg, paddingVertical: 10 },
   premiumButtonText: { color: colors.white, fontWeight: "700" },
-  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl + tabBarClearance, gap: 10 },
+  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs + tabBarClearance, gap: 10 },
   // Reference mockup (#scr-likes): each row is its own white rounded card
   // floating on the gradient background, not a flat row sharing one long
   // divided list the way it was before - Alena: "белая заливка внутри 2
@@ -610,7 +639,6 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "700", color: colors.ink },
   subtitle: { fontSize: 13, color: colors.muted, marginTop: 2 },
   visitorNote: { fontSize: 12, color: colors.pink, marginTop: 2, fontWeight: "600" },
-  heart: { fontSize: 16, color: colors.pink },
   rowActions: { flexDirection: "row", gap: 8 },
   actionButtonBlue: {
     width: 40,

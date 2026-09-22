@@ -98,6 +98,17 @@ export default function WhatsNewScreen() {
     navigation.replace("MainTabs");
   }
 
+  // Alena: "нажала на 1й пункт посмотреть что к чему, вернуться не
+  // получилось. что там ещё нового я больше никогда не узнаю" - every
+  // branch here used navigation.replace(), which REMOVES WhatsNewScreen
+  // from the stack instead of pushing on top of it. Combined with this
+  // screen only ever being shown once per device (markWhatsNewSeen(), set
+  // the moment any item is tapped), tapping even one item meant it was
+  // gone for good with no way back to see the rest. navigate() instead -
+  // WhatsNewScreen stays underneath, so the native back gesture/button
+  // returns to the list. dismiss() below (the X and "Continue" button)
+  // intentionally keeps replace() - leaving this screen for good is the
+  // whole point there.
   function openItem(key: ItemKey) {
     markWhatsNewSeen();
     switch (key) {
@@ -105,36 +116,36 @@ export default function WhatsNewScreen() {
       // (Boost lives inside the Me tab, message starters inside an
       // existing chat thread) - land on the nearest tab instead.
       case "boost":
-        navigation.replace("MainTabs", { screen: "Me" });
+        navigation.navigate("MainTabs", { screen: "Me" });
         return;
       case "messages":
-        navigation.replace("MainTabs", { screen: "Messages" });
+        navigation.navigate("MainTabs", { screen: "Messages" });
         return;
       case "referral":
-        navigation.replace("Referral");
+        navigation.navigate("Referral");
         return;
       case "safety":
-        navigation.replace("SafetyCheckIn");
+        navigation.navigate("SafetyCheckIn");
         return;
       case "video":
-        navigation.replace("VideoVerification");
+        navigation.navigate("VideoVerification");
         return;
       case "insight":
-        navigation.replace("AiAdvisor");
+        navigation.navigate("AiAdvisor");
         return;
       case "agreement":
         // No generic entry point (needs a matched profileId) - same gap as
         // the website, which falls back to the pricing page.
-        navigation.replace("Subscription");
+        navigation.navigate("Subscription");
         return;
       case "community":
-        navigation.replace("Community");
+        navigation.navigate("Community");
         return;
       case "quizAi":
         // The AI reflection lives inside the existing quiz results screen
         // (a button there, not a separate route) - opening the quiz itself
         // gets a person straight to it either way.
-        navigation.replace("CompatibilityQuiz");
+        navigation.navigate("CompatibilityQuiz");
         return;
       case "askAi":
       case "agreementDraft":
@@ -142,14 +153,16 @@ export default function WhatsNewScreen() {
         // their own (backend/main.py's public/ask-ai and
         // public/agreement-draft, item 25) - open them in the in-app
         // browser, same pattern SubscriptionScreen.tsx already uses for
-        // the Terms/Privacy links.
+        // the Terms/Privacy links. Never removed WhatsNewScreen from the
+        // stack in the first place (no navigation call at all), so it
+        // wasn't affected by this bug, but left as-is either way.
         void WebBrowser.openBrowserAsync(`${SITE_BASE_URL}/${locale}/tools/${key === "askAi" ? "ask-ai" : "agreement-draft"}`);
         return;
       case "familyPlanAi":
         // No generic entry point (needs a matched profileId, same as
         // "agreement" above) - falls back to the pricing page since this
         // is a Family Builder Pro feature.
-        navigation.replace("Subscription");
+        navigation.navigate("Subscription");
         return;
     }
   }

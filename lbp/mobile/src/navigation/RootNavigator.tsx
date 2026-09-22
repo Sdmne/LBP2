@@ -439,7 +439,10 @@ export default function RootNavigator() {
             />
             <Stack.Screen name="Terms" component={TermsScreen} options={{ headerShown: true, title: t("nav.termsTitle") }} />
             <Stack.Screen name="TrustSafety" component={TrustSafetyScreen} options={{ headerShown: true, title: t("nav.trustSafetyTitle") }} />
-            <Stack.Screen name="Filters" component={FiltersScreen} options={{ headerShown: true, title: t("nav.filtersTitle") }} />
+            {/* headerShown: false - FiltersScreen builds its own transparent/
+                blurred header now (Alena: no circles/shadow on back+reset,
+                no solid header background) instead of the native-stack one. */}
+            <Stack.Screen name="Filters" component={FiltersScreen} options={{ headerShown: false }} />
             <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: true, title: t("nav.editProfileTitle") }} />
             <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} options={{ headerShown: true, title: t("nav.deleteAccountTitle") }} />
             {/* headerShown: false - the wizard builds its own in-content header
