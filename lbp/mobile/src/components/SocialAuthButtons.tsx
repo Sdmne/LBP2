@@ -5,7 +5,7 @@ import * as Google from "expo-auth-session/providers/google";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import { GoogleAuthProvider, OAuthProvider, signInWithCredential } from "firebase/auth";
-import { firebaseAuth } from "../firebase";
+import { firebaseAuth, firebaseAuthError } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
 import { useI18n } from "../i18n/I18nContext";
@@ -72,6 +72,27 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   // still gets created, but the button is disabled via `googleConfigured`
   // (the real values) before anyone could ever tap it into using this
   // placeholder for an actual request.
+  // FIX HISTORY (2026-09-22):
+  // Attempt 1 (reverted): by default, when no `redirectUri` is passed,
+  // Google.useAuthRequest() builds its own native redirect as
+  // `${Application.applicationId}:/oauthredirect` - i.e.
+  // "com.letsBeParents.letsBeParents:/oauthredirect". That scheme wasn't
+  // registered as an Android/iOS intent-filter anywhere (only app.json's
+  // top-level `scheme`, "letsbeparents", was), so after Google finished
+  // sign-in nothing on the device knew how to reopen the app - it fell
+  // through to a bare google.com page. First fix attempt overrode
+  // `redirectUri` to use the already-registered "letsbeparents" scheme
+  // instead - that broke a DIFFERENT way: Google's own OAuth policy
+  // rejects single-word custom schemes with no period ("doesn't comply
+  // with Google's OAuth 2.0 policy for keeping apps secure", error 400),
+  // since Google requires reverse-domain-style schemes specifically to
+  // avoid collisions between apps.
+  // Actual fix: keep using the library's default redirect (already valid,
+  // reverse-domain style, since it's built from the applicationId) and
+  // instead register the missing Android intent-filter / iOS
+  // CFBundleURLTypes entry for "com.letsBeParents.letsBeParents" in
+  // app.json, so the OS knows which app to hand the redirect back to.
+  // See app.json's android.intentFilters / ios.infoPlist.CFBundleURLTypes.
   const [request, , promptAsync] = Google.useAuthRequest({
     iosClientId: GOOGLE_OAUTH_CLIENT_IDS.ios || undefined,
     androidClientId: GOOGLE_OAUTH_CLIENT_IDS.android || undefined,
@@ -106,7 +127,26 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   }
 
   async function handleGoogle() {
-    if (!request || !googleConfigured || !firebaseAuth || googleBusy || appleBusy) return;
+    if (googleBusy || appleBusy) return;
+    // TEMPORARY DIAGNOSTIC (2026-09-21): the button was tappable but did
+    // nothing, with zero visible feedback - one of the silent early-return
+    // conditions below was firing. Surfacing exactly which one, instead of
+    // a plain `return`, so the next tap on a real device tells us what to
+    // fix instead of guessing blind with no device log access. Remove this
+    // block (restore the single silent `return` above) once Google sign-in
+    // is confirmed working end to end.
+    if (!firebaseAuth) {
+      setError(`DEBUG: firebaseAuth is null - ${firebaseAuthError || "no error captured"}`);
+      return;
+    }
+    if (!googleConfigured) {
+      setError("DEBUG: googleConfigured is false (no Google client ID for this platform)");
+      return;
+    }
+    if (!request) {
+      setError("DEBUG: request is null (Google.useAuthRequest has no request object yet)");
+      return;
+    }
     setError(null);
     setGoogleBusy(true);
     try {
@@ -188,7 +228,15 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
       <Pressable
         style={variant === "sheet" ? styles.googleButtonSheet : styles.googleButton}
         onPress={handleGoogle}
-        disabled={!request || !googleConfigured || !firebaseAuth || googleBusy || appleBusy}
+        // TEMPORARY DIAGNOSTIC (2026-09-21): was `!request || !googleConfigured
+        // || !firebaseAuth || googleBusy || appleBusy` - blocking the tap
+        // entirely on those conditions meant it did nothing with zero
+        // feedback when one was true. Only still blocking on the busy flags
+        // (to prevent a double-tap firing two concurrent sign-in attempts) so
+        // handleGoogle's own new diagnostic checks above always get to run
+        // and show which condition is actually false. Restore the full
+        // condition here once Google sign-in is confirmed working.
+        disabled={googleBusy || appleBusy}
       >
         {googleBusy ? (
           <ActivityIndicator color={colors.text} />

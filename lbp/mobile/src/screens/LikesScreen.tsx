@@ -38,7 +38,7 @@ type Tab = "likesYou" | "matches" | "myLikes" | "visitors";
 // after seeing a competitor app that never reveals identity at all on the
 // free tier (blurred photo, no name, age number only). The server
 // (member_likes() in main.py) now sends real free-tier preview rows with
-// identityHidden=true, a server-blurred photo, and no name/location - see the
+// identityHidden=true and no name/photo/location at all - see the
 // identityHidden branch in renderItem below. Reduced from 5 to 4 rows per
 // her explicit "оставь только 4 для примера" so the upgrade banner sits
 // higher on screen. Must match LIKES_FREE_PREVIEW_COUNT in main.py.
@@ -418,13 +418,29 @@ export default function LikesScreen({ navigation }: Props) {
                 style={styles.card}
                 onPress={() => (previewLocked ? rootNav.navigate("LikesPaywall") : rootNav.navigate("ProfileDetail", { profileId: item.id }))}
               >
-                {/* Hidden identities receive only a server-blurred image and age. */}
-                {item.avatarUrl ? (
+                {/* item.identityHidden: a real free-tier preview row from
+                    member_likes() (main.py) - name/city/country are never
+                    sent for these at all. avatarUrl, if present, is a
+                    server-blurred copy (blurred_preview_url_for() in
+                    main.py bakes the blur into the image itself with
+                    Pillow before it's ever sent), never the real photo -
+                    unlike the old client-side BlurView approach, there's
+                    no runtime blur step on the client left to fail open
+                    (confirmed happening on at least one Android device:
+                    lock icon showed, blur did not, real photo was fully
+                    visible underneath). Alena's reference screenshot shows
+                    an actual blurred photo, not a blank icon, so the
+                    silhouette below is now only the fallback for a row
+                    with no source photo at all (never had one, or
+                    blurring it failed server-side). */}
+                {item.identityHidden && item.avatarUrl ? (
                   <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
                 ) : item.identityHidden ? (
                   <View style={[styles.avatar, styles.avatarPlaceholder]}>
                     <Feather name="user" size={22} color={colors.muted} />
                   </View>
+                ) : item.avatarUrl ? (
+                  <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
                 ) : (
                   <View style={[styles.avatar, styles.avatarPlaceholder]}>
                     <Text style={styles.avatarPlaceholderText}>{item.displayName?.[0] ?? "?"}</Text>
@@ -483,8 +499,22 @@ export default function LikesScreen({ navigation }: Props) {
                 ) : (
                   <Text style={styles.heart}>♥</Text>
                 )}
-                {/* Premium-only preview mode still needs an overlay; real free
-                    accounts receive an already blurred image from the server. */}
+                {/* Frosted-glass overlay over the WHOLE row (photo AND
+                    name/location text) - not just the photo - since the
+                    point is that no part of who this is should be
+                    readable. Only needed when item.identityHidden is
+                    false - i.e. real premium data being shown through the
+                    "previewAsFree" self-test toggle (see isPreviewingFree
+                    above). A genuinely free-tier row (identityHidden=true)
+                    already has nothing real underneath to blur - the
+                    generic silhouette + age rendered above IS the safe
+                    view, no overlay needed, and skipping BlurView there
+                    also sidesteps the Android rendering gap noted below
+                    entirely for real free users (previously the ONLY
+                    protection for a real free user's data was this blur,
+                    which is exactly what silently failed to render on at
+                    least one Android device/version - lock icon showed,
+                    photo and name did not get obscured). */}
                 {previewLocked && !item.identityHidden ? (
                   <BlurView
                     intensity={50}

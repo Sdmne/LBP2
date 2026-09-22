@@ -14,20 +14,6 @@ export type ApiClient = {
   upload<T>(path: string, body: FormData): Promise<T>;
 };
 
-export function browserDeviceInfo() {
-  const info: Record<string, unknown> = { source: "Web App" };
-  if (typeof window === "undefined") return info;
-  info.screenWidth = window.screen.width;
-  info.screenHeight = window.screen.height;
-  info.pixelRatio = window.devicePixelRatio;
-  try {
-    info.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    // Sign-in remains available when the browser does not expose a timezone.
-  }
-  return info;
-}
-
 export function createApiClient(basePath = "/api"): ApiClient {
   const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
     const headers = new Headers(init.headers || {});
@@ -52,12 +38,7 @@ export function createApiClient(basePath = "/api"): ApiClient {
 
   return {
     get: <T>(path: string) => request<T>(path),
-    post: <T>(path: string, body?: unknown) => request<T>(path, {
-      method: "POST",
-      body: JSON.stringify(/^\/auth\/(login|signup|firebase)$/.test(path)
-        ? { ...(body as Record<string, unknown> ?? {}), deviceInfo: browserDeviceInfo() }
-        : body ?? {}),
-    }),
+    post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
     delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),

@@ -1,10 +1,10 @@
-import React from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 
-export type OptionRow = { value: string; label: string; count?: number };
+export type OptionRow = { value: string; label: string; count?: number; icon?: string };
 
 // Shared full-screen modal list picker - single or multi-select, with an
 // optional loading spinner for async option lists (country/city). Extracted
@@ -18,6 +18,8 @@ export function OptionListPicker({
   selected,
   multi,
   loading,
+  searchable,
+  searchPlaceholder,
   onToggle,
   onClose,
 }: {
@@ -26,11 +28,22 @@ export function OptionListPicker({
   selected: string[];
   multi: boolean;
   loading?: boolean;
+  // Optional live text filter above the list, for option lists too long to
+  // scroll comfortably (e.g. the ~150-row language list) - unused by the
+  // shorter country/city/ethnicity lists that don't pass it.
+  searchable?: boolean;
+  searchPlaceholder?: string;
   onToggle: (value: string) => void;
   onClose: () => void;
 }) {
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
+  const [query, setQuery] = useState("");
+  const filteredOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(q));
+  }, [options, query]);
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -39,20 +52,36 @@ export function OptionListPicker({
           <Text style={styles.done}>{t("filters.done")}</Text>
         </Pressable>
       </View>
+      {searchable ? (
+        <View style={styles.searchWrap}>
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder={searchPlaceholder || t("common.search")}
+            placeholderTextColor={colors.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+      ) : null}
       {loading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={colors.pink} />
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + spacing.lg }}>
-          {options.map((option) => {
+          {filteredOptions.map((option) => {
             const isSelected = selected.includes(option.value);
             return (
               <Pressable key={option.value || "any"} style={styles.row} onPress={() => onToggle(option.value)}>
-                <Text style={styles.rowLabel}>
-                  {option.label}
-                  {typeof option.count === "number" ? ` (${option.count})` : ""}
-                </Text>
+                <View style={styles.rowLabelWrap}>
+                  {option.icon ? <Text style={styles.rowIcon}>{option.icon}</Text> : null}
+                  <Text style={styles.rowLabel}>
+                    {option.label}
+                    {typeof option.count === "number" ? ` (${option.count})` : ""}
+                  </Text>
+                </View>
                 {isSelected ? <Text style={styles.check}>{"✓"}</Text> : null}
               </Pressable>
             );
@@ -72,6 +101,15 @@ export function OptionListPicker({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  searchWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  searchInput: {
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: colors.tintPink,
+    paddingHorizontal: spacing.md,
+    fontSize: 14,
+    color: colors.ink,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -93,6 +131,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
   },
+  rowLabelWrap: { flexDirection: "row", alignItems: "center", flexShrink: 1, gap: 10 },
+  rowIcon: { fontSize: 18 },
   rowLabel: { fontSize: 14.5, color: colors.ink, flexShrink: 1 },
   check: { fontSize: 16, fontWeight: "800", color: colors.pink },
   footer: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.line },

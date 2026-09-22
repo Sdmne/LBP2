@@ -34,6 +34,22 @@ export const CATALOG_ENUM_OPTIONS: Record<string, CatalogLabelOption[]> = {
     { value: "EGG_DONOR", label: "Egg donor" },
     { value: "CO_PARENTING_PARTNER", label: "Co-parenting partner" },
   ],
+  // Added Sept 2026: EditProfileScreen's "Donor's contact" field used to be
+  // free text (confirmed: no enum for this exists anywhere - not in this
+  // app's signup wizard, not on the website's signup or edit forms, not in
+  // the backend's Pydantic model). Alena then sent the actual original
+  // design reference ("Edit questionnaire", step 4 of 4, "What contact do
+  // you want the donor to have with the child?") showing these 4 options
+  // with icons - this list matches that reference exactly, not a guess.
+  // FULL_ANONYMITY is also the exact value already stored on existing
+  // profiles (Alena's own test account included), so old data still
+  // displays correctly once this ships.
+  donorContact: [
+    { value: "FULL_ANONYMITY", label: "Full anonymity", icon: "🔒" },
+    { value: "IDENTITY_DISCLOSED_AT_18", label: "Identity disclosed at 18", icon: "📅" },
+    { value: "LIMITED_CONTACT", label: "Limited contact", icon: "✉️" },
+    { value: "ONGOING_RELATIONSHIP", label: "Ongoing relationship", icon: "🤝" },
+  ],
   // Ported from the website's ui.tsx CATALOG_ENUM_OPTIONS - same values,
   // used by EditProfileScreen's Ethnicity picker and ProfileWizardScreen's
   // Appearance/About steps.

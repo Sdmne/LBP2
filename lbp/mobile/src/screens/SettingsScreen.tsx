@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import * as Application from "expo-application";
+import * as Updates from "expo-updates";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { fetchSettings, updateSettings } from "../api/settings";
 import { ApiError } from "../api/client";
@@ -80,6 +82,30 @@ export default function SettingsScreen({ navigation }: Props) {
     }
   }
 
+  // Incognito browsing - premium roadmap step 2 (step 1 was CatalogScreen's
+  // Rewind button). Pro-only: tapping it on a non-Pro account shows the
+  // same upgrade Alert pattern already used by FiltersScreen's premium-
+  // locked fields and CatalogScreen's Rewind button, instead of a new
+  // custom paywall UI. incognitoAvailable comes from the server (reflects
+  // the CURRENT subscription, not a cached "ever paid" flag), so this
+  // stays accurate even if a Pro subscription lapses without the app being
+  // reopened first.
+  function toggleIncognito(value: boolean) {
+    if (!settings) return;
+    if (!settings.incognitoAvailable) {
+      Alert.alert(t("settings.incognitoLockedTitle"), t("settings.incognitoLockedBody"), [
+        { text: t("filters.premiumLockedCancel"), style: "cancel" },
+        { text: t("filters.premiumLockedUpgrade"), onPress: () => navigation.navigate("Subscription") },
+      ]);
+      return;
+    }
+    setSettings({ ...settings, incognitoEnabled: value });
+    setSavingKey("incognitoEnabled");
+    updateSettings({ incognitoEnabled: value })
+      .catch(() => setSettings((prev) => (prev ? { ...prev, incognitoEnabled: !value } : prev)))
+      .finally(() => setSavingKey(null));
+  }
+
   async function toggleNotification(type: string, value: boolean) {
     if (!settings) return;
     const next: NotificationSetting[] = settings.notificationSettings.map((row) =>
@@ -115,6 +141,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const accountLinks: { icon: keyof typeof Feather.glyphMap; label: string; onPress: () => void }[] = [
     { icon: "image", label: t("settings.photos"), onPress: () => navigation.navigate("Photos") },
     { icon: "check-circle", label: t("settings.verification"), onPress: () => navigation.navigate("Verification") },
+    { icon: "video", label: t("settings.videoVerification"), onPress: () => navigation.navigate("VideoVerification") },
     { icon: "star", label: t("settings.premium"), onPress: () => navigation.navigate("Subscription") },
     { icon: "message-circle", label: t("settings.aiAdvisor"), onPress: () => navigation.navigate("AiAdvisor") },
     { icon: "slash", label: t("settings.blockedUsers"), onPress: () => navigation.navigate("BlockedUsers") },
@@ -132,6 +159,20 @@ export default function SettingsScreen({ navigation }: Props) {
         <View style={styles.row}>
           <Text style={styles.rowLabel}>{t("settings.showInBrowse")}</Text>
           <Switch value={settings.visibleInCatalog} onValueChange={toggleVisible} disabled={savingKey === "visibleInCatalog"} />
+        </View>
+        <View style={[styles.row, styles.rowDivider]}>
+          <View>
+            <View style={styles.rowLabelWithBadge}>
+              <Text style={styles.rowLabel}>{t("settings.incognito")}</Text>
+              {!settings.incognitoAvailable ? <Text style={styles.proBadge}>{t("settings.proBadge")}</Text> : null}
+            </View>
+            <Text style={styles.rowSubLabel}>{t("settings.incognitoSubtitle")}</Text>
+          </View>
+          <Switch
+            value={settings.incognitoAvailable && settings.incognitoEnabled}
+            onValueChange={toggleIncognito}
+            disabled={savingKey === "incognitoEnabled"}
+          />
         </View>
       </View>
 
@@ -198,7 +239,25 @@ export default function SettingsScreen({ navigation }: Props) {
           <Text style={styles.linkText}>{t("settings.termsPrivacy")}</Text>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
+        <Pressable style={styles.menuRow} onPress={() => navigation.navigate("TrustSafety")}>
+          <View style={styles.iconWrap}>
+            <Feather name="shield" size={16} color={colors.pink} />
+          </View>
+          <Text style={styles.linkText}>{t("settings.trustSafety")}</Text>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </View>
+
+      {/* Small diagnostic footer - lets Alena screenshot exactly which build
+          and OTA update her phone is running when something "doesn't
+          update", instead of guessing blind (2026-09-13: the Pro-tier
+          plan-picker fix wasn't showing up after restarts, and there was no
+          way to tell from the app itself whether the update had even been
+          downloaded). Updates.updateId is null when running the embedded
+          bundle (no OTA update ever applied since install), not an error. */}
+      <Text style={styles.versionFooter}>
+        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"}) · {Updates.channel || "embedded"} · {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"}
+      </Text>
     </ScrollView>
     </GradientBackground>
   );
@@ -240,6 +299,18 @@ const styles = StyleSheet.create({
   },
   rowDivider: { borderBottomWidth: 1, borderBottomColor: colors.line },
   rowLabel: { fontSize: 14.5, color: colors.ink },
+  rowLabelWithBadge: { flexDirection: "row", alignItems: "center", gap: 6 },
+  rowSubLabel: { fontSize: 12, color: colors.muted, marginTop: 2, maxWidth: 240 },
+  proBadge: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#8a6d1f",
+    backgroundColor: "#f6e6b8",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    overflow: "hidden",
+  },
   languageRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   languageChip: {
     borderWidth: 1.5,
@@ -262,4 +333,5 @@ const styles = StyleSheet.create({
   iconWrap: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: colors.tintPink },
   linkText: { flex: 1, fontSize: 14.5, color: colors.ink },
   chevron: { fontSize: 18, color: colors.muted },
+  versionFooter: { fontSize: 11, color: colors.muted, textAlign: "center", marginTop: spacing.lg },
 });

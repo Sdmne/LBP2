@@ -13,7 +13,13 @@ import {
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { clearAiAdvisorMessages, fetchAiAdvisorMessages, sendAiAdvisorMessage, type AiAdvisorMessage } from "../api/aiAdvisor";
+import {
+  clearAiAdvisorMessages,
+  fetchAiAdvisorMessages,
+  fetchWeeklyInsight,
+  sendAiAdvisorMessage,
+  type AiAdvisorMessage,
+} from "../api/aiAdvisor";
 import { ApiError } from "../api/client";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
@@ -31,7 +37,7 @@ type Props = NativeStackScreenProps<RootStackParamList, "AiAdvisor">;
 // isn't Premium, "configured: false" means the developer hasn't set
 // ANTHROPIC_API_KEY on the server yet.
 export default function AiAdvisorScreen({}: Props) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState<AiAdvisorMessage[]>([]);
   const [configured, setConfigured] = useState(true);
@@ -40,6 +46,12 @@ export default function AiAdvisorScreen({}: Props) {
   const [needsPremium, setNeedsPremium] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  // Premium roadmap step 10 - personalized weekly insight. Fetched
+  // separately from the chat history and failure is silent (worst
+  // case: no card shows) - it is a nice-to-have on top of the chat,
+  // never something that should block the screen from working.
+  const [weeklyInsight, setWeeklyInsight] = useState<string | null>(null);
+  const [weeklyInsightDismissed, setWeeklyInsightDismissed] = useState(false);
   const listRef = useRef<FlatList<AiAdvisorMessage>>(null);
 
   const load = useCallback(async () => {
@@ -50,6 +62,15 @@ export default function AiAdvisorScreen({}: Props) {
       const res = await fetchAiAdvisorMessages();
       setMessages(res.messages);
       setConfigured(res.configured);
+      if (res.configured) {
+        fetchWeeklyInsight(locale)
+          .then((insightRes) => setWeeklyInsight(insightRes.insight))
+          .catch(() => {
+            // Silent - either not Premium (rare here, since reaching this
+            // point already means the chat itself loaded) or a transient
+            // error. The chat still works fully without this card.
+          });
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         setNeedsPremium(true);
@@ -59,7 +80,7 @@ export default function AiAdvisorScreen({}: Props) {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, locale]);
 
   useEffect(() => {
     void load();
@@ -123,12 +144,26 @@ export default function AiAdvisorScreen({}: Props) {
   }
 
   return (
-    <GradientBackground variant="soft">
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={insets.top + 44}
-      >
+    // BUG FIX (Sep 2026, round 2): Alena kept seeing the composer buried
+    // under the keyboard even after the first fix (behavior="height",
+    // still below) - a fresh screenshot showed only its rounded top edge
+    // peeking above the keyboard, everything else covered. The first fix
+    // copied ChatScreen.tsx's KeyboardAvoidingView props correctly, but
+    // missed a structural difference: ChatScreen's KeyboardAvoidingView IS
+    // the screen's outermost element, while this screen had it nested
+    // one level deeper, inside <GradientBackground>'s LinearGradient. That
+    // extra native view in between the KeyboardAvoidingView and the actual
+    // screen root can throw off Android's own resize/layout pass, since
+    // KeyboardAvoidingView measures/adjusts based on its OWN layout, not
+    // its parent's. Matching ChatScreen's hierarchy exactly - KeyboardAvoidingView
+    // as the true root, GradientBackground moved to be its child instead of
+    // its parent - removes that extra layer without losing the background.
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 44 : 0}
+    >
+      <GradientBackground variant="soft" style={styles.flex}>
         {!configured ? (
           <View style={styles.notice}>
             <Text style={styles.noticeText}>{t("aiAdvisor.notConfigured")}</Text>
@@ -137,6 +172,18 @@ export default function AiAdvisorScreen({}: Props) {
         {error ? (
           <View style={styles.notice}>
             <Text style={styles.noticeText}>{error}</Text>
+          </View>
+        ) : null}
+        {weeklyInsight && !weeklyInsightDismissed ? (
+          <View style={styles.insightCard}>
+            <Feather name="sunrise" size={16} color={colors.pink} />
+            <View style={styles.insightTextWrap}>
+              <Text style={styles.insightLabel}>{t("aiAdvisor.weeklyInsightLabel")}</Text>
+              <Text style={styles.insightText}>{weeklyInsight}</Text>
+            </View>
+            <Pressable onPress={() => setWeeklyInsightDismissed(true)} hitSlop={8}>
+              <Feather name="x" size={16} color={colors.muted} />
+            </Pressable>
           </View>
         ) : null}
         <FlatList
@@ -185,8 +232,8 @@ export default function AiAdvisorScreen({}: Props) {
             <Feather name="send" size={20} color={draft.trim() && configured ? colors.pink : colors.muted} />
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
-    </GradientBackground>
+      </GradientBackground>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -198,6 +245,19 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, color: colors.muted, textAlign: "center", lineHeight: 20, maxWidth: 280 },
   notice: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
   noticeText: { fontSize: 12.5, color: colors.danger, textAlign: "center" },
+  insightCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+  },
+  insightTextWrap: { flex: 1 },
+  insightLabel: { fontSize: 11, fontWeight: "700", color: colors.pink, textTransform: "uppercase", letterSpacing: 0.3 },
+  insightText: { fontSize: 13.5, color: colors.ink, lineHeight: 19, marginTop: 2 },
   list: { padding: spacing.md, flexGrow: 1 },
   bubbleRow: { flexDirection: "row", marginBottom: spacing.sm },
   bubbleRowOut: { justifyContent: "flex-end" },

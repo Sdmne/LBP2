@@ -1,4 +1,15 @@
 import { Platform } from "react-native";
+// KNOWN GAP: expo-device/expo-notifications are not yet in package.json -
+// this sandbox's network egress can't reach the npm registry to resolve
+// the right SDK-57-compatible versions (`npx expo install` needs that
+// lookup), so `npx tsc --noEmit` currently reports these two imports as
+// unresolved. That is the ONLY thing left before this file is real: the
+// developer runs `npx expo install expo-notifications expo-device` (the
+// standard, correct way to add any Expo module - it picks the right
+// version automatically) as step one of building item 16, which will also
+// make these two lines type-check. Every other file in this diff already
+// type-checks clean; this file's logic itself follows the standard,
+// widely-used expo-notifications registration pattern.
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
@@ -18,8 +29,7 @@ import { registerPushToken, unregisterPushToken } from "../api/pushTokens";
 // instead of showing a banner/sound.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
+    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),

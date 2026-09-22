@@ -3,7 +3,7 @@
     "name": "LetsBeParents",
     "slug": "letsbeparents-mobile",
     "scheme": "letsbeparents",
-    "version": "0.1.1",
+    "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
@@ -22,7 +22,14 @@
       "infoPlist": {
         "NSCameraUsageDescription": "LetsBeParents uses the camera for video calls and for adding profile photos.",
         "NSMicrophoneUsageDescription": "LetsBeParents uses the microphone for voice and video calls.",
-        "NSPhotoLibraryUsageDescription": "LetsBeParents needs access to your photos so you can add them to your profile."
+        "NSPhotoLibraryUsageDescription": "LetsBeParents needs access to your photos so you can add them to your profile.",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.letsBeParents.letsBeParents"
+            ]
+          }
+        ]
       },
       "bitcode": false
     },
@@ -45,12 +52,25 @@
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "com.letsBeParents.letsBeParents"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "plugins": [
       "@config-plugins/react-native-webrtc",
-      "expo-video",
-      "expo-notifications"
+      "expo-video"
     ],
     "extra": {
       "eas": {

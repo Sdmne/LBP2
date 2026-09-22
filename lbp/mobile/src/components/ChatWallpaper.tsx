@@ -74,7 +74,14 @@ function buildGrid(width: number, height: number): Cell[] {
 export default function ChatWallpaper({
   children,
   style,
-  variant = "pattern",
+  // Default changed to "rainbow" (Sept 2026): Alena confirmed the
+  // rainbow image IS her chosen wallpaper ("я же присылала какой точно с
+  // радугой файлом") after seeing the app still default to the older
+  // grey icon-grid pattern (her very first, since-superseded choice from
+  // before she supplied real artwork). The icon pattern stays available
+  // as the other picker option, just no longer the default for people who
+  // haven't picked one yet.
+  variant = "rainbow",
 }: {
   children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;

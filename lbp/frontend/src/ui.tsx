@@ -1,14 +1,12 @@
-import { PRICING_TEXT } from "./pricing-reference";
 import {
   FormEvent,
-  type CSSProperties,
   type ReactNode,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { MemberChatCalls } from "./member-chat-calls";
+import { Room, RoomEvent } from "livekit-client";
 import {
   Link,
   Navigate,
@@ -20,21 +18,16 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { ApiError, createApiClient } from "./api";
-import { loadKnowledgeArticles, normalizeArticle } from "./articles";
-import { firstAvatarText, userInitials, UserAvatar } from "./user-avatar";
-import { MemberProfile, profileAge, profileCountry } from "./member-profile";
-import { AccountPremium, MemberAccount, ownProfileData } from "./member-account";
-import { MemberLikes } from "./member-likes";
-import { SlidingTabs } from "./sliding-tabs";
-import { MemberChat, ChatLegacyRedirect } from "./member-chat";
-import { MemberProfileEdit } from "./member-profile-edit";
-import { MemberProfilePhotos, MemberProfileVerification } from "./member-profile-tools";
 import {
   signInWithSocial,
   socialErrorMessage,
   type SocialProvider,
 } from "./firebase-auth";
-import { NotFoundPage } from "./not-found";
+import {
+  referenceArticleMeta,
+  referenceArticleNavigation,
+  referenceKnowledgeArticles,
+} from "./reference-article-meta";
 
 const api = createApiClient("/api");
 type Row = Record<string, unknown>;
@@ -128,7 +121,8 @@ const saveConsentCookies = (
         : "necessary";
   writeCookie("lbp_consent", level, COOKIE_MAX_AGE);
   writeCookie("lbp_consent_id", consentId, COOKIE_MAX_AGE);
-  writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
+  if (preferences) writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
+  else writeCookie("NEXT_LOCALE", "", 0);
 };
 
 const COOKIE_TEXT = {
@@ -150,19 +144,20 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 days", description: "Remembers how you first reached us (first touch), used to understand where new members come from." },
         { name: "lbp_attr_last", duration: "90 days", description: "Remembers how you most recently reached us (last touch), used to understand where new members come from." },
         { name: "lbp_consent_id", duration: "180 days", description: "Anonymous consent reference id, kept as proof of the consent choice you made here (GDPR Art. 7(1))." },
-        { name: "NEXT_LOCALE", duration: "1 year", description: "Remembers the interface language for the localized site." },
       ],
-      preferences: [],
+      preferences: [
+        { name: "NEXT_LOCALE", duration: "1 year", description: "Remembers your selected interface language." },
+      ],
       statistics: [
         { name: "AMP_*", duration: "Up to 1 year", description: "Product analytics — measures usage to improve the product." },
         { name: "AMP_MKTG_*", duration: "Up to 1 year", description: "Product analytics — measures how visitors first reached the app." },
       ],
     },
     about: [
-      "Cookies are small text files that websites use to make a user's experience more efficient.",
-      "The law lets us store cookies that are strictly necessary for this site to work; for everything else we need your permission. Necessary cookies are used on the basis of GDPR Art. 6(1)(f); all other categories are used only with your consent (GDPR Art. 6(1)(a)).",
-      "This site uses different types of cookies; some are set by third-party services that appear on our pages.",
-      "You can change or withdraw your consent at any time using the \"Cookie settings\" link in the footer of the page.",
+      "Cookies are small text files that websites can use to make a user's experience more efficient.",
+      "The law states that we can store cookies on your device if they are strictly necessary for the operation of this site. For all other types of cookies, we need your permission. Necessary cookies are processed under Art. 6(1)(f) GDPR; all other categories only with your consent under Art. 6(1)(a) GDPR.",
+      "This site uses different types of cookies. Some cookies are placed by third-party services that appear on our pages.",
+      "You can change or withdraw your consent at any time from the Cookie settings link at the bottom of the page.",
     ],
     learnMore: "Learn more about how we process personal data in our Privacy Policy.",
     rejectAll: "Reject all",
@@ -188,9 +183,8 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 дней", description: "Запоминает, как вы впервые попали к нам (первое посещение), чтобы понимать, откуда приходят новые участники." },
         { name: "lbp_attr_last", duration: "90 дней", description: "Запоминает, как вы попали к нам в последний раз (последнее посещение), чтобы понимать, откуда приходят новые участники." },
         { name: "lbp_consent_id", duration: "180 дней", description: "Анонимный идентификатор согласия, хранится как подтверждение сделанного вами здесь выбора (GDPR ст. 7(1))." },
-        { name: "NEXT_LOCALE", duration: "1 год", description: "Запоминает язык интерфейса для локализованного сайта." },
       ],
-      preferences: [],
+      preferences: [{ name: "NEXT_LOCALE", duration: "1 год", description: "Запоминает выбранный язык интерфейса." }],
       statistics: [
         { name: "AMP_*", duration: "До 1 года", description: "Продуктовая аналитика — измеряет использование для улучшения продукта." },
         { name: "AMP_MKTG_*", duration: "До 1 года", description: "Продуктовая аналитика — измеряет, как посетители впервые попали в приложение." },
@@ -226,9 +220,8 @@ const COOKIE_TEXT = {
         { name: "lbp_attr_first", duration: "90 días", description: "Recuerda cómo llegaste a nosotros por primera vez (primer contacto), para entender de dónde vienen los nuevos miembros." },
         { name: "lbp_attr_last", duration: "90 días", description: "Recuerda cómo llegaste a nosotros la última vez (último contacto), para entender de dónde vienen los nuevos miembros." },
         { name: "lbp_consent_id", duration: "180 días", description: "Identificador de consentimiento anónimo, conservado como prueba de la elección de consentimiento que hizo aquí (RGPD art. 7(1))." },
-        { name: "NEXT_LOCALE", duration: "1 año", description: "Recuerda el idioma de interfaz para el sitio localizado." },
       ],
-      preferences: [],
+      preferences: [{ name: "NEXT_LOCALE", duration: "1 año", description: "Recuerda el idioma de interfaz que has seleccionado." }],
       statistics: [
         { name: "AMP_*", duration: "Hasta 1 año", description: "Análisis de producto — mide el uso para mejorar el producto." },
         { name: "AMP_MKTG_*", duration: "Hasta 1 año", description: "Análisis de producto — mide cómo llegaron los visitantes a la app por primera vez." },
@@ -278,7 +271,6 @@ function CookieConsent() {
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let live = true;
-    writeCookie("NEXT_LOCALE", locale, COOKIE_LOCALE_MAX_AGE);
     const browserChoice = readConsentCookie();
     const browserConsentId = ensureConsentId();
     setConsentId(browserConsentId);
@@ -342,8 +334,8 @@ function CookieConsent() {
     checked: boolean;
     cookies: CookieDefinition[];
   }> = [
-    { key: "necessary", count: text.cookies.necessary.length, disabled: true, checked: true, cookies: text.cookies.necessary },
-    { key: "preferences", count: text.cookies.preferences.length, checked: preferences, cookies: text.cookies.preferences },
+    { key: "necessary", count: 5, disabled: true, checked: true, cookies: text.cookies.necessary },
+    { key: "preferences", count: 1, checked: preferences, cookies: text.cookies.preferences },
     { key: "statistics", count: 2, checked: statistics, cookies: text.cookies.statistics },
   ];
   const setCategory = (key: CookieCategoryKey, checked: boolean) => {
@@ -495,11 +487,174 @@ function CookieConsent() {
   );
 }
 
-function CallManager({session}:{session:Session}) { return <MemberChatCalls session={session} locale={localeOf()} />; }
+function CallManager({ session }: { session: Session }) {
+  const [incoming, setIncoming] = useState<Row | null>(null);
+  const [active, setActive] = useState<Row | null>(null);
+  const [state, setState] = useState("");
+  const media = useRef<HTMLDivElement | null>(null);
+  const roomRef = useRef<Room | null>(null);
+
+  useEffect(() => {
+    if (!session || active) return;
+    let alive = true;
+    const poll = () => {
+      void api
+        .get<{ items: Row[] }>("/member/calls/incoming")
+        .then((result) => alive && setIncoming(result.items?.[0] || null))
+        .catch(() => undefined);
+    };
+    poll();
+    const timer = window.setInterval(poll, 3000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [session, active]);
+
+  useEffect(() => {
+    if (!active) return;
+    const serverUrl = asText(active.serverUrl);
+    const token = asText(active.token);
+    if (serverUrl === "—" || token === "—") return;
+    let cancelled = false;
+    const room = new Room();
+    roomRef.current = room;
+    room.on(RoomEvent.TrackSubscribed, (track) => {
+      const element = track.attach();
+      element.autoplay = true;
+      if (element instanceof HTMLVideoElement) element.playsInline = true;
+      media.current?.append(element);
+    });
+    room.on(RoomEvent.TrackUnsubscribed, (track) =>
+      track.detach().forEach((element) => element.remove()),
+    );
+    room.on(RoomEvent.Disconnected, () => {
+      if (!cancelled) {
+        setState("Call ended.");
+        setActive(null);
+      }
+    });
+    void (async () => {
+      try {
+        setState("Connecting…");
+        await room.connect(serverUrl, token);
+        await room.localParticipant.setMicrophoneEnabled(true);
+        if (asText(active.callType).toUpperCase() === "VIDEO")
+          await room.localParticipant.setCameraEnabled(true);
+        if (!cancelled) setState("Connected");
+      } catch {
+        if (!cancelled) {
+          setState("Unable to connect the call.");
+          setActive(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      room.disconnect();
+      if (roomRef.current === room) roomRef.current = null;
+      media.current?.replaceChildren();
+    };
+  }, [active]);
+
+  useEffect(() => {
+    const start = (event: Event) => {
+      const call = (event as CustomEvent<Row>).detail;
+      if (call) setActive(call);
+    };
+    window.addEventListener("lbp-call-start", start);
+    return () => window.removeEventListener("lbp-call-start", start);
+  }, []);
+
+  const decline = async () => {
+    if (!incoming?.id) return;
+    const call = incoming;
+    setIncoming(null);
+    try {
+      await api.post(
+        `/member/calls/${encodeURIComponent(asText(call.id))}/decline`,
+      );
+    } catch {
+      setState("Could not decline the call.");
+    }
+  };
+  const accept = async () => {
+    if (!incoming?.id) return;
+    const call = incoming;
+    setIncoming(null);
+    try {
+      const result = await api.post<{ call: Row }>(
+        `/member/calls/${encodeURIComponent(asText(call.id))}/accept`,
+      );
+      setActive(result.call);
+    } catch {
+      setState("This call is no longer available.");
+    }
+  };
+  const end = async () => {
+    if (!active?.id) return;
+    const call = active;
+    setActive(null);
+    roomRef.current?.disconnect();
+    try {
+      await api.post(
+        `/member/calls/${encodeURIComponent(asText(call.id))}/end`,
+      );
+    } catch {
+      setState("The call was closed locally.");
+    }
+  };
+
+  return (
+    <>
+      {incoming && (
+        <div
+          className="call-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Incoming call"
+        >
+          <section>
+            <p className="eyebrow">
+              Incoming {asText(incoming.callType).toLowerCase()} call
+            </p>
+            <h2>{asText(incoming.peerName)}</h2>
+            <div className="actions">
+              <button className="secondary" onClick={() => void decline()}>
+                Decline
+              </button>
+              <button className="primary" onClick={() => void accept()}>
+                Accept
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {active && (
+        <div
+          className="call-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Active call"
+        >
+          <section>
+            <p className="eyebrow">{asText(active.callType)} call</p>
+            <h2>{asText(active.peerName)}</h2>
+            <p className="notice">{state || "Calling…"}</p>
+            <div className="call-media" ref={media} />
+            <button className="secondary" onClick={() => void end()}>
+              End call
+            </button>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
 
 const SITE_TEXT = {
   en: {
-    knowledge: "Knowledge Hub", match: "Find a match", clinics: "Clinics", lawyers: "Lawyers", resources: "Resources & Tools", safety: "Safety", pricing: "Pricing",
+    knowledge: "Knowledge Hub", match: "Find a match", clinics: "Clinics", lawyers: "Lawyers", resources: "Resources", professionals: "Professionals", safety: "Safety", pricing: "Pricing",
     profile: "Profile", signOut: "Sign out", signIn: "Sign in", signUp: "Sign up",
     likes: "Likes", messages: "Messages", notifications: "Member notifications",
     tagline: "Helping every family find their way.", platform: "Platform", company: "Company",
@@ -507,7 +662,7 @@ const SITE_TEXT = {
     rights: "© 2026 LetsBeParents. All rights reserved.", cookies: "Cookie settings", language: "Language",
   },
   ru: {
-    knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы", resources: "Ресурсы и инструменты", safety: "Безопасность", pricing: "Цены",
+    knowledge: "База знаний", match: "Найти пару", clinics: "Клиники", lawyers: "Юристы", resources: "Ресурсы", professionals: "Специалисты", safety: "Безопасность", pricing: "Цены",
     profile: "Мой профиль", signOut: "Выйти", signIn: "Войти", signUp: "Регистрация",
     likes: "Лайки", messages: "Сообщения", notifications: "Уведомления участника",
     tagline: "Помогаем каждой семье найти свой путь.", platform: "Платформа", company: "Компания",
@@ -515,7 +670,7 @@ const SITE_TEXT = {
     rights: "© 2026 LetsBeParents. Все права защищены.", cookies: "Настройки cookies", language: "Язык",
   },
   es: {
-    knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados", resources: "Recursos y herramientas", safety: "Seguridad", pricing: "Precios",
+    knowledge: "Centro de conocimiento", match: "Buscar match", clinics: "Clínicas", lawyers: "Abogados", resources: "Recursos", professionals: "Profesionales", safety: "Seguridad", pricing: "Precios",
     profile: "Mi perfil", signOut: "Cerrar sesión", signIn: "Iniciar sesión", signUp: "Registrarse",
     likes: "Me gusta", messages: "Mensajes", notifications: "Notificaciones de miembro",
     tagline: "Ayudamos a cada familia a encontrar su camino.", platform: "Plataforma", company: "Empresa",
@@ -526,18 +681,17 @@ const SITE_TEXT = {
 
 function MemberCounters({
   session,
-  menu = false,
-  onNavigate,
+  onLogout,
 }: {
   session: Session;
-  menu?: boolean;
-  onNavigate?: () => void;
+  onLogout: () => Promise<void>;
 }) {
   const locale = localeOf();
   const text = SITE_TEXT[locale];
   const [counts, setCounts] = useState<Row>({});
-  const [memberState, setMemberState] = useState<{ userId: unknown; value: Row } | null>(null);
-  const member = memberState?.userId === session?.user.id ? memberState?.value || {} : {};
+  const [member, setMember] = useState<Row>({});
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!session) {
       setCounts({});
@@ -551,25 +705,29 @@ function MemberCounters({
         .catch(() => alive && setCounts({}));
     };
     load();
-    window.addEventListener("lbp-member-changed", load);
     const timer = window.setInterval(load, 30_000);
     return () => {
       alive = false;
-      window.removeEventListener("lbp-member-changed", load);
       window.clearInterval(timer);
     };
   }, [session]);
   useEffect(() => {
     if (!session) return;
     let alive = true;
-    const load = () => { void api
+    void api
       .get<Row>("/member/me")
-      .then((result) => alive && setMemberState({ userId: session.user.id, value: result || {} }))
-      .catch(() => alive && setMemberState(null)); };
-    load();
-    window.addEventListener("lbp-member-changed", load);
-    return () => { alive = false; window.removeEventListener("lbp-member-changed", load); };
+      .then((result) => alive && setMember(result || {}))
+      .catch(() => alive && setMember({}));
+    return () => { alive = false; };
   }, [session]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menuOpen]);
   if (!session) return null;
   const likes = Number(counts.likesYou ?? counts.likesyou ?? member.likesYou ?? member.likesyou ?? 0);
   const messages = Number(counts.unreadMessages ?? counts.unreadmessages ?? member.unreadMessages ?? member.unreadmessages ?? 0);
@@ -577,23 +735,28 @@ function MemberCounters({
   const data = profile.data && typeof profile.data === "object" ? profile.data as Row : {};
   const photos = Array.isArray(member.photos) ? member.photos : [];
   const firstPhoto = photos[0] && typeof photos[0] === "object" ? photos[0] as Row : {};
-  const avatar = firstAvatarText(profile.avatarUrl, profile.avatar_url, data.avatarUrl, data.avatar_url, firstPhoto.publicUrl, firstPhoto.url);
-  const displayName = firstAvatarText(profile.displayName, profile.display_name, data.displayName, data.display_name, session.user.displayName, session.user.display_name, "Member");
+  const avatar = String(profile.avatarUrl ?? data.avatarUrl ?? firstPhoto.publicUrl ?? firstPhoto.url ?? "");
+  const displayName = String(session.user.displayName ?? profile.displayName ?? data.displayName ?? "Member");
+  const initials = displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   return (
-    <div className={menu ? "member-menu-counters" : "member-header-actions"} aria-label={text.notifications}>
-      <Link className={menu ? "member-menu-action" : "member-icon-link"} role={menu ? "menuitem" : undefined} onClick={onNavigate} to={`/${locale}/likes`} aria-label={text.likes} aria-current={window.location.pathname === `/${locale}/likes` ? "page" : undefined}>
+    <div className="member-header-actions" aria-label={text.notifications}>
+      <Link className="member-icon-link" to={`/${locale}/likes`} aria-label={text.likes}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z" /><path d="M7 10v12" /></svg>
-        {menu && <span>{text.likes}</span>}
         {likes > 0 ? <b>{likes > 99 ? "99+" : likes}</b> : null}
       </Link>
-      <Link className={menu ? "member-menu-action" : "member-icon-link"} role={menu ? "menuitem" : undefined} onClick={onNavigate} to={`/${locale}/chat`} aria-label={text.messages} aria-current={new RegExp(`^/${locale}/(?:messages|chat)(?:/|$)`).test(window.location.pathname) ? "page" : undefined}>
+      <Link className="member-icon-link" to={`/${locale}/messages`} aria-label={text.messages}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /></svg>
-        {menu && <span>{text.messages}</span>}
         {messages > 0 ? <b>{messages > 99 ? "99+" : messages}</b> : null}
       </Link>
-      {!menu && <Link className="member-avatar-button" aria-label={text.profile} to={`/${locale}/profile`}>
-          <UserAvatar src={avatar} name={displayName} fallbackClassName="member-avatar-initials" />
-      </Link>}
+      <div className="member-avatar-menu" ref={menuRef}>
+        <button type="button" className="member-avatar-button" aria-label={text.profile} aria-expanded={menuOpen} onClick={() => setMenuOpen((value) => !value)}>
+          {avatar ? <img src={avatar} alt="" /> : <span>{initials}</span>}
+        </button>
+        {menuOpen ? <div className="member-avatar-dropdown">
+          <Link onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
+          <button type="button" onClick={() => void onLogout()}>{text.signOut}</button>
+        </div> : null}
+      </div>
     </div>
   );
 }
@@ -602,74 +765,32 @@ function Shell({
   session,
   onLogout,
   children,
-  pendingSession = false,
 }: {
   session: Session;
   onLogout: () => Promise<void>;
   children: React.ReactNode;
-  pendingSession?: boolean;
 }) {
-  const { pathname } = useLocation();
   const locale = localeOf();
   const text = SITE_TEXT[locale];
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const navigationRef = useRef<HTMLElement>(null);
-  const focusMenuOnOpen = useRef<"first" | "last" | null>(null);
   const [headerScrolled, setHeaderScrolled] = useState(() => window.scrollY > 24);
-  const isLanding = new RegExp(`^/${locale}/?$`).test(pathname);
-  const isAuth = new RegExp(`^/${locale}/auth/`).test(pathname);
-  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(pathname);
-  const isChat = new RegExp(`^/${locale}/(?:chat|messages)(?:/|$)`).test(pathname);
-  const isProfileTool = new RegExp(`^/${locale}/(?:profile/(?:edit|photos|verification)|photos|verification)/?$`).test(pathname);
-  const hasMemberMenu = Boolean(session);
-  const isAccount = new RegExp(`^/${locale}/(?:profile(?:/(?:notifications|blocked))?|likes)/?$`).test(pathname);
-  const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(pathname);
-  const isCatalog = !isProfileTool && new RegExp(`^/${locale}/(?:catalog(?:/|$)|profile/[^/]+/?$)`).test(pathname);
-  const isMemberDetail = !isProfileTool && new RegExp(`^/${locale}/(?:catalog|profile)/[^/]+/?$`).test(pathname);
-  const isClinics = new RegExp(`^/${locale}/clinics(?:/|$)`).test(pathname);
-  const isLawyers = new RegExp(`^/${locale}/lawyers(?:/|$)`).test(pathname);
+  const isLanding = new RegExp(`^/${locale}/?$`).test(window.location.pathname);
+  const isAuth = new RegExp(`^/${locale}/auth/`).test(window.location.pathname);
+  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(window.location.pathname);
+  const isKnowledge = new RegExp(`^/${locale}/knowledge-hub(?:/|$)`).test(window.location.pathname);
+  const isCatalog = new RegExp(`^/${locale}/catalog(?:/|$)`).test(window.location.pathname);
+  const isClinics = new RegExp(`^/${locale}/clinics(?:/|$)`).test(window.location.pathname);
+  const isLawyers = new RegExp(`^/${locale}/lawyers(?:/|$)`).test(window.location.pathname);
   const isDirectory = isClinics || isLawyers;
-  const isDirectoryDetail = new RegExp(`^/${locale}/(?:clinics|lawyers)/[^/]+/?$`).test(pathname);
-  const isArticle = new RegExp(`^/${locale}/knowledge-hub/[^/]+/?$`).test(pathname);
-  const isContact = new RegExp(`^/${locale}/contact/?$`).test(pathname);
-  const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(pathname);
-  const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(pathname);
-  const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(pathname);
-  const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(pathname);
-  const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(pathname);
-  const menuItems = () => Array.from(navigationRef.current?.querySelectorAll<HTMLElement>("a, button") || [])
-    .filter((item) => item.getClientRects().length > 0 && !item.hasAttribute("disabled"));
-  const focusMenuEdge = (edge: "first" | "last") => {
-    const items = menuItems();
-    (edge === "last" ? items[items.length - 1] : items[0])?.focus();
-  };
-  useEffect(() => {
-    if (!menuOpen) return;
-    if (focusMenuOnOpen.current) {
-      focusMenuEdge(focusMenuOnOpen.current);
-      focusMenuOnOpen.current = null;
-    }
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Element && !event.target.closest(".mobile-menu, .web-header nav")) setMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setMenuOpen(false);
-      menuTriggerRef.current?.focus();
-    };
-    const closeOnDesktop = () => {
-      if (window.innerWidth >= 1280) setMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("resize", closeOnDesktop);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("resize", closeOnDesktop);
-    };
-  }, [hasMemberMenu, menuOpen]);
+  const isDirectoryDetail = new RegExp(`^/${locale}/(?:clinics|lawyers)/[^/]+/?$`).test(window.location.pathname);
+  const isArticle = new RegExp(`^/${locale}/knowledge-hub/[^/]+/?$`).test(window.location.pathname);
+  const isContact = new RegExp(`^/${locale}/contact/?$`).test(window.location.pathname);
+  const isTrustSafety = new RegExp(`^/${locale}/trust-safety/?$`).test(window.location.pathname);
+  const isPricing = new RegExp(`^/${locale}/pricing/?$`).test(window.location.pathname);
+  const isResources = new RegExp(`^/${locale}/resources(?:/|$)`).test(window.location.pathname);
+  const isProfessionals = new RegExp(`^/${locale}/professionals(?:/|$)`).test(window.location.pathname);
+  const isFindYourPath = new RegExp(`^/${locale}/find-your-path(?:/|$)`).test(window.location.pathname);
+  const isStaticPage = new RegExp(`^/${locale}/pages/[^/]+/?$`).test(window.location.pathname);
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
@@ -700,86 +821,65 @@ function Shell({
     window.location.assign(`/${parts.join("/")}${window.location.search}${window.location.hash}`);
   };
   const navigation = (
-    <nav ref={navigationRef} id="public-site-navigation" className={menuOpen ? "open" : ""} role={menuOpen ? "menu" : undefined} aria-label={locale === "ru" ? "Основная навигация" : locale === "es" ? "Navegación principal" : "Primary navigation"}
-      onKeyDown={(event) => {
-        if (!menuOpen || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const items = menuItems();
-        const current = items.findIndex((item) => item === document.activeElement);
-        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
-          : event.key === "ArrowDown" ? (current + 1) % items.length
-          : current <= 0 ? items.length - 1 : current - 1;
-        items[next]?.focus();
-      }}>
-      <Link role={menuOpen ? "menuitem" : undefined} className={isKnowledge ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/knowledge-hub`}>
+    <nav className={menuOpen ? "open" : ""}>
+      <Link className={isKnowledge ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/knowledge-hub`}>
         {text.knowledge}
       </Link>
-      <Link role={menuOpen ? "menuitem" : undefined} className={isCatalog ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/catalog`}>
-        {text.match}
-      </Link>
-      <Link role={menuOpen ? "menuitem" : undefined} className={isClinics ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/clinics`}>
+      <Link className={isClinics ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/clinics`}>
         {text.clinics}
       </Link>
-      <Link role={menuOpen ? "menuitem" : undefined} className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
+      <Link className={isLawyers ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/lawyers`}>
         {text.lawyers}
       </Link>
-      <Link role={menuOpen ? "menuitem" : undefined} className={isResources || isFindYourPath ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
+      <Link className={isResources ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/resources`}>
         {text.resources}
       </Link>
-      <Link role={menuOpen ? "menuitem" : undefined} className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
+      <Link className={isProfessionals ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/professionals`}>
+        {text.professionals}
+      </Link>
+      <Link className={isTrustSafety ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/trust-safety`}>
         {text.safety}
       </Link>
-      <Link role={menuOpen ? "menuitem" : undefined} className={isPricing ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/pricing`}>
+      <Link className={isPricing ? "active" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/pricing`}>
         {text.pricing}
       </Link>
       <div className="mobile-nav-actions">
-        {pendingSession ? null : session && hasMemberMenu ? (menuOpen && <MemberCounters session={session} menu onNavigate={() => setMenuOpen(false)} />) : session ? (
+        {session ? (
           <>
-            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
-            <button role={menuOpen ? "menuitem" : undefined} className="plain-button" onClick={() => void onLogout()}>{text.signOut}</button>
+            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/profile`}>{text.profile}</Link>
+            <button className="plain-button" onClick={() => void onLogout()}>{text.signOut}</button>
           </>
         ) : (
           <>
-            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/auth/login`}>{text.signIn}</Link>
-            <Link role={menuOpen ? "menuitem" : undefined} onClick={() => setMenuOpen(false)} to={`/${locale}/auth/register`}>{text.signUp}</Link>
+            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/auth/login`}>{text.signIn}</Link>
+            <Link onClick={() => setMenuOpen(false)} to={`/${locale}/auth/register`}>{text.signUp}</Link>
           </>
         )}
       </div>
     </nav>
   );
   return (
-    <div className={`web-app${isChat ? " chat-app" : ""}${isProfileTool ? " profile-tools-app" : ""}`}>
-      <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
+    <div className="web-app">
+      {!isStandaloneAuth && <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
         <div className="web-header-inner">
           <Link className="logo" to={`/${locale}`} aria-label="LetsBeParents">
             <img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" />
           </Link>
           {navigation}
           <button
-            ref={menuTriggerRef}
-            className={`mobile-menu${session || pendingSession ? " has-member-actions" : ""}`}
+            className={`mobile-menu${session ? " has-member-actions" : ""}`}
             type="button"
             aria-label="Toggle menu"
             aria-expanded={menuOpen}
-            aria-controls="public-site-navigation"
-            aria-haspopup="menu"
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-              event.preventDefault();
-              const edge = event.key === "ArrowUp" ? "last" : "first";
-              if (menuOpen) focusMenuEdge(edge);
-              else {
-                focusMenuOnOpen.current = edge;
-                setMenuOpen(true);
-              }
-            }}
             onClick={() => setMenuOpen((value) => !value)}
           >
-            {hasMemberMenu ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16" /><path d="M4 12h16" /><path d="M4 19h16" /></svg> : <><span /><span /><span /></>}
+            <span />
+            <span />
+            <span />
           </button>
-          {pendingSession ? <div className="header-actions pending-header-actions" aria-hidden="true" /> : session ? (
+          {session ? (
             <div className="header-actions member-header-actions-wrap">
-              <MemberCounters session={session} />
+              <MemberCounters session={session} onLogout={onLogout} />
             </div>
           ) : (
             <div className="header-actions">
@@ -792,8 +892,8 @@ function Shell({
             </div>
           )}
         </div>
-      </header>
-      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isMemberDetail ? " member-profile-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isStaticPage ? " static-main" : ""}${isAccount ? " account-main" : ""}`}>{children}</main>
+      </header>}
+      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isProfessionals ? " professionals-main" : ""}${isStaticPage ? " static-main" : ""}`}>{children}</main>
       <footer className="web-footer">
         <div className="web-footer-inner">
           <div className="footer-brand">
@@ -801,15 +901,24 @@ function Shell({
               <img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" />
             </Link>
             <p>{text.tagline}</p>
+            <div className="footer-store-links">
+              <a href="https://letsbeparents.onelink.me/wg1x?pid=website&c=footer" aria-label="Download on the App Store">
+                <img src="/web-static/images/badges/appstore-white-b32c87ae.png" alt="Download on the App Store" />
+              </a>
+              <a href="https://letsbeparents.onelink.me/wg1x?pid=website&c=footer" aria-label="Get it on Google Play">
+                <img src="/web-static/images/badges/googleplay-white-7aebf78f.png" alt="Get it on Google Play" />
+              </a>
+            </div>
           </div>
           <div className="footer-column">
             <h3>{text.platform}</h3>
             <nav>
               <Link to={`/${locale}/knowledge-hub`}>{text.knowledge}</Link>
-              <Link to={`/${locale}/catalog`}>{text.match}</Link>
               <Link to={`/${locale}/clinics`}>{text.clinics}</Link>
               <Link to={`/${locale}/lawyers`}>{text.lawyers}</Link>
               <Link to={`/${locale}/resources`}>{text.resources}</Link>
+              <Link to={`/${locale}/professionals`}>{text.professionals}</Link>
+              <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
               <Link to={`/${locale}/pricing`}>{text.pricing}</Link>
             </nav>
           </div>
@@ -817,7 +926,6 @@ function Shell({
             <h3>{text.company}</h3>
             <nav>
               <Link to={`/${locale}/contact`}>{text.contact}</Link>
-              <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
               <Link to={`/${locale}/pages/terms-of-use`}>{text.terms}</Link>
               <Link to={`/${locale}/pages/privacy-policy`}>{text.privacy}</Link>
             </nav>
@@ -1034,11 +1142,11 @@ function Home() {
     return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>;
   };
   const pathImage = (key: string) => {
-    if (key === "donor") return "/web-static/images/landing/path-donor-0dd2f3af.jpg";
-    if (key === "partner") return "/web-static/images/landing/path-partner-1df6d179.jpg";
-    if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor-bb85903a.jpg";
-    if (key === "exploring") return "/web-static/images/landing/path-exploring-607ba1f7.jpg";
-    return "/web-static/images/landing/path-coparent-50e0ccf3.png";
+    if (key === "donor") return "/web-static/images/landing/path-donor.jpg";
+    if (key === "partner") return "/web-static/images/landing/path-partner.jpg";
+    if (key === "couple-donor") return "/web-static/images/landing/path-couple-donor.jpg";
+    if (key === "exploring") return "/web-static/images/landing/path-exploring.jpg";
+    return "/web-static/images/landing/path-coparent.jpg";
   };
   const features = text.features.map((feature, index) => ({ ...feature, image: LANDING_FEATURE_IMAGES[index] }));
   return (
@@ -1258,9 +1366,8 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         email,
         password,
       });
-      const nextSession = await refreshSession({ user: response.user });
-      onLogin(nextSession);
-      navigate(`/${locale}/${nextSession?.user.emailVerified === false ? "auth/verify-email" : "catalog"}`);
+      onLogin(await refreshSession({ user: response.user }));
+      navigate(`/${locale}/catalog`);
     } catch {
       setError(copy.signInError);
     } finally {
@@ -1361,7 +1468,7 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
         locale,
       });
       onLogin(await refreshSession({ user: response.user }));
-      navigate(`/${locale}/auth/verify-email`);
+      navigate(`/${locale}/profile`);
     } catch {
       setError(
         copy.createError,
@@ -1523,14 +1630,10 @@ const standaloneAuthCopy = {
     resetDone: "Password updated. You can now sign in.",
     wait: "Please wait...",
     verifyTitle: "Confirm your email",
-    verifyLead: "Enter the 6-digit code from your email. The confirmation link in the same message also works.",
+    verifyLead: "Open the link in your email, or request a new confirmation message.",
     resend: "Resend email",
     verifySent: "We sent a confirmation link to your email.",
     verifyDone: "Email confirmed. You can continue to LetsBeParents.",
-    verifyCode: "6-digit code",
-    verifyCodePlaceholder: "000000",
-    verifyCodeButton: "Verify email",
-    invalidCode: "The code is invalid or has expired.",
     alreadyVerified: "Your email is already confirmed.",
     recentlySent: "A confirmation email was sent recently. Check your inbox.",
     deliveryFailed: "The email could not be delivered. Please try again later.",
@@ -1549,14 +1652,10 @@ const standaloneAuthCopy = {
     resetDone: "Пароль изменён. Теперь можно войти.",
     wait: "Подождите...",
     verifyTitle: "Подтвердите email",
-    verifyLead: "Введите 6-значный код из письма. Ссылка для подтверждения в том же письме тоже работает.",
+    verifyLead: "Откройте ссылку из письма или запросите новое письмо для подтверждения.",
     resend: "Отправить повторно",
     verifySent: "Мы отправили ссылку для подтверждения на вашу почту.",
     verifyDone: "Email подтверждён. Можно продолжить работу с LetsBeParents.",
-    verifyCode: "6-значный код",
-    verifyCodePlaceholder: "000000",
-    verifyCodeButton: "Подтвердить email",
-    invalidCode: "Код неверен или срок его действия истёк.",
     alreadyVerified: "Ваш email уже подтверждён.",
     recentlySent: "Письмо уже было недавно отправлено. Проверьте почту.",
     deliveryFailed: "Не удалось доставить письмо. Повторите попытку позже.",
@@ -1575,14 +1674,10 @@ const standaloneAuthCopy = {
     resetDone: "Contraseña actualizada. Ya puedes iniciar sesión.",
     wait: "Espera...",
     verifyTitle: "Confirma tu correo",
-    verifyLead: "Introduce el código de 6 dígitos del correo. El enlace del mismo mensaje también funciona.",
+    verifyLead: "Abre el enlace del correo o solicita un nuevo mensaje de confirmación.",
     resend: "Reenviar correo",
     verifySent: "Hemos enviado un enlace de confirmación a tu correo.",
     verifyDone: "Correo confirmado. Ya puedes continuar en LetsBeParents.",
-    verifyCode: "Código de 6 dígitos",
-    verifyCodePlaceholder: "000000",
-    verifyCodeButton: "Verificar correo",
-    invalidCode: "El código no es válido o ha caducado.",
     alreadyVerified: "Tu correo ya está confirmado.",
     recentlySent: "El correo de confirmación se envió hace poco. Revisa tu bandeja de entrada.",
     deliveryFailed: "No se pudo enviar el correo. Inténtalo de nuevo más tarde.",
@@ -1662,7 +1757,6 @@ function VerifyEmail() {
   );
   const [busy, setBusy] = useState(Boolean(token));
   const [confirmed, setConfirmed] = useState(false);
-  const [code, setCode] = useState("");
   useEffect(() => {
     if (!token) return;
     window.history.replaceState(null, "", window.location.pathname);
@@ -1697,23 +1791,6 @@ function VerifyEmail() {
       setBusy(false);
     }
   };
-  const confirmCode = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!/^\d{6}$/.test(code)) {
-      setStatus(copy.invalidCode);
-      return;
-    }
-    setBusy(true);
-    try {
-      await api.post("/auth/email-verification/code/confirm", { code });
-      setConfirmed(true);
-      setStatus(copy.verifyDone);
-    } catch {
-      setStatus(copy.invalidCode);
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <section className="standalone-auth-page">
       <div className="standalone-auth-visual"><img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" /></div>
@@ -1721,29 +1798,10 @@ function VerifyEmail() {
         <div className="standalone-auth-form-card">
           <h1>{copy.verifyTitle}</h1>
           <p>{copy.verifyLead}</p>
-          {confirmed ? (
-            <form onSubmit={(event) => { event.preventDefault(); navigate(`/${locale}/catalog`); }}>
-              <button className="standalone-auth-primary">{copy.continue}</button>
-            </form>
-          ) : (
-            <form onSubmit={confirmCode}>
-              <label htmlFor="verify-email-code">{copy.verifyCode}</label>
-              <input
-                id="verify-email-code"
-                className="standalone-auth-code"
-                value={code}
-                onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                placeholder={copy.verifyCodePlaceholder}
-                maxLength={6}
-                autoFocus={!token}
-              />
-              <button className="standalone-auth-primary" disabled={busy || code.length !== 6}>{busy ? copy.wait : copy.verifyCodeButton}</button>
-            </form>
-          )}
-          {!confirmed && <button className="standalone-auth-resend" type="button" disabled={busy} onClick={() => void resend()}>{copy.resend}</button>}
-          <p className="standalone-auth-message" data-kind={status === copy.invalid || status === copy.invalidCode || status === copy.deliveryFailed || status === copy.generic ? "error" : "info"}>{status}</p>
+          <form onSubmit={(event) => { event.preventDefault(); if (confirmed) navigate(`/${locale}/catalog`); else void resend(); }}>
+            <button className="standalone-auth-primary" disabled={busy}>{busy ? copy.wait : confirmed ? copy.continue : copy.resend}</button>
+          </form>
+          <p className="standalone-auth-message" data-kind={status === copy.invalid || status === copy.deliveryFailed || status === copy.generic ? "error" : "info"}>{status}</p>
           <StandaloneAuthBackLink locale={locale} label={copy.back} />
         </div>
       </div>
@@ -2453,41 +2511,35 @@ const CATALOG_COPY = {
   en: {
     browse: "Browse profiles", collections: "Collections", all: "All", day: "day", days: "days", month: "month",
     filters: "Filters", allFilters: "All filters", closeFilters: "Close filters", clear: "Clear all", apply: "Apply filters",
-    country: "Country", city: "City", anyCountry: "Any country", cityFirst: "Select a single country to filter by city", cityPlaceholder: "Start typing a city name...",
+    country: "Country", city: "City", anyCountry: "Any country", cityFirst: "Select a single country to filter by city",
     profileType: "Profile type", donor: "Donor", lookingFor: "Looking for", allTypes: "All types",
     matches: "Matches profiles that fit any of these options", verified: "Verified only", age: "Age", from: "From", to: "To",
     ethnicity: "Ethnicity", hair: "Hair color", eye: "Eye color", education: "Education", religion: "Religion",
-    premium: "Premium only", premiumTitle: "Premium filters", premiumText: "Choose Premium to unlock advanced filters and find more compatible profiles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Close Premium offer", search: "Search...", none: "No options found", noProfiles: "No profiles found", noProfilesHelp: "Try changing or clearing the filters.",
+    premium: "Premium only", search: "Search...", none: "No options found", noProfiles: "No profiles found", noProfilesHelp: "Try changing or clearing the filters.",
     loadMore: "Load more", loading: "Loading ...", locationHidden: "Location hidden", message: "Message", like: "Like", liked: "Liked",
     ageError: "Minimum age cannot be greater than maximum age.", failed: "Could not load the catalog.", actionFailed: "This action could not be completed.",
-    dailyLikeLimit: "You have reached today's like limit. You can like more profiles tomorrow.", dailyChatLimit: "You have reached today's new chat limit. You can start more chats tomorrow.",
-    profileUnavailable: "This profile is no longer available.", chatUnavailable: "This conversation cannot be opened right now.",
   },
   ru: {
     browse: "Каталог профилей", collections: "Коллекции", all: "Все", day: "день", days: "дней", month: "месяц",
     filters: "Фильтры", allFilters: "Все фильтры", closeFilters: "Закрыть фильтры", clear: "Очистить всё", apply: "Применить фильтры",
-    country: "Страна", city: "Город", anyCountry: "Любая страна", cityFirst: "Сначала выберите одну страну", cityPlaceholder: "Начните вводить город...",
+    country: "Страна", city: "Город", anyCountry: "Любая страна", cityFirst: "Сначала выберите одну страну",
     profileType: "Тип профиля", donor: "Донор", lookingFor: "Ищет", allTypes: "Все типы",
     matches: "Показываем анкеты, соответствующие любому из выбранных вариантов", verified: "Только подтверждённые", age: "Возраст", from: "От", to: "До",
     ethnicity: "Этническая принадлежность", hair: "Цвет волос", eye: "Цвет глаз", education: "Образование", religion: "Религия",
-    premium: "Только Premium", premiumTitle: "Premium-фильтры", premiumText: "Оформите Premium, чтобы открыть расширенные фильтры и точнее искать подходящие анкеты.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Закрыть предложение Premium", search: "Поиск...", none: "Варианты не найдены", noProfiles: "Анкеты не найдены", noProfilesHelp: "Измените или очистите фильтры.",
+    premium: "Только Premium", search: "Поиск...", none: "Варианты не найдены", noProfiles: "Анкеты не найдены", noProfilesHelp: "Измените или очистите фильтры.",
     loadMore: "Показать ещё", loading: "Загрузка ...", locationHidden: "Местоположение скрыто", message: "Написать", like: "Нравится", liked: "Liked",
     ageError: "Минимальный возраст не может быть больше максимального.", failed: "Не удалось загрузить каталог.", actionFailed: "Не удалось выполнить действие.",
-    dailyLikeLimit: "Дневной лимит лайков исчерпан. Новые лайки будут доступны завтра.", dailyChatLimit: "Дневной лимит новых чатов исчерпан. Новые диалоги будут доступны завтра.",
-    profileUnavailable: "Этот профиль больше недоступен.", chatUnavailable: "Сейчас не удалось открыть этот диалог.",
   },
   es: {
     browse: "Explorar perfiles", collections: "Colecciones", all: "Todos", day: "día", days: "días", month: "mes",
     filters: "Filtros", allFilters: "Todos los filtros", closeFilters: "Cerrar filtros", clear: "Borrar todo", apply: "Aplicar filtros",
-    country: "País", city: "Ciudad", anyCountry: "Cualquier país", cityFirst: "Selecciona primero un país", cityPlaceholder: "Empieza a escribir una ciudad...",
+    country: "País", city: "Ciudad", anyCountry: "Cualquier país", cityFirst: "Selecciona primero un país",
     profileType: "Tipo de perfil", donor: "Donante", lookingFor: "Busca", allTypes: "Todos los tipos",
     matches: "Muestra perfiles que coincidan con cualquiera de estas opciones", verified: "Solo verificados", age: "Edad", from: "Desde", to: "Hasta",
     ethnicity: "Origen étnico", hair: "Color de pelo", eye: "Color de ojos", education: "Educación", religion: "Religión",
-    premium: "Solo Premium", premiumTitle: "Filtros Premium", premiumText: "Elige Premium para desbloquear filtros avanzados y encontrar perfiles más compatibles.", premiumMonthly: "Premium Monthly", premiumQuarterly: "Premium Quarterly", premiumClose: "Cerrar oferta Premium", search: "Buscar...", none: "No se encontraron opciones", noProfiles: "No se encontraron perfiles", noProfilesHelp: "Cambia o borra los filtros.",
+    premium: "Solo Premium", search: "Buscar...", none: "No se encontraron opciones", noProfiles: "No se encontraron perfiles", noProfilesHelp: "Cambia o borra los filtros.",
     loadMore: "Mostrar más", loading: "Cargando ...", locationHidden: "Ubicación oculta", message: "Escribir", like: "Me gusta", liked: "Liked",
     ageError: "La edad mínima no puede superar la máxima.", failed: "No se pudo cargar el catálogo.", actionFailed: "No se pudo completar la acción.",
-    dailyLikeLimit: "Has alcanzado el límite diario de Me gusta. Podrás indicar más perfiles mañana.", dailyChatLimit: "Has alcanzado el límite diario de chats nuevos. Podrás iniciar más chats mañana.",
-    profileUnavailable: "Este perfil ya no está disponible.", chatUnavailable: "No se puede abrir esta conversación ahora mismo.",
   },
 } satisfies Record<CookieLocale, Record<string, string>>;
 
@@ -2567,9 +2619,9 @@ const catalogPhotoUrls = (item: Row) => {
   const urls: string[] = [];
   const add = (value: unknown) => {
     const url = typeof value === "string"
-      ? firstAvatarText(value)
+      ? value.trim()
       : value && typeof value === "object"
-        ? firstAvatarText((value as Row).publicUrl, (value as Row).url)
+        ? catalogText((value as Row).publicUrl ?? (value as Row).url)
         : "";
     if (url && url !== "—" && !urls.includes(url)) urls.push(url);
   };
@@ -2610,17 +2662,18 @@ function CatalogCard({
   const [photoIndex, setPhotoIndex] = useState(0);
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<Set<string>>(() => new Set());
   const name = catalogText(item.displayName ?? data.displayName, "LetsBeParents member");
-  const age = profileAge(item);
-  const location = [item.city ?? data.city, profileCountry(item.countryName ?? data.countryName ?? item.country ?? data.country, locale)]
+  const age = catalogText(item.age ?? data.age);
+  const location = [item.city ?? data.city, item.countryName ?? data.countryName ?? item.country ?? data.country]
     .filter(Boolean).map(String).join(", ");
   const donorTypes = catalogList(item.donorType ?? data.donorType);
   const lookingFor = catalogList(item.lookingFor ?? data.lookingFor ?? item.recipientType ?? data.recipientType);
   const verified = catalogBoolean(item.isVerified ?? data.isVerified);
+  const videoVerified = catalogBoolean(item.isVideoVerified ?? data.isVideoVerified);
   const liked = catalogBoolean(item.likedByViewer ?? data.likedByViewer);
   const id = catalogText(item.id ?? data.id);
-  const detailPath = `/${locale}/profile/${encodeURIComponent(id)}`;
+  const detailPath = `/${locale}/catalog/${encodeURIComponent(id)}`;
   const title = age ? `${name}, ${age}` : name;
-  const initials = userInitials(name);
+  const initials = name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   const activePhoto = photos[photoIndex];
   const movePhoto = (direction: number) => setPhotoIndex((current) => (current + direction + photos.length) % photos.length);
   return (
@@ -2673,6 +2726,11 @@ function CatalogCard({
           <svg className={`catalog-verified-icon ${verified ? "is-verified" : "is-unverified"}`} viewBox="0 0 24 24" aria-label={verified ? "Verified" : "Not verified"} role="img">
             <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" /><path d="m9 12 2 2 4-4" />
           </svg>
+          {videoVerified && (
+            <span className="catalog-video-verified-badge" title="Video verified" style={{ marginLeft: 4 }}>
+              🎥
+            </span>
+          )}
         </div>
         <p className="catalog-card-location">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>
@@ -2696,7 +2754,6 @@ function CatalogFilterModal({
   cities,
   premium,
   onPremium,
-  premiumPromptOpen,
 }: {
   locale: CookieLocale;
   value: CatalogFilters;
@@ -2707,19 +2764,15 @@ function CatalogFilterModal({
   cities: CatalogOption[];
   premium: boolean;
   onPremium: () => void;
-  premiumPromptOpen: boolean;
 }) {
   const copy = CATALOG_COPY[locale];
   const [openField, setOpenField] = useState("");
   const [query, setQuery] = useState("");
-  const [cityQuery, setCityQuery] = useState(catalogText(value.city));
-  const [cityActiveIndex, setCityActiveIndex] = useState(-1);
-  const [dropdownActiveIndex, setDropdownActiveIndex] = useState(-1);
   const set = <K extends keyof CatalogFilters>(key: K, next: CatalogFilters[K]) => onChange({ ...value, [key]: next });
   useEffect(() => {
     document.body.classList.add("catalog-filter-open");
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || premiumPromptOpen) return;
+      if (event.key !== "Escape") return;
       if (openField) setOpenField("");
       else onClose();
     };
@@ -2728,30 +2781,7 @@ function CatalogFilterModal({
       document.body.classList.remove("catalog-filter-open");
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [onClose, openField, premiumPromptOpen]);
-  useEffect(() => {
-    if (!openField) return;
-    const closeOutside = (event: globalThis.PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      const activeWrap = document.querySelector(`[data-catalog-filter-field="${openField}"]`);
-      if (activeWrap?.contains(target)) return;
-      setOpenField("");
-      setQuery("");
-      setDropdownActiveIndex(-1);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
-  }, [openField]);
-  useEffect(() => {
-    setCityQuery(catalogText(value.city));
-    setCityActiveIndex(-1);
-  }, [value.city, value.country.join(",")]);
-  useEffect(() => {
-    if (!openField) return;
-    const index = openField === "city" ? cityActiveIndex : dropdownActiveIndex;
-    document.getElementById(`catalog-filter-${openField}-option-${index}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [openField, cityActiveIndex, dropdownActiveIndex, query, cityQuery]);
+  }, [onClose, openField]);
   const fieldOptions = (field: string) => field === "country" ? countries : field === "city" ? cities : CATALOG_ENUM_OPTIONS[field] || [];
   const selectedValues = (field: string) => {
     if (["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)) return value[field as keyof CatalogFilters] as string[];
@@ -2764,90 +2794,11 @@ function CatalogFilterModal({
       const current = value[key];
       const next = current.includes(optionValue) ? current.filter((item) => item !== optionValue) : [...current, optionValue];
       onChange({ ...value, [key]: next, ...(key === "country" ? { city: "" } : {}) });
-      if (key === "country") { setCityQuery(""); setCityActiveIndex(-1); }
     } else {
       const key = field as "city" | "ethnicity" | "hairColor" | "eyeColor" | "education" | "religion";
       set(key, value[key] === optionValue ? "" : optionValue);
       setOpenField("");
-      setDropdownActiveIndex(-1);
     }
-  };
-  const cityField = () => {
-    const disabled = value.country.length !== 1;
-    const controlId = "catalog-filter-city";
-    const labelId = `${controlId}-label`;
-    const selectedCountry = value.country[0] || "";
-    const countryLabel = countries.find((option) => option.value === selectedCountry)?.label || profileCountry(selectedCountry, locale);
-    const term = cityQuery.trim().toLowerCase();
-    const filtered = term ? cities.filter((option) => option.label.toLowerCase().includes(term) || option.value.toLowerCase().includes(term)).slice(0, 24) : [];
-    const dropdownOpen = openField === "city" && !disabled && filtered.length > 0;
-    const activeIndex = filtered.length ? Math.min(cityActiveIndex, filtered.length - 1) : -1;
-    const chooseCity = (option: CatalogOption) => {
-      set("city", option.value);
-      setCityQuery(option.label);
-      setCityActiveIndex(-1);
-      setOpenField("");
-    };
-    return (
-      <div className={`catalog-filter-field catalog-city-field${disabled ? " disabled" : ""}`} key="city">
-        <label id={labelId} htmlFor={controlId}>{copy.city}</label>
-        <div className="catalog-filter-select-wrap" data-catalog-filter-field="city">
-          <input
-            id={controlId}
-            className="catalog-city-autocomplete"
-            type="text"
-            role="combobox"
-            value={disabled ? "" : cityQuery}
-            disabled={disabled}
-            placeholder={disabled ? copy.cityFirst : copy.cityPlaceholder}
-            aria-labelledby={labelId}
-            aria-autocomplete="list"
-            aria-expanded={dropdownOpen}
-            aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
-            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
-
-            autoComplete="off"
-            onFocus={() => { if (!disabled) setOpenField("city"); }}
-            onKeyDown={(event) => {
-              if (disabled) return;
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setOpenField("city");
-                setCityActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setCityActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
-              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
-                event.preventDefault();
-                chooseCity(filtered[activeIndex]);
-              } else if (event.key === "Escape" && openField === "city") {
-                event.preventDefault();
-                event.stopPropagation();
-                setOpenField("");
-              }
-            }}
-            onChange={(event) => {
-              const next = event.target.value;
-              setCityQuery(next);
-              set("city", next);
-              setCityActiveIndex(-1);
-              setOpenField("city");
-            }}
-          />
-          {dropdownOpen && (
-            <div id={`${controlId}-options`} className="catalog-filter-dropdown catalog-city-dropdown" role="listbox" aria-labelledby={labelId}>
-              <section>
-                {filtered.map((option, index) => {
-                  const [name, rest] = option.label.split(/,\s*/, 2);
-                  const active = index === activeIndex;
-                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={option.value === value.city} className={`${option.value === value.city ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setCityActiveIndex(index)} onClick={() => chooseCity(option)}><span className="catalog-city-option-name">{name}</span>{countryLabel || rest ? <span className="catalog-city-option-country">, {countryLabel || rest}</span> : null}</button>;
-                })}
-              </section>
-            </div>
-          )}
-        </div>
-      </div>
-    );
   };
   const filterField = (field: string, label: string, placeholder: string, options: { premium?: boolean; disabled?: boolean; description?: string } = {}) => {
     const locked = Boolean(options.premium && !premium);
@@ -2855,83 +2806,31 @@ function CatalogFilterModal({
     const allOptions = fieldOptions(field);
     const selectedLabels = selected.map((token) => allOptions.find((option) => option.value === token)?.label || catalogOptionLabel(field, token));
     const filtered = allOptions.filter((option) => option.label.toLowerCase().startsWith(query.trim().toLowerCase()) || option.value.toLowerCase().startsWith(query.trim().toLowerCase()));
-    const controlId = `catalog-filter-${field}`;
-    const labelId = `${controlId}-label`;
-    const valueId = `${controlId}-value`;
-    const premiumId = `${controlId}-premium`;
-    const dropdownOpen = openField === field && !locked && !options.disabled;
-    const activeIndex = filtered.length ? Math.min(dropdownActiveIndex, filtered.length - 1) : -1;
     return (
       <div className={`catalog-filter-field${options.disabled ? " disabled" : ""}${field === "lookingFor" ? " looking-field" : ""}`} key={field}>
-        <label id={labelId} htmlFor={controlId}>{label}</label>
-        <div className="catalog-filter-select-wrap" data-catalog-filter-field={field}>
+        <label>{label}</label>
+        <div className="catalog-filter-select-wrap">
           <button
-            id={controlId}
             className={`catalog-filter-select${locked ? " premium" : ""}`}
             type="button"
             disabled={options.disabled}
-            aria-labelledby={`${labelId} ${valueId}${locked ? ` ${premiumId}` : ""}`}
-            aria-haspopup={locked || options.disabled ? undefined : "listbox"}
-            aria-expanded={locked || options.disabled ? undefined : dropdownOpen}
-            aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
-            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
+            aria-expanded={openField === field}
             onClick={() => {
               if (locked) { onPremium(); return; }
               setOpenField((current) => current === field ? "" : field);
               setQuery("");
-              setDropdownActiveIndex(-1);
-            }}
-            onKeyDown={(event) => {
-              if (locked || options.disabled) return;
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setOpenField(field);
-                setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
-              } else if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setOpenField(field);
-                setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
-              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
-                event.preventDefault();
-                choose(field, filtered[activeIndex].value);
-              } else if (event.key === "Escape" && dropdownOpen) {
-                event.preventDefault();
-                event.stopPropagation();
-                setOpenField("");
-                setQuery("");
-                setDropdownActiveIndex(-1);
-              }
             }}
           >
-            <span id={valueId} className={`catalog-filter-value${selectedLabels.length ? "" : " placeholder"}`}>{selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : placeholder}</span>
-            {locked ? <span id={premiumId} className="catalog-filter-premium-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg><span>{copy.premium}</span></span> : null}
-            {!options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
+            {selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : <span>{placeholder}</span>}
+            {locked ? <em><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>{copy.premium}</em> : !options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
           </button>
-          {dropdownOpen && (
-            <div id={`${controlId}-options`} className="catalog-filter-dropdown" role="listbox" aria-labelledby={labelId} aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
-              <div><input autoFocus value={query} role="combobox" aria-expanded={dropdownOpen} aria-controls={`${controlId}-options`} aria-activedescendant={filtered.length && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined} aria-autocomplete="list" onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
-                } else if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
-                } else if (event.key === "Enter" && filtered[activeIndex]) {
-                  event.preventDefault();
-                  choose(field, filtered[activeIndex].value);
-                } else if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setOpenField("");
-                  setQuery("");
-                  setDropdownActiveIndex(-1);
-                }
-              }} onChange={(event) => { setQuery(event.target.value); setDropdownActiveIndex(-1); }} placeholder={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} aria-label={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} /></div>
+          {openField === field && !locked && !options.disabled && (
+            <div className="catalog-filter-dropdown" role="listbox" aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
+              <div><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={copy.search} aria-label={copy.search} /></div>
               <section>
-                {filtered.length ? filtered.map((option, index) => {
+                {filtered.length ? filtered.map((option) => {
                   const isSelected = selected.includes(option.value);
-                  const active = index === activeIndex;
-                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={isSelected} className={`${isSelected ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setDropdownActiveIndex(index)} onClick={() => choose(field, option.value)}><i aria-hidden="true" />{option.icon ? <span>{option.icon}</span> : null}<span>{option.label}</span></button>;
+                  return <button type="button" role="option" aria-selected={isSelected} className={isSelected ? "selected" : ""} key={option.value} onClick={() => choose(field, option.value)}><i aria-hidden="true" />{option.icon ? <span>{option.icon}</span> : null}<span>{option.label}</span></button>;
                 }) : <p>{copy.none}</p>}
               </section>
             </div>
@@ -2948,7 +2847,7 @@ function CatalogFilterModal({
         <header><h2 id="catalog-filter-title">{copy.allFilters}</h2><button type="button" aria-label={copy.closeFilters} onClick={onClose}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></header>
         <div className="catalog-filter-scroll"><div className="catalog-filter-content">
           {filterField("country", copy.country, copy.anyCountry)}
-          {cityField()}
+          {filterField("city", copy.city, copy.cityFirst, { disabled: value.country.length !== 1 })}
           {filterField("profileTypes", copy.profileType, copy.allTypes)}
           {filterField("donorTypes", copy.donor, copy.allTypes)}
           {filterField("lookingFor", copy.lookingFor, copy.allTypes, { description: copy.matches })}
@@ -2961,32 +2860,12 @@ function CatalogFilterModal({
           {filterField("religion", copy.religion, "—", { premium: true })}
         </div></div>
         <footer>
-          <button type="button" className="catalog-filter-clear" onClick={() => { onChange(emptyCatalogFilters()); setOpenField(""); setQuery(""); setDropdownActiveIndex(-1); setCityActiveIndex(-1); }}>{copy.clear}</button>
+          <button type="button" className="catalog-filter-clear" hidden={activeCatalogFilterCount(value) === 0} onClick={() => onChange(emptyCatalogFilters())}>{copy.clear}</button>
           <button type="button" className="catalog-filter-apply" onClick={onApply}>{copy.apply}</button>
         </footer>
       </section>
     </div>
   );
-}
-
-function useCatalogCities(country: string, query: string, enabled: boolean): CatalogOption[] {
-  const [result, setResult] = useState<{ key: string; cities: CatalogOption[] }>({ key: "", cities: [] });
-  const term = query.trim();
-  const key = enabled && country && term ? JSON.stringify([country, term]) : "";
-  useEffect(() => {
-    if (!key) return;
-    let alive = true;
-    const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ country, q: term, limit: "200" });
-      api.get<{ cities?: Row[] }>(`/member/catalog/filter-options?${params}`)
-        .then((data) => {
-          if (alive) setResult({ key, cities: (data.cities || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })) });
-        })
-        .catch(() => { if (alive) setResult({ key, cities: [] }); });
-    }, 200);
-    return () => { alive = false; window.clearTimeout(timer); };
-  }, [country, key, term]);
-  return key && result.key === key ? result.cities : [];
 }
 
 function Catalog({ session }: { session: Session }) {
@@ -3007,10 +2886,8 @@ function Catalog({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [premiumPromptOpen, setPremiumPromptOpen] = useState(false);
   const loadMoreSentinel = useRef<HTMLDivElement | null>(null);
-  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; premium: boolean }>({ countries: [], premium: catalogBoolean(session?.user.isPremium) });
-  const cities = useCatalogCities(draftFilters.country.length === 1 ? draftFilters.country[0] : "", draftFilters.city, filterOpen);
+  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; cities: CatalogOption[]; premium: boolean }>({ countries: [], cities: [], premium: Boolean(session?.user.isPremium) });
   const querySignature = JSON.stringify([period, filters]);
   useEffect(() => {
     let alive = true;
@@ -3044,7 +2921,7 @@ function Catalog({ session }: { session: Session }) {
     return () => { alive = false; };
   }, [copy.failed, offset, querySignature]);
   useEffect(() => {
-    if (!filterOpen) return;
+    if (!filterOpen || catalogOptions.countries.length) return;
     let alive = true;
     api.get<{ countries?: Row[]; isPremium?: unknown }>("/member/catalog/filter-options?limit=200")
       .then((data) => {
@@ -3052,51 +2929,49 @@ function Catalog({ session }: { session: Session }) {
         setCatalogOptions((current) => ({
           ...current,
           countries: (data.countries || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })),
-          premium: data.isPremium === undefined ? current.premium : catalogBoolean(data.isPremium),
+          premium: catalogBoolean(data.isPremium) || current.premium,
         }));
       })
       .catch(() => undefined);
     return () => { alive = false; };
-  }, [filterOpen]);
+  }, [catalogOptions.countries.length, filterOpen]);
+  useEffect(() => {
+    if (!filterOpen || draftFilters.country.length !== 1) {
+      setCatalogOptions((current) => current.cities.length ? { ...current, cities: [] } : current);
+      return;
+    }
+    let alive = true;
+    api.get<{ cities?: Row[] }>(`/member/catalog/filter-options?country=${encodeURIComponent(draftFilters.country[0])}&limit=200`)
+      .then((data) => alive && setCatalogOptions((current) => ({ ...current, cities: (data.cities || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })) })))
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [draftFilters.country, filterOpen]);
   const persist = (nextFilters: CatalogFilters, nextPeriod = period) => {
     try { sessionStorage.setItem(storageKey, JSON.stringify({ period: nextPeriod, filters: nextFilters })); } catch { /* optional */ }
   };
+  const requireVerified = () => {
+    if (session?.user.profileVerified === true) return true;
+    navigate(`/${locale}/verification`);
+    return false;
+  };
   const like = async (item: Row) => {
+    if (!requireVerified()) return;
     const id = catalogText(item.id);
     if (catalogBoolean(item.likedByViewer ?? catalogData(item).likedByViewer)) return;
-    setError("");
     setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: true } : profile));
     try {
-      const result = await api.post<Row>(`/member/likes/${encodeURIComponent(id)}`);
-      if (catalogBoolean(result.matched) && result.conversationId)
-        navigate(`/${locale}/chat/${encodeURIComponent(String(result.conversationId))}`);
-    } catch (failure) {
+      await api.post(`/member/likes/${encodeURIComponent(id)}`);
+    } catch {
       setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: false } : profile));
-      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
-      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
-      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
-      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyLikeLimit);
-      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.profileUnavailable);
-      else setError(copy.actionFailed);
+      setError(copy.actionFailed);
     }
   };
   const message = async (item: Row) => {
-    setError("");
+    if (!requireVerified()) return;
     try {
-      const conversation = await api.post<Row>("/member/conversations", { targetProfileId: catalogText(item.id) });
-      if (!conversation.conversationId) throw new Error("Conversation was not created");
-      navigate(`/${locale}/chat/${encodeURIComponent(String(conversation.conversationId))}`);
-    } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
-      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
-      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
-      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyChatLimit);
-      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.chatUnavailable);
-      else setError(copy.actionFailed);
-    }
-  };
-  const openPremiumPrompt = () => {
-    setPremiumPromptOpen(true);
+      await api.post("/member/conversations", { targetProfileId: catalogText(item.id) });
+      navigate(`/${locale}/messages`);
+    } catch { setError(copy.actionFailed); }
   };
   const applyFilters = () => {
     const min = Number(draftFilters.ageMin || 0);
@@ -3107,7 +2982,6 @@ function Catalog({ session }: { session: Session }) {
     setOffset(0);
     persist(next);
     setFilterOpen(false);
-    setPremiumPromptOpen(false);
   };
   const changePeriod = (next: number) => {
     setPeriod(next);
@@ -3131,30 +3005,14 @@ function Catalog({ session }: { session: Session }) {
       <h1>{copy.browse}</h1>
       <div className="catalog-reference-controls">
         <span>{copy.collections}</span>
-        <SlidingTabs
-          className="catalog-reference-periods sliding-tabs--catalog"
-          label={copy.collections}
-          value={period}
-          onChange={changePeriod}
-          options={[
-            { value: 0, label: copy.all },
-            { value: 1, label: `1 ${copy.day}` },
-            { value: 7, label: `7 ${copy.days}` },
-            { value: 30, label: `1 ${copy.month}` },
-          ]}
-        />
+        <div className="catalog-reference-periods" role="tablist" aria-label={copy.collections}>
+          <button type="button" role="tab" aria-selected={period === 0} className={period === 0 ? "active" : ""} onClick={() => changePeriod(0)}><span>{copy.all}</span></button>
+          <button type="button" role="tab" aria-selected={period === 1} className={period === 1 ? "active" : ""} onClick={() => changePeriod(1)}><span>1</span><small>{copy.day}</small></button>
+          <button type="button" role="tab" aria-selected={period === 7} className={period === 7 ? "active" : ""} onClick={() => changePeriod(7)}><span>7</span><small>{copy.days}</small></button>
+          <button type="button" role="tab" aria-selected={period === 30} className={period === 30 ? "active" : ""} onClick={() => changePeriod(30)}><span>1</span><small>{copy.month}</small></button>
+        </div>
         <button className="catalog-reference-filter-button" type="button" aria-label={copy.allFilters} onClick={() => { setDraftFilters({ ...filters }); setFilterOpen(true); }}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M21 4h-7" />
-            <path d="M10 4H3" />
-            <path d="M21 12h-9" />
-            <path d="M8 12H3" />
-            <path d="M21 20h-5" />
-            <path d="M12 20H3" />
-            <path d="M14 2v4" />
-            <path d="M8 10v4" />
-            <path d="M16 18v4" />
-          </svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></svg>
           <span>{copy.filters}</span>{filterCount > 0 ? <b>{filterCount}</b> : null}
         </button>
       </div>
@@ -3162,19 +3020,327 @@ function Catalog({ session }: { session: Session }) {
       {loading && offset === 0 ? <div className="catalog-reference-loading" role="status" aria-label={copy.loading}><span /></div> : error && items.length === 0 ? null : items.length ? (
         <div className="catalog-reference-grid">{items.map((item) => <CatalogCard key={catalogText(item.id)} item={item} locale={locale} onLike={(profile) => void like(profile)} onMessage={(profile) => void message(profile)} />)}</div>
       ) : <div className="catalog-reference-empty"><strong>{copy.noProfiles}</strong><span>{copy.noProfilesHelp}</span></div>}
-      {!(loading && offset === 0) && items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
-      {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => { setFilterOpen(false); setPremiumPromptOpen(false); }} onApply={applyFilters} countries={catalogOptions.countries} cities={cities} premium={catalogOptions.premium} onPremium={openPremiumPrompt} premiumPromptOpen={premiumPromptOpen} /> : null}
-      {premiumPromptOpen ? <AccountPremium locale={locale} close={() => setPremiumPromptOpen(false)} /> : null}
+      {items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
+      {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => setFilterOpen(false)} onApply={applyFilters} countries={catalogOptions.countries} cities={catalogOptions.cities} premium={catalogOptions.premium} onPremium={() => { setFilterOpen(false); navigate(`/${locale}/subscription`); }} /> : null}
     </section>
   );
 }
 
+// Same reason list mobile's ReportProfileScreen.tsx uses (matches the
+// production reference screenshots) - backend takes free-text `reason`,
+// this fixed list is a product choice. Previously the website's "Report"
+// button skipped straight to a hardcoded generic reason with no picker;
+// audit 2026-09-13 (site-vs-app-audit-2026-09-13.docx, item 3) originally
+// missed that a report flow existed here at all - corrected: it existed,
+// just without the reason list mobile has. This closes that gap.
+const REPORT_REASONS = ["Spam", "Harassment", "Inappropriate Content", "Fake Profile", "Scam", "Other"];
+
 function CatalogProfile({ session }: { session: Session }) {
-  return <MemberProfile session={session} locale={localeOf()} />;
+  const { id = "" } = useParams();
+  const locale = localeOf();
+  const navigate = useNavigate();
+  const [profile, setProfile] = useState<Row | null>(null);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  useEffect(() => {
+    const endpoint = session ? "/member/catalog" : "/public/catalog";
+    api
+      .get<Row>(`${endpoint}/${encodeURIComponent(id)}`)
+      .then(setProfile)
+      .catch(() => setError("This profile is not available."));
+  }, [id, session]);
+  if (error)
+    return (
+      <section className="access-card">
+        <p className="error">{error}</p>
+        <Link to={`/${locale}/catalog`}>Back to catalog</Link>
+      </section>
+    );
+  if (!profile) return <LoadingIndicator />;
+  const action = async (kind: "like" | "message" | "block") => {
+    if (!session) {
+      navigate(`/${locale}/auth/login`);
+      return;
+    }
+    try {
+      if (kind === "like")
+        await api.post(`/member/likes/${encodeURIComponent(id)}`);
+      if (kind === "message")
+        await api.post("/member/conversations", { targetProfileId: id });
+      if (kind === "block")
+        await api.post(`/member/blocks/${encodeURIComponent(id)}`, {
+          reason: "Blocked from catalog",
+        });
+      setNotice(
+        kind === "message"
+          ? "Conversation is ready in Messages."
+          : `${kind[0].toUpperCase()}${kind.slice(1)} request completed.`,
+      );
+    } catch {
+      setNotice("This action is not currently available for your account.");
+    }
+  };
+  const submitReport = async () => {
+    if (!session) {
+      navigate(`/${locale}/auth/login`);
+      return;
+    }
+    if (!reportReason) return;
+    try {
+      await api.post(`/member/reports/${encodeURIComponent(id)}`, { reason: reportReason });
+      setNotice("Report submitted - thank you.");
+      setReportOpen(false);
+      setReportReason("");
+    } catch {
+      setNotice("This action is not currently available for your account.");
+    }
+  };
+  const data = (profile.data ?? {}) as Row;
+  const mayInteractWithMembers = session?.user.profileVerified === true;
+  return (
+    <article className="detail-card catalog-profile">
+      <Link to={`/${locale}/catalog`}>← Back to catalog</Link>
+      <div className="profile-summary">
+        {profile.avatarUrl ? (
+          <img src={asText(profile.avatarUrl)} alt="" />
+        ) : (
+          <div className="avatar-placeholder">
+            {asText(profile.displayName).slice(0, 1)}
+          </div>
+        )}
+        <div>
+          <h1>{asText(profile.displayName)}</h1>
+          <p>
+            {[profile.city, profile.country]
+              .filter(Boolean)
+              .map(asText)
+              .join(", ")}
+          </p>
+          <p>
+            {asText(
+              profile.profileType ??
+                data.profileType ??
+                profile.recipientType ??
+                profile.donorType,
+            )}
+          </p>
+        </div>
+      </div>
+      <p className="prose">{asText(data.about ?? data.bio)}</p>
+      {mayInteractWithMembers ? (
+        <>
+          <div className="actions">
+            <button className="primary" onClick={() => action("like")}>
+              Like
+            </button>
+            <button className="secondary" onClick={() => action("message")}>
+              Message
+            </button>
+            <button className="secondary" onClick={() => action("block")}>
+              Block
+            </button>
+            <button className="secondary" onClick={() => setReportOpen((open) => !open)}>
+              Report
+            </button>
+          </div>
+          {reportOpen ? (
+            <div className="report-picker">
+              <select
+                aria-label="Reason"
+                value={reportReason}
+                onChange={(event) => setReportReason(event.target.value)}
+              >
+                <option value="">Select a reason…</option>
+                {REPORT_REASONS.map((reason) => (
+                  <option key={reason} value={reason}>
+                    {reason}
+                  </option>
+                ))}
+              </select>
+              <button className="primary" disabled={!reportReason} onClick={() => void submitReport()}>
+                Submit report
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : session ? (
+        <div className="access-card">
+          <p>Verify your profile before interacting with members.</p>
+          <Link className="primary" to={`/${locale}/verification`}>
+            Start verification
+          </Link>
+        </div>
+      ) : (
+        <Link className="primary" to={`/${locale}/auth/login`}>
+          Sign in to interact
+        </Link>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+    </article>
+  );
 }
 
 function Likes({ session }: { session: Session }) {
-  return <MemberLikes session={session} locale={localeOf()} renderProfileCard={props => <CatalogCard {...props} />} />;
+  const locale = localeOf();
+  const [data, setData] = useState<Row | null>(null);
+  const [tab, setTab] = useState("likesYou");
+  const [visitors, setVisitors] = useState<Row[]>([]);
+  const [visitorsLocked, setVisitorsLocked] = useState(false);
+  const [favourites, setFavourites] = useState<Row | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (session)
+      api
+        .get<Row>("/member/likes")
+        .then(setData)
+        .catch(() => setError("Could not load likes."));
+  }, [session]);
+  useEffect(() => {
+    if (!session || tab !== "likesYou" || !data?.readThroughId) return;
+    void api
+      .post("/member/notifications/likes/read", {
+        readThroughId: Number(data.readThroughId),
+      })
+      .catch(() => undefined);
+  }, [data, session, tab]);
+  useEffect(() => {
+    if (!session || tab !== "visitors") return;
+    api
+      .get<{ items: Row[]; locked?: boolean }>("/member/profile-views")
+      .then((response) => {
+        setVisitors(response.items || []);
+        setVisitorsLocked(Boolean(response.locked));
+      })
+      .catch(() => setError("Could not load profile visitors."));
+  }, [session, tab]);
+  useEffect(() => {
+    if (!session || (tab !== "clinics" && tab !== "lawyers")) return;
+    api
+      .get<Row>("/member/favourites")
+      .then(setFavourites)
+      .catch(() => setError("Could not load liked clinics and lawyers."));
+  }, [session, tab]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  const removeFavourite = async (
+    kind: "clinics" | "lawyers",
+    identifier: unknown,
+  ) => {
+    try {
+      await api.delete(
+        `/member/favourites/${kind}/${encodeURIComponent(asText(identifier))}`,
+      );
+      const refreshed = await api.get<Row>("/member/favourites");
+      setFavourites(refreshed);
+    } catch {
+      setError("Could not remove this item.");
+    }
+  };
+  const tabs = [
+    ["likesYou", "Likes you"],
+    ["matches", "Matches"],
+    ["myLikes", "My likes"],
+    ["visitors", "Visitors"],
+    ["clinics", "Clinics"],
+    ["lawyers", "Lawyers"],
+  ];
+  const profileItems = Array.isArray(data?.[tab])
+    ? (data?.[tab] as Row[])
+    : tab === "visitors"
+      ? visitors
+      : [];
+  const favouriteItems = (favourites?.[tab] as Row[] | undefined) || [];
+  const isLocked =
+    (tab === "likesYou" && Boolean(data?.likesYouLocked)) ||
+    (tab === "visitors" && visitorsLocked);
+  return (
+    <section>
+      <h1>Likes</h1>
+      <nav className="member-tabs">
+        {tabs.map(([key, title]) => (
+          <button
+            className={tab === key ? "active" : ""}
+            key={key}
+            onClick={() => setTab(key)}
+          >
+            {title}
+          </button>
+        ))}
+      </nav>
+      {error && <p className="error">{error}</p>}
+      {isLocked ? (
+        <div className="access-card">
+          <h2>Premium feature</h2>
+          <p>
+            Verify your profile and activate Premium to access this section.
+          </p>
+        </div>
+      ) : tab === "clinics" || tab === "lawyers" ? (
+        <div className="directory-grid">
+          {favouriteItems.map((item, index) => (
+            <article
+              className="directory-card static"
+              key={asText(item.id ?? index)}
+            >
+              {item.logoUrl || item.photoUrl ? (
+                <img src={asText(item.logoUrl ?? item.photoUrl)} alt="" />
+              ) : (
+                <div className="avatar-placeholder">
+                  {asText(item.name).slice(0, 1)}
+                </div>
+              )}
+              <div>
+                <h3>{asText(item.name)}</h3>
+                <p>
+                  {[item.city, item.country]
+                    .filter(Boolean)
+                    .map(asText)
+                    .join(", ")}
+                </p>
+                <button
+                  className="secondary"
+                  onClick={() => void removeFavourite(tab, item.id)}
+                >
+                  Liked
+                </button>
+              </div>
+            </article>
+          ))}
+          {!favouriteItems.length && (
+            <p className="notice">There are no liked {tab}.</p>
+          )}
+        </div>
+      ) : (
+        <div className="profile-grid">
+          {profileItems.map((item, index) => (
+            <article
+              className="profile-card"
+              key={String(item.profileId ?? item.id ?? index)}
+            >
+              {item.avatarUrl ? (
+                <img src={asText(item.avatarUrl)} alt="" />
+              ) : (
+                <div className="avatar-placeholder">
+                  {asText(item.displayName).slice(0, 1)}
+                </div>
+              )}
+              <h2>{asText(item.displayName)}</h2>
+              <p>
+                {[item.city, item.country]
+                  .filter(Boolean)
+                  .map(asText)
+                  .join(", ")}
+              </p>
+            </article>
+          ))}
+          {!profileItems.length && (
+            <p className="notice">There are no entries to display.</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Profile({ session }: { session: Session }) {
@@ -3186,7 +3352,7 @@ function Profile({ session }: { session: Session }) {
     if (session)
       api.get<Row>("/member/me").then((result) => {
         setData(result);
-        setDraft(ownProfileData(result.profile));
+        setDraft((result.profile ?? {}) as Row);
       });
   }, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
@@ -3448,13 +3614,20 @@ function MemberLinks({ locale }: { locale: string }) {
   return (
     <nav className="member-links">
       <Link to={`/${locale}/profile`}>Profile</Link>
+      <Link to={`/${locale}/compatibility`}>Compatibility</Link>
       <Link to={`/${locale}/ai-advisor`}>AI Advisor</Link>
       <Link to={`/${locale}/photos`}>Photos</Link>
       <Link to={`/${locale}/verification`}>Verification</Link>
-      <Link to={`/${locale}/chat`}>Messages</Link>
+      <Link to={`/${locale}/messages`}>Messages</Link>
       <Link to={`/${locale}/visitors`}>Visitors</Link>
       <Link to={`/${locale}/favourites`}>Saved</Link>
       <Link to={`/${locale}/blocked`}>Blocked</Link>
+      <Link to={`/${locale}/boost`}>Boost</Link>
+      <Link to={`/${locale}/referral`}>Referral</Link>
+      <Link to={`/${locale}/safety-checkin`}>Safety Check-In</Link>
+      <Link to={`/${locale}/cost-calculator`}>Cost Calculator</Link>
+      <Link to={`/${locale}/video-verification`}>Video Verification</Link>
+      <Link to={`/${locale}/community`}>Community</Link>
       <Link to={`/${locale}/settings`}>Settings</Link>
     </nav>
   );
@@ -3688,6 +3861,25 @@ function Settings({ session }: { session: Session }) {
         />
         Visible in catalog
       </label>
+      <label className="toggle-row">
+        <input
+          type="checkbox"
+          checked={Boolean(settings.incognitoAvailable && settings.incognitoEnabled)}
+          disabled={!settings.incognitoAvailable}
+          onChange={(event) =>
+            setSettings((current) => ({
+              ...current,
+              incognitoEnabled: event.target.checked,
+            }))
+          }
+        />
+        Incognito browsing{settings.incognitoAvailable ? "" : " (Pro feature)"}
+      </label>
+      {!settings.incognitoAvailable && (
+        <p className="notice">
+          Browse profiles without appearing in their Visitors list - available with a Pro subscription.
+        </p>
+      )}
       <fieldset className="notification-settings">
         <legend>Email notifications</legend>
         {notifications.map((item) => (
@@ -3849,7 +4041,245 @@ function Verification({ session }: { session: Session }) {
   );
 }
 
-function Conversations({ session }: { session: Session }) { return <MemberChat session={session} locale={localeOf()} />; }
+function Conversations({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [conversations, setConversations] = useState<Row[]>([]);
+  const [active, setActive] = useState<Row | null>(null);
+  const [messages, setMessages] = useState<Row[]>([]);
+  const [body, setBody] = useState("");
+  const [notice, setNotice] = useState("");
+  const [starters, setStarters] = useState<string[]>([]);
+  const [startersLoading, setStartersLoading] = useState(false);
+  const load = () => {
+    void api
+      .get<{ items: Row[] }>("/member/conversations")
+      .then((data) => setConversations(data.items || []))
+      .catch(() => setNotice("Could not load messages."));
+  };
+  const loadMessages = async (conversationId: unknown) => {
+    const response = await api.get<{ items: Row[] }>(
+      `/member/conversations/${encodeURIComponent(asText(conversationId))}/messages`,
+    );
+    setMessages(response.items || []);
+  };
+  useEffect(load, []);
+  useEffect(() => {
+    if (active?.id)
+      void loadMessages(active.id).catch(() =>
+        setNotice("Could not load this conversation."),
+      );
+  }, [active]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  const send = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!active?.id || !body.trim()) return;
+    try {
+      await api.post(
+        `/member/conversations/${encodeURIComponent(asText(active.id))}/messages`,
+        { body },
+      );
+      setBody("");
+      await loadMessages(active.id);
+      load();
+    } catch {
+      setNotice(
+        "Message could not be sent. Both members must be verified before chatting.",
+      );
+    }
+  };
+  const attach = async (file: File | undefined) => {
+    if (!file || !active?.id) return;
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      await api.upload(
+        `/member/conversations/${encodeURIComponent(asText(active.id))}/attachments`,
+        data,
+      );
+      await loadMessages(active.id);
+      load();
+    } catch {
+      setNotice(
+        "Attachment could not be sent. Images and PDF files are supported after verification.",
+      );
+    }
+  };
+  const startCall = async (callType: "AUDIO" | "VIDEO") => {
+    if (!active?.id) return;
+    try {
+      const response = await api.post<Row>(
+        `/member/conversations/${encodeURIComponent(asText(active.id))}/calls`,
+        { callType },
+      );
+      const call = response.call as Row | undefined;
+      if (!call) throw new Error("Call was not created");
+      window.dispatchEvent(
+        new CustomEvent<Row>("lbp-call-start", { detail: call }),
+      );
+      setNotice("Calling your match…");
+    } catch {
+      setNotice(
+        "A Premium subscription and verification are required for calls.",
+      );
+    }
+  };
+  const loadStarters = async () => {
+    if (!active?.id) return;
+    setStartersLoading(true);
+    setStarters([]);
+    try {
+      const response = await api.post<{ ok: true; starters: string[] }>(
+        `/member/conversations/${encodeURIComponent(asText(active.id))}/message-starters`,
+        {},
+      );
+      setStarters(response.starters || []);
+    } catch (err) {
+      setNotice(
+        err instanceof ApiError && err.status === 402
+          ? "AI-suggested openers are a Pro feature."
+          : "Could not suggest openers right now.",
+      );
+    } finally {
+      setStartersLoading(false);
+    }
+  };
+  return (
+    <section className="conversations">
+      <div>
+        <h1>Messages</h1>
+        <MemberLinks locale={locale} />
+        {notice && (
+          <p className={notice.includes("started") ? "notice" : "error"}>
+            {notice}
+          </p>
+        )}
+        <div className="conversation-layout">
+          <aside>
+            {conversations.map((item) => (
+              <button
+                className={active?.id === item.id ? "active" : ""}
+                key={asText(item.id)}
+                onClick={() => setActive(item)}
+              >
+                <strong>
+                  {asText(
+                    item.peerDisplayName ?? item.displayName ?? item.title,
+                  )}
+                </strong>
+                <small>{asText(item.lastMessageBody)}</small>
+              </button>
+            ))}
+          </aside>
+          <div className="message-pane">
+            {active ? (
+              <>
+                <div className="message-title">
+                  <h2>
+                    {asText(
+                      active.peerDisplayName ??
+                        active.displayName ??
+                        active.title,
+                    )}
+                  </h2>
+                  <div className="call-actions">
+                    <button
+                      className="secondary"
+                      onClick={() => void startCall("AUDIO")}
+                    >
+                      Audio call
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => void startCall("VIDEO")}
+                    >
+                      Video call
+                    </button>
+                    {Boolean(active.other_profile_id) && (
+                      <Link
+                        className="secondary"
+                        to={`/${locale}/family-room/${encodeURIComponent(asText(active.other_profile_id))}`}
+                      >
+                        Family Room
+                      </Link>
+                    )}
+                    {Boolean(active.other_profile_id) && (
+                      <Link
+                        className="secondary"
+                        to={`/${locale}/compatibility-report/${encodeURIComponent(asText(active.other_profile_id))}`}
+                      >
+                        Compatibility Report
+                      </Link>
+                    )}
+                  </div>
+                </div>
+                <div className="message-list">
+                  {messages.map((message) => (
+                    <div className="message-bubble" key={asText(message.id)}>
+                      <span>{asText(message.body)}</span>
+                      {Boolean(message.mediaUrl) && (
+                        <a
+                          href={asText(message.mediaUrl)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open attachment
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="message-starters">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void loadStarters()}
+                    disabled={startersLoading}
+                  >
+                    {startersLoading ? "Thinking…" : "Suggest openers"}
+                  </button>
+                  {starters.length > 0 && (
+                    <ul>
+                      {starters.map((text, index) => (
+                        <li key={index}>
+                          <span>{text}</span>
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => setBody(text)}
+                          >
+                            Use
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <form onSubmit={send}>
+                  <input
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                    placeholder="Write a message…"
+                  />
+                  <label className="attachment-control">
+                    Attach
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      onChange={(event) => void attach(event.target.files?.[0])}
+                    />
+                  </label>
+                  <button className="primary">Send</button>
+                </form>
+              </>
+            ) : (
+              <p>Select a conversation.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function SimpleMemberList({
   session,
@@ -3895,7 +4325,13 @@ function SimpleMemberList({
             className="profile-card"
             key={asText(item.profileId ?? item.id ?? index)}
           >
-            <UserAvatar src={item.avatarUrl} name={firstAvatarText(item.displayName, item.display_name, item.name)} />
+            {item.avatarUrl ? (
+              <img src={asText(item.avatarUrl)} alt="" />
+            ) : (
+              <div className="avatar-placeholder">
+                {asText(item.displayName).slice(0, 1)}
+              </div>
+            )}
             <h2>{asText(item.displayName ?? item.name)}</h2>
             <p>
               {[item.city, item.country].filter(Boolean).map(asText).join(", ")}
@@ -3995,7 +4431,6 @@ function AccountDeletion({ session }: { session: Session }) {
   const locale = localeOf();
   const [reason, setReason] = useState("Prefer not to say");
   const [details, setDetails] = useState("");
-  const [confirmation, setConfirmation] = useState("");
   const [notice, setNotice] = useState("");
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
   const submit = async (event: FormEvent) => {
@@ -4004,10 +4439,8 @@ function AccountDeletion({ session }: { session: Session }) {
       const response = await api.post<Row>("/member/account-deletion", {
         reason,
         details,
-        confirmation,
       });
       setNotice(asText(response.message ?? "Deletion request submitted."));
-      window.setTimeout(() => window.location.assign(`/${locale}/auth/login`), 1200);
     } catch {
       setNotice("Could not submit the deletion request.");
     }
@@ -4016,7 +4449,7 @@ function AccountDeletion({ session }: { session: Session }) {
     <section className="member-form danger-zone">
       <h1>Delete account</h1>
       <MemberLinks locale={locale} />
-      <p>Access ends immediately. Your account, matches, and conversations are permanently deleted after 30 days.</p>
+      <p>Your request is reviewed before the account is permanently removed.</p>
       {notice && <p className="notice">{notice}</p>}
       <form onSubmit={submit}>
         <label>
@@ -4034,16 +4467,7 @@ function AccountDeletion({ session }: { session: Session }) {
             onChange={(event) => setDetails(event.target.value)}
           />
         </label>
-        <label>
-          Type DELETE to confirm
-          <input
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value.toUpperCase().slice(0, 6))}
-            autoComplete="off"
-            required
-          />
-        </label>
-        <button className="primary" disabled={confirmation !== "DELETE"}>Delete my account</button>
+        <button className="primary">Request account deletion</button>
       </form>
     </section>
   );
@@ -4090,7 +4514,7 @@ function Subscription({ session }: { session: Session }) {
             <p>Your Premium subscription is active.</p>
           ) : (
             <div className="plan-actions">
-              {["MONTHLY", "QUARTERLY"].map((plan) => (
+              {["MONTHLY", "QUARTERLY", "ANNUAL"].map((plan) => (
                 <button
                   className="primary"
                   key={plan}
@@ -4108,6 +4532,16 @@ function Subscription({ session }: { session: Session }) {
   );
 }
 
+// "Family Plan & Shared Family Room" + "Document & checklist tools" -
+// Family Builder Pro pricing-page features (see PRICING_TEXT below).
+// Mirrors mobile/src/screens/FamilyRoomScreen.tsx: same endpoints
+// (backend/main.py's "FAMILY ROOM" section), same 402 (needs Premium) /
+// 404 (no active match with this profile) gating rendered as dedicated
+// states rather than guessed at client-side. Reached from the Messages
+// page (a "Family Room" link next to the call buttons, using the active
+// conversation's other_profile_id - see conversation_scope_sql()) since
+// this site doesn't have a general "view this member's profile" page the
+// way the mobile app's ProfileDetailScreen does.
 const FAMILY_ROOM_SECTIONS: Array<"parenting" | "finances" | "legal" | "general"> = [
   "parenting",
   "finances",
@@ -4152,20 +4586,41 @@ function FamilyRoom({ session }: { session: Session }) {
   const [addingSection, setAddingSection] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [pregnancyEntries, setPregnancyEntries] = useState<Row[]>([]);
-  const [pregnancyCategory, setPregnancyCategory] = useState<
-    "lab_test" | "ultrasound" | "prescription"
-  >("lab_test");
+  const [pregnancyCategory, setPregnancyCategory] = useState<"lab_test" | "ultrasound" | "prescription">("lab_test");
   const [pregnancyNote, setPregnancyNote] = useState("");
   const [pregnancyUploading, setPregnancyUploading] = useState(false);
+  const [agreement, setAgreement] = useState<Row | null>(null);
+  const [agreementStatus, setAgreementStatus] = useState<"idle" | "ok" | "needsPremium" | "error">("idle");
+  const [agreementFullName, setAgreementFullName] = useState("");
+  const [agreementSigning, setAgreementSigning] = useState(false);
+  const [agreementNotice, setAgreementNotice] = useState("");
+
+  const loadAgreement = () => {
+    if (!session || !profileId) return;
+    api
+      .get<{ ok: true; agreement: Row }>(`/member/family-room/${encodeURIComponent(profileId)}/agreement`)
+      .then((data) => {
+        setAgreement(data.agreement);
+        setAgreementStatus("ok");
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setAgreementStatus("needsPremium");
+        else setAgreementStatus("error");
+      });
+  };
 
   const loadPregnancy = () => {
     if (!session || !profileId) return;
     api
-      .get<{ ok: true; entries: Row[] }>(
-        `/member/family-room/${encodeURIComponent(profileId)}/pregnancy`,
-      )
+      .get<{ ok: true; entries: Row[] }>(`/member/family-room/${encodeURIComponent(profileId)}/pregnancy`)
       .then((data) => setPregnancyEntries(data.entries || []))
-      .catch(() => undefined);
+      .catch(() => {
+        // Silent - Pregnancy Room is a free add-on to Family Room (no
+        // Premium gate, see backend/main.py's member_pregnancy_room()); if
+        // this fails it's almost always the same "no active match" 404
+        // already surfaced by the main Family Room load above, so no need
+        // to show a second error for it.
+      });
   };
 
   const load = () => {
@@ -4176,9 +4631,9 @@ function FamilyRoom({ session }: { session: Session }) {
       .then((data) => {
         setRoom(data);
         const plan = (data.plan as Row) || {};
-        setParenting(String(plan.parentingNotes ?? ""));
-        setFinances(String(plan.financesNotes ?? ""));
-        setLegal(String(plan.legalNotes ?? ""));
+        setParenting(asText(plan.parentingNotes));
+        setFinances(asText(plan.financesNotes));
+        setLegal(asText(plan.legalNotes));
         setPlanDirty(false);
         setStatus("ok");
       })
@@ -4190,26 +4645,19 @@ function FamilyRoom({ session }: { session: Session }) {
   };
   useEffect(load, [session, profileId]);
   useEffect(loadPregnancy, [session, profileId]);
+  useEffect(loadAgreement, [session, profileId]);
 
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
 
   const savePlan = async () => {
-    if (savingPlan || !room) return;
     setSavingPlan(true);
     setNotice("");
     try {
-      const baseline = (room.plan as Row) || {};
-      const updates = Object.fromEntries(Object.entries({ parentingNotes: parenting, financesNotes: finances, legalNotes: legal })
-        .filter(([key, value]) => value !== String(baseline[key] ?? "")));
       const response = await api.patch<Row>(
         `/member/family-room/${encodeURIComponent(profileId)}/plan`,
-        updates,
+        { parentingNotes: parenting, financesNotes: finances, legalNotes: legal },
       );
       setRoom((prev) => (prev ? { ...prev, plan: response.plan } : prev));
-      const savedPlan = response.plan as Row;
-      setParenting(String(savedPlan.parentingNotes ?? ""));
-      setFinances(String(savedPlan.financesNotes ?? ""));
-      setLegal(String(savedPlan.legalNotes ?? ""));
       setPlanDirty(false);
     } catch {
       setNotice("Could not save the Family Plan. Please try again.");
@@ -4302,6 +4750,29 @@ function FamilyRoom({ session }: { session: Session }) {
     }
   };
 
+  const signAgreement = async () => {
+    if (!agreementFullName.trim()) return;
+    setAgreementSigning(true);
+    setAgreementNotice("");
+    try {
+      const data = await api.post<{ ok: true; agreement: Row }>(
+        `/member/family-room/${encodeURIComponent(profileId)}/agreement/sign`,
+        { fullName: agreementFullName.trim() },
+      );
+      setAgreement(data.agreement);
+      setAgreementFullName("");
+      setAgreementNotice("Signed.");
+    } catch (err) {
+      setAgreementNotice(
+        err instanceof ApiError && err.status === 409
+          ? "Complete every Family Plan section together before signing."
+          : "Could not sign the agreement.",
+      );
+    } finally {
+      setAgreementSigning(false);
+    }
+  };
+
   const uploadDocument = async (file: File | undefined) => {
     if (!file) return;
     setUploading(true);
@@ -4356,7 +4827,7 @@ function FamilyRoom({ session }: { session: Session }) {
         `/member/family-room/${encodeURIComponent(profileId)}/pregnancy`,
         data,
       );
-      setPregnancyEntries((previous) => [response.entry, ...previous]);
+      setPregnancyEntries((prev) => [response.entry, ...prev]);
       setPregnancyNote("");
     } catch {
       setNotice("Could not upload that file to the Pregnancy Room.");
@@ -4367,13 +4838,9 @@ function FamilyRoom({ session }: { session: Session }) {
 
   const deletePregnancyEntry = async (entry: Row) => {
     const entryId = entry.id;
-    setPregnancyEntries((previous) =>
-      previous.filter((item) => item.id !== entryId),
-    );
+    setPregnancyEntries((prev) => prev.filter((e) => e.id !== entryId));
     try {
-      await api.delete(
-        `/member/family-room/pregnancy/${encodeURIComponent(asText(entryId))}`,
-      );
+      await api.delete(`/member/family-room/pregnancy/${encodeURIComponent(asText(entryId))}`);
     } catch {
       setNotice("Could not remove that entry.");
       loadPregnancy();
@@ -4384,7 +4851,7 @@ function FamilyRoom({ session }: { session: Session }) {
     return (
       <section className="access-card">
         <h1>Family Room</h1>
-        <LoadingIndicator />
+        <p>Loading…</p>
       </section>
     );
   }
@@ -4413,7 +4880,7 @@ function FamilyRoom({ session }: { session: Session }) {
           You don't have an active match with this profile, so there's no
           shared Family Room here yet.
         </p>
-        <Link className="secondary" to={`/${locale}/chat`}>
+        <Link className="secondary" to={`/${locale}/messages`}>
           Back to Messages
         </Link>
       </section>
@@ -4447,8 +4914,6 @@ function FamilyRoom({ session }: { session: Session }) {
           <textarea
             rows={4}
             value={parenting}
-            disabled={savingPlan}
-            maxLength={20000}
             placeholder="How do you both picture day-to-day parenting?"
             onChange={(event) => {
               setParenting(event.target.value);
@@ -4461,8 +4926,6 @@ function FamilyRoom({ session }: { session: Session }) {
           <textarea
             rows={4}
             value={finances}
-            disabled={savingPlan}
-            maxLength={20000}
             placeholder="How will costs be shared and planned for?"
             onChange={(event) => {
               setFinances(event.target.value);
@@ -4475,8 +4938,6 @@ function FamilyRoom({ session }: { session: Session }) {
           <textarea
             rows={4}
             value={legal}
-            disabled={savingPlan}
-            maxLength={20000}
             placeholder="What legal steps or agreements do you need to look into?"
             onChange={(event) => {
               setLegal(event.target.value);
@@ -4534,14 +4995,12 @@ function FamilyRoom({ session }: { session: Session }) {
             >
               <input
                 value={newItemText[section] || ""}
-                maxLength={500}
-                disabled={addingSection !== null}
                 placeholder="Add an item…"
                 onChange={(event) =>
                   setNewItemText((prev) => ({ ...prev, [section]: event.target.value }))
                 }
               />
-              <button className="secondary" disabled={addingSection !== null}>
+              <button className="secondary" disabled={addingSection === section}>
                 Add
               </button>
             </form>
@@ -4596,8 +5055,7 @@ function FamilyRoom({ session }: { session: Session }) {
             {pregnancyEntries.map((entry) => (
               <li key={asText(entry.id)}>
                 <a href={asText(entry.contentUrl)} target="_blank" rel="noreferrer">
-                  {PREGNANCY_CATEGORY_LABELS[asText(entry.category)] ||
-                    asText(entry.category)}
+                  {PREGNANCY_CATEGORY_LABELS[asText(entry.category)] || asText(entry.category)}
                   {entry.note ? ` - ${asText(entry.note)}` : ""}
                 </a>
                 <span>{formatFamilyRoomBytes(Number(entry.bytes) || 0)}</span>
@@ -4616,16 +5074,13 @@ function FamilyRoom({ session }: { session: Session }) {
           <select
             aria-label="Category"
             value={pregnancyCategory}
-            onChange={(event) =>
-              setPregnancyCategory(event.target.value as typeof pregnancyCategory)
-            }
+            onChange={(event) => setPregnancyCategory(event.target.value as typeof pregnancyCategory)}
           >
             <option value="lab_test">Lab result</option>
             <option value="ultrasound">Ultrasound</option>
             <option value="prescription">Prescription</option>
           </select>
           <input
-            type="text"
             value={pregnancyNote}
             placeholder="Note (optional)"
             onChange={(event) => setPregnancyNote(event.target.value)}
@@ -4636,53 +5091,144 @@ function FamilyRoom({ session }: { session: Session }) {
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf"
               disabled={pregnancyUploading}
-              onChange={(event) =>
-                void uploadPregnancyEntry(event.target.files?.[0])
-              }
+              onChange={(event) => void uploadPregnancyEntry(event.target.files?.[0])}
             />
           </label>
         </div>
+      </div>
+
+      <div className="list-card family-room-card">
+        <h2>Co-Parenting Agreement</h2>
+        <p>
+          Once you've completed every Family Plan section together, either
+          of you can sign - a good-faith mutual record of what you agreed
+          on, not a legally binding e-signature.
+        </p>
+        {agreementStatus === "needsPremium" && (
+          <p className="notice">
+            The Co-Parenting Agreement is part of Family Builder Pro.{" "}
+            <Link to={`/${locale}/subscription`}>View Premium</Link>
+          </p>
+        )}
+        {agreementStatus === "error" && (
+          <p className="error">Could not load your agreement.</p>
+        )}
+        {agreementStatus === "ok" && agreement && (
+          <>
+            {agreement.status === "SIGNED" ? (
+              <div className="notice">
+                <p>Signed by both of you on {asText(agreement.signedAt)}.</p>
+                <p>
+                  You: {asText(agreement.myFullName)} - Partner:{" "}
+                  {asText(agreement.partnerFullName)}
+                </p>
+              </div>
+            ) : (
+              <>
+                <p>
+                  {asText(agreement.sectionsCompleteCount)} of{" "}
+                  {asText(agreement.sectionsTotalCount)} sections complete by
+                  both of you.
+                </p>
+                {agreement.mySigned ? (
+                  <p className="notice">
+                    You signed this agreement. Waiting for your partner to
+                    sign their copy.
+                  </p>
+                ) : agreement.readyToSign ? (
+                  <div className="member-form">
+                    <label>
+                      Type your full legal name to sign
+                      <input
+                        value={agreementFullName}
+                        onChange={(event) => setAgreementFullName(event.target.value)}
+                        placeholder="Full legal name"
+                      />
+                    </label>
+                    <button
+                      className="primary"
+                      disabled={!agreementFullName.trim() || agreementSigning}
+                      onClick={() => void signAgreement()}
+                    >
+                      {agreementSigning ? "Signing…" : "Sign agreement"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="notice">
+                    Complete every Family Plan section together before you
+                    can sign.
+                  </p>
+                )}
+                {agreement.partnerSigned && (
+                  <p className="notice">Your partner has already signed their copy.</p>
+                )}
+              </>
+            )}
+            {agreementNotice && (
+              <p className={agreementNotice === "Signed." ? "notice" : "error"}>
+                {agreementNotice}
+              </p>
+            )}
+          </>
+        )}
       </div>
     </section>
   );
 }
 
-type AiAdvisorMessage = {
-  role: "user" | "assistant";
-  text: string;
-  at: string;
-};
+type AiAdvisorMessage = { role: "user" | "assistant"; text: string; at: string };
 
+// AI Family Advisor ("ИИ консультант", backlog item 12) - mirrors
+// mobile/src/screens/AiAdvisorScreen.tsx exactly: same endpoints
+// (backend/main.py's member_ai_advisor_*()), same 402 ("needs Premium") /
+// configured:false (ANTHROPIC_API_KEY not set on the server yet) states.
+// The pricing page already lists "AI Family Advisor" as a Pro-tier
+// feature (see PRICING_TEXT below) - this is the actual feature behind
+// that checkmark, which did not exist on the website before (audit
+// 2026-09-13: site-vs-app-audit-2026-09-13.docx, item 1).
 function AiAdvisor({ session }: { session: Session }) {
   const locale = localeOf();
-  const [status, setStatus] = useState<
-    "loading" | "ok" | "needsPremium" | "error"
-  >("loading");
+  const [status, setStatus] = useState<"loading" | "ok" | "needsPremium" | "error">("loading");
   const [configured, setConfigured] = useState(true);
   const [messages, setMessages] = useState<AiAdvisorMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState("");
+  const [weeklyInsight, setWeeklyInsight] = useState("");
+  const [weeklyInsightStatus, setWeeklyInsightStatus] = useState<"idle" | "loading" | "ok" | "needsPremium" | "error">("idle");
 
   const load = () => {
     if (!session) return;
     setStatus("loading");
     api
-      .get<{ ok: true; configured: boolean; messages: AiAdvisorMessage[] }>(
-        "/member/ai-advisor/messages",
-      )
+      .get<{ ok: true; configured: boolean; messages: AiAdvisorMessage[] }>("/member/ai-advisor/messages")
       .then((data) => {
         setMessages(data.messages);
         setConfigured(data.configured);
         setStatus("ok");
       })
-      .catch((error) => {
-        if (error instanceof ApiError && error.status === 402)
-          setStatus("needsPremium");
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
         else setStatus("error");
       });
   };
   useEffect(load, [session]);
+
+  const loadWeeklyInsight = () => {
+    if (!session) return;
+    setWeeklyInsightStatus("loading");
+    api
+      .get<{ ok: true; insight: string }>(`/member/ai-advisor/weekly-insight?locale=${encodeURIComponent(locale)}`)
+      .then((data) => {
+        setWeeklyInsight(data.insight);
+        setWeeklyInsightStatus("ok");
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setWeeklyInsightStatus("needsPremium");
+        else setWeeklyInsightStatus("error");
+      });
+  };
+  useEffect(loadWeeklyInsight, [session]);
 
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
 
@@ -4693,24 +5239,18 @@ function AiAdvisor({ session }: { session: Session }) {
     setDraft("");
     setSending(true);
     setNotice("");
-    const optimistic: AiAdvisorMessage = {
-      role: "user",
-      text,
-      at: new Date().toISOString(),
-    };
-    setMessages((previous) => [...previous, optimistic]);
+    const optimistic: AiAdvisorMessage = { role: "user", text, at: new Date().toISOString() };
+    setMessages((prev) => [...prev, optimistic]);
     try {
-      const response = await api.post<{
-        ok: true;
-        reply: string;
-        messages: AiAdvisorMessage[];
-      }>("/member/ai-advisor/messages", { text });
-      setMessages(response.messages);
-    } catch (error) {
-      setMessages((previous) => previous.filter((item) => item !== optimistic));
+      const res = await api.post<{ ok: true; reply: string; messages: AiAdvisorMessage[] }>(
+        "/member/ai-advisor/messages",
+        { text },
+      );
+      setMessages(res.messages);
+    } catch (err) {
+      setMessages((prev) => prev.filter((m) => m !== optimistic));
       setDraft(text);
-      if (error instanceof ApiError && error.status === 402)
-        setStatus("needsPremium");
+      if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
       else setNotice("Could not send that message. Please try again.");
     } finally {
       setSending(false);
@@ -4722,7 +5262,7 @@ function AiAdvisor({ session }: { session: Session }) {
       await api.delete("/member/ai-advisor/messages");
       setMessages([]);
     } catch {
-      setNotice("Could not clear the conversation. Please try again.");
+      // Silent - same as mobile: worst case the old history just stays visible.
     }
   };
 
@@ -4730,7 +5270,7 @@ function AiAdvisor({ session }: { session: Session }) {
     return (
       <section className="access-card">
         <h1>AI Family Advisor</h1>
-        <LoadingIndicator />
+        <p>Loading…</p>
       </section>
     );
   }
@@ -4755,15 +5295,23 @@ function AiAdvisor({ session }: { session: Session }) {
     return (
       <section className="access-card">
         <h1>AI Family Advisor</h1>
-        <p className="error">
-          Could not load the AI Family Advisor. Please try again.
-        </p>
+        <p className="error">Could not load the AI Family Advisor. Please try again.</p>
       </section>
     );
   }
 
   return (
     <section className="advisor-page">
+      {weeklyInsightStatus !== "idle" && weeklyInsightStatus !== "needsPremium" && (
+        <div className="list-card advisor-card weekly-insight-card">
+          <h2>Your weekly check-in</h2>
+          {weeklyInsightStatus === "loading" && <p className="notice">Loading…</p>}
+          {weeklyInsightStatus === "error" && (
+            <p className="error">Could not load your weekly check-in.</p>
+          )}
+          {weeklyInsightStatus === "ok" && <p>{weeklyInsight}</p>}
+        </div>
+      )}
       <div className="list-card advisor-card">
         <div className="message-title">
           <h1>AI Family Advisor</h1>
@@ -4773,13 +5321,11 @@ function AiAdvisor({ session }: { session: Session }) {
         </div>
         <p>
           Ask about the process, terminology, or how to use LetsBeParents -
-          I'll help you find the right next step. This isn't medical, legal or
-          financial advice.
+          I'll help you find the right next step. This isn't medical, legal
+          or financial advice.
         </p>
         {!configured && (
-          <p className="error">
-            The AI Family Advisor isn't set up yet - please check back soon.
-          </p>
+          <p className="error">The AI Family Advisor isn't set up yet - please check back soon.</p>
         )}
         {notice && <p className="error">{notice}</p>}
         <div className="message-list advisor-list">
@@ -4789,11 +5335,7 @@ function AiAdvisor({ session }: { session: Session }) {
             messages.map((message, index) => (
               <div
                 key={`${message.role}-${message.at}-${index}`}
-                className={`message-bubble ${
-                  message.role === "user"
-                    ? "advisor-bubble-user"
-                    : "advisor-bubble-assistant"
-                }`}
+                className={`message-bubble ${message.role === "user" ? "advisor-bubble-user" : "advisor-bubble-assistant"}`}
               >
                 <span>{message.text}</span>
               </div>
@@ -4801,17 +5343,14 @@ function AiAdvisor({ session }: { session: Session }) {
           )}
           {sending && <p className="notice">Typing…</p>}
         </div>
-        <form className="advisor-form" onSubmit={(event) => void send(event)}>
+        <form onSubmit={(event) => void send(event)}>
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Ask the Family Advisor…"
             disabled={!configured}
           />
-          <button
-            className="primary"
-            disabled={!draft.trim() || sending || !configured}
-          >
+          <button className="primary" disabled={!draft.trim() || sending || !configured}>
             Send
           </button>
         </form>
@@ -4820,7 +5359,444 @@ function AiAdvisor({ session }: { session: Session }) {
   );
 }
 
+// "Compatibility Score & Why you match" (Family Builder) / "Detailed
+// Compatibility Report" (Family Builder Pro) - see backend/main.py's
+// COMPATIBILITY SCORE section. Mirrors mobile's CompatibilityAnswersScreen:
+// free for everyone to fill in (the Premium gate is only on viewing a
+// two-sided report with a match, see CompatibilityReport below). Reached
+// from the account nav (MemberLinks) since it does not need a match.
+function CompatibilityAnswers({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [questions, setQuestions] = useState<Row[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
 
+  useEffect(() => {
+    if (!session) return;
+    Promise.all([
+      api.get<Row>("/member/compatibility/questions"),
+      api.get<Row>("/member/compatibility/answers"),
+    ])
+      .then(([q, a]) => {
+        setQuestions((q.items as Row[]) || []);
+        setAnswers((a.answers as Record<string, string>) || {});
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  }, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const answeredCount = Object.keys(answers).length;
+
+  const save = async () => {
+    setSaving(true);
+    setNotice("");
+    try {
+      await api.post<Row>("/member/compatibility/answers", { answers });
+      setNotice("saved");
+    } catch {
+      setNotice("error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (status === "loading") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility profile</h1>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility profile</h1>
+        <p className="error">Could not load the compatibility questions. Please try again.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="compatibility-answers">
+      <h1>Compatibility profile</h1>
+      <p>
+        Answer a few questions about parenting, involvement, timeline and
+        boundaries. When you match with someone, you will both see where you
+        align and what is worth discussing - no percentage, no pass or fail.
+      </p>
+      <p className="compatibility-progress">
+        {answeredCount} of {questions.length} answered
+      </p>
+      {notice === "saved" && <p className="notice">Saved.</p>}
+      {notice === "error" && <p className="error">Could not save your answers. Please try again.</p>}
+
+      {questions.map((question) => {
+        const qid = asText(question.id);
+        const options = (question.options as Row[]) || [];
+        return (
+          <div className="list-card compatibility-question-card" key={qid}>
+            <h3>{asText(question.prompt)}</h3>
+            {options.map((option) => {
+              const key = asText(option.key);
+              const selected = answers[qid] === key;
+              return (
+                <button
+                  type="button"
+                  key={key}
+                  className={`compatibility-option${selected ? " compatibility-option-selected" : ""}`}
+                  onClick={() => setAnswers((prev) => ({ ...prev, [qid]: key }))}
+                >
+                  <span className="compatibility-radio" />
+                  {asText(option.label)}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      <div className="plan-actions">
+        <button className="primary" onClick={() => void save()} disabled={saving}>
+          {saving ? "Saving..." : "Save answers"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// Two-sided "Compatibility Score & Why you match" / "Detailed
+// Compatibility Report" - mirrors mobile's CompatibilityReportScreen.
+// Gating mirrors FamilyRoom exactly: Premium (402) and an active match
+// (404) are both server-checked and rendered here, not guessed
+// client-side. Reached from the Messages page next to the Family Room
+// link, using the same conversation other_profile_id.
+function CompatibilityReport({ session }: { session: Session }) {
+  const locale = localeOf();
+  const { profileId = "" } = useParams();
+  const [status, setStatus] = useState<
+    "loading" | "ok" | "needsPremium" | "noMatch" | "error"
+  >("loading");
+  const [report, setReport] = useState<Row | null>(null);
+
+  useEffect(() => {
+    if (!session || !profileId) return;
+    setStatus("loading");
+    api
+      .get<Row>(`/member/compatibility-report/${encodeURIComponent(profileId)}`)
+      .then((data) => {
+        setReport(data);
+        setStatus("ok");
+      })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 402) setStatus("needsPremium");
+        else if (err instanceof ApiError && err.status === 404) setStatus("noMatch");
+        else setStatus("error");
+      });
+  }, [session, profileId]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  if (status === "loading") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>Loading...</p>
+      </section>
+    );
+  }
+
+  if (status === "needsPremium") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>
+          The Compatibility Report is part of Family Builder Pro. Upgrade to
+          see where you and your match align.
+        </p>
+        <Link className="primary" to={`/${locale}/subscription`}>
+          View Premium
+        </Link>
+      </section>
+    );
+  }
+
+  if (status === "noMatch") {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>
+          You do not have an active match with this profile, so there is no
+          shared report here yet.
+        </p>
+        <Link className="secondary" to={`/${locale}/messages`}>
+          Back to Messages
+        </Link>
+      </section>
+    );
+  }
+
+  if (status === "error" || !report) {
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p className="error">Could not load the Compatibility Report. Please try again.</p>
+      </section>
+    );
+  }
+
+  if (report.status === "incomplete") {
+    const youCompleted = Boolean(report.youCompleted);
+    return (
+      <section className="access-card">
+        <h1>Compatibility Report</h1>
+        <p>
+          {youCompleted
+            ? "Your match has not filled in their compatibility profile yet. Check back once they have."
+            : "Fill in your compatibility profile first, then check back once your match has too."}
+        </p>
+        {!youCompleted && (
+          <Link className="primary" to={`/${locale}/compatibility`}>
+            Fill in your compatibility profile
+          </Link>
+        )}
+      </section>
+    );
+  }
+
+  const strongest = (report.strongest as string[]) || [];
+  const worthDiscussing = (report.worthDiscussing as string[]) || [];
+  const talkingPoints = (report.talkingPoints as string[]) || [];
+
+  return (
+    <section className="compatibility-report">
+      <h1>Compatibility Report</h1>
+
+      <div className="list-card compatibility-report-card">
+        <h2>Your strongest areas</h2>
+        {strongest.length === 0 ? (
+          <p className="notice">Not enough matching answers yet to call out a strongest area.</p>
+        ) : (
+          <div className="compatibility-pill-row">
+            {strongest.map((label) => (
+              <span className="compatibility-pill" key={label}>
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="list-card compatibility-report-card">
+        <h2>Worth discussing</h2>
+        {worthDiscussing.length === 0 ? (
+          <p className="notice">Nothing stands out here - you are aligned everywhere you have both answered.</p>
+        ) : (
+          <div className="compatibility-pill-row">
+            {worthDiscussing.map((label) => (
+              <span className="compatibility-pill compatibility-pill-muted" key={label}>
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {talkingPoints.length > 0 && (
+        <div className="list-card compatibility-report-card">
+          <h2>Questions to talk through together</h2>
+          <ul className="compatibility-talking-points">
+            {talkingPoints.map((point, index) => (
+              <li key={index}>{point}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const PRICING_TEXT = {
+  en: {
+    eyebrow: "PRICING",
+    title: "Find the right person to build a family with.",
+    intro: "Better matches. Deeper compatibility. More confidence. Start free, upgrade when you're ready to go deeper.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Free forever", altNote: "",
+        tagline: "Create your profile and start discovering.",
+        features: ["Full profile & basic discovery", "3 likes per day", "Basic matching"],
+        cta: "Get started free", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "per month, billed monthly",
+        altNote: "or €49.99 for 3 months - €16.66/month, save 33%",
+        tagline: "For members ready to match with intention.",
+        features: ["Compatibility Score & Why you match", "Advanced family filters", "See who liked you", "Video & audio calls", "15 likes/day, 5 reach-outs/day", "Priority in discovery"],
+        cta: "Start Family Builder", badge: "Best value",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "per month", altNote: "",
+        tagline: "Everything in Family Builder, plus deeper guidance.",
+        features: ["Everything in Family Builder", "AI Family Advisor", "Detailed Compatibility Report", "Family Plan & Shared Family Room", "Document & checklist tools", "Priority support"],
+        cta: "Go Pro", badge: "",
+      },
+    ],
+    footnote: "Prices shown in EUR and may vary by region. Cancel anytime. Premium requires profile verification.",
+    faqLinkLabel: "See how we verify members",
+    compareTitle: "Compare all features",
+    compareSub: "See exactly what's included in each plan.",
+    matrixGroups: [
+      { name: "Match better", rows: [
+        { label: "Daily likes", values: ["3", "15", "Unlimited"] },
+        { label: "Reach out first", values: ["", "5/day", "Unlimited"] },
+        { label: "Advanced family filters", values: ["", "check", "check"] },
+        { label: "Priority in catalog", values: ["", "check", "check"] },
+        { label: "See who liked you", values: ["", "check", "check"] },
+        { label: "See profile visitors", values: ["", "check", "check"] },
+      ] },
+      { name: "Understand compatibility", rows: [
+        { label: "Compatibility Score", values: ["", "check", "check"] },
+        { label: "Why you match", values: ["", "check", "check"] },
+        { label: "Expanded profile info", values: ["", "check", "check"] },
+        { label: "Verification info", values: ["", "check", "check"] },
+      ] },
+      { name: "Connect & communicate", rows: [
+        { label: "Video & audio calls", values: ["", "check", "check"] },
+        { label: "Private photos", values: ["", "check", "check"] },
+        { label: "Incognito mode", values: ["", "check", "check"] },
+      ] },
+      { name: "Build your family", rows: [
+        { label: "Family Plan (shared)", values: ["", "Limited", "check"] },
+        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "Detailed Compatibility Report", values: ["", "", "check"] },
+        { label: "Document & checklist tools", values: ["", "", "check"] },
+        { label: "Priority support", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  ru: {
+    eyebrow: "ЦЕНЫ",
+    title: "Найдите того, с кем строить семью.",
+    intro: "Более точные совпадения. Глубже совместимость. Больше уверенности. Начните бесплатно, обновитесь, когда будете готовы к большему.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Бесплатно навсегда", altNote: "",
+        tagline: "Создайте профиль и начните знакомиться.",
+        features: ["Полный профиль и базовый поиск", "3 лайка в день", "Базовый подбор пар"],
+        cta: "Начать бесплатно", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "в месяц, ежемесячная оплата",
+        altNote: "или €49.99 за 3 месяца - €16.66/мес, экономия 33%",
+        tagline: "Для тех, кто готов искать пару осознанно.",
+        features: ["Оценка совместимости и «почему вы подходите»", "Расширенные семейные фильтры", "Кто лайкнул вас", "Видео- и аудиозвонки", "15 лайков/день, 5 обращений/день", "Приоритет в поиске"],
+        cta: "Начать Family Builder", badge: "Лучшая цена",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "в месяц", altNote: "",
+        tagline: "Всё из Family Builder плюс более глубокое сопровождение.",
+        features: ["Всё из Family Builder", "AI Family Advisor", "Подробный отчёт о совместимости", "Family Plan и общая комната семьи", "Документы и чек-листы", "Приоритетная поддержка"],
+        cta: "Перейти на Pro", badge: "",
+      },
+    ],
+    footnote: "Цены указаны в евро и могут отличаться в зависимости от региона. Отмена в любой момент. Premium доступен после верификации профиля.",
+    faqLinkLabel: "Как мы проверяем участников",
+    compareTitle: "Сравните все возможности",
+    compareSub: "Точный список того, что включено в каждый тариф.",
+    matrixGroups: [
+      { name: "Больше совпадений", rows: [
+        { label: "Лайки в день", values: ["3", "15", "Без ограничений"] },
+        { label: "Первым написать", values: ["", "5 в день", "Без ограничений"] },
+        { label: "Расширенные семейные фильтры", values: ["", "check", "check"] },
+        { label: "Приоритет в каталоге", values: ["", "check", "check"] },
+        { label: "Кто лайкнул вас", values: ["", "check", "check"] },
+        { label: "Кто смотрел профиль", values: ["", "check", "check"] },
+      ] },
+      { name: "Понимание совместимости", rows: [
+        { label: "Оценка совместимости", values: ["", "check", "check"] },
+        { label: "Почему вы подходите", values: ["", "check", "check"] },
+        { label: "Расширенная информация профиля", values: ["", "check", "check"] },
+        { label: "Информация о верификации", values: ["", "check", "check"] },
+      ] },
+      { name: "Связь и общение", rows: [
+        { label: "Видео- и аудиозвонки", values: ["", "check", "check"] },
+        { label: "Приватные фото", values: ["", "check", "check"] },
+        { label: "Режим инкогнито", values: ["", "check", "check"] },
+      ] },
+      { name: "Постройте свою семью", rows: [
+        { label: "Семейный план (общий)", values: ["", "Ограниченно", "check"] },
+        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "Подробный отчёт о совместимости", values: ["", "", "check"] },
+        { label: "Документы и чек-листы", values: ["", "", "check"] },
+        { label: "Приоритетная поддержка", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+  es: {
+    eyebrow: "PRECIOS",
+    title: "Encuentra a la persona adecuada para formar una familia.",
+    intro: "Mejores matches. Mayor compatibilidad. Más confianza. Empieza gratis y mejora cuando quieras ir más allá.",
+    plans: [
+      {
+        key: "explore", name: "Explore", price: "€0", priceNote: "Gratis para siempre", altNote: "",
+        tagline: "Crea tu perfil y empieza a descubrir.",
+        features: ["Perfil completo y descubrimiento básico", "3 likes al día", "Emparejamiento básico"],
+        cta: "Empieza gratis", badge: "",
+      },
+      {
+        key: "familyBuilder", name: "Family Builder", price: "€24.99", priceNote: "al mes, facturación mensual",
+        altNote: "o €49.99 por 3 meses - €16.66/mes, ahorra 33%",
+        tagline: "Para quienes buscan match con intención.",
+        features: ["Puntuación de compatibilidad y «por qué haces match»", "Filtros familiares avanzados", "Ver quién te dio like", "Videollamadas y llamadas de audio", "15 likes/día, 5 contactos/día", "Prioridad en el descubrimiento"],
+        cta: "Empezar Family Builder", badge: "Mejor precio",
+      },
+      {
+        key: "familyBuilderPro", name: "Family Builder Pro", price: "€29.99", priceNote: "al mes", altNote: "",
+        tagline: "Todo lo de Family Builder, con acompañamiento más profundo.",
+        features: ["Todo lo de Family Builder", "AI Family Advisor", "Informe de compatibilidad detallado", "Family Plan y Sala Familiar Compartida", "Documentos y listas de verificación", "Soporte prioritario"],
+        cta: "Pasar a Pro", badge: "",
+      },
+    ],
+    footnote: "Los precios se muestran en EUR y pueden variar según la región. Cancela cuando quieras. Premium requiere verificación de perfil.",
+    faqLinkLabel: "Cómo verificamos a los miembros",
+    compareTitle: "Compara todas las funciones",
+    compareSub: "Mira exactamente qué incluye cada plan.",
+    matrixGroups: [
+      { name: "Mejores coincidencias", rows: [
+        { label: "Me gusta diarios", values: ["3", "15", "Ilimitado"] },
+        { label: "Escribir primero", values: ["", "5/día", "Ilimitado"] },
+        { label: "Filtros familiares avanzados", values: ["", "check", "check"] },
+        { label: "Prioridad en el catálogo", values: ["", "check", "check"] },
+        { label: "Ver quién te dio like", values: ["", "check", "check"] },
+        { label: "Ver visitantes del perfil", values: ["", "check", "check"] },
+      ] },
+      { name: "Entender la compatibilidad", rows: [
+        { label: "Puntuación de compatibilidad", values: ["", "check", "check"] },
+        { label: "Por qué coincidís", values: ["", "check", "check"] },
+        { label: "Información ampliada del perfil", values: ["", "check", "check"] },
+        { label: "Información de verificación", values: ["", "check", "check"] },
+      ] },
+      { name: "Conectar y comunicarse", rows: [
+        { label: "Videollamadas y llamadas de audio", values: ["", "check", "check"] },
+        { label: "Fotos privadas", values: ["", "check", "check"] },
+        { label: "Modo incógnito", values: ["", "check", "check"] },
+      ] },
+      { name: "Construye tu familia", rows: [
+        { label: "Plan familiar (compartido)", values: ["", "Limitado", "check"] },
+        { label: "AI Family Advisor", values: ["", "", "check"] },
+        { label: "Informe de compatibilidad detallado", values: ["", "", "check"] },
+        { label: "Documentos y listas de verificación", values: ["", "", "check"] },
+        { label: "Soporte prioritario", values: ["", "", "check"] },
+      ] },
+    ],
+  },
+} satisfies Record<CookieLocale, Record<string, unknown>>;
 
 function Pricing({ session }: { session: Session }) {
   const locale = localeOf();
@@ -4986,6 +5962,17 @@ const knowledgeHubCopy: Record<CookieLocale, {
   },
 };
 
+const latestKnowledgeArticles: Row[] = [
+  { id: "d21f57ef", slug: "co-parenting-red-flags-when-you-should-walk-away", title: "Co-Parenting Red Flags: When You Should Walk Away", excerpt: "Thinking about co-parenting? Learn which warning signs may signal an unhealthy or unsafe arrangement, from pressure and dishonesty to control and poor boundaries.", coverUrl: "/web-static/articles/1786801192887-d7333d16.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:39:19.430Z", views: 2 },
+  { id: "d69db046", slug: "can-co-parenting-work-without-a-romantic-relationship", title: "Can Co-Parenting Work Without a Romantic Relationship?", excerpt: "Can two people successfully co-parent without being a couple? Explore trust, boundaries, new partners, conflict and what makes co-parenting work.", coverUrl: "/web-static/articles/1786800884924-51087667.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:34:49.459Z", views: 1 },
+  { id: "316117d7", slug: "co-parenting-agreement-what-to-discuss-before-having-a-child", title: "Co-Parenting Agreement: What to Discuss Before Having a Child", excerpt: "Considering co-parenting? Learn what to discuss before pregnancy, from living arrangements and finances to decision-making, boundaries and future changes.", coverUrl: "/web-static/articles/1786800288283-2bb1dadc.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:25:06.599Z", views: 1 },
+  { id: "79c8f4b8", slug: "questions-to-ask-a-potential-co-parent-before-you-move-forward", title: "Questions to Ask a Potential Co-Parent Before You Move Forward", excerpt: "Thinking about co-parenting with someone? These practical questions can help you talk about parenting, money, living arrangements, boundaries and the future.", coverUrl: "/web-static/articles/1786799902679-855ba763.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:18:28.090Z", views: 2 },
+  { id: "0b9d1fac", slug: "how-to-find-a-co-parent-where-to-start-and-what-to-look-for", title: "How to Find a Co-Parent: Where to Start and What to Look For", excerpt: "Looking for a co-parent? Learn where to start, what to discuss early, how to spot compatibility and which red flags you shouldn't ignore.", coverUrl: "/web-static/articles/1786799585487-49cb88e4.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:13:10.321Z", views: 0 },
+  { id: "50a19e23", slug: "what-is-co-parenting-how-to-know-if-it-could-be-right-for-you", title: "What Is Co-Parenting? How to Know If It Could Be Right for You", excerpt: "What is co-parenting, and could it work for you? Explore relationships, boundaries, parenting decisions, finances and legal questions before you take the next step.", coverUrl: "/web-static/articles/1786799400356-2c5b1877.jpg", categorySlug: "Co-parenting", categoryName: "Co-parenting", publishedAt: "2026-08-15T13:10:04.894Z", views: 3 },
+  { id: "316bf71e", slug: "how-to-choose-your-path-to-parenthood-questions-to-consider", title: "How to Choose Your Path to Parenthood: Questions to Consider", excerpt: "Not sure which path to parenthood is right for you? Explore the questions that matter around family, health, finances, support and your priorities.", coverUrl: "/web-static/articles/1786799040979-03f84347.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-15T13:04:04.950Z", views: 3 },
+  { id: "e585cffa", slug: "different-ways-to-become-a-parent-your-options-explained", title: "Different Ways to Become a Parent: Your Options Explained", excerpt: "Explore different paths to parenthood, from parenting with a partner and co-parenting to donor conception, fertility treatment, adoption and surrogacy.", coverUrl: "/web-static/articles/1786715854481-9e2ad679.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-14T13:57:51.783Z", views: 2 },
+  { id: "3e9f35f8", slug: "am-i-ready-to-become-a-parent-how-to-know-when-to-start", title: "Am I Ready to Become a Parent? How to Know When to Start", excerpt: "Thinking about becoming a parent but not sure you're ready? Explore the questions that matter most — from your reasons and lifestyle to finances, health and support — and find a clearer way forward.", coverUrl: "/web-static/articles/1786715655186-9f49a617.jpg", categorySlug: "Parenthood", categoryName: "Parenthood", publishedAt: "2026-08-14T13:54:17.992Z", views: 2 },
+];
 
 const knowledgeCategoryName = (slug: string, locale: CookieLocale = "en") =>
   knowledgeCategoryCopy[locale][slug.toLowerCase()]
@@ -5001,12 +5988,6 @@ const knowledgeLoadMoreCopy: Record<
   es: { idle: "Cargar más", loading: "Cargando ..." },
 };
 
-const articlePreviewCopy: Record<CookieLocale, string> = {
-  en: "Preview Mode — This article is not published yet",
-  ru: "Режим предпросмотра — Эта статья ещё не опубликована",
-  es: "Modo de vista previa — Este artículo aún no está publicado",
-};
-
 const knowledgeDate = (value: unknown) => {
   const date = new Date(String(value));
   if (Number.isNaN(date.getTime())) return "—";
@@ -5018,24 +5999,37 @@ const knowledgeDate = (value: unknown) => {
 function KnowledgeHub() {
   const locale = localeOf();
   const copy = knowledgeHubCopy[locale];
-  const [data, setData] = useState<Row[] | null>(null);
-  const [error, setError] = useState("");
+  const [data, setData] = useState<Page<Row> | null>(null);
   const [category, setCategory] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => {
-    let alive = true;
-    setData(null);
-    setError("");
-    setVisibleCount(12);
-    loadKnowledgeArticles(api, locale)
-      .then((items) => { if (alive) setData(items); })
-      .catch(() => { if (alive) setError(copy.unavailable); });
-    return () => { alive = false; };
-  }, [copy.unavailable, locale]);
-  const allArticles: Row[] = (data ?? []).map((item) => ({
+    api
+      .get<Page<Row>>(
+        `/public/articles?locale=${encodeURIComponent(locale)}&limit=60&offset=0`,
+      )
+      .then(setData)
+      .catch(() => setData({ items: [], total: 0, limit: 60, offset: 0 }));
+  }, [locale]);
+  const backendArticles: Row[] = (data?.items ?? []).map((item) => {
+    const meta = (item.meta ?? {}) as Row;
+    const metaCategory = (meta.category ?? {}) as Row;
+    const selectedTranslation = (meta.selectedTranslation ?? {}) as Row;
+    const categorySlug = String(item.category ?? metaCategory.slug ?? "");
+    const referenceMeta = referenceArticleMeta[String(item.slug)];
+    return {
+      ...item,
+      coverUrl: referenceMeta?.coverUrl ?? item.coverUrl ?? item.cover_url ?? selectedTranslation.coverImageUrl,
+      categorySlug,
+      categoryName: knowledgeCategoryName(categorySlug, locale),
+      publishedAt: item.publishedAt ?? item.published_at ?? meta.publishedAt,
+      views: referenceMeta?.views ?? item.views ?? meta.viewCount ?? 0,
+    } as Row;
+  });
+  const latestSlugs = new Set(latestKnowledgeArticles.map((item) => String(item.slug)));
+  const allArticles: Row[] = referenceKnowledgeArticles.map((item) => ({
     ...item,
-    categoryName: knowledgeCategoryName(String(item.categorySlug), locale),
+    categoryName: knowledgeCategoryName(item.categorySlug, locale),
   }));
   const filteredArticles = category
     ? allArticles.filter((item) => String(item.categorySlug).toLowerCase() === category.toLowerCase())
@@ -5060,8 +6054,6 @@ function KnowledgeHub() {
           <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{locale === "es" ? item.name : knowledgeCategoryName(item.slug, locale)}</button>
         ))}
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
-      {!data && !error && <LoadingIndicator />}
       <div className="knowledge-grid">
         {visibleArticles.map((item) => (
           <Link
@@ -5069,7 +6061,7 @@ function KnowledgeHub() {
             key={String(item.id)}
             to={`/${locale}/knowledge-hub/${encodeURIComponent(asText(item.slug))}`}
           >
-            <div className="knowledge-card-image">{Boolean(item.coverUrl) && <img src={asText(item.coverUrl)} alt={asText(item.title)} />}</div>
+            <div className="knowledge-card-image"><img src={asText(item.coverUrl)} alt={asText(item.title)} /></div>
             <div className="knowledge-card-body">
               <span className="knowledge-badge">{asText(item.categoryName)}</span>
               <h3>{asText(item.title)}</h3>
@@ -5101,10 +6093,8 @@ function KnowledgeHub() {
 
 function Article() {
   const { locale = "en", slug = "" } = useParams();
-  const [searchParams] = useSearchParams();
   const activeLocale = locale as CookieLocale;
   const copy = knowledgeHubCopy[activeLocale];
-  const previewMode = searchParams.get("preview") === "true";
   const [article, setArticle] = useState<Row | null>(null);
   const [navigationArticles, setNavigationArticles] = useState<Row[]>([]);
   const [error, setError] = useState("");
@@ -5115,11 +6105,13 @@ function Article() {
   }, [locale, slug]);
   useEffect(() => {
     let alive = true;
-    setNavigationArticles([]);
-    loadKnowledgeArticles(api, locale)
-      .then((items) => {
+    api
+      .get<Page<Row>>(
+        `/public/articles?locale=${encodeURIComponent(locale)}&limit=60&offset=0`,
+      )
+      .then((page) => {
         if (!alive) return;
-        setNavigationArticles(items);
+        setNavigationArticles(referenceKnowledgeArticles);
       })
       .catch(() => {
         if (alive) setNavigationArticles([]);
@@ -5131,100 +6123,58 @@ function Article() {
     const load = async () => {
       try {
         const result = await api.get<Row>(
-          `/public/articles/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}${previewMode ? "?preview=true" : ""}`,
+          `/public/articles/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}`,
         );
-        if (alive) setArticle(normalizeArticle(result));
+        if (alive) setArticle(result);
       } catch {
-        if (alive) setError(copy.unavailable);
+        const latestIndex = latestKnowledgeArticles.findIndex((item) => item.slug === slug);
+        if (locale !== "en" || latestIndex < 0 || latestIndex > 8) {
+          if (alive) setError(copy.unavailable);
+          return;
+        }
+        try {
+          const response = await fetch(`/web-static/articles/details/${encodeURIComponent(slug)}-20260821.json`);
+          if (!response.ok) throw new Error("Article snapshot unavailable");
+          const payload = await response.json() as { result?: { data?: { json?: Row } } };
+          const result = payload.result?.data?.json;
+          if (!result) throw new Error("Article snapshot is invalid");
+          if (alive) setArticle(result);
+        } catch {
+          if (alive) setError(copy.unavailable);
+        }
       }
     };
     void load();
     return () => { alive = false; };
-  }, [copy.unavailable, locale, previewMode, slug]);
-  useEffect(() => {
-    if (!article) return;
-    const meta = article.meta && typeof article.meta === "object" && !Array.isArray(article.meta)
-      ? article.meta as Row
-      : {};
-    const translation = meta.translation && typeof meta.translation === "object" && !Array.isArray(meta.translation)
-      ? meta.translation as Row
-      : {};
-    const firstText = (...values: unknown[]) =>
-      values.map((value) => String(value ?? "").trim()).find(Boolean) ?? "";
-    const title = firstText(meta.metaTitle, meta.seoTitle, translation.metaTitle, translation.seoTitle, article.title, "LetsBeParents");
-    const description = firstText(meta.metaDescription, meta.seoDescription, translation.metaDescription, translation.seoDescription, article.excerpt);
-    const imageValue = firstText(meta.ogImage, meta.ogImageUrl, translation.ogImage, translation.ogImageUrl, article.coverUrl, article.cover_url);
-    let image = "";
-    try {
-      image = imageValue ? new URL(imageValue, window.location.origin).href : "";
-    } catch {
-      image = "";
-    }
-    const canonical = `${window.location.origin}/${locale}/knowledge-hub/${encodeURIComponent(slug)}`;
-    const localeTag = locale === "ru" ? "ru_RU" : locale === "es" ? "es_ES" : "en_US";
-    const managed: HTMLElement[] = [];
-    const setMeta = (attribute: "name" | "property", key: string, content: string) => {
-      if (!content) return;
-      const element = document.createElement("meta");
-      element.setAttribute(attribute, key);
-      element.setAttribute("content", content);
-      element.dataset.articleSeo = "true";
-      document.head.appendChild(element);
-      managed.push(element);
-    };
-    const canonicalLink = document.createElement("link");
-    canonicalLink.rel = "canonical";
-    canonicalLink.href = canonical;
-    canonicalLink.dataset.articleSeo = "true";
-    document.head.appendChild(canonicalLink);
-    managed.push(canonicalLink);
-    document.title = title || "LetsBeParents";
-    setMeta("name", "description", description);
-    setMeta("property", "og:title", title);
-    setMeta("property", "og:description", description);
-    setMeta("property", "og:url", canonical);
-    setMeta("property", "og:site_name", "LetsBeParents");
-    setMeta("property", "og:locale", localeTag);
-    setMeta("property", "og:type", "article");
-    setMeta("property", "article:published_time", String(article.publishedAt ?? article.published_at ?? ""));
-    setMeta("property", "article:modified_time", String(article.updated_at ?? article.updatedAt ?? ""));
-    setMeta("property", "og:image", image);
-    setMeta("name", "twitter:card", "summary_large_image");
-    setMeta("name", "twitter:title", title);
-    setMeta("name", "twitter:description", description);
-    setMeta("name", "twitter:image", image);
-    return () => {
-      managed.forEach((element) => element.remove());
-      document.title = "LetsBeParents";
-    };
-  }, [article, locale, slug]);
-  const previewBanner = previewMode ? (
-    <div className="article-preview-banner" role="status">
-      {articlePreviewCopy[activeLocale]}
-    </div>
-  ) : null;
+  }, [copy.unavailable, locale, slug]);
   if (error)
     return (
-      <>
-        {previewBanner}
-        <section className="access-card">
-          <p className="error">{error}</p>
-          <Link to={`/${locale}/knowledge-hub`}>{copy.back}</Link>
-        </section>
-      </>
+      <section className="access-card">
+        <p className="error">{error}</p>
+        <Link to={`/${locale}/knowledge-hub`}>{copy.back}</Link>
+      </section>
     );
-  if (!article) return <>{previewBanner}<LoadingIndicator /></>;
-  const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale);
-  const coverUrl = article.coverUrl;
-  const publishedAt = article.publishedAt;
-  const views = article.views;
+  if (!article) return <LoadingIndicator />;
+  const staticArticle = latestKnowledgeArticles.find((item) => item.slug === slug);
+  const categoryValue = article.category;
+  const categoryName = typeof categoryValue === "object" && categoryValue
+    ? asText((categoryValue as Row).name)
+    : knowledgeCategoryName(asText(categoryValue), "en");
+  const referenceMeta = referenceArticleMeta[slug];
+  const coverUrl = referenceMeta?.coverUrl ?? staticArticle?.coverUrl ?? article.coverUrl ?? article.cover_url ?? article.coverImageUrl;
+  const publishedAt = staticArticle?.publishedAt ?? article.publishedAt ?? article.published_at;
+  const views = referenceMeta?.views ?? staticArticle?.views ?? article.views ?? article.viewCount ?? 0;
   const bodyHtml = article.bodyHtml ?? article.body_html ?? article.content;
   const referenceBodyHtml = asText(bodyHtml).replaceAll("https://letsbeparents.com/", "/");
   const navigationIndex = navigationArticles.findIndex((item) => asText(item.slug) === slug);
-  const previous = (article.prev as Row | null | undefined)
-      ?? (article.previous as Row | null | undefined)
+  const referenceNavigation = referenceArticleNavigation[slug];
+  const previous = referenceNavigation
+    ? referenceNavigation.previous
+    : (article.previous as Row | null | undefined)
       ?? (navigationIndex > 0 ? navigationArticles[navigationIndex - 1] : null);
-  const next = (article.next as Row | null | undefined)
+  const next = referenceNavigation
+    ? referenceNavigation.next
+    : (article.next as Row | null | undefined)
       ?? (navigationIndex >= 0 && navigationIndex < navigationArticles.length - 1
         ? navigationArticles[navigationIndex + 1]
         : null);
@@ -5238,9 +6188,7 @@ function Article() {
     },
   );
   return (
-    <>
-      {previewBanner}
-      <article className="article-page">
+    <article className="article-page">
       <Link className="article-back" to={`/${locale}/knowledge-hub`}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h12"/></svg><span>{copy.back}</span></Link>
       <header className="article-heading">
         <span className="knowledge-badge">{categoryName}</span>
@@ -5272,8 +6220,7 @@ function Article() {
           ) : <span className="article-navigation-placeholder" />}
         </nav>
       )}
-      </article>
-    </>
+    </article>
   );
 }
 
@@ -5337,7 +6284,7 @@ function Contact() {
           <dt>{copy.phone}</dt>
           <dd><a href="tel:+38268530700">+382 68 530 700</a></dd>
           <dt>{copy.email}</dt>
-          <dd><a href="mailto:support@letsbeparents.com">support@letsbeparents.com</a></dd>
+          <dd><a href="mailto:contact@letsbeparents.com">contact@letsbeparents.com</a></dd>
         </dl>
       </aside>
       <div className="contact-form-panel">
@@ -5690,7 +6637,7 @@ function ResourcesIndex() {
           <h2>Looking for professional guidance?</h2>
           <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
         </div>
-        <Link className="resources-pro-button" to={`/${locale}/contact`}>Learn about professional support {resourceArrow()}</Link>
+        <Link className="resources-pro-button" to={`/${locale}/professionals`}>Learn about professional support {resourceArrow()}</Link>
       </section>
 
       <section className="landing-cta">
@@ -6447,7 +7394,220 @@ function FindYourPath() {
           <h2>Looking for professional guidance?</h2>
           <p>Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted space to connect people with psychological, medical and other professional support when they need it.</p>
         </div>
-        <Link className="resources-pro-button" to={`/${locale}/contact`}>Learn about professional support {resourceArrow()}</Link>
+        <Link className="resources-pro-button" to={`/${locale}/professionals`}>Learn about professional support {resourceArrow()}</Link>
+      </section>
+    </div>
+  );
+}
+
+function professionalIcon(key: string) {
+  if (key === "scale") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18" /><path d="m19 8 3 8a5 5 0 0 1-6 0zV7" /><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1" /><path d="m5 8 3 8a5 5 0 0 1-6 0zV7" /><path d="M7 21h10" /></svg>;
+  if (key === "wallet") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4" /><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /><path d="M18 12a2 2 0 0 0 0 4h4v-4Z" /></svg>;
+  if (key === "support") return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="4" /><path d="m4.93 4.93 4.24 4.24" /><path d="m14.83 9.17 4.24-4.24" /><path d="m14.83 14.83 4.24 4.24" /><path d="m9.17 14.83-4.24 4.24" /></svg>;
+  return resourceCategoryIcon("fertility");
+}
+
+function professionalStepIcon(icon: string) {
+  if (icon === "profile") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14" /><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /></svg>;
+  if (icon === "match") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.414 14.414C21 12.828 22 11.5 22 9.5a5.5 5.5 0 0 0-9.591-3.676.6.6 0 0 1-.818.001A5.5 5.5 0 0 0 2 9.5c0 2.3 1.5 4 3 5.5l5.535 5.362a2 2 0 0 0 2.879.052 2.12 2.12 0 0 0-.004-3 2.124 2.124 0 1 0 3-3 2.124 2.124 0 0 0 3.004 0 2 2 0 0 0 0-2.828l-1.881-1.882a2.41 2.41 0 0 0-3.409 0l-1.71 1.71a2 2 0 0 1-2.828 0 2 2 0 0 1 0-2.828l2.823-2.762" /></svg>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 2v2" /><path d="M5 2v2" /><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1" /><path d="M8 15a6 6 0 0 0 12 0v-3" /><circle cx="20" cy="10" r="2" /></svg>;
+}
+
+// Public directory of vetted professionals, per the /professionals TZ (Sept 2026).
+// Clinics & lawyers reuse the existing catalog directories once signed in; therapists and
+// financial advisors are marked available:false until real profiles are onboarded - flip
+// those two flags (and swap in real copy) once that's true.
+const PROFESSIONALS_TEXT: Record<CookieLocale, {
+  eyebrow: string;
+  heroTitle: string;
+  heroSubtitle: string;
+  heroCtaPrimary: string;
+  heroCtaSecondary: string;
+  categoriesEyebrow: string;
+  categoriesTitle: string;
+  categoriesSubtitle: string;
+  categories: Array<{ key: string; icon: string; title: string; description: string; statSuffix: string | null; available: boolean }>;
+  comingSoonLabel: string;
+  stepsEyebrow: string;
+  stepsTitle: string;
+  steps: Array<[string, string, string, string]>;
+  trustTitle: string;
+  trustDescription: string;
+  trustCta: string;
+  closingTitle: string;
+  closingSubtitle: string;
+  closingCta: string;
+}> = {
+  en: {
+    eyebrow: "Professional support",
+    heroTitle: "Trusted experts for every step of your journey",
+    heroSubtitle: "Fertility clinics, family lawyers, therapists and financial advisors - vetted, verified, and available when you're ready to talk.",
+    heroCtaPrimary: "Sign up free",
+    heroCtaSecondary: "See how verification works",
+    categoriesEyebrow: "Who's on the platform",
+    categoriesTitle: "Support for every part of building a family",
+    categoriesSubtitle: "Browse categories publicly - full profiles and booking unlock once you create a free account.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Fertility clinics", description: "Compare verified fertility clinics worldwide. Book video consultations once you're signed in.", statSuffix: "partner clinics", available: true },
+      { key: "lawyers", icon: "scale", title: "Family lawyers", description: "Reproductive law specialists for contracts, parentage and co-parenting agreements.", statSuffix: "lawyers", available: true },
+      { key: "therapists", icon: "support", title: "Therapists & counselors", description: "Talk through the emotional side of building a family - before, during and after you find your match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Financial advisors", description: "Understand the real cost of donor conception, surrogacy or adoption before you commit.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Coming soon",
+    stepsEyebrow: "How it works",
+    stepsTitle: "From browsing to booking, in three steps",
+    steps: [
+      ["01", "Browse categories", "See who's available in your country, across all four categories.", "clinic"],
+      ["02", "Sign up free", "Create your account to unlock full profiles and details.", "profile"],
+      ["03", "Book a consultation", "Chat or video call, right inside LetsBeParents.", "match"],
+    ],
+    trustTitle: "Every professional is verified before they're listed",
+    trustDescription: "Licenses and credentials are checked before a clinic or lawyer appears on LetsBeParents. See exactly what we check and what's still on you to confirm yourself.",
+    trustCta: "See what we check",
+    closingTitle: "Ready to connect with the right expert?",
+    closingSubtitle: "Create your free account to unlock full profiles and book your first consultation.",
+    closingCta: "Create free account",
+  },
+  ru: {
+    eyebrow: "Профессиональная поддержка",
+    heroTitle: "Проверенные специалисты на каждом этапе вашего пути",
+    heroSubtitle: "Клиники репродукции, семейные юристы, психологи и финансовые консультанты - проверены, верифицированы и готовы поговорить, когда вы будете готовы.",
+    heroCtaPrimary: "Зарегистрироваться бесплатно",
+    heroCtaSecondary: "Как работает проверка",
+    categoriesEyebrow: "Кто есть на платформе",
+    categoriesTitle: "Поддержка на каждом этапе создания семьи",
+    categoriesSubtitle: "Категории можно посмотреть без регистрации - полные профили и бронирование открываются после создания бесплатного аккаунта.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Клиники репродукции", description: "Сравнивайте проверенные клиники репродукции по всему миру. Бронируйте видеоконсультации после входа в аккаунт.", statSuffix: "партнёрских клиник", available: true },
+      { key: "lawyers", icon: "scale", title: "Семейные юристы", description: "Специалисты по репродуктивному праву - контракты, установление родительства, соглашения о совместном родительстве.", statSuffix: "юристов", available: true },
+      { key: "therapists", icon: "support", title: "Психологи и консультанты", description: "Обсудите эмоциональную сторону создания семьи - до, во время и после того, как найдёте пару.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Финансовые консультанты", description: "Разберитесь в реальной стоимости донорского зачатия, суррогатного материнства или усыновления, прежде чем принимать решение.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Скоро",
+    stepsEyebrow: "Как это работает",
+    stepsTitle: "От просмотра до бронирования - три шага",
+    steps: [
+      ["01", "Просмотрите категории", "Смотрите, кто доступен в вашей стране, по всем четырём категориям.", "clinic"],
+      ["02", "Зарегистрируйтесь бесплатно", "Создайте аккаунт, чтобы открыть полные профили и подробности.", "profile"],
+      ["03", "Забронируйте консультацию", "Чат или видеозвонок - прямо внутри LetsBeParents.", "match"],
+    ],
+    trustTitle: "Каждый специалист проходит проверку перед публикацией",
+    trustDescription: "Лицензии и квалификация проверяются прежде, чем клиника или юрист появятся на LetsBeParents. Посмотрите, что именно мы проверяем, а что стоит уточнить самостоятельно.",
+    trustCta: "Что мы проверяем",
+    closingTitle: "Готовы связаться с нужным специалистом?",
+    closingSubtitle: "Создайте бесплатный аккаунт, чтобы открыть полные профили и забронировать первую консультацию.",
+    closingCta: "Создать бесплатный аккаунт",
+  },
+  es: {
+    eyebrow: "Apoyo profesional",
+    heroTitle: "Expertos de confianza en cada paso de tu camino",
+    heroSubtitle: "Clínicas de fertilidad, abogados de familia, terapeutas y asesores financieros - verificados y disponibles cuando estés listo para hablar.",
+    heroCtaPrimary: "Regístrate gratis",
+    heroCtaSecondary: "Cómo funciona la verificación",
+    categoriesEyebrow: "Quién está en la plataforma",
+    categoriesTitle: "Apoyo para cada parte de formar una familia",
+    categoriesSubtitle: "Explora las categorías sin registrarte - los perfiles completos y la reserva se desbloquean al crear una cuenta gratuita.",
+    categories: [
+      { key: "clinics", icon: "fertility", title: "Clínicas de fertilidad", description: "Compara clínicas de fertilidad verificadas en todo el mundo. Reserva videoconsultas una vez que hayas iniciado sesión.", statSuffix: "clínicas partner", available: true },
+      { key: "lawyers", icon: "scale", title: "Abogados de familia", description: "Especialistas en derecho reproductivo para contratos, filiación y acuerdos de coparentalidad.", statSuffix: "abogados", available: true },
+      { key: "therapists", icon: "support", title: "Terapeutas y consejeros", description: "Habla sobre el lado emocional de formar una familia - antes, durante y después de encontrar tu match.", statSuffix: null, available: false },
+      { key: "financial", icon: "wallet", title: "Asesores financieros", description: "Entiende el coste real de la donación, la gestación subrogada o la adopción antes de decidir.", statSuffix: null, available: false },
+    ],
+    comingSoonLabel: "Próximamente",
+    stepsEyebrow: "Cómo funciona",
+    stepsTitle: "De explorar a reservar, en tres pasos",
+    steps: [
+      ["01", "Explora las categorías", "Mira quién está disponible en tu país, en las cuatro categorías.", "clinic"],
+      ["02", "Regístrate gratis", "Crea tu cuenta para desbloquear perfiles completos y detalles.", "profile"],
+      ["03", "Reserva una consulta", "Chat o videollamada, directamente en LetsBeParents.", "match"],
+    ],
+    trustTitle: "Cada profesional se verifica antes de aparecer en la lista",
+    trustDescription: "Las licencias y credenciales se comprueban antes de que una clínica o un abogado aparezca en LetsBeParents. Descubre exactamente qué comprobamos nosotros y qué te corresponde confirmar a ti.",
+    trustCta: "Ver qué comprobamos",
+    closingTitle: "¿Listo para conectar con el experto adecuado?",
+    closingSubtitle: "Crea tu cuenta gratuita para desbloquear perfiles completos y reservar tu primera consulta.",
+    closingCta: "Crear cuenta gratuita",
+  },
+};
+
+function Professionals() {
+  const locale = localeOf();
+  const t = PROFESSIONALS_TEXT[locale];
+  const stats = LANDING_TEXT[locale].stats;
+  const clinicsCount = stats[2][0];
+  const lawyersCount = stats[3][0];
+  const statFor = (key: string, suffix: string | null) => {
+    if (!suffix) return null;
+    if (key === "clinics") return `${clinicsCount}+ ${suffix}`;
+    if (key === "lawyers") return `${lawyersCount}+ ${suffix}`;
+    return null;
+  };
+  return (
+    <div className="professionals-page">
+      <section className="professionals-hero">
+        <span className="landing-pill"><i /><span>{t.eyebrow}</span></span>
+        <h1>{t.heroTitle}</h1>
+        <p>{t.heroSubtitle}</p>
+        <div className="professionals-hero-actions">
+          <Link className="landing-gradient-button" to={`/${locale}/auth/register`}>{t.heroCtaPrimary} {resourceArrow()}</Link>
+          <Link className="professionals-secondary-link" to={`/${locale}/trust-safety`}>{t.heroCtaSecondary}</Link>
+        </div>
+      </section>
+
+      <section className="professionals-categories">
+        <div className="landing-section-intro">
+          <span>{t.categoriesEyebrow}</span>
+          <h2>{t.categoriesTitle}</h2>
+          <p className="resources-section-sub">{t.categoriesSubtitle}</p>
+        </div>
+        <div className="professionals-cat-grid">
+          {t.categories.map((cat) => {
+            const stat = statFor(cat.key, cat.statSuffix);
+            return (
+              <div key={cat.key} className={`professionals-card${cat.available ? "" : " is-soon"}`}>
+                {!cat.available && <span className="resources-tool-tag soon professionals-soon-tag">{t.comingSoonLabel}</span>}
+                <span className="resources-category-icon">{professionalIcon(cat.icon)}</span>
+                <h3>{cat.title}</h3>
+                <p>{cat.description}</p>
+                {stat && <div className="professionals-card-stat">{stat}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="professionals-steps-section">
+        <div className="landing-section-intro">
+          <span>{t.stepsEyebrow}</span>
+          <h2>{t.stepsTitle}</h2>
+        </div>
+        <div className="professionals-steps-row">
+          {t.steps.map(([number, title, description, icon]) => (
+            <article key={number} className="professionals-step-card">
+              <div className="landing-step-icon">{professionalStepIcon(icon)}</div>
+              <div className="landing-step-number">{number}</div>
+              <h3>{title}</h3>
+              <p>{description}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="resources-pro">
+        <span className="resources-pro-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m9 12 2 2 4-4" /></svg>
+        </span>
+        <div className="resources-pro-copy">
+          <h2>{t.trustTitle}</h2>
+          <p>{t.trustDescription}</p>
+        </div>
+        <Link className="resources-pro-button" to={`/${locale}/trust-safety`}>{t.trustCta} {resourceArrow()}</Link>
+      </section>
+
+      <section className="landing-cta">
+        <h2>{t.closingTitle}</h2>
+        <p>{t.closingSubtitle}</p>
+        <Link to={`/${locale}/auth/register`}>{t.closingCta} <span>{"→"}</span></Link>
       </section>
     </div>
   );
@@ -7123,34 +8283,1018 @@ function PartnerClinic() {
   );
 }
 
+function Boost({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [active, setActive] = useState(false);
+  const [activeUntil, setActiveUntil] = useState<string | null>(null);
+  const [pendingRequestId, setPendingRequestId] = useState<unknown>(null);
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [requesting, setRequesting] = useState(false);
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{ active: boolean; activeUntil: string | null; pendingRequestId: unknown }>("/member/boost")
+      .then((data) => {
+        setActive(data.active);
+        setActiveUntil(data.activeUntil);
+        setPendingRequestId(data.pendingRequestId);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const requestBoost = async () => {
+    setRequesting(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      const data = await api.post<{
+        ok: true;
+        status: string;
+        activeUntil?: string;
+        requestId?: number;
+        message?: string;
+      }>("/member/boost", {});
+      setNotice(data.message || "Boost requested.");
+      load();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof ApiError && err.status === 403
+          ? "You need to be verified before requesting a Boost."
+          : "Could not request a Boost right now.",
+      );
+    } finally {
+      setRequesting(false);
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Boost</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Boost puts your profile near the top of Catalog results for a
+        limited time, so more people see you first.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your Boost status.</p>
+      )}
+      {status === "ok" && (
+        <>
+          {active ? (
+            <p className="notice">
+              Your Boost is active until {asText(activeUntil)}.
+            </p>
+          ) : pendingRequestId ? (
+            <p className="notice">Your Boost request is under review.</p>
+          ) : (
+            <button
+              className="primary"
+              onClick={() => void requestBoost()}
+              disabled={requesting}
+            >
+              {requesting ? "Requesting…" : "Request a Boost"}
+            </button>
+          )}
+        </>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+    </section>
+  );
+}
+
+function Referral({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [code, setCode] = useState("");
+  const [referredCount, setReferredCount] = useState(0);
+  const [rewardedCount, setRewardedCount] = useState(0);
+  const [redeemedCode, setRedeemedCode] = useState<string | null>(null);
+  const [inputCode, setInputCode] = useState("");
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [redeeming, setRedeeming] = useState(false);
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{
+        code: string;
+        referredCount: number;
+        rewardedCount: number;
+        redeemedCode: string | null;
+      }>("/member/referral")
+      .then((data) => {
+        setCode(data.code);
+        setReferredCount(data.referredCount);
+        setRewardedCount(data.rewardedCount);
+        setRedeemedCode(data.redeemedCode);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const redeem = async () => {
+    const value = inputCode.trim();
+    if (!value) return;
+    setRedeeming(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      await api.post("/member/referral/redeem", { code: value });
+      setNotice("Invite code redeemed.");
+      setInputCode("");
+      load();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409)
+        setErrorMsg("You've already used an invite code.");
+      else if (err instanceof ApiError && err.status === 404)
+        setErrorMsg("That invite code was not found.");
+      else if (err instanceof ApiError && err.status === 422)
+        setErrorMsg("You can't use your own invite code.");
+      else setErrorMsg("Could not redeem that code.");
+    } finally {
+      setRedeeming(false);
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Referral</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Invite friends to LetsBeParents - when they join and get verified,
+        you earn a profile Boost.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your referral info.</p>
+      )}
+      {status === "ok" && (
+        <>
+          <div className="list-card">
+            <p>Your invite code</p>
+            <p>
+              <strong>{code}</strong>
+            </p>
+            <p>
+              {referredCount} friend(s) invited - {rewardedCount} rewarded
+            </p>
+          </div>
+          {!redeemedCode ? (
+            <>
+              <label>
+                Have an invite code?
+                <input
+                  value={inputCode}
+                  onChange={(event) => setInputCode(event.target.value)}
+                  placeholder="Enter invite code"
+                />
+              </label>
+              <button
+                className="primary"
+                onClick={() => void redeem()}
+                disabled={!inputCode.trim() || redeeming}
+              >
+                {redeeming ? "Redeeming…" : "Redeem code"}
+              </button>
+            </>
+          ) : (
+            <p className="notice">
+              You've already redeemed an invite code ({redeemedCode}).
+            </p>
+          )}
+        </>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+    </section>
+  );
+}
+
+function SafetyCheckIn({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [checkins, setCheckins] = useState<Row[]>([]);
+  const [withWhom, setWithWhom] = useState("");
+  const [plan, setPlan] = useState("");
+  const [hours, setHours] = useState(3);
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; checkins: Row[] }>("/member/safety-checkins")
+      .then((data) => {
+        setCheckins(data.checkins || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const create = async () => {
+    if (!plan.trim()) return;
+    setCreating(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      await api.post("/member/safety-checkins", {
+        withWhom: withWhom.trim() || undefined,
+        plan: plan.trim(),
+        hoursUntilCheckIn: hours,
+      });
+      setPlan("");
+      setWithWhom("");
+      setNotice("Check-in scheduled.");
+      load();
+    } catch {
+      setErrorMsg("Could not schedule that check-in.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const markSafe = async (item: Row) => {
+    try {
+      await api.post(
+        `/member/safety-checkins/${encodeURIComponent(asText(item.id))}/safe`,
+        {},
+      );
+      load();
+    } catch {
+      setErrorMsg("Could not mark that check-in as safe.");
+    }
+  };
+
+  const cancelCheckin = async (item: Row) => {
+    try {
+      await api.post(
+        `/member/safety-checkins/${encodeURIComponent(asText(item.id))}/cancel`,
+        {},
+      );
+      load();
+    } catch {
+      setErrorMsg("Could not cancel that check-in.");
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Safety Check-In</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Meeting someone in person for the first time? Set a check-in - it
+        stays on your record here as a reminder to follow up with yourself
+        by the deadline.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your check-ins.</p>
+      )}
+      <label>
+        Meeting with (optional)
+        <input
+          value={withWhom}
+          onChange={(event) => setWithWhom(event.target.value)}
+          placeholder="Who are you meeting?"
+        />
+      </label>
+      <label>
+        Plan
+        <textarea
+          rows={3}
+          value={plan}
+          onChange={(event) => setPlan(event.target.value)}
+          placeholder="Where and when, in case someone needs to check on you"
+        />
+      </label>
+      <label>
+        Check in with yourself after
+        <select
+          value={hours}
+          onChange={(event) => setHours(Number(event.target.value))}
+        >
+          <option value={1}>1 hour</option>
+          <option value={2}>2 hours</option>
+          <option value={3}>3 hours</option>
+          <option value={6}>6 hours</option>
+          <option value={12}>12 hours</option>
+          <option value={24}>24 hours</option>
+          <option value={48}>48 hours</option>
+          <option value={72}>72 hours</option>
+        </select>
+      </label>
+      <button
+        className="primary"
+        onClick={() => void create()}
+        disabled={!plan.trim() || creating}
+      >
+        {creating ? "Scheduling…" : "Schedule check-in"}
+      </button>
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+      <div className="list-card">
+        <h2>Your check-ins</h2>
+        {checkins.length === 0 ? (
+          <p className="notice">No check-ins yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {checkins.map((item) => (
+              <li key={asText(item.id)}>
+                <span>
+                  {asText(item.plan)}
+                  {item.withWhom ? ` - with ${asText(item.withWhom)}` : ""}
+                  {" - "}
+                  {asText(item.status)}
+                </span>
+                {item.status === "PENDING" && (
+                  <>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void markSafe(item)}
+                    >
+                      I'm safe
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void cancelCheckin(item)}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function VideoVerification({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [videoVerified, setVideoVerified] = useState(false);
+  const [requestStatus, setRequestStatus] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const load = () => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{
+        videoVerified: boolean;
+        videoVerifiedAt: string | null;
+        requestId: unknown;
+        requestStatus: string | null;
+      }>("/member/video-verification")
+      .then((data) => {
+        setVideoVerified(data.videoVerified);
+        setRequestStatus(data.requestStatus);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session]);
+
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setNotice("");
+    setErrorMsg("");
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      const res = await api.upload<{
+        ok: true;
+        requestStatus?: string;
+        message?: string;
+      }>("/member/video-verification", data);
+      setNotice(res.message || "Video submitted for review.");
+      load();
+    } catch (err) {
+      setErrorMsg(
+        err instanceof ApiError && err.status === 415
+          ? "Unsupported video type - use MP4, MOV or WebM."
+          : err instanceof ApiError && err.status === 413
+          ? "That video is too large."
+          : "Could not submit your video.",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <section className="member-form">
+      <h1>Video Verification</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Record a short video of yourself to earn the video-verified badge
+        on your profile - a human reviews every submission.
+      </p>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load your video verification status.</p>
+      )}
+      {status === "ok" && (
+        <>
+          {videoVerified ? (
+            <p className="notice">Your profile is video-verified.</p>
+          ) : requestStatus === "PENDING" ? (
+            <p className="notice">Your video is under review.</p>
+          ) : (
+            <>
+              {requestStatus === "DECLINED" && (
+                <p className="error">
+                  Your last submission was declined - you can record a new
+                  video and try again.
+                </p>
+              )}
+              <label className="upload-control">
+                {uploading ? "Uploading…" : "Upload a video (MP4, MOV or WebM)"}
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,video/webm"
+                  disabled={uploading}
+                  onChange={(event) => void upload(event.target.files?.[0])}
+                />
+              </label>
+            </>
+          )}
+        </>
+      )}
+      {notice && <p className="notice">{notice}</p>}
+      {errorMsg && <p className="error">{errorMsg}</p>}
+    </section>
+  );
+}
+
+type ParenthoodCostItem = { key: string; low: number; high: number };
+type ParenthoodCostPathDef = {
+  key: string;
+  perCycle: boolean;
+  defaultUnits: number;
+  minUnits: number;
+  maxUnits: number;
+  title: string;
+  desc: string;
+  tip: string;
+  items: ParenthoodCostItem[];
+};
+
+const PARENTHOOD_COST_ITEM_LABELS: Record<string, string> = {
+  legalFees: "Legal fees",
+  agencyFees: "Agency / program fees",
+  programFees: "Program & country fees",
+  medicalFees: "Medical & clinic fees",
+  medications: "Medications",
+  screening: "Screening & testing",
+  donorCompensation: "Donor compensation",
+  surrogateCompensation: "Surrogate compensation",
+  travel: "Travel",
+  insurance: "Insurance & contingency",
+  homeStudy: "Home study & training",
+  postPlacement: "Post-placement / finalization",
+  monitoring: "Monitoring & procedure fee",
+};
+
+const PARENTHOOD_COST_PATHS: ParenthoodCostPathDef[] = [
+  {
+    key: "knownDonor",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Known donor (home insemination)",
+    desc: "Conceiving with a donor you already know, without a fertility clinic.",
+    tip: "A known-donor legal agreement, even between friends, protects everyone's parental rights later - don't skip it.",
+    items: [
+      { key: "screening", low: 300, high: 600 },
+      { key: "legalFees", low: 500, high: 1500 },
+    ],
+  },
+  {
+    key: "cryobankIui",
+    perCycle: true,
+    defaultUnits: 3,
+    minUnits: 1,
+    maxUnits: 8,
+    title: "Sperm bank + IUI",
+    desc: "A donor vial from a licensed bank, inseminated at a clinic.",
+    tip: "Many people need 3-6 cycles before a pregnancy - budgeting for several attempts up front avoids surprises.",
+    items: [
+      { key: "medicalFees", low: 900, high: 1300 },
+      { key: "monitoring", low: 300, high: 800 },
+    ],
+  },
+  {
+    key: "ivfOwnEggs",
+    perCycle: true,
+    defaultUnits: 2,
+    minUnits: 1,
+    maxUnits: 6,
+    title: "IVF (your own eggs)",
+    desc: "In-vitro fertilization using your own eggs and sperm or a donor's.",
+    tip: "Ask every clinic for an itemized quote - a flat 'IVF package' price often excludes medications and genetic testing.",
+    items: [
+      { key: "medicalFees", low: 12000, high: 20000 },
+      { key: "medications", low: 3000, high: 7000 },
+    ],
+  },
+  {
+    key: "ivfDonorEggs",
+    perCycle: true,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 3,
+    title: "IVF with donor eggs",
+    desc: "In-vitro fertilization using eggs from a donor.",
+    tip: "Frozen (bank) donor eggs are typically cheaper than a fresh cycle matched specifically to you - worth asking both prices.",
+    items: [
+      { key: "donorCompensation", low: 10000, high: 20000 },
+      { key: "medicalFees", low: 15000, high: 25000 },
+      { key: "legalFees", low: 1500, high: 3000 },
+    ],
+  },
+  {
+    key: "surrogacy",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Gestational surrogacy",
+    desc: "A surrogate carries a pregnancy created with your embryo.",
+    tip: "Get separate legal counsel for yourself and the surrogate - nearly every country/state requires it, and it protects both sides.",
+    items: [
+      { key: "surrogateCompensation", low: 40000, high: 60000 },
+      { key: "agencyFees", low: 20000, high: 30000 },
+      { key: "legalFees", low: 10000, high: 15000 },
+      { key: "medicalFees", low: 20000, high: 30000 },
+      { key: "insurance", low: 5000, high: 10000 },
+    ],
+  },
+  {
+    key: "domesticAdoption",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Domestic adoption",
+    desc: "Adopting a child born in your own country.",
+    tip: "Costs vary hugely by agency - get a full written fee schedule before committing to one.",
+    items: [
+      { key: "agencyFees", low: 20000, high: 40000 },
+      { key: "legalFees", low: 3000, high: 10000 },
+      { key: "postPlacement", low: 1000, high: 3000 },
+    ],
+  },
+  {
+    key: "internationalAdoption",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "International adoption",
+    desc: "Adopting a child from another country.",
+    tip: "Timelines can run 1-3 years - factor in multiple trips and possible extended stays abroad.",
+    items: [
+      { key: "agencyFees", low: 15000, high: 30000 },
+      { key: "programFees", low: 5000, high: 15000 },
+      { key: "travel", low: 5000, high: 10000 },
+      { key: "homeStudy", low: 3000, high: 6000 },
+    ],
+  },
+  {
+    key: "fosterAdopt",
+    perCycle: false,
+    defaultUnits: 1,
+    minUnits: 1,
+    maxUnits: 1,
+    title: "Foster-to-adopt",
+    desc: "Fostering a child through the state system, with adoption as the goal.",
+    tip: "In many countries this path is state-subsidized and dramatically cheaper than private paths - worth exploring if cost is the main barrier.",
+    items: [
+      { key: "homeStudy", low: 0, high: 1000 },
+      { key: "legalFees", low: 500, high: 2000 },
+    ],
+  },
+];
+
+function parenthoodCostSum(items: ParenthoodCostItem[], field: "low" | "high"): number {
+  return items.reduce((total, item) => total + item[field], 0);
+}
+
+function formatUsdRange(low: number, high: number): string {
+  const fmt = (value: number) => `$${Math.round(value).toLocaleString("en-US")}`;
+  return `${fmt(low)} - ${fmt(high)}`;
+}
+
+function CostCalculator() {
+  const locale = localeOf();
+  const [selectedKey, setSelectedKey] = useState(PARENTHOOD_COST_PATHS[0].key);
+  const [units, setUnits] = useState<Record<string, number>>(() =>
+    Object.fromEntries(PARENTHOOD_COST_PATHS.map((path) => [path.key, path.defaultUnits])),
+  );
+  const selected =
+    PARENTHOOD_COST_PATHS.find((path) => path.key === selectedKey) || PARENTHOOD_COST_PATHS[0];
+  const selectedUnits = units[selected.key] ?? selected.defaultUnits;
+  const perUnitLow = parenthoodCostSum(selected.items, "low");
+  const perUnitHigh = parenthoodCostSum(selected.items, "high");
+  const factor = selected.perCycle ? Math.max(1, selectedUnits) : 1;
+  const totalLow = perUnitLow * factor;
+  const totalHigh = perUnitHigh * factor;
+  const adjustUnits = (delta: number) => {
+    setUnits((prev) => {
+      const current = prev[selected.key] ?? selected.defaultUnits;
+      const next = Math.min(selected.maxUnits, Math.max(selected.minUnits, current + delta));
+      return { ...prev, [selected.key]: next };
+    });
+  };
+  return (
+    <section className="member-form">
+      <h1>Cost of Parenthood Calculator</h1>
+      <MemberLinks locale={locale} />
+      <p>
+        Rough reference ranges for the most common paths to parenthood, so
+        you can start budgeting with realistic numbers.
+      </p>
+      <p className="notice">
+        These are rough US-market reference ranges only, not quotes. Real
+        costs vary enormously by country, provider and individual
+        circumstances - always get a written quote before committing to
+        anything.
+      </p>
+      <div className="list-card">
+        <h2>Choose a path</h2>
+        <ul className="family-room-documents">
+          {PARENTHOOD_COST_PATHS.map((path) => (
+            <li key={path.key}>
+              <button
+                type="button"
+                className={`link-button${path.key === selectedKey ? " active" : ""}`}
+                onClick={() => setSelectedKey(path.key)}
+              >
+                {path.title}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="list-card">
+        <h2>{selected.title}</h2>
+        <p>{selected.desc}</p>
+        {selected.perCycle && (
+          <p>
+            How many cycles to plan for?{" "}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => adjustUnits(-1)}
+              disabled={selectedUnits <= selected.minUnits}
+            >
+              -
+            </button>{" "}
+            {selectedUnits}{" "}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => adjustUnits(1)}
+              disabled={selectedUnits >= selected.maxUnits}
+            >
+              +
+            </button>
+          </p>
+        )}
+        <p>
+          <strong>Estimated total: {formatUsdRange(totalLow, totalHigh)}</strong>{" "}
+          {selected.perCycle ? `for ${selectedUnits} cycles` : "one-time total for this path"}
+        </p>
+        <h3>Cost breakdown</h3>
+        <ul className="family-room-documents">
+          {selected.items.map((item) => (
+            <li key={item.key}>
+              <span>{PARENTHOOD_COST_ITEM_LABELS[item.key] || item.key}</span>
+              <span>
+                {formatUsdRange(item.low, item.high)}
+                {selected.perCycle ? " / cycle" : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="notice">{selected.tip}</p>
+      </div>
+      <Link className="link-button" to={`/${locale}/resources/parenthood-planning/financial-planning`}>
+        Full worksheet: Financial Planning for Future Parents
+      </Link>
+      <Link className="link-button" to={`/${locale}/ai-advisor`}>
+        Ask the AI Family Advisor about your situation
+      </Link>
+      <p className="notice">
+        Not financial, legal or medical advice. For planning and discussion
+        purposes only.
+      </p>
+    </section>
+  );
+}
+
+function CommunityGroups({ session }: { session: Session }) {
+  const locale = localeOf();
+  const [groups, setGroups] = useState<Row[]>([]);
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  useEffect(() => {
+    if (!session) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; groups: Row[] }>("/member/community/groups")
+      .then((data) => {
+        setGroups(data.groups || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  }, [session]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  return (
+    <section>
+      <h1>Community</h1>
+      <MemberLinks locale={locale} />
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && <p className="error">Could not load community groups.</p>}
+      <div className="list-card">
+        {status === "ok" && groups.length === 0 ? (
+          <p className="notice">No groups yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {groups.map((group) => (
+              <li key={asText(group.id)}>
+                <Link to={`/${locale}/community/${encodeURIComponent(asText(group.id))}`}>
+                  {asText(group.name)}
+                </Link>
+                <span>{asText(group.description)}</span>
+                <span>{asText(group.postCount)} posts</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CommunityGroupPosts({ session }: { session: Session }) {
+  const locale = localeOf();
+  const { groupId = "" } = useParams();
+  const [posts, setPosts] = useState<Row[]>([]);
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const load = () => {
+    if (!session || !groupId) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; posts: Row[] }>(
+        `/member/community/groups/${encodeURIComponent(groupId)}/posts`,
+      )
+      .then((data) => {
+        setPosts(data.posts || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session, groupId]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  const submitPost = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    setPosting(true);
+    setNotice("");
+    try {
+      await api.post(
+        `/member/community/groups/${encodeURIComponent(groupId)}/posts`,
+        { body },
+      );
+      setDraft("");
+      load();
+    } catch {
+      setNotice("Could not post that message.");
+    } finally {
+      setPosting(false);
+    }
+  };
+  const removePost = async (item: Row) => {
+    try {
+      await api.delete(
+        `/member/community/posts/${encodeURIComponent(asText(item.id))}`,
+      );
+      load();
+    } catch {
+      setNotice("Could not delete that post.");
+    }
+  };
+  return (
+    <section>
+      <h1>Community</h1>
+      <MemberLinks locale={locale} />
+      <Link to={`/${locale}/community`}>Back to groups</Link>
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && (
+        <p className="error">Could not load this group's posts.</p>
+      )}
+      {notice && <p className="error">{notice}</p>}
+      <div className="member-form">
+        <label>
+          New post
+          <textarea
+            rows={3}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Share something with the group…"
+          />
+        </label>
+        <button
+          className="primary"
+          onClick={() => void submitPost()}
+          disabled={!draft.trim() || posting}
+        >
+          {posting ? "Posting…" : "Post"}
+        </button>
+      </div>
+      <div className="list-card">
+        {status === "ok" && posts.length === 0 ? (
+          <p className="notice">No posts yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {posts.map((item) => (
+              <li key={asText(item.id)}>
+                <Link to={`/${locale}/community/post/${encodeURIComponent(asText(item.id))}`}>
+                  {asText(item.authorName)}
+                  {item.isExpert ? " (Expert)" : ""}: {asText(item.body)}
+                </Link>
+                <span>{asText(item.replyCount)} replies</span>
+                {Boolean(item.isMine) && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => void removePost(item)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CommunityPostDetail({ session }: { session: Session }) {
+  const locale = localeOf();
+  const { postId = "" } = useParams();
+  const [replies, setReplies] = useState<Row[]>([]);
+  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const load = () => {
+    if (!session || !postId) return;
+    setStatus("loading");
+    api
+      .get<{ ok: true; replies: Row[] }>(
+        `/member/community/posts/${encodeURIComponent(postId)}/replies`,
+      )
+      .then((data) => {
+        setReplies(data.replies || []);
+        setStatus("ok");
+      })
+      .catch(() => setStatus("error"));
+  };
+  useEffect(load, [session, postId]);
+  if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
+  const submitReply = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    setPosting(true);
+    setNotice("");
+    try {
+      await api.post(
+        `/member/community/posts/${encodeURIComponent(postId)}/replies`,
+        { body },
+      );
+      setDraft("");
+      load();
+    } catch {
+      setNotice("Could not post that reply.");
+    } finally {
+      setPosting(false);
+    }
+  };
+  const removeReply = async (item: Row) => {
+    try {
+      await api.delete(
+        `/member/community/replies/${encodeURIComponent(asText(item.id))}`,
+      );
+      load();
+    } catch {
+      setNotice("Could not delete that reply.");
+    }
+  };
+  return (
+    <section>
+      <h1>Community post</h1>
+      <MemberLinks locale={locale} />
+      {status === "loading" && <p className="notice">Loading…</p>}
+      {status === "error" && <p className="error">Could not load replies.</p>}
+      {notice && <p className="error">{notice}</p>}
+      <div className="member-form">
+        <label>
+          Reply
+          <textarea
+            rows={3}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            placeholder="Write a reply…"
+          />
+        </label>
+        <button
+          className="primary"
+          onClick={() => void submitReply()}
+          disabled={!draft.trim() || posting}
+        >
+          {posting ? "Replying…" : "Reply"}
+        </button>
+      </div>
+      <div className="list-card">
+        {status === "ok" && replies.length === 0 ? (
+          <p className="notice">No replies yet.</p>
+        ) : (
+          <ul className="family-room-documents">
+            {replies.map((item) => (
+              <li key={asText(item.id)}>
+                <span>
+                  {asText(item.authorName)}
+                  {item.isExpert ? " (Expert)" : ""}: {asText(item.body)}
+                </span>
+                {Boolean(item.isMine) && (
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => void removeReply(item)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export function WebApp() {
   const locale = localeOf();
-  const location = useLocation();
   const [session, setSession] = useState<Session | undefined>(undefined);
   useEffect(() => {
-    let active = true;
-    const load = () => {
-      void api
-        .get<{ user: Row }>("/auth/me")
-        .then((response) => {
-          if (active) setSession({ user: response.user });
-        })
-        .catch(() => {
-          if (active) setSession(null);
-        });
-    };
-    load();
-    window.addEventListener("lbp-member-changed", load);
-    return () => {
-      active = false;
-      window.removeEventListener("lbp-member-changed", load);
-    };
-  }, [location.pathname]);
+    api
+      .get<{ user: Row }>("/auth/me")
+      .then((response) => setSession({ user: response.user }))
+      .catch(() => setSession(null));
+  }, []);
   const logout = async () => {
     await api.post("/auth/logout");
     setSession(null);
   };
-  if (session === undefined) return <Shell session={null} onLogout={logout} pendingSession><LoadingIndicator fullPage /></Shell>;
+  if (session === undefined) return <LoadingIndicator fullPage />;
   const content = (element: React.ReactNode) => (
     <Shell session={session} onLogout={logout}>
       {element}
@@ -7182,12 +9326,10 @@ export function WebApp() {
         element={<Navigate to="/en/knowledge-hub" replace />}
       />
       <Route path="/likes" element={<Navigate to="/en/likes" replace />} />
-      <Route path="/chat" element={<ChatLegacyRedirect />} />
-      <Route path="/chat/:conversationId" element={<ChatLegacyRedirect />} />
-      <Route path="/messages/:conversationId" element={<ChatLegacyRedirect />} />
+      <Route path="/chat" element={<Navigate to="/en/messages" replace />} />
       <Route
         path="/messages"
-        element={<ChatLegacyRedirect />}
+        element={<Navigate to="/en/messages" replace />}
       />
       <Route path="/profile" element={<Navigate to="/en/profile" replace />} />
       <Route
@@ -7237,10 +9379,6 @@ export function WebApp() {
         element={session ? content(<CatalogProfile session={session} />) : <Navigate to={`/${locale}/auth/login`} replace />}
       />
       <Route
-        path="/:locale/profile/:id"
-        element={session ? content(<CatalogProfile session={session} />) : <Navigate to={`/${locale}/auth/login`} replace />}
-      />
-      <Route
         path="/:locale/clinics"
         element={session ? content(<Directory key="clinics" kind="clinics" />) : <Navigate to={`/${locale}/auth/login`} replace />}
       />
@@ -7271,6 +9409,7 @@ export function WebApp() {
       <Route path="/:locale/resources/:category" element={content(<ResourceCategory />)} />
       <Route path="/:locale/resources/:category/:tool" element={content(<ResourceTool />)} />
       <Route path="/:locale/find-your-path/:slug" element={content(<FindYourPath />)} />
+      <Route path="/:locale/professionals" element={content(<Professionals />)} />
       <Route path="/:locale/pages/:slug" element={content(<ContentPage />)} />
       <Route
         path="/:locale/likes"
@@ -7278,16 +9417,11 @@ export function WebApp() {
       />
       <Route
         path="/:locale/profile"
-        element={content(<MemberAccount session={session} locale={locale} onLogout={logout} />)}
+        element={content(<Profile session={session} />)}
       />
-      <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={localeOf()} />)} />
-      <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={localeOf()} />)} />
-      <Route path="/:locale/profile/verification" element={content(<MemberProfileVerification locale={localeOf()} />)} />
-      <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={locale} onLogout={logout} view="notifications" />)} />
-      <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={locale} onLogout={logout} view="blocked" />)} />
       <Route
         path="/:locale/photos"
-        element={content(<MemberProfilePhotos locale={localeOf()} />)}
+        element={content(<Photos session={session} />)}
       />
       <Route
         path="/:locale/settings"
@@ -7295,18 +9429,16 @@ export function WebApp() {
       />
       <Route
         path="/:locale/verification"
-        element={content(<MemberProfileVerification locale={localeOf()} />)}
+        element={content(<Verification session={session} />)}
       />
       <Route
         path="/:locale/messages"
-        element={<ChatLegacyRedirect />}
+        element={content(<Conversations session={session} />)}
       />
       <Route
         path="/:locale/chat"
-        element={content(<Conversations session={session} />)}
+        element={<Navigate to={`/${locale}/messages`} replace />}
       />
-      <Route path="/:locale/chat/:conversationId" element={content(<Conversations session={session} />)} />
-      <Route path="/:locale/messages/:conversationId" element={<ChatLegacyRedirect />} />
       <Route
         path="/:locale/visitors"
         element={content(
@@ -7326,6 +9458,10 @@ export function WebApp() {
         element={content(<AccountDeletion session={session} />)}
       />
       <Route
+        path="/:locale/subscription"
+        element={content(<Subscription session={session} />)}
+      />
+      <Route
         path="/:locale/family-room/:profileId"
         element={content(<FamilyRoom session={session} />)}
       />
@@ -7334,10 +9470,46 @@ export function WebApp() {
         element={content(<AiAdvisor session={session} />)}
       />
       <Route
-        path="/:locale/subscription"
-        element={content(<Subscription session={session} />)}
+        path="/:locale/compatibility"
+        element={content(<CompatibilityAnswers session={session} />)}
       />
-      <Route path="*" element={content(<NotFoundPage locale={locale} />)} />
+      <Route
+        path="/:locale/compatibility-report/:profileId"
+        element={content(<CompatibilityReport session={session} />)}
+      />
+      <Route
+        path="/:locale/boost"
+        element={content(<Boost session={session} />)}
+      />
+      <Route
+        path="/:locale/referral"
+        element={content(<Referral session={session} />)}
+      />
+      <Route
+        path="/:locale/safety-checkin"
+        element={content(<SafetyCheckIn session={session} />)}
+      />
+      <Route
+        path="/:locale/cost-calculator"
+        element={content(<CostCalculator />)}
+      />
+      <Route
+        path="/:locale/video-verification"
+        element={content(<VideoVerification session={session} />)}
+      />
+      <Route
+        path="/:locale/community"
+        element={content(<CommunityGroups session={session} />)}
+      />
+      <Route
+        path="/:locale/community/:groupId"
+        element={content(<CommunityGroupPosts session={session} />)}
+      />
+      <Route
+        path="/:locale/community/post/:postId"
+        element={content(<CommunityPostDetail session={session} />)}
+      />
+      <Route path="*" element={<Navigate to="/en" replace />} />
       </Routes>
     </>
   );

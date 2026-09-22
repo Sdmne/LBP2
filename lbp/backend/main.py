@@ -27,18 +27,11 @@ from datetime import date, datetime, timedelta, timezone
 from contextlib import contextmanager
 from threading import Lock, Thread
 from typing import Any, Literal
-from functools import lru_cache
-from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 
 try:
     import bcrypt
 except ImportError:  # pragma: no cover - optional until the image is rebuilt
     bcrypt = None
-
-try:
-    import redis as redis_client
-except ImportError:  # pragma: no cover - optional until the image is rebuilt
-    redis_client = None
 
 try:
     from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
@@ -127,21 +120,11 @@ PASSWORD_RESET_MINUTES = 60
 AUTH_EMAIL_RESEND_SECONDS = 60
 ACCOUNT_DELETION_DAYS = 30
 ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "3600")))
-MARKETING_CAMPAIGN_POLL_SECONDS = max(15, int(os.getenv("MARKETING_CAMPAIGN_POLL_SECONDS", "30")))
-DOCKER_METRICS_FILE = Path(os.getenv("DOCKER_METRICS_FILE", "/run/metrics/docker-system-df.jsonl"))
-DOCKER_METRICS_MAX_AGE_SECONDS = max(60, int(os.getenv("DOCKER_METRICS_MAX_AGE_SECONDS", "3900")))
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0").strip()
-REDIS_SOCKET_TIMEOUT_SECONDS = max(0.25, float(os.getenv("REDIS_SOCKET_TIMEOUT_SECONDS", "2")))
-REDIS_CONNECTION_LOCK = Lock()
-REDIS_CONNECTION = None
-CRON_SECRET = os.getenv("CRON_SECRET", "").strip()
-CRON_SECRET_FILE = Path(os.getenv("CRON_SECRET_FILE", "/run/secrets/cron-secret"))
-SYSTEM_CRON_JOBS_FILE = Path(os.getenv("SYSTEM_CRON_JOBS_FILE", "/run/metrics/system-cron-jobs.json"))
 PARTNER_SESSION_DAYS = 30
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 UPLOAD_URL_PREFIX = os.getenv("UPLOAD_URL_PREFIX", "/uploads")
 PRIVATE_UPLOAD_DIR = Path(os.getenv("PRIVATE_UPLOAD_DIR", "/app/private/quarantine"))
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 MAX_PROFILE_PHOTOS = 6
 MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", str(40_000_000)))
 MIN_PROFILE_IMAGE_SIDE = int(os.getenv("MIN_PROFILE_IMAGE_SIDE", "256"))
@@ -152,6 +135,15 @@ ALLOWED_CHAT_ATTACHMENT_TYPES = {
     "image/webp": ".webp",
     "application/pdf": ".pdf",
 }
+# Premium roadmap step 9 - video-verification badge. A short selfie
+# video the member records/uploads, reviewed by a human admin (same
+# reviewed-request pattern as Boost/Co-Parenting Agreement - no
+# automatic video analysis exists in this codebase). Kept as its own
+# allowlist/size cap rather than reusing MAX_UPLOAD_BYTES, since a
+# short video is naturally heavier than a photo.
+ALLOWED_VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm"}
+MAX_VIDEO_VERIFICATION_BYTES = int(os.getenv("MAX_VIDEO_VERIFICATION_BYTES", str(40 * 1024 * 1024)))
+
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "").strip()
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "").strip()
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "").strip()
@@ -193,6 +185,50 @@ DIDIT_WEBHOOK_SECRET = os.getenv("DIDIT_WEBHOOK_SECRET", "").strip()
 DIDIT_ENABLED = os.getenv("DIDIT_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
 PUBLIC_APP_URL = os.getenv("PUBLIC_APP_URL", "").rstrip("/")
 DIDIT_TIMEOUT_SECONDS = int(os.getenv("DIDIT_TIMEOUT_SECONDS", "20"))
+
+# AI Family Advisor (item 12 of Alena's backlog - "ИИ консультант", decision
+# made Sept 2026 to use Anthropic's Claude API). Same env-var-driven
+# is-it-configured pattern as the Didit block above. ANTHROPIC_API_KEY must
+# be set directly on the server as an environment variable - it must never
+# be committed to this file or any other tracked source.
+ANTHROPIC_API_BASE = os.getenv("ANTHROPIC_API_BASE", "https://api.anthropic.com/v1").rstrip("/")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+# Haiku by default - cheapest per-token model, plenty capable for
+# navigation/orientation Q&A rather than open-ended reasoning. Override via
+# env var if a heavier model is ever warranted for this feature.
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5").strip()
+ANTHROPIC_TIMEOUT_SECONDS = int(os.getenv("ANTHROPIC_TIMEOUT_SECONDS", "30"))
+AI_ADVISOR_MAX_OUTPUT_TOKENS = int(os.getenv("AI_ADVISOR_MAX_OUTPUT_TOKENS", "700"))
+# Message starters (premium roadmap item, built on the same Claude API
+# plumbing as the AI Family Advisor above - no second API key needed).
+MESSAGE_STARTERS_MAX_OUTPUT_TOKENS = int(os.getenv("MESSAGE_STARTERS_MAX_OUTPUT_TOKENS", "400"))
+# How many past messages (user+assistant combined) are kept per profile and
+# sent back to the model as conversation context. Stored inline in
+# profiles.data (see member_ai_advisor_send below) rather than a new table -
+# keeps this self-contained with no migration, and bounds how much that one
+# JSON blob can grow per profile.
+AI_ADVISOR_MAX_HISTORY = 40
+
+# Push notifications (item 16 of Alena's backlog). Unlike the AI Advisor
+# above, this needs no API key/secret - Expo's push API
+# (https://exp.host/--/api/v2/push/send) accepts unauthenticated requests
+# for a project's own Expo push tokens, which is all this app needs. The
+# mobile side (expo-notifications) registers a token per device and POSTs
+# it to /api/member/push-tokens; this is what actually delivers it, called
+# from send_profile_notification() alongside (not instead of) the existing
+# email path, gated by the exact same per-type preference toggle.
+# IMPORTANT: expo-notifications is a NEW native module - it is not usable
+# on anyone's phone until the developer runs `npx expo install
+# expo-notifications expo-device` and ships a new `eas build` (not just
+# `eas update`, unlike everything else built this session). This backend
+# code and the mobile registration code are both safe to deploy early -
+# they simply do nothing until a device actually registers a token.
+EXPO_PUSH_API_URL = "https://exp.host/--/api/v2/push/send"
+EXPO_PUSH_TIMEOUT_SECONDS = int(os.getenv("EXPO_PUSH_TIMEOUT_SECONDS", "10"))
+# A profile can have more than one device registered (phone + tablet, or a
+# reinstall that never cleaned up its old token) - capped so profiles.data
+# can't grow unbounded from someone repeatedly reinstalling the app.
+PUSH_TOKENS_MAX_PER_PROFILE = 8
 DIDIT_MAX_PORTRAIT_BYTES = 2 * 1024 * 1024
 DIDIT_PORTRAIT_TRANSPORT_BYTES = max(
     6 * 1024,
@@ -414,76 +450,6 @@ def json_value(value: Any) -> Any:
         return value
 
 
-ANTHROPIC_API_BASE = os.getenv("ANTHROPIC_API_BASE", "https://api.anthropic.com/v1").rstrip("/")
-
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
-
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5").strip()
-
-ANTHROPIC_TIMEOUT_SECONDS = int(os.getenv("ANTHROPIC_TIMEOUT_SECONDS", "30"))
-
-AI_ADVISOR_MAX_OUTPUT_TOKENS = int(os.getenv("AI_ADVISOR_MAX_OUTPUT_TOKENS", "700"))
-
-AI_ADVISOR_MAX_HISTORY = 40
-
-EXPO_PUSH_API_URL = "https://exp.host/--/api/v2/push/send"
-
-EXPO_PUSH_TIMEOUT_SECONDS = int(os.getenv("EXPO_PUSH_TIMEOUT_SECONDS", "10"))
-
-PUSH_TOKENS_MAX_PER_PROFILE = 8
-
-AI_ADVISOR_SYSTEM_PROMPT = (
-    "You are the Family Advisor inside the LetsBeParents app. LetsBeParents connects intended parents, "
-    "surrogates, and donors, and also runs a directory of fertility clinics and family-law lawyers. "
-    "Your job is to help the person navigate the third-party reproduction process in plain language, "
-    "explain relevant terminology and steps, and help them find and use the right feature inside the app "
-    "(matching, the Clinics/Lawyers directory, Family Room, Compatibility Report, etc.).\n\n"
-    "Strict rules you must always follow:\n"
-    "- You are not a doctor, lawyer, financial advisor, or psychologist, and you never provide a diagnosis, "
-    "a legal opinion, financial advice, or a clinical/psychological assessment. For anything medical, legal, "
-    "financial, or mental-health related, give general orientation only and clearly recommend the person "
-    "consult a licensed professional (or a clinic/lawyer from the app's own directory).\n"
-    "- You never recommend a specific match, clinic, or lawyer, and you never make or influence a matching "
-    "decision - point the person to the app's own directory/search/filters instead of naming a provider.\n"
-    "- If a question is outside what you can safely help with, say so plainly and suggest the right kind of "
-    "professional or in-app feature instead of guessing.\n"
-    "- Be warm, concise, and practical. Reply in the same language the person writes in.\n"
-)
-
-STICKER_CATALOG: dict[str, str] = {
-    "party": "🎉",
-    "heart": "❤️",
-    "baby": "👶",
-    "bump": "🤰",
-    "laugh": "😂",
-    "thumbsup": "👍",
-    "thanks": "🙏",
-    "confetti": "🎊",
-    "flowers": "💐",
-    "bottle": "🍼",
-    "teddy": "🧸",
-    "star": "🌟",
-    "cheers": "🥳",
-    "love": "😍",
-    "hug": "🤗",
-    "sparkles": "✨",
-    "unicorn": "🦄",
-    "butterfly": "🦋",
-    "balloon": "🎈",
-    "gift": "🎁",
-    "cake": "🎂",
-    "wave": "👋",
-    "kiss": "😘",
-    "clap": "👏",
-    "rainbow": "🌈",
-    "moon": "🌙",
-}
-
-STICKER_BODY_PREFIX = "::sticker::"
-
-SUBSCRIPTION_TIER_RANK = {"EXPLORE": 0, "BUILDER": 1, "PRO": 2}
-
-
 def public_safe_data(value: Any) -> Any:
     data = json_value(value)
     deny = {
@@ -501,8 +467,6 @@ def public_safe_data(value: Any) -> Any:
         "firebaseUid",
         "token",
         "tokens",
-        "pushTokens",
-        "aiAdvisorMessages",
     }
     if isinstance(data, list):
         return [public_safe_data(item) for item in data]
@@ -717,90 +681,6 @@ def auth_session_response(response: Response, token: str, expires_at: str, user:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
     return {"sessionToken": token, "expiresAt": expires_at, "user": public_user(user), **extra}
-
-
-def app_redis():
-    global REDIS_CONNECTION
-    if not REDIS_URL or redis_client is None:
-        return None
-    if REDIS_CONNECTION is None:
-        with REDIS_CONNECTION_LOCK:
-            if REDIS_CONNECTION is None:
-                REDIS_CONNECTION = redis_client.Redis.from_url(
-                    REDIS_URL,
-                    socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
-                    socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
-                    decode_responses=True,
-                )
-    return REDIS_CONNECTION
-
-
-def redis_cooldown_started(key: str, seconds: int) -> bool | None:
-    client = app_redis()
-    if client is None:
-        return None
-    try:
-        return bool(client.set(key, "1", ex=seconds, nx=True))
-    except Exception as error:
-        logger.warning("Redis cooldown is unavailable: %s", type(error).__name__)
-        return None
-
-
-def redis_counter(key: str) -> int | None:
-    client = app_redis()
-    if client is None:
-        return None
-    try:
-        return int(client.get(key) or 0)
-    except Exception as error:
-        logger.warning("Redis counter read is unavailable: %s", type(error).__name__)
-        return None
-
-
-def redis_increment_counter(key: str, seconds: int) -> int | None:
-    client = app_redis()
-    if client is None:
-        return None
-    try:
-        value = client.eval(
-            "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
-            1,
-            key,
-            seconds,
-        )
-        return int(value)
-    except Exception as error:
-        logger.warning("Redis counter update is unavailable: %s", type(error).__name__)
-        return None
-
-
-def redis_delete(key: str) -> None:
-    client = app_redis()
-    if client is None:
-        return
-    try:
-        client.delete(key)
-    except Exception as error:
-        logger.warning("Redis key cleanup is unavailable: %s", type(error).__name__)
-
-
-def require_cron_secret(
-    x_cron_secret: str | None = Header(None, alias="X-Cron-Secret"),
-    authorization: str | None = Header(None),
-) -> None:
-    expected = CRON_SECRET
-    if not expected and CRON_SECRET_FILE.is_file():
-        try:
-            expected = CRON_SECRET_FILE.read_text(encoding="utf-8").strip()
-        except OSError:
-            expected = ""
-    if not expected:
-        raise HTTPException(status_code=503, detail="Cron authentication is not configured")
-    supplied = str(x_cron_secret or "").strip()
-    if not supplied and authorization and authorization.lower().startswith("bearer "):
-        supplied = authorization.split(" ", 1)[1].strip()
-    if not supplied or not secrets.compare_digest(supplied, expected):
-        raise HTTPException(status_code=401, detail="Invalid cron credentials")
 
 
 def request_session_tokens(request: Request, authorization: str | None) -> list[str]:
@@ -1133,6 +1013,118 @@ def didit_request(
     return data
 
 
+def ai_advisor_is_configured() -> bool:
+    return bool(ANTHROPIC_API_KEY)
+
+
+# Product rule from the strategic-pivot doc, encoded directly in the system
+# prompt: this feature helps people navigate the process and the app - it
+# is explicitly NOT a substitute for a doctor, lawyer, or psychologist, and
+# it never recommends a specific match/clinic/lawyer (that would blur into
+# the app's own paid matching/directory features and into real advice this
+# session is not qualified to give).
+AI_ADVISOR_SYSTEM_PROMPT = (
+    "You are the Family Advisor inside the LetsBeParents app. LetsBeParents connects intended parents, "
+    "surrogates, and donors, and also runs a directory of fertility clinics and family-law lawyers. "
+    "Your job is to help the person navigate the third-party reproduction process in plain language, "
+    "explain relevant terminology and steps, and help them find and use the right feature inside the app "
+    "(matching, the Clinics/Lawyers directory, Family Room, Compatibility Report, etc.).\n\n"
+    "Strict rules you must always follow:\n"
+    "- You are not a doctor, lawyer, financial advisor, or psychologist, and you never provide a diagnosis, "
+    "a legal opinion, financial advice, or a clinical/psychological assessment. For anything medical, legal, "
+    "financial, or mental-health related, give general orientation only and clearly recommend the person "
+    "consult a licensed professional (or a clinic/lawyer from the app's own directory).\n"
+    "- You never recommend a specific match, clinic, or lawyer, and you never make or influence a matching "
+    "decision - point the person to the app's own directory/search/filters instead of naming a provider.\n"
+    "- If a question is outside what you can safely help with, say so plainly and suggest the right kind of "
+    "professional or in-app feature instead of guessing.\n"
+    "- Be warm, concise, and practical. Reply in the same language the person writes in.\n"
+)
+
+
+def ai_advisor_call_claude(
+    messages: list[dict[str, str]],
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
+) -> str:
+    if not ai_advisor_is_configured():
+        raise HTTPException(status_code=503, detail="The AI Family Advisor is not configured yet")
+    body = json.dumps(
+        {
+            "model": ANTHROPIC_MODEL,
+            "max_tokens": max_tokens or AI_ADVISOR_MAX_OUTPUT_TOKENS,
+            "system": system_prompt or AI_ADVISOR_SYSTEM_PROMPT,
+            "messages": messages,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{ANTHROPIC_API_BASE}/messages",
+        data=body,
+        method="POST",
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=ANTHROPIC_TIMEOUT_SECONDS) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as error:
+        provider_body = error.read().decode("utf-8", errors="replace")[:2000]
+        try:
+            provider_data = json.loads(provider_body)
+            detail = (provider_data.get("error") or {}).get("message") or "AI Family Advisor provider rejected the request"
+        except (json.JSONDecodeError, AttributeError):
+            detail = "AI Family Advisor provider rejected the request"
+        raise HTTPException(status_code=502, detail=str(detail)) from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise HTTPException(status_code=502, detail="AI Family Advisor is temporarily unavailable") from error
+    try:
+        data = json.loads(raw.decode("utf-8")) if raw else {}
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=502, detail="AI Family Advisor returned an invalid response") from error
+    content = data.get("content") if isinstance(data, dict) else None
+    text_parts = [block.get("text", "") for block in (content or []) if isinstance(block, dict) and block.get("type") == "text"]
+    reply = "".join(text_parts).strip()
+    if not reply:
+        raise HTTPException(status_code=502, detail="AI Family Advisor returned an empty response")
+    return reply
+
+
+def send_expo_push(tokens: list[str], title: str, body: str, data: dict[str, Any] | None = None) -> None:
+    # Fire-and-forget, unlike didit_request()/ai_advisor_call_claude() -
+    # this is always called from inside a best-effort notification path
+    # (send_profile_notification, itself usually a BackgroundTask off a
+    # like/match/message request), so a delivery problem here must never
+    # bubble up and fail the request that triggered it. Every failure mode
+    # is caught and logged, never raised.
+    valid_tokens = [t for t in tokens if isinstance(t, str) and t.startswith("ExponentPushToken")]
+    if not valid_tokens:
+        return
+    # Expo's push API accepts up to 100 messages per request.
+    for i in range(0, len(valid_tokens), 100):
+        chunk = valid_tokens[i : i + 100]
+        messages = [
+            {"to": token, "title": title, "body": body, "sound": "default", "data": data or {}}
+            for token in chunk
+        ]
+        request = urllib.request.Request(
+            EXPO_PUSH_API_URL,
+            data=json.dumps(messages, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=EXPO_PUSH_TIMEOUT_SECONDS) as response:
+                response.read()
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
+            logger.warning("Expo push delivery failed: %s", type(error).__name__)
+        except Exception:
+            logger.exception("Unexpected error sending Expo push notification")
+
+
 def didit_internal_status(value: Any) -> str:
     normalized = re.sub(r"[^A-Z]+", "_", str(value or "").strip().upper()).strip("_")
     return {
@@ -1312,20 +1304,17 @@ class SignupPayload(BaseModel):
     password: str = Field(min_length=8, max_length=200)
     displayName: str = Field(min_length=1, max_length=255)
     locale: str = Field(default="en", max_length=8)
-    deviceInfo: dict[str, Any] = Field(default_factory=dict)
 
 
 class LoginPayload(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=1, max_length=200)
-    deviceInfo: dict[str, Any] = Field(default_factory=dict)
 
 
 class FirebaseAuthPayload(BaseModel):
     idToken: str = Field(min_length=100, max_length=20000)
     displayName: str | None = Field(default=None, max_length=255)
     intent: Literal["login", "register"] = "login"
-    deviceInfo: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthSessionResponse(BaseModel):
@@ -1418,6 +1407,75 @@ class MessageCreatePayload(BaseModel):
     body: str = Field(min_length=1, max_length=5000)
 
 
+# Item 13(b) - Premium-exclusive chat stickers. Alena chose to start with
+# emoji placeholders (see StickerCatalog on the mobile side, src/data/
+# stickerData.ts - the same ids/emoji, kept in sync by hand since there
+# are only 16) rather than wait on real custom artwork; swapping in real
+# images later only touches this catalog and how ChatScreen renders a
+# sticker bubble, not this gating/plumbing. A sticker id is validated
+# against this fixed server-side list rather than trusting whatever emoji
+# the client sends - the client only ever sends an id, never the emoji
+# itself, so a modified client can't send an arbitrary/offensive glyph as
+# a "sticker".
+STICKER_CATALOG: dict[str, str] = {
+    "party": "🎉",
+    "heart": "❤️",
+    "baby": "👶",
+    "bump": "🤰",
+    "laugh": "😂",
+    "thumbsup": "👍",
+    "thanks": "🙏",
+    "confetti": "🎊",
+    "flowers": "💐",
+    "bottle": "🍼",
+    "teddy": "🧸",
+    "star": "🌟",
+    "cheers": "🥳",
+    "love": "😍",
+    "hug": "🤗",
+    "sparkles": "✨",
+    # Added Sept 2026 alongside mobile's expanded sticker set (Alena: "И в
+    # премиум стикеры") - keep in sync by hand with mobile/src/data/
+    # stickerData.ts, same rule as the original 16.
+    "unicorn": "🦄",
+    "butterfly": "🦋",
+    "balloon": "🎈",
+    "gift": "🎁",
+    "cake": "🎂",
+    "wave": "👋",
+    "kiss": "😘",
+    "clap": "👏",
+    "rainbow": "🌈",
+    "moon": "🌙",
+}
+# No new conversation_messages column needed for this - it has no "type"
+# field at all (see member_send_message/member_send_attachment above,
+# both just use body/media_url) - so a sticker message is plain text with
+# this prefix, exactly like the AI Advisor/push token features this
+# session avoided a schema migration by reusing an existing JSON column.
+# ChatScreen recognizes the prefix client-side to render a big sticker
+# bubble instead of plain text (see utils/stickers.ts).
+STICKER_BODY_PREFIX = "::sticker::"
+
+
+class StickerSendPayload(BaseModel):
+    stickerId: str = Field(min_length=1, max_length=40)
+
+
+class AiAdvisorMessagePayload(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+# Item 16 - push notifications. Just the Expo push token string; platform
+# isn't needed server-side (Expo's push API routes to APNs/FCM itself
+# based on the token), but accepted and ignored so the mobile client can
+# send it for its own future debugging/admin-view use without a breaking
+# change later.
+class PushTokenPayload(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    platform: str | None = None
+
+
 class CallCreatePayload(BaseModel):
     callType: Literal["VOICE", "VIDEO", "AUDIO"] = Field(default="VOICE", description="VOICE or VIDEO. Legacy AUDIO is accepted and normalized to VOICE.")
 
@@ -1462,6 +1520,18 @@ class FamilyPlanSectionUpdatePayload(BaseModel):
         return value
 
 
+class AgreementSignPayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    fullName: str = Field(min_length=1, max_length=200)
+
+    @field_validator("fullName")
+    @classmethod
+    def nonblank_full_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A typed full name is required to sign")
+        return value.strip()
+
+
 class FamilyChecklistItemCreatePayload(BaseModel):
     model_config = {"extra": "forbid"}
     section: str = Field(default="general", pattern="^(parenting|finances|legal|general)$")
@@ -1502,7 +1572,12 @@ class VerificationPayload(BaseModel):
 
 
 class SubscriptionIntentPayload(BaseModel):
-    plan: str = Field(default="monthly", pattern="^(monthly|quarterly)$")
+    plan: str = Field(default="monthly", pattern="^(monthly|quarterly|annual)$")
+    # UPDATE (Sept 2026): real Family-Builder-vs-Pro tiers, per the /pricing
+    # page's own 3-tier structure (see normalize_subscription_tier()) -
+    # defaults to BUILDER for any request that doesn't specify one (the
+    # lower of the two paid tiers), so an un-updated client still gets a
+    # valid, real tier rather than erroring.
     tier: str = Field(default="BUILDER", pattern="^(BUILDER|PRO)$")
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -1536,13 +1611,49 @@ class AdminAccountUpdatePayload(BaseModel):
 
 class AdminSubscriptionGrantPayload(BaseModel):
     profileRef: str = Field(min_length=1, max_length=320)
-    plan: str = Field(pattern="^(PREMIUM_MONTHLY|PREMIUM_QUARTERLY)$")
-    days: int = Field(ge=1, le=3650)
+    plan: str = Field(pattern="^(PREMIUM_MONTHLY|PREMIUM_QUARTERLY|PREMIUM_ANNUAL)$")
+    days: int = Field(ge=1, le=366)
+    # Defaults to PRO (not BUILDER) - an admin manually granting Premium is
+    # almost always doing a support/VIP gesture, and PRO is the strictly
+    # larger grant, so this preserves the pre-tier behavior (full access)
+    # for anyone calling this endpoint without passing tier explicitly.
+    tier: str = Field(default="PRO", pattern="^(BUILDER|PRO)$")
 
 
 class AdminSubscriptionReviewPayload(BaseModel):
     status: str = Field(pattern="^(APPROVED|DECLINED)$")
     days: int | None = Field(default=None, ge=1, le=366)
+
+
+# Premium roadmap step 3 - one-off profile Boost. Mirrors the subscription
+# request/review shape above deliberately (member requests, a human
+# reviews and approves/declines) rather than inventing a different
+# convention, for the same reason SubscriptionIntentPayload works that
+# way: there's no real in-app billing/IAP integration in this app yet, so
+# a "purchase" here is honestly a reviewed request, not instant billing.
+class AdminBoostReviewPayload(BaseModel):
+    status: str = Field(pattern="^(APPROVED|DECLINED)$")
+    hours: int | None = Field(default=None, ge=1, le=168)
+
+
+# Premium roadmap step 9 - video-verification badge. Same reviewed-
+# request shape as AdminBoostReviewPayload above (no hours field needed
+# here - approval is a one-time boolean badge, not a time window).
+class AdminVideoVerificationReviewPayload(BaseModel):
+    status: str = Field(pattern="^(APPROVED|DECLINED)$")
+
+
+# Premium roadmap step 11 - Pro-only community/expert Q&A groups.
+class CommunityPostPayload(BaseModel):
+    body: str = Field(min_length=1, max_length=3000)
+
+
+class CommunityReplyPayload(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class AdminCommunityExpertPayload(BaseModel):
+    isExpert: bool
 
 
 class AdminSupportMessagePayload(BaseModel):
@@ -1555,89 +1666,6 @@ class AdminNotificationTestPayload(BaseModel):
     actorName: str | None = Field(default=None, max_length=255)
     message: str | None = Field(default=None, max_length=5000)
     respectPreference: bool = False
-
-
-class CronRunHistoryPayload(BaseModel):
-    job: str = Field(min_length=1, max_length=100)
-    status: Literal["OK", "FAILED"]
-    durationSeconds: float = Field(ge=0, le=86_400)
-    results: str = Field(min_length=1, max_length=500)
-
-
-def normalize_marketing_content_variants(values: dict[str, str]) -> dict[str, str]:
-    normalized: dict[str, str] = {}
-    for locale_code, message in values.items():
-        locale_code = str(locale_code).strip().lower()
-        message = str(message or "").strip()
-        if locale_code not in {"en", "ru", "es"}:
-            raise ValueError(f"Unsupported campaign locale: {locale_code}")
-        if len(message) > 5000:
-            raise ValueError(f"Campaign content for {locale_code} exceeds 5000 characters")
-        if message:
-            normalized[locale_code] = message
-    if not normalized.get("en"):
-        raise ValueError("English campaign content is required")
-    return normalized
-
-
-class AdminMarketingCohortFilter(BaseModel):
-    model_config = {"extra": "forbid"}
-    locales: list[Literal["en", "ru", "es"]] = Field(default_factory=lambda: ["en", "ru", "es"], min_length=1, max_length=3)
-    wizardCompleted: bool | None = None
-    isPremium: bool | None = None
-
-    @field_validator("locales")
-    @classmethod
-    def unique_marketing_locales(cls, values: list[str]) -> list[str]:
-        return list(dict.fromkeys(values))
-
-
-class AdminMarketingCampaignPayload(BaseModel):
-    model_config = {"extra": "forbid"}
-    title: str = Field(min_length=1, max_length=200)
-    contentVariants: dict[str, str] = Field(min_length=1, max_length=3)
-    cohortFilter: AdminMarketingCohortFilter
-    channel: Literal["CHAT_AND_PUSH", "CHAT_MESSAGE", "PUSH_ONLY"] = "CHAT_AND_PUSH"
-    respectMarketingPref: bool = True
-
-    @field_validator("title")
-    @classmethod
-    def nonblank_campaign_title(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Campaign title is required")
-        return value
-
-    @field_validator("contentVariants")
-    @classmethod
-    def valid_campaign_content(cls, values: dict[str, str]) -> dict[str, str]:
-        return normalize_marketing_content_variants(values)
-
-
-class AdminMarketingSchedulePayload(BaseModel):
-    model_config = {"extra": "forbid"}
-    scheduledFor: datetime
-
-
-class AdminMarketingTestPayload(BaseModel):
-    model_config = {"extra": "forbid"}
-    email: str = Field(min_length=3, max_length=320)
-    contentVariants: dict[str, str] = Field(min_length=1, max_length=3)
-    channel: Literal["CHAT_AND_PUSH", "CHAT_MESSAGE", "PUSH_ONLY"] = "CHAT_MESSAGE"
-    respectMarketingPref: bool = True
-
-    @field_validator("email")
-    @classmethod
-    def valid_test_recipient_email(cls, value: str) -> str:
-        value = normalize_email(value)
-        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
-            raise ValueError("Enter a valid recipient email")
-        return value
-
-    @field_validator("contentVariants")
-    @classmethod
-    def valid_test_content(cls, values: dict[str, str]) -> dict[str, str]:
-        return normalize_marketing_content_variants(values)
 
 
 class PartnerLoginPayload(BaseModel):
@@ -1658,6 +1686,13 @@ class MemberSettingsPayload(BaseModel):
     notificationSettings: list[dict[str, Any]] | None = None
     visibleInCatalog: bool | None = None
     betaFlags: dict[str, Any] | None = None
+    # Premium roadmap, step 2 (Sept 2026): "Incognito browsing" - Pro-only,
+    # distinct from visibleInCatalog above. visibleInCatalog hides the
+    # profile from discovery entirely (nobody sees it at all); incognito
+    # still lets the member browse and appear normally, it just stops their
+    # OWN visits from being recorded against the profiles they look at -
+    # see record_profile_view()'s early-return for the actual mechanism.
+    incognitoEnabled: bool | None = None
 
 
 class LikesReadPayload(BaseModel):
@@ -1774,72 +1809,6 @@ def notification_target_path(notification_type: str, locale_code: str) -> str:
     return f"{PUBLIC_APP_URL}/{locale_code}{route}"
 
 
-def ai_advisor_is_configured() -> bool:
-    return bool(ANTHROPIC_API_KEY)
-
-def ai_advisor_call_claude(messages: list[dict[str, str]]) -> str:
-    if not ai_advisor_is_configured():
-        raise HTTPException(status_code=503, detail="The AI Family Advisor is not configured yet")
-    body = json.dumps(
-        {
-            "model": ANTHROPIC_MODEL,
-            "max_tokens": AI_ADVISOR_MAX_OUTPUT_TOKENS,
-            "system": AI_ADVISOR_SYSTEM_PROMPT,
-            "messages": messages,
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{ANTHROPIC_API_BASE}/messages",
-        data=body,
-        method="POST",
-        headers={
-            "x-api-key": ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=ANTHROPIC_TIMEOUT_SECONDS) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor provider rejected the request") from error
-    except (urllib.error.URLError, TimeoutError) as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor is temporarily unavailable") from error
-    try:
-        data = json.loads(raw.decode("utf-8")) if raw else {}
-    except json.JSONDecodeError as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an invalid response") from error
-    content = data.get("content") if isinstance(data, dict) else None
-    text_parts = [block.get("text", "") for block in (content or []) if isinstance(block, dict) and block.get("type") == "text"]
-    reply = "".join(text_parts).strip()
-    if not reply:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an empty response")
-    return reply
-
-def send_expo_push(tokens: list[str], title: str, body: str, data: dict[str, Any] | None = None) -> None:
-    valid_tokens = list(dict.fromkeys(t for t in tokens if valid_expo_push_token(t)))
-    for i in range(0, len(valid_tokens), 100):
-        messages = [{"to": token, "title": title, "body": body, "sound": "default", "data": data or {}}
-                    for token in valid_tokens[i:i + 100]]
-        request = urllib.request.Request(
-            EXPO_PUSH_API_URL, data=json.dumps(messages, ensure_ascii=False).encode("utf-8"), method="POST",
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=EXPO_PUSH_TIMEOUT_SECONDS) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            tickets = result.get("data") if isinstance(result, dict) else None
-            if not isinstance(tickets, list) or len(tickets) != len(messages):
-                logger.warning("Push provider returned an invalid delivery response")
-                continue
-            rejected = sum(not isinstance(ticket, dict) or ticket.get("status") != "ok" for ticket in tickets)
-            if rejected:
-                logger.warning("Push provider rejected %s notification(s)", rejected)
-        except Exception as error:
-            logger.warning("Push delivery failed: %s", type(error).__name__)
-
-
 def send_profile_notification(
     profile_id: int,
     notification_type: str,
@@ -1871,6 +1840,13 @@ def send_profile_notification(
 
     email_address = normalize_email(recipient.get("email"))
     profile_data = as_dict(recipient.get("data"))
+    # Preference check now gates BOTH channels and runs before the
+    # email-specific checks below (previously it ran after the
+    # email-address check, which only ever mattered for the since-unseen
+    # case of a local_users row with no email at all) - push (item 16)
+    # piggybacks on this same per-type toggle rather than adding a second
+    # one nobody asked for (see SettingsScreen.tsx's "Notifications"
+    # section / settings.notificationsCaption).
     if not force and not notification_preference_enabled(profile_data, notification_type):
         record_notification_delivery(notification_type, profile_id, "SKIPPED", email_address, "PREFERENCE_DISABLED")
         return {"ok": True, "status": "PREFERENCE_DISABLED"}
@@ -1884,18 +1860,23 @@ def send_profile_notification(
     preview = re.sub(r"\s+", " ", str(message_preview or "")).strip()
     if len(preview) > 180:
         preview = preview[:177] + "..."
-    body = preview if notification_type == "MARKETING" and preview else body_template.format(actor=actor, message=preview)
+    body = body_template.format(actor=actor, message=preview)
     target_url = notification_target_path(notification_type, locale_code)
+
+    # Push (item 16) - independent of email deliverability/config below,
+    # so a profile with SMTP misconfigured, or simply no email on file,
+    # still gets pushed if they have a registered device. send_expo_push()
+    # is a no-op when there are no tokens and never raises.
     push_tokens = profile_data.get("pushTokens")
     if isinstance(push_tokens, list) and push_tokens:
         send_expo_push(push_tokens, subject, body, {"type": notification_type, "url": target_url})
+
     if not email_address:
         record_notification_delivery(notification_type, profile_id, "SKIPPED", detail="EMAIL_NOT_FOUND")
         return {"ok": False, "status": "EMAIL_NOT_FOUND"}
     if not email_notifications_configured():
         record_notification_delivery(notification_type, profile_id, "FAILED", email_address, "SMTP_NOT_CONFIGURED")
         return {"ok": False, "status": "SMTP_NOT_CONFIGURED"}
-
 
     email_message = EmailMessage()
     email_message["Subject"] = subject
@@ -1990,20 +1971,6 @@ def record_auth_email_event(event_type: str, user_id: int, delivery_status: str)
         logger.exception("Could not record authentication email event")
 
 
-def send_smtp_message(email_message: EmailMessage) -> None:
-    context = ssl.create_default_context()
-    if SMTP_USE_SSL:
-        server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS, context=context)
-    else:
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS)
-    with server:
-        if SMTP_USE_TLS and not SMTP_USE_SSL:
-            server.starttls(context=context)
-        if SMTP_USER:
-            server.login(SMTP_USER, SMTP_PASSWORD)
-        server.send_message(email_message)
-
-
 def send_transactional_email(
     recipient: str,
     subject: str,
@@ -2037,7 +2004,17 @@ def send_transactional_email(
         subtype="html",
     )
     try:
-        send_smtp_message(email_message)
+        context = ssl.create_default_context()
+        if SMTP_USE_SSL:
+            server = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS, context=context)
+        else:
+            server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT_SECONDS)
+        with server:
+            if SMTP_USE_TLS and not SMTP_USE_SSL:
+                server.starttls(context=context)
+            if SMTP_USER:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(email_message)
         return True
     except Exception as exc:
         logger.warning("Authentication email delivery failed: %s", type(exc).__name__)
@@ -2070,60 +2047,6 @@ def issue_email_verification_code(cursor, user_id: int, lifetime: timedelta) -> 
         (user_id, token_hash(code), database_datetime(expires_at)),
     )
     return code, expires_at
-
-
-def send_contact_request_email(recipient: str, body: dict[str, Any]) -> str:
-    recipient_email = normalize_email(recipient)
-    if not recipient_email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", recipient_email):
-        return "RECIPIENT_NOT_CONFIGURED"
-    if not email_notifications_configured():
-        return "SMTP_NOT_CONFIGURED"
-
-    sender_email = normalize_email(str(body.get("email") or ""))
-    sender_name = re.sub(r"\s+", " ", str(body.get("name") or "").strip()) or "Website visitor"
-    subject_value = re.sub(r"\s+", " ", str(body.get("subject") or "General question").strip()) or "General question"
-    message_value = str(body.get("message") or "").strip()
-    payload_value = body.get("payload") if isinstance(body.get("payload"), dict) else {}
-    submitted_at = now_utc().isoformat()
-
-    email_message = EmailMessage()
-    email_message["Subject"] = f"LetsBeParents contact: {subject_value}"
-    email_message["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM_EMAIL))
-    email_message["To"] = recipient_email
-    if re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", sender_email):
-        email_message["Reply-To"] = formataddr((sender_name, sender_email))
-    details = [
-        "New LetsBeParents contact form message",
-        "",
-        f"Name: {sender_name}",
-        f"Email: {sender_email or 'Not provided'}",
-        f"Subject: {subject_value}",
-        f"Submitted at: {submitted_at}",
-        "",
-        "Message:",
-        message_value or "Not provided",
-    ]
-    if payload_value:
-        details.extend(["", "Payload:", json.dumps(payload_value, ensure_ascii=False, indent=2)])
-    plain_body = "\n".join(details)
-    email_message.set_content(plain_body)
-    email_message.add_alternative(
-        "<html><body style=\"font-family:Arial,sans-serif;color:#050816\">"
-        "<h2>New LetsBeParents contact form message</h2>"
-        f"<p><strong>Name:</strong> {html.escape(sender_name)}</p>"
-        f"<p><strong>Email:</strong> {html.escape(sender_email or 'Not provided')}</p>"
-        f"<p><strong>Subject:</strong> {html.escape(subject_value)}</p>"
-        f"<p><strong>Submitted at:</strong> {html.escape(submitted_at)}</p>"
-        f"<p style=\"white-space:pre-wrap\">{html.escape(message_value or 'Not provided')}</p>"
-        "</body></html>",
-        subtype="html",
-    )
-    try:
-        send_smtp_message(email_message)
-        return "SENT"
-    except Exception as exc:
-        logger.warning("Contact form email delivery failed: %s", type(exc).__name__)
-        return "DELIVERY_FAILED"
 
 
 def send_auth_action_email(
@@ -2540,51 +2463,21 @@ def as_dict(value: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def device_client_metadata(value: Any) -> dict[str, Any]:
-    """Allow only device properties; identity, IP and timestamps are server-owned."""
-    raw = as_dict(value)
-    result: dict[str, Any] = {}
-    for key in ("source", "osName", "osVersion", "brand", "model", "appVersion"):
-        if isinstance(raw.get(key), str) and raw[key].strip():
-            result[key] = raw[key].strip()[:120]
-    if result.get("source") not in {"Web App", "Mobile App (iOS)", "Mobile App (Android)"}:
-        result.pop("source", None)
-    zone = raw.get("timezone")
-    if isinstance(zone, str) and len(zone) <= 100:
-        try:
-            ZoneInfo(zone)
-            result["timezone"] = zone
-        except (ValueError, ZoneInfoNotFoundError):
-            pass
-    for key, maximum in (("screenWidth", 20000), ("screenHeight", 20000), ("pixelRatio", 20)):
-        number = raw.get(key)
-        if isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number) and 0 < number <= maximum:
-            result[key] = number
-    if isinstance(raw.get("isEmulator"), bool):
-        result["isEmulator"] = raw["isEmulator"]
-    return result
-
-
-def record_device_session(cursor, profile_id: int, request: Request, source: str, device_info: Any = None, *, is_registration: bool = False) -> None:
+def record_device_session(cursor, profile_id: int, request: Request, source: str) -> None:
     """Persist a factual sign-in record for the admin Devices history."""
     forwarded_for = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
     client_host = getattr(request.client, "host", "") if request.client else ""
     user_agent = str(request.headers.get("user-agent") or "").strip()
     normalized_agent = user_agent.lower()
-    client_info = device_client_metadata(device_info)
-    device_type = "mobile" if str(client_info.get("source") or "").startswith("Mobile App") or any(token in normalized_agent for token in ("android", "iphone", "ipad", "mobile")) else "desktop"
+    device_type = "mobile" if any(token in normalized_agent for token in ("android", "iphone", "ipad", "mobile")) else "desktop"
     data = {
-        **client_info,
         "profileId": profile_id,
         "signedInAt": now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "authMethod": source,
+        "source": source,
         "ip": forwarded_for or client_host,
         "userAgent": user_agent[:1000],
         "deviceType": device_type,
-        "isRegistration": is_registration,
     }
-    if "source" not in data and user_agent.startswith("Mozilla/"):
-        data["source"] = "Web App"
     cursor.execute(
         """
         INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at)
@@ -2596,70 +2489,6 @@ def record_device_session(cursor, profile_id: int, request: Request, source: str
             json.dumps(data, ensure_ascii=False),
         ),
     )
-    cursor.execute(
-        """
-        UPDATE profiles
-        SET data = COALESCE(data, '{}'::jsonb) || jsonb_build_object('lastSessionDevice', %s::jsonb)
-            || CASE WHEN %s AND COALESCE(data->'registrationDevice', 'null'::jsonb) = 'null'::jsonb
-                    THEN jsonb_build_object('registrationDevice', %s::jsonb) ELSE '{}'::jsonb END
-        WHERE id = %s
-        """,
-        (json.dumps(data, ensure_ascii=False), is_registration, json.dumps(data, ensure_ascii=False), profile_id),
-    )
-
-
-def normalize_browser_name(raw_value: Any) -> str:
-    text = str(raw_value or "").strip()
-    if not text:
-        return "Unknown"
-    lowered = text.lower()
-    is_mobile = any(token in lowered for token in ("iphone", "ipad", "ipod", "android", "mobile", "mobi"))
-    if "gsa/" in lowered or "gsa " in lowered:
-        return "GSA"
-    if "edg/" in lowered or "edge/" in lowered or "edge " in lowered or "msedge" in lowered:
-        return "Edge"
-    if "opr/" in lowered or "opera/" in lowered:
-        return "Opera"
-    if "samsungbrowser" in lowered:
-        return "Samsung Internet"
-    if "ucbrowser" in lowered:
-        return "UC Browser"
-    if "whale/" in lowered:
-        return "Whale"
-    if "miuibrowser" in lowered:
-        return "MIUI Browser"
-    if "fxios" in lowered or "firefox/" in lowered:
-        return "Firefox"
-    if "crios" in lowered or ("chrome/" in lowered and "edg/" not in lowered and "opr/" not in lowered):
-        return "Mobile Chrome" if is_mobile else "Chrome"
-    if "safari/" in lowered:
-        return "Mobile Safari" if is_mobile else "Safari"
-    if "msie" in lowered or "trident/" in lowered:
-        return "Internet Explorer"
-    return "Unknown"
-
-
-def normalize_platform_name(raw_source: Any, raw_user_agent: Any) -> str:
-    source = str(raw_source or "").upper().replace("-", "_").replace(" ", "_")
-    if any(token in source for token in ("IOS", "IPHONE", "IPAD", "APP_STORE", "APPLE")):
-        return "iOS"
-    if any(token in source for token in ("ANDROID", "PLAY_STORE", "GOOGLE_PLAY")):
-        return "Android"
-    if source in {"WEB", "WEB_APP", "LOCAL_SIGNUP", "FIREBASE_AUTH", "BROWSER"}:
-        return "Web"
-
-    agent = str(raw_user_agent or "").lower()
-    if not agent:
-        return "Unknown"
-    if "android" in agent or "linux; android" in agent:
-        return "Android"
-    if any(token in agent for token in ("iphone", "ipad", "ipod", "crios", "fxios")):
-        return "iOS"
-    if any(token in agent for token in ("macintosh", "windows nt", "x11", "cros", "mac os x")):
-        return "Web"
-    if "mobile" in agent or "mobi" in agent:
-        return "Android"
-    return "Unknown"
 
 
 def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -2677,6 +2506,7 @@ def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
         "avatarUrl": row.get("avatarUrl") or data.get("avatarUrl"),
         "profileType": data.get("profileType") or row.get("role"),
         "isVerified": data.get("isVerified"),
+        "isVideoVerified": data.get("isVideoVerified"),
         "isPremium": data.get("isPremium"),
         "likedByViewer": row.get("likedByViewer"),
         "likeReadOnly": row.get("likeReadOnly"),
@@ -2919,24 +2749,37 @@ def profile_data(profile: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def profile_tier(profile: dict[str, Any] | None) -> str:
+    """The profile's real feature tier (EXPLORE/BUILDER/PRO). Prefers the
+    explicit `tier` field set by recompute_profile_premium() from the
+    profile's active subscription; a legacy isPremium/premium flag with no
+    `tier` field (set before this split existed) is treated as PRO rather
+    than BUILDER - this preserves existing paying members' access (Family
+    Room etc.) instead of silently downgrading them the moment this code
+    ships. New subscriptions always carry a real tier going forward."""
     data = profile_data(profile)
     tier = str(data.get("tier") or "").strip().upper()
     if tier in SUBSCRIPTION_TIER_RANK:
         return tier
-    return "PRO" if json_bool(data, "isPremium") or json_bool(data, "premium") else "EXPLORE"
-
-def profile_is_pro(profile: dict[str, Any] | None) -> bool:
-    return profile_tier(profile) == "PRO"
-
-def normalize_subscription_tier(value: str | None) -> str:
-    normalized = str(value or "").strip().upper()
-    if normalized not in SUBSCRIPTION_TIER_RANK:
-        raise HTTPException(status_code=422, detail="Unsupported subscription tier")
-    return normalized
+    if json_bool(data, "isPremium") or json_bool(data, "premium"):
+        return "PRO"
+    return "EXPLORE"
 
 
 def profile_is_premium(profile: dict[str, Any] | None) -> bool:
-    return profile_tier(profile) in {"BUILDER", "PRO"}
+    """True for BUILDER or PRO (any paid tier) - kept as the name every
+    existing Builder-level gate (likes limit, filters, who-liked-you, calls)
+    already calls; unchanged behavior. The Compatibility Report also opens
+    at this level, but its talkingPoints detail is Pro-only - see
+    profile_is_pro() and member_compatibility_report()."""
+    return SUBSCRIPTION_TIER_RANK[profile_tier(profile)] >= SUBSCRIPTION_TIER_RANK["BUILDER"]
+
+
+def profile_is_pro(profile: dict[str, Any] | None) -> bool:
+    """True for PRO only - gates the Pro-exclusive perks (Family Room,
+    documents, priority support, the Compatibility Report's per-question
+    talkingPoints - the "Detailed" in "Detailed Compatibility Report" on
+    the pricing page; AI Family Advisor once that's built)."""
+    return SUBSCRIPTION_TIER_RANK[profile_tier(profile)] >= SUBSCRIPTION_TIER_RANK["PRO"]
 
 
 def profile_is_verified(profile: dict[str, Any] | None) -> bool:
@@ -3002,19 +2845,14 @@ def catalog_completion_sql(table_name: str = "profiles") -> str:
           JSON_UNQUOTE(JSON_EXTRACT({table_name}.data, '$.mismatchKind')) = 'NO_DATA'
           AND NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT({table_name}.data, '$.profileType')), ''), 'null') IS NOT NULL
           AND NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT({table_name}.data, '$.country')), ''), 'null') IS NOT NULL
-          AND (
-            NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT({table_name}.data, '$.dateOfBirth')), ''), 'null') IS NULL
-            OR TO_DATE(NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT({table_name}.data, '$.dateOfBirth')), ''), 'null'), 'YYYY-MM-DD') <= CURRENT_DATE - INTERVAL '18 years'
-          )
         )
       )
     )"""
 
 
-RUNTIME_SETTING_DEFAULTS: dict[str, bool | int | str] = {
+RUNTIME_SETTING_DEFAULTS: dict[str, bool | int] = {
     "platform.registration_enabled": True,
     "platform.livekit_enabled": True,
-    "platform.system_email": "support@letsbeparents.com",
     "limits.free_likes_per_day": FREE_DAILY_LIKE_LIMIT,
     "limits.premium_likes_per_day": PREMIUM_DAILY_LIKE_LIMIT,
     "limits.free_cold_chats_per_day": FREE_DAILY_COLD_CHAT_LIMIT,
@@ -3029,14 +2867,9 @@ def runtime_setting_key(row: dict[str, Any]) -> str:
                  if isinstance(value, str) and value.startswith(("platform.", "limits."))), "")
 
 
-def normalize_runtime_setting(key: str, value: Any) -> bool | int | str:
+def normalize_runtime_setting(key: str, value: Any) -> bool | int:
     if key not in RUNTIME_SETTING_DEFAULTS:
         raise ValueError("Unknown runtime setting")
-    if isinstance(RUNTIME_SETTING_DEFAULTS[key], str):
-        text = str(value or "").strip()
-        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", text):
-            raise ValueError(f"{key} must be a valid email address")
-        return text
     if isinstance(RUNTIME_SETTING_DEFAULTS[key], bool):
         if isinstance(value, bool):
             return value
@@ -3074,7 +2907,7 @@ def validate_runtime_setting(values: dict[str, Any], current: dict[str, Any] | N
     return {**values, "data": data}
 
 
-def runtime_settings(cursor) -> dict[str, bool | int | str]:
+def runtime_settings(cursor) -> dict[str, bool | int]:
     # The allowlist prevents contact addresses, provider keys or other private
     # settings from leaking through the public configuration endpoint.
     keys = tuple(RUNTIME_SETTING_DEFAULTS)
@@ -3124,15 +2957,37 @@ def validate_chat_message(cursor, body: str) -> str:
     return text
 
 
+# UPDATE (Sept 2026): Alena flagged a recurring complaint - free users
+# register, like people, get no match, and assume mutual likes must be a
+# paid feature (they are not - see member_like_profile()). The real
+# problem is that brand-new profiles didn't get enough visibility to be
+# seen and liked back in time. A "new user" boost (honeymoon.*) already
+# existed here, but its weight (5) was tiny next to verified (100) and
+# premium (30), so it had almost no practical effect once any
+# verified/premium profiles were in the pool. Raised the weight so a new
+# sign-up is meaningfully more visible during their first days, and
+# extended the window from 5 to 10 days to cover a realistic
+# time-to-first-likes. These can be tuned later via an admin 'settings'
+# row (source_key ranking.weights.honeymoon / ranking.honeymoon.
+# durationDays) without a redeploy - a DB row with that key overrides
+# this default.
 RANKING_DEFAULTS: dict[str, bool | float] = {
-    "ranking.v2.enabled": False,
-    "ranking.honeymoon.durationDays": 5,
+    "ranking.v2.enabled": True,
+    "ranking.honeymoon.durationDays": 10,
     "ranking.recency.halfLifeHours": 48,
     "ranking.weights.completeness": 25,
-    "ranking.weights.honeymoon": 5,
+    "ranking.weights.honeymoon": 35,
     "ranking.weights.premium": 30,
     "ranking.weights.recency": 25,
     "ranking.weights.verified": 100,
+    # Premium roadmap, step 3 (Sept 2026): one-off paid profile Boost - see
+    # member_request_boost()/admin_review_boost() below. Weighted below
+    # "verified" (100) on purpose, so a boosted-but-unverified profile still
+    # doesn't outrank verified ones outright, but well above "premium" (30)
+    # alone, so a boost is clearly, noticeably worth paying for - it should
+    # feel like a real jump, not a rounding error next to a plain Builder/
+    # Pro subscription.
+    "ranking.weights.boost": 65,
 }
 
 
@@ -3238,7 +3093,7 @@ def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, li
     joins: list[str] = []
     terms: list[str] = []
     params: list[Any] = []
-    weights = {name: float(settings[f"ranking.weights.{name}"]) for name in ("completeness", "honeymoon", "premium", "recency", "verified")}
+    weights = {name: float(settings[f"ranking.weights.{name}"]) for name in ("completeness", "honeymoon", "premium", "recency", "verified", "boost")}
     if weights["completeness"]:
         terms.append(f"%s * ({catalog_profile_completeness_sql()})")
         params.append(weights["completeness"])
@@ -3289,14 +3144,40 @@ def catalog_ranking_sql(settings: dict[str, bool | float]) -> tuple[str, str, li
         terms.append(f"""%s * CASE WHEN LOWER(COALESCE(profiles.data->>'isVerified', 'false')) IN ('true','1')
                          OR ({verified_at}) IS NOT NULL THEN 1 ELSE 0 END""")
         params.append(weights["verified"])
+    if weights["boost"]:
+        # boostActiveUntil is set by admin_review_boost() on approval - a
+        # plain ISO timestamp on the profile's own data blob, same pattern
+        # as verifiedAt/lastLoginAt above. No separate "is this boost still
+        # running" lookup needed - a boost that has expired just fails this
+        # CASE and stops contributing, no cleanup job required.
+        boost_until = ranking_timestamp_sql("profiles.data->>'boostActiveUntil'")
+        terms.append(f"%s * CASE WHEN ({boost_until}) IS NOT NULL AND ({boost_until}) > CURRENT_TIMESTAMP THEN 1 ELSE 0 END")
+        params.append(weights["boost"])
     order = f"({' + '.join(terms)}) DESC, profiles.id DESC" if terms else "profiles.id DESC"
     return "\n".join(joins), order, params
+
+
+# UPDATE (Sept 2026): real Family-Builder-vs-Pro tiers, matching the
+# /pricing page's own 3-tier structure (see the master brief's Pricing
+# section) - EXPLORE is free/no subscription, BUILDER and PRO are the two
+# paid tiers a subscription (member request or admin grant) can carry.
+# Distinct from `plan` (PREMIUM_MONTHLY/QUARTERLY/ANNUAL), which is the
+# billing *period*, not the feature tier - a subscription has both.
+SUBSCRIPTION_TIER_RANK = {"EXPLORE": 0, "BUILDER": 1, "PRO": 2}
+
+
+def normalize_subscription_tier(value: str | None) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized not in SUBSCRIPTION_TIER_RANK:
+        raise HTTPException(status_code=422, detail="Unsupported subscription tier")
+    return normalized
 
 
 def normalize_subscription_plan(value: str) -> str:
     normalized = str(value or "").strip().upper()
     aliases = {
         "MONTHLY": "PREMIUM_MONTHLY",
+        "QUARTERLY": "PREMIUM_QUARTERLY",
         "ANNUAL": "PREMIUM_ANNUAL",
         "PREMIUM_MONTHLY": "PREMIUM_MONTHLY",
         "PREMIUM_QUARTERLY": "PREMIUM_QUARTERLY",
@@ -3316,13 +3197,10 @@ def subscription_plan_days(plan: str) -> int:
     }[normalize_subscription_plan(plan)]
 
 
-def profile_is_eligible_for_member_access(profile: dict[str, Any] | None) -> bool:
+def profile_is_visible_in_catalog(profile: dict[str, Any] | None) -> bool:
     if not profile or profile.get("status") != "ACTIVE" or profile.get("role") != "USER":
         return False
     data = profile_data(profile)
-    birth_date = profile_birth_date(data.get("dateOfBirth"))
-    if birth_date is not None and birth_date > latest_adult_birth_date():
-        return False
     legacy_catalog_profile = (
         str(data.get("mismatchKind") or "").strip().upper() == "NO_DATA"
         and str(data.get("profileType") or "").strip().lower() not in {"", "null"}
@@ -3331,13 +3209,7 @@ def profile_is_eligible_for_member_access(profile: dict[str, Any] | None) -> boo
     return (
         profile_has_completed_onboarding(profile)
         and (profile_has_adult_birth_date(profile) or legacy_catalog_profile)
-    )
-
-
-def profile_is_visible_in_catalog(profile: dict[str, Any] | None) -> bool:
-    data = profile_data(profile)
-    return profile_is_eligible_for_member_access(profile) and json_bool(
-        data, "visibleInCatalog", json_bool(data, "isVisibleInCatalog", True)
+        and json_bool(data, "visibleInCatalog", json_bool(data, "isVisibleInCatalog", True))
     )
 
 
@@ -3373,60 +3245,6 @@ def active_match_id(cursor, profile_a_id: int, profile_b_id: int) -> int | None:
     return int(row["id"]) if row else None
 
 
-def profiles_have_member_relationship(cursor, profile_a_id: int, profile_b_id: int) -> bool:
-    """Whether the target has shared access with the viewer through an interaction."""
-    low_id, high_id = ordered_pair(profile_a_id, profile_b_id)
-    cursor.execute(
-        """
-        SELECT EXISTS (
-          SELECT 1
-          FROM profile_likes l
-          WHERE l.status = 'ACTIVE'
-            AND l.actor_profile_id = %s
-            AND l.target_profile_id = %s
-        ) OR EXISTS (
-          SELECT 1
-          FROM profile_matches m
-          WHERE m.status = 'ACTIVE'
-            AND m.profile_a_id = %s
-            AND m.profile_b_id = %s
-        ) OR EXISTS (
-          SELECT 1
-          FROM conversation_messages cm
-          JOIN conversations c ON c.id = cm.conversation_id
-          WHERE cm.status = 'ACTIVE'
-            AND c.status = 'ACTIVE'
-            AND cm.sender_profile_id = %s
-            AND c.profile_a_id = %s
-            AND c.profile_b_id = %s
-        ) AS related
-        """,
-        (
-            profile_b_id,
-            profile_a_id,
-            low_id,
-            high_id,
-            profile_b_id,
-            low_id,
-            high_id,
-        ),
-    )
-    row = cursor.fetchone()
-    return bool(row and row.get("related"))
-
-
-def profile_is_visible_to_member(cursor, viewer_profile_id: int, profile: dict[str, Any] | None) -> bool:
-    """Apply profile eligibility before the catalog-visibility relationship exception.
-
-    Callers enforce active blocks separately so their existing 403/404 responses stay intact.
-    """
-    if not profile_is_eligible_for_member_access(profile):
-        return False
-    return profile_is_visible_in_catalog(profile) or profiles_have_member_relationship(
-        cursor, viewer_profile_id, int(profile["id"])
-    )
-
-
 def require_active_match(cursor, profile_a_id: int, profile_b_id: int) -> int:
     """Require an active, unblocked pair and hold its match until the transaction ends."""
     low_id, high_id = ordered_pair(profile_a_id, profile_b_id)
@@ -3452,8 +3270,12 @@ def require_family_premium(cursor, profile_id: int) -> None:
     profile = fetch_profile(cursor, profile_id)
     if not profile or profile.get("status") != "ACTIVE":
         raise HTTPException(status_code=404, detail="Profile not found")
-    if not profile_is_premium(profile):
-        raise HTTPException(status_code=402, detail="Premium is required for the Family Room")
+    # UPDATE (Sept 2026): Family Room/Plan/Documents is a Family Builder
+    # PRO-tier perk specifically (per /pricing), not any-paid-tier - see
+    # profile_is_pro(). Name kept as require_family_premium (used at 9 call
+    # sites) rather than renamed, to keep this a minimal, low-risk change.
+    if not profile_is_pro(profile):
+        raise HTTPException(status_code=402, detail="Family Builder Pro is required for the Family Room")
 
 
 def family_document_storage_path(storage_key: str) -> Path:
@@ -3470,6 +3292,93 @@ def family_document_storage_path(storage_key: str) -> Path:
     if family_root not in target.parents:
         raise HTTPException(status_code=404, detail="Document source is unavailable")
     return target
+
+
+def video_verification_storage_path(storage_key: str) -> Path:
+    # Mirrors family_document_storage_path() above exactly (same private-root
+    # safety checks), scoped to the "video-verifications/" prefix instead of
+    # "family-room/".
+    private_root = PRIVATE_UPLOAD_DIR.resolve()
+    public_root = UPLOAD_DIR.resolve()
+    if private_root == public_root or public_root in private_root.parents:
+        raise HTTPException(status_code=503, detail="Private document storage is not configured safely")
+    if not storage_key.startswith("video-verifications/"):
+        raise HTTPException(status_code=404, detail="Video source is unavailable")
+    target = safe_storage_path(private_root, storage_key)
+    if target == public_root or public_root in target.parents:
+        raise HTTPException(status_code=503, detail="Private document storage is not configured safely")
+    video_root = (private_root / "video-verifications").resolve()
+    if video_root not in target.parents:
+        raise HTTPException(status_code=404, detail="Video source is unavailable")
+    return target
+
+
+# Structured 10-section Family Plan (Alena's reference mockup, "Your Family
+# Plan"). Separate, additive alongside the free-text family_plans table
+# above/below - same match/premium gating, different tables (see
+# sql/2026_09_family_plan_sections.sql). Fixed key list mirrored on the
+# mobile side for i18n/ordering (mobile/src/utils/familyPlan.ts) - keep
+# both in sync with the SQL CHECK constraint if this ever changes.
+FAMILY_PLAN_SECTION_KEYS: list[str] = [
+    "values-motivation",
+    "parenting-roles",
+    "legal-custody",
+    "financial-planning",
+    "living-arrangements",
+    "health-insurance",
+    "education",
+    "communication",
+    "extended-family",
+    "emergency-planning",
+]
+
+
+def fetch_family_plan_sections(
+    cursor, match_id: int, viewer_profile_id: int, other_profile_id: int
+) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT section_key AS sectionKey, content, updated_by_profile_id AS updatedByProfileId,
+               updated_at AS updatedAt
+        FROM family_plan_sections
+        WHERE match_id = %s
+        """,
+        (match_id,),
+    )
+    content_by_key = {row["sectionKey"]: normalize_row(row) for row in cursor.fetchall()}
+
+    cursor.execute(
+        """
+        SELECT section_key AS sectionKey, profile_id AS profileId
+        FROM family_plan_section_completions
+        WHERE match_id = %s
+        """,
+        (match_id,),
+    )
+    my_done: set[str] = set()
+    partner_done: set[str] = set()
+    for row in cursor.fetchall():
+        key = row["sectionKey"]
+        pid = int(row["profileId"])
+        if pid == viewer_profile_id:
+            my_done.add(key)
+        elif pid == other_profile_id:
+            partner_done.add(key)
+
+    sections: list[dict[str, Any]] = []
+    for key in FAMILY_PLAN_SECTION_KEYS:
+        entry = content_by_key.get(key)
+        sections.append(
+            {
+                "key": key,
+                "content": entry["content"] if entry else "",
+                "updatedByProfileId": entry["updatedByProfileId"] if entry else None,
+                "updatedAt": entry["updatedAt"] if entry else None,
+                "myComplete": key in my_done,
+                "partnerComplete": key in partner_done,
+            }
+        )
+    return sections
 
 
 def fetch_family_plan(cursor, match_id: int) -> dict[str, Any]:
@@ -3569,66 +3478,6 @@ def fetch_pregnancy_room_entries(cursor, match_id: int) -> list[dict[str, Any]]:
     return entries
 
 
-FAMILY_PLAN_SECTION_KEYS: list[str] = [
-    "values-motivation",
-    "parenting-roles",
-    "legal-custody",
-    "financial-planning",
-    "living-arrangements",
-    "health-insurance",
-    "education",
-    "communication",
-    "extended-family",
-    "emergency-planning",
-]
-
-
-def fetch_family_plan_sections(cursor, match_id: int, viewer_profile_id: int, other_profile_id: int) -> list[dict[str, Any]]:
-    cursor.execute(
-        """
-        SELECT section_key AS sectionKey, content, updated_by_profile_id AS updatedByProfileId,
-               updated_at AS updatedAt
-        FROM family_plan_sections
-        WHERE match_id = %s
-        """,
-        (match_id,),
-    )
-    content_by_key = {row["sectionKey"]: normalize_row(row) for row in cursor.fetchall()}
-
-    cursor.execute(
-        """
-        SELECT section_key AS sectionKey, profile_id AS profileId
-        FROM family_plan_section_completions
-        WHERE match_id = %s
-        """,
-        (match_id,),
-    )
-    my_done: set[str] = set()
-    partner_done: set[str] = set()
-    for row in cursor.fetchall():
-        key = row["sectionKey"]
-        profile_id = int(row["profileId"])
-        if profile_id == viewer_profile_id:
-            my_done.add(key)
-        elif profile_id == other_profile_id:
-            partner_done.add(key)
-
-    sections: list[dict[str, Any]] = []
-    for key in FAMILY_PLAN_SECTION_KEYS:
-        entry = content_by_key.get(key)
-        sections.append(
-            {
-                "key": key,
-                "content": entry["content"] if entry else "",
-                "updatedByProfileId": entry["updatedByProfileId"] if entry else None,
-                "updatedAt": entry["updatedAt"] if entry else None,
-                "myComplete": key in my_done,
-                "partnerComplete": key in partner_done,
-            }
-        )
-    return sections
-
-
 def daily_like_count(cursor, profile_id: int) -> int:
     cursor.execute(
         """
@@ -3683,6 +3532,14 @@ def record_cold_chat_open(cursor, profile_id: int, target_profile_id: int, conve
 
 def record_profile_view(cursor, viewer_profile_id: int, viewed_profile_id: int) -> bool:
     if viewer_profile_id == viewed_profile_id or has_active_block(cursor, viewer_profile_id, viewed_profile_id):
+        return False
+    # Incognito browsing (Pro-only, Sept 2026): re-checked live off the
+    # viewer's CURRENT tier every call rather than trusting a cached flag,
+    # same defense-in-depth already used by profile_is_premium()/
+    # profile_is_pro() elsewhere - if a Pro member's subscription lapses,
+    # incognito silently stops applying rather than staying on for free.
+    viewer_profile = fetch_profile(cursor, viewer_profile_id)
+    if json_bool(profile_data(viewer_profile), "incognitoEnabled") and profile_is_pro(viewer_profile):
         return False
     source_key = f"local-{viewer_profile_id}-{viewed_profile_id}"
     cursor.execute(
@@ -3868,8 +3725,6 @@ def ensure_support_welcome(cursor, profile_id: int) -> int | None:
     if not support_conversation:
         return None
     conversation_id, support_profile_id = support_conversation
-    # Serialize the existence check for concurrent sign-ins and admin initialization.
-    cursor.execute("SELECT id FROM conversations WHERE id = %s FOR UPDATE", (conversation_id,))
     cursor.execute(
         """
         INSERT IGNORE INTO support_welcome_deliveries (profile_id, support_profile_id, conversation_id, created_at)
@@ -3901,11 +3756,14 @@ def ensure_support_welcome(cursor, profile_id: int) -> int | None:
 
 
 def ensure_priority_support_note(cursor, profile_id: int) -> None:
-    """Send the one-time "you have priority support" note for Premium
-    members, the same idempotent way ensure_support_welcome() sends the
-    general welcome message (a body-text existence check, no extra table)."""
+    """Send the one-time "you have priority support" note for Family
+    Builder PRO members specifically (per /pricing's "Priority support" is
+    a Pro-tier line item, not a Builder one) - profile_is_pro(), not
+    profile_is_premium(). Same idempotent pattern as
+    ensure_support_welcome() (a body-text existence check, no extra
+    table)."""
     profile = fetch_profile(cursor, profile_id)
-    if not profile or not profile_is_premium(profile):
+    if not profile or not profile_is_pro(profile):
         return
     support_conversation = ensure_support_conversation(cursor, profile_id)
     if not support_conversation:
@@ -4111,7 +3969,7 @@ def api_root():
 
 
 @app.post("/api/auth/signup", response_model=SignupSessionResponse)
-def auth_signup(payload: SignupPayload, response: Response, request: Request):
+def auth_signup(payload: SignupPayload, response: Response):
     email = normalize_email(payload.email)
     if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
         raise HTTPException(status_code=422, detail="Valid email is required")
@@ -4149,7 +4007,6 @@ def auth_signup(payload: SignupPayload, response: Response, request: Request):
         )
         user_id = cursor.lastrowid
         ensure_support_welcome(cursor, int(profile_id))
-        record_device_session(cursor, int(profile_id), request, "password", payload.deviceInfo, is_registration=True)
         token, expires_at = create_session(cursor, user_id)
         verification_token, _ = issue_auth_action_token(
             cursor,
@@ -4332,7 +4189,7 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
             user = cursor.fetchone()
 
         ensure_support_welcome(cursor, int(user["profile_id"]))
-        record_device_session(cursor, int(user["profile_id"]), request, f"social:{provider}", payload.deviceInfo, is_registration=is_new_user)
+        record_device_session(cursor, int(user["profile_id"]), request, f"social:{provider}")
         token, expires_at = create_session(cursor, user["id"])
         conn.commit()
 
@@ -4370,7 +4227,7 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
             )
             user["password_hash"] = upgraded_hash
         ensure_support_welcome(cursor, int(user["profile_id"]))
-        record_device_session(cursor, int(user["profile_id"]), request, "password", payload.deviceInfo)
+        record_device_session(cursor, int(user["profile_id"]), request, "password")
         token, expires_at = create_session(cursor, user["id"])
         conn.commit()
     return auth_session_response(response, token, expires_at, user)
@@ -4422,10 +4279,6 @@ def auth_logout(request: Request, response: Response, authorization: str | None 
 @app.post("/api/auth/forgot-password")
 def auth_forgot_password(payload: ForgotPasswordPayload):
     email = normalize_email(payload.email)
-    cooldown_key = f"auth:forgot-password:{hashlib.sha256(email.encode('utf-8')).hexdigest()}"
-    redis_cooldown = redis_cooldown_started(cooldown_key, AUTH_EMAIL_RESEND_SECONDS)
-    if redis_cooldown is False:
-        return {"ok": True, "status": "PASSWORD_RESET_EMAIL_SENT"}
     reset_delivery = None
     with db_cursor() as (conn, cursor):
         cursor.execute(
@@ -4439,24 +4292,13 @@ def auth_forgot_password(payload: ForgotPasswordPayload):
         )
         user = cursor.fetchone()
         if user and user["status"] == "ACTIVE":
-            cursor.execute(
-                """
-                SELECT id
-                FROM auth_action_tokens
-                WHERE user_id = %s AND purpose = 'RESET_PASSWORD'
-                  AND created_at > DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
-                LIMIT 1
-                """,
-                (user["id"], AUTH_EMAIL_RESEND_SECONDS),
+            reset_token, _ = issue_auth_action_token(
+                cursor,
+                int(user["id"]),
+                "RESET_PASSWORD",
+                timedelta(minutes=PASSWORD_RESET_MINUTES),
             )
-            if not cursor.fetchone():
-                reset_token, _ = issue_auth_action_token(
-                    cursor,
-                    int(user["id"]),
-                    "RESET_PASSWORD",
-                    timedelta(minutes=PASSWORD_RESET_MINUTES),
-                )
-                reset_delivery = (int(user["id"]), user["email"], reset_token)
+            reset_delivery = (int(user["id"]), user["email"], reset_token)
         conn.commit()
     if reset_delivery:
         send_auth_action_email(reset_delivery[0], reset_delivery[1], "RESET_PASSWORD", reset_delivery[2], payload.locale)
@@ -4470,9 +4312,6 @@ def auth_forgot_password(payload: ForgotPasswordPayload):
 def auth_resend_verification(payload: AuthLocalePayload, user: dict[str, Any] = Depends(require_user)):
     if user.get("email_verified_at"):
         return {"ok": True, "status": "EMAIL_ALREADY_VERIFIED"}
-    cooldown_key = f"auth:email-verification-resend:{int(user['id'])}"
-    if redis_cooldown_started(cooldown_key, AUTH_EMAIL_RESEND_SECONDS) is False:
-        return {"ok": True, "status": "EMAIL_RECENTLY_SENT"}
     with db_cursor() as (conn, cursor):
         cursor.execute(
             """
@@ -4545,7 +4384,6 @@ def auth_confirm_email(payload: VerifyEmailPayload):
             (action_token["user_id"],),
         )
         conn.commit()
-    redis_delete(f"auth:email-verification-code-attempts:{int(action_token['user_id'])}")
     return {"ok": True, "status": "EMAIL_VERIFIED"}
 
 
@@ -4555,12 +4393,7 @@ def auth_confirm_email_code(
     user: dict[str, Any] = Depends(require_user),
 ):
     if user.get("email_verified_at"):
-        redis_delete(f"auth:email-verification-code-attempts:{int(user['id'])}")
         return {"ok": True, "status": "EMAIL_ALREADY_VERIFIED", "user": public_user(user)}
-    attempts_key = f"auth:email-verification-code-attempts:{int(user['id'])}"
-    cached_attempts = redis_counter(attempts_key)
-    if cached_attempts is not None and cached_attempts >= 10:
-        raise HTTPException(status_code=429, detail="TOO_MANY_CODE_ATTEMPTS")
     with db_cursor() as (conn, cursor):
         cursor.execute(
             """
@@ -4594,7 +4427,6 @@ def auth_confirm_email_code(
                 (json.dumps({"userId": user["id"], "createdAt": now_utc().isoformat()}),),
             )
             conn.commit()
-            redis_increment_counter(attempts_key, 15 * 60)
             raise HTTPException(status_code=400, detail="INVALID_OR_EXPIRED_CODE")
         cursor.execute(
             "UPDATE local_users SET email_verified_at = COALESCE(email_verified_at, UTC_TIMESTAMP()) WHERE id = %s",
@@ -4619,7 +4451,6 @@ def auth_confirm_email_code(
         )
         verified_user = cursor.fetchone()
         conn.commit()
-    redis_delete(attempts_key)
     return {"ok": True, "status": "EMAIL_VERIFIED", "user": public_user(verified_user)}
 
 
@@ -4729,19 +4560,22 @@ def save_privacy_consent(payload: CookieConsentPayload, request: Request, respon
         encode_consent_level(preferences),
         COOKIE_CONSENT_DAYS * 24 * 60 * 60,
     )
-    set_public_cookie(
-        response,
-        COOKIE_LOCALE_NAME,
-        payload.locale,
-        COOKIE_LOCALE_DAYS * 24 * 60 * 60,
-        secure=False,
-    )
+    if preferences["preferences"]:
+        set_public_cookie(
+            response,
+            COOKIE_LOCALE_NAME,
+            payload.locale,
+            COOKIE_LOCALE_DAYS * 24 * 60 * 60,
+            secure=False,
+        )
+    else:
+        delete_public_cookie(response, COOKIE_LOCALE_NAME, secure=False)
     return {
         "ok": True,
         "saved": True,
         "preferences": preferences,
         "savedAt": saved_at,
-        "locale": payload.locale,
+        "locale": payload.locale if preferences["preferences"] else None,
     }
 
 
@@ -4755,25 +4589,12 @@ def public_contact(payload: ContactPayload):
         "payload": payload.payload,
     }
     with db_cursor() as (conn, cursor):
-        settings = runtime_settings(cursor)
-        recipient_email = str(settings.get("platform.system_email") or RUNTIME_SETTING_DEFAULTS["platform.system_email"])
-        delivery_status = send_contact_request_email(recipient_email, body)
         cursor.execute(
             """
             INSERT INTO api_events (event_type, payload)
             VALUES ('public.contact', %s)
             """,
-            (
-                json.dumps(
-                    {
-                        **body,
-                        "recipient": recipient_email,
-                        "deliveryStatus": delivery_status,
-                        "createdAt": now_utc().isoformat(),
-                    },
-                    ensure_ascii=False,
-                ),
-            ),
+            (json.dumps(body, ensure_ascii=False),),
         )
         conn.commit()
     return {"ok": True, "message": "Message sent"}
@@ -5333,6 +5154,8 @@ def member_settings(user: dict[str, Any] = Depends(require_user)):
         "notificationSettings": notifications,
         "visibleInCatalog": data.get("visibleInCatalog", data.get("isVisibleInCatalog", True)),
         "betaFlags": data.get("betaFlags") if isinstance(data.get("betaFlags"), dict) else {},
+        "incognitoEnabled": json_bool(data, "incognitoEnabled"),
+        "incognitoAvailable": profile_is_pro(profile),
     }
 
 
@@ -5349,6 +5172,13 @@ def member_update_settings(payload: MemberSettingsPayload, user: dict[str, Any] 
         updates["isVisibleInCatalog"] = payload.visibleInCatalog
     if payload.betaFlags is not None:
         updates["betaFlags"] = payload.betaFlags
+    if payload.incognitoEnabled is not None:
+        if payload.incognitoEnabled:
+            with db_cursor() as (_, cursor):
+                profile = fetch_profile(cursor, profile_id)
+            if not profile_is_pro(profile):
+                raise HTTPException(status_code=402, detail="Incognito browsing is a Pro feature")
+        updates["incognitoEnabled"] = payload.incognitoEnabled
     if not updates:
         raise HTTPException(status_code=422, detail="No settings to update")
     with db_cursor() as (conn, cursor):
@@ -5362,6 +5192,114 @@ def member_update_settings(payload: MemberSettingsPayload, user: dict[str, Any] 
         )
         conn.commit()
     return {"ok": True, "settings": updates}
+
+
+# =========================================================
+# PRIVACY / CONSENT (analytics + marketing). Real, per-member consent
+# record - deliberately a SEPARATE table (profile_consents), not another
+# flag inside profiles.data, per Alena's explicit request for something
+# audit-grade rather than a quiet local switch. Append-only: saving inserts
+# a new row only when the value actually changes (or is being decided for
+# the first time), so the table can always answer "what did this member
+# agree to, and when" rather than just "what's the current toggle state".
+#
+# Distinct from the website's existing anonymous cookie-consent system
+# (COOKIE_CONSENT_NAME / GET+POST /api/privacy/consent above) - that one
+# covers pre-login site visitors and two different categories (functional
+# "preferences" / "statistics" cookies). This one is scoped to a logged-in
+# member's profile, mobile + web, and to the two categories Alena asked
+# for by name: analytics and marketing.
+#
+# Honest scope note (Sept 2026): checked directly before building this -
+# neither the mobile app nor the website has any analytics or marketing
+# SDK wired in today (Firebase is used only for Google/Apple sign-in), so
+# right now these toggles have nothing real to turn on or off. Built for
+# real anyway, per Alena's own choice over a fake local-only switch -
+# profile_has_consent() below is what any future analytics/marketing
+# integration must check before firing an event for a given profile, not
+# just this endpoint's own screen.
+# =========================================================
+
+PRIVACY_CONSENT_CATEGORIES = ("analytics", "marketing")
+
+
+class PrivacyConsentPayload(BaseModel):
+    analytics: bool | None = None
+    marketing: bool | None = None
+
+
+def fetch_profile_consent_state(cursor, profile_id: int) -> dict[str, dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT DISTINCT ON (category) category, granted, created_at
+        FROM profile_consents
+        WHERE profile_id = %s
+        ORDER BY category, created_at DESC
+        """,
+        (profile_id,),
+    )
+    rows = {row["category"]: row for row in cursor.fetchall()}
+    return {
+        category: {
+            "granted": bool(rows[category]["granted"]) if category in rows else False,
+            "decided": category in rows,
+            "updatedAt": rows[category]["created_at"] if category in rows else None,
+        }
+        for category in PRIVACY_CONSENT_CATEGORIES
+    }
+
+
+def profile_has_consent(cursor, profile_id: int, category: str) -> bool:
+    """Whether this member has actually opted in to `category` tracking.
+    Nothing in this codebase calls this yet - see the module comment above.
+    Any future analytics/marketing integration must check this before
+    firing an event for a given profile, not just show it in Settings."""
+    state = fetch_profile_consent_state(cursor, profile_id)
+    return bool(state.get(category, {}).get("granted"))
+
+
+@app.get("/api/member/privacy/consent")
+def member_privacy_consent(response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        state = fetch_profile_consent_state(cursor, profile_id)
+    return {"ok": True, "consent": state}
+
+
+@app.post("/api/member/privacy/consent")
+def member_save_privacy_consent(payload: PrivacyConsentPayload, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    updates = payload.model_dump(exclude_unset=True, exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=422, detail="No consent choice to save")
+    with db_cursor() as (conn, cursor):
+        current = fetch_profile_consent_state(cursor, profile_id)
+        changed: dict[str, bool] = {}
+        for category, granted in updates.items():
+            if category not in PRIVACY_CONSENT_CATEGORIES:
+                continue
+            granted = bool(granted)
+            existing = current.get(category, {})
+            if existing.get("decided") and existing.get("granted") == granted:
+                continue  # no real change - don't pad the audit log
+            changed[category] = granted
+        for category, granted in changed.items():
+            cursor.execute(
+                """
+                INSERT INTO profile_consents (profile_id, category, granted, source)
+                VALUES (%s, %s, %s, 'MEMBER')
+                """,
+                (profile_id, category, granted),
+            )
+        if changed:
+            cursor.execute(
+                "INSERT INTO api_events (event_type, payload) VALUES ('member.privacy_consent_updated', %s)",
+                (json.dumps({"profileId": profile_id, "changes": changed}, ensure_ascii=False),),
+            )
+        conn.commit()
+        state = fetch_profile_consent_state(cursor, profile_id) if changed else current
+    return {"ok": True, "consent": state}
 
 
 @app.patch("/api/member/profile")
@@ -5382,19 +5320,6 @@ def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = 
         updates["displayName"] = display_name
     if not updates.get("dateOfBirth"):
         raise HTTPException(status_code=422, detail="Date of birth is required")
-    if not updates.get("country"):
-        raise HTTPException(status_code=422, detail="Country is required")
-    if not updates.get("city"):
-        raise HTTPException(status_code=422, detail="City is required")
-    if not updates.get("profileType"):
-        raise HTTPException(status_code=422, detail="Profile type is required")
-    looking_for = updates.get("lookingFor") if isinstance(updates.get("lookingFor"), list) else []
-    donor_type = updates.get("donorType") if isinstance(updates.get("donorType"), list) else []
-    if not looking_for and not donor_type:
-        raise HTTPException(status_code=422, detail="Matching goal is required")
-    needs_donor_contact = bool(donor_type) or any(str(item).upper().endswith("_DONOR") for item in looking_for)
-    if needs_donor_contact and not updates.get("desiredDonorContact"):
-        raise HTTPException(status_code=422, detail="Donor contact preference is required")
     birth_date = profile_birth_date(updates["dateOfBirth"])
     if birth_date is None:
         raise HTTPException(status_code=422, detail="Date of birth must use YYYY-MM-DD format")
@@ -5468,19 +5393,7 @@ async def read_profile_image(file: UploadFile) -> tuple[str, str, bytes, dict[st
     return normalized_content_type, normalized_ext, normalized_body, metadata
 
 
-def media_storage_available(storage_key: Any, public_url: Any = "") -> bool:
-    key = str(storage_key or "").strip().lstrip("/")
-    if key:
-        if key.startswith("quarantine/"):
-            path = safe_storage_path(PRIVATE_UPLOAD_DIR, key[len("quarantine/"):])
-        else:
-            path = safe_storage_path(UPLOAD_DIR, key)
-        if path.is_file():
-            return True
-    return bool(re.match(r"^https?://", str(public_url or "").strip(), re.IGNORECASE))
-
-
-def profile_photo_content_response(photo: dict[str, Any], *, image_only: bool = True) -> Response:
+def profile_photo_content_response(photo: dict[str, Any]) -> Response:
     storage_key = str(photo.get("storageKey") or "").strip().lstrip("/")
     if storage_key.startswith("quarantine/"):
         storage_path = safe_storage_path(PRIVATE_UPLOAD_DIR, storage_key[len("quarantine/"):])
@@ -5498,19 +5411,13 @@ def profile_photo_content_response(photo: dict[str, Any], *, image_only: bool = 
     if not re.match(r"^https?://", public_url, re.IGNORECASE):
         raise HTTPException(status_code=404, detail="Photo source is unavailable")
     try:
-        request = urllib.request.Request(
-            public_url,
-            headers={"User-Agent": "LetsBeParents/1.0", "Accept": "image/*" if image_only else "*/*"},
-        )
+        request = urllib.request.Request(public_url, headers={"User-Agent": "LetsBeParents/1.0", "Accept": "image/*"})
         with urllib.request.urlopen(request, timeout=15) as remote:
             content_type = (remote.headers.get_content_type() or "").lower()
             body = remote.read(MAX_UPLOAD_BYTES + 1)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError) as exc:
-        message = "Could not load the profile photo" if image_only else "Could not load the media file"
-        raise HTTPException(status_code=502, detail=message) from exc
-    if len(body) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Media file is too large")
-    if image_only and content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=502, detail="Could not load the profile photo") from exc
+    if content_type not in ALLOWED_IMAGE_TYPES or len(body) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=415, detail="Profile photo format is not supported")
     return Response(
         content=body,
@@ -5740,15 +5647,6 @@ def apply_avatar_crop_moderation(
     public_url = None
     with db_cursor() as (conn, cursor):
         if decision == "APPROVED":
-            cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
-            if not cursor.fetchone():
-                raise HTTPException(status_code=404, detail="User not found")
-            cursor.execute(
-                "SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE",
-                (primary_photo_id, profile_id),
-            )
-            if not cursor.fetchone():
-                raise HTTPException(status_code=409, detail="Approved primary photo is unavailable")
             public_url = promote_media_file(cursor, media_file_id)
             if not public_url:
                 raise HTTPException(status_code=409, detail="Avatar media is unavailable")
@@ -5756,7 +5654,7 @@ def apply_avatar_crop_moderation(
                 """
                 UPDATE profile_photos
                 SET avatar_media_file_id = %s, updated_at = UTC_TIMESTAMP()
-                WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
+                WHERE id = %s AND profile_id = %s AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
                 """,
                 (media_file_id, primary_photo_id, profile_id),
             )
@@ -5861,14 +5759,14 @@ def automatically_recheck_legacy_profile_photos() -> None:
                 "providerConfigured": vision_is_configured(),
             }
         else:
-            result = moderate_profile_image(body, require_face=True)
+            result = moderate_profile_image(body, require_face=False)
         try:
             photo = apply_profile_photo_moderation(photo_id, result, actor="automatic_recheck")
             avatar_media_file_id = int_or_none(item.get("avatar_media_file_id"))
             if photo.get("moderationStatus") == "APPROVED" and avatar_media_file_id:
                 avatar_body = quarantine_photo_bytes(item.get("avatar_storage_key"))
                 avatar_result = (
-                    moderate_profile_image(avatar_body, require_face=True)
+                    moderate_profile_image(avatar_body, require_face=False)
                     if avatar_body
                     else {
                         "decision": "REJECTED",
@@ -5951,8 +5849,7 @@ async def member_upload_photo(
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
-            SELECT COUNT(DISTINCT position) AS total,
-                   COUNT(*) FILTER (WHERE position = %s) AS atPosition
+            SELECT COUNT(DISTINCT position) AS total, SUM(position = %s) AS atPosition
             FROM profile_photos
             WHERE profile_id = %s AND status IN ('ACTIVE', 'PENDING')
             """,
@@ -6062,12 +5959,12 @@ async def member_upload_photo(
             ),
         )
         conn.commit()
-    profile_moderation = moderate_profile_image(body, require_face=True)
+    profile_moderation = moderate_profile_image(body, require_face=False)
     photo = apply_profile_photo_moderation(photo_id, profile_moderation)
     avatar_outcome = None
     avatar_moderation = None
     if photo.get("moderationStatus") == "APPROVED" and avatar_body is not None and avatar_media_id:
-        avatar_moderation = moderate_profile_image(avatar_body, require_face=True)
+        avatar_moderation = moderate_profile_image(avatar_body, require_face=False)
         avatar_outcome = apply_avatar_crop_moderation(
             int(avatar_media_id),
             profile_id,
@@ -6097,16 +5994,7 @@ async def member_upload_avatar(
     file: UploadFile = File(...),
     user: dict[str, Any] = Depends(require_user),
 ):
-    return await upload_profile_avatar(file, require_profile_id(user))
-
-
-async def upload_profile_avatar(
-    file: UploadFile,
-    profile_id: int,
-    *,
-    expected_photo_id: int | None = None,
-    actor: str = "google_vision",
-):
+    profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
@@ -6121,8 +6009,6 @@ async def upload_profile_avatar(
         primary_photo = cursor.fetchone()
     if not primary_photo:
         raise HTTPException(status_code=409, detail="Upload and approve a primary profile photo first")
-    if expected_photo_id is not None and int(primary_photo["id"]) != expected_photo_id:
-        raise HTTPException(status_code=409, detail="This photo is no longer the primary photo")
     content_type, ext, body, image_metadata = await read_profile_image(file)
     storage_dir = PRIVATE_UPLOAD_DIR / "profiles" / str(profile_id)
     storage_dir.mkdir(parents=True, exist_ok=True)
@@ -6169,13 +6055,12 @@ async def upload_profile_avatar(
             ),
         )
         conn.commit()
-    moderation = moderate_profile_image(body, require_face=True)
+    moderation = moderate_profile_image(body, require_face=False)
     outcome = apply_avatar_crop_moderation(
         media_file_id,
         profile_id,
         int(primary_photo["id"]),
         moderation,
-        actor=actor,
     )
     if outcome["status"] == "REJECTED":
         raise HTTPException(status_code=422, detail="Avatar photo was rejected by moderation")
@@ -6245,6 +6130,104 @@ def member_delete_photo(photo_id: int, user: dict[str, Any] = Depends(require_us
     return {"ok": True}
 
 
+# Mobile's "My photos" screen (mockup: separate Primary photo / Avatar slots
+# with a "Set as primary" action on the other gallery photos) needs a real
+# way to change which uploaded photo is the primary (position 0) one -
+# previously the only way was delete-and-reupload in the right order. This
+# reuses the exact promotion semantics member_delete_photo already applies
+# when the primary photo is removed (profile avatarUrl recomputed,
+# verification reset since the public-facing photo changed) but for the
+# "swap two existing photos" case instead of "one is gone".
+#
+# profile_photos has no column proving a (profile_id, position) uniqueness
+# constraint from this codebase alone, so the position swap goes through an
+# unused sentinel value rather than writing either row directly onto the
+# other's current position - safe whether or not such a constraint exists.
+_PRIMARY_SWAP_SENTINEL_POSITION = 100
+
+
+@app.post("/api/member/photos/{photo_id}/primary")
+def member_set_primary_photo(photo_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT id, position, status, moderation_status, avatar_media_file_id, public_url
+            FROM profile_photos
+            WHERE id = %s AND profile_id = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (photo_id, profile_id),
+        )
+        target = cursor.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Photo not found")
+        if target["status"] != "ACTIVE" or target["moderation_status"] != "APPROVED":
+            raise HTTPException(status_code=409, detail="Only an approved photo can be set as the primary photo")
+
+        target_position = int(target["position"] or 0)
+        if target_position == 0:
+            return {"ok": True, "alreadyPrimary": True}
+
+        cursor.execute(
+            """
+            SELECT id FROM profile_photos
+            WHERE profile_id = %s AND position = 0 AND status = 'ACTIVE'
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        current_primary = cursor.fetchone()
+
+        cursor.execute(
+            "UPDATE profile_photos SET position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (_PRIMARY_SWAP_SENTINEL_POSITION, photo_id),
+        )
+        if current_primary:
+            cursor.execute(
+                "UPDATE profile_photos SET position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (target_position, current_primary["id"]),
+            )
+        cursor.execute(
+            "UPDATE profile_photos SET position = 0, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (photo_id,),
+        )
+
+        # Mirrors apply_profile_photo_moderation's position==0 branch: the
+        # newly-primary photo's own crop (if it happens to already have one
+        # from a past stint at position 0) becomes the profile avatar, else
+        # the photo itself stands in as the avatar until a crop is set.
+        avatar_url = None
+        if target.get("avatar_media_file_id"):
+            cursor.execute("SELECT public_url FROM media_files WHERE id = %s", (target["avatar_media_file_id"],))
+            media = cursor.fetchone()
+            avatar_url = (media or {}).get("public_url") or None
+        if not avatar_url:
+            avatar_url = target.get("public_url") or None
+
+        update_profile_data(
+            cursor,
+            profile_id,
+            {
+                "avatarUrl": avatar_url,
+                "isWizardCompleted": bool(avatar_url),
+                "isVerified": False,
+                "verifiedAt": None,
+                "verificationProvider": None,
+            },
+        )
+        reset_verification_after_primary_photo_change(cursor, profile_id)
+        cursor.execute(
+            "INSERT INTO api_events (event_type, payload) VALUES ('member.photo_set_primary', %s)",
+            (json.dumps({"profileId": profile_id, "photoId": photo_id}, ensure_ascii=False),),
+        )
+        conn.commit()
+    return {"ok": True, "avatarUrl": avatar_url}
+
+
 @app.post("/api/member/likes/{profile_identifier}")
 def member_like_profile(
     profile_identifier: str,
@@ -6263,7 +6246,7 @@ def member_like_profile(
         if target_profile_id == actor_profile_id:
             raise HTTPException(status_code=422, detail="You cannot like your own profile")
         target_profile = fetch_profile(cursor, target_profile_id)
-        if not profile_is_visible_to_member(cursor, actor_profile_id, target_profile):
+        if not profile_is_visible_in_catalog(target_profile):
             raise HTTPException(status_code=404, detail="Profile not found")
         if has_active_block(cursor, actor_profile_id, target_profile_id):
             raise HTTPException(status_code=403, detail="This profile is not available")
@@ -6333,6 +6316,16 @@ def member_like_profile(
 
 @app.delete("/api/member/likes/{profile_identifier}")
 def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depends(require_user)):
+    # FIX (Sept 2026): this used to 405 unconditionally, for EVERY unlike -
+    # not just a mutual match. Alena: "убрать [лайк] - раньше могла, а
+    # поставить обратно нет" (repeated multiple times across this session).
+    # A previous fix only taught the CLIENT to skip calling this for a
+    # matched profile and show an explanation instead - it never checked
+    # what this endpoint actually did for the non-matched case, which was
+    # silently failing the same way. Real rule: only a MUTUAL match's like
+    # is irreversible (block the profile instead) - a plain one-sided like
+    # can be undone, same as the "like" side already allows re-liking after
+    # this via member_like_profile's ON DUPLICATE KEY UPDATE.
     actor_profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         target_profile_id = resolve_profile_id(cursor, profile_identifier)
@@ -6347,6 +6340,8 @@ def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depend
         )
         existing_like = cursor.fetchone()
         if not existing_like or existing_like.get("status") != "ACTIVE":
+            # Nothing to undo - already unliked (or never liked). Not an
+            # error: the client may be retrying/reconciling state.
             return {"ok": True, "liked": False}
         cursor.execute(
             """
@@ -6357,7 +6352,8 @@ def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depend
             """,
             (target_profile_id, actor_profile_id),
         )
-        if cursor.fetchone():
+        is_mutual_match = cursor.fetchone() is not None
+        if is_mutual_match:
             raise HTTPException(status_code=405, detail="Likes are irreversible. Block the profile to remove mutual interaction.")
         cursor.execute(
             "UPDATE profile_likes SET status = 'INACTIVE', updated_at = UTC_TIMESTAMP() WHERE id = %s",
@@ -6367,90 +6363,99 @@ def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depend
     return {"ok": True, "liked": False}
 
 
+# Free accounts get a real teaser of who liked them (first N, real photos/
+# names) instead of nothing - Alena's explicit, repeated spec ("покажи 5шт",
+# "оставить только 5 шт а ниже про сменить тариф") with a reference mockup:
+# 5 clear real rows, blurred/locked beyond that, upgrade card below. Must
+# match FREE_PREVIEW_COUNT in mobile/src/screens/LikesScreen.tsx.
+# UPDATE (Sept 2026): Alena's original spec ("покажи 5шт") showed real
+# photos/names for the first N free-tier likers as a teaser. She has since
+# reversed that after seeing a competitor app's approach ("Опять я с этим.
+# Опять замыливания нет! Я же вижу кто меня посмотрел! Я не должна на
+# бесплатном тарифе") - she now wants NO identity revealed at all on the
+# free tier (age only, no name/photo), matching a reference screenshot of
+# a competitor's blurred "liked you" list. Sending real photos/names and
+# relying on the mobile client to visually blur them (the previous
+# approach) is also fragile by construction - if the client-side blur
+# ever fails to render (confirmed happening on at least one Android
+# device/version - the lock icon showed but the blur underneath it did
+# not), the real photo and name are exposed anyway. Now the server simply
+# never sends identity fields for a free account's preview rows - see
+# anonymized_admirer_summary() below. Reduced 5 -> 4 per her explicit
+# "оставь только 4 для примера" (fewer preview rows so the upgrade card
+# sits higher on screen). Must match FREE_PREVIEW_COUNT in
+# mobile/src/screens/LikesScreen.tsx.
 LIKES_FREE_PREVIEW_COUNT = 4
 
 
 BLURRED_PREVIEW_DIR_NAME = "blurred-previews"
+# Heavy enough that no detail survives (matches the reference screenshot's
+# "can't make out who it is" look) but still shows real color/shape, unlike
+# a flat gray silhouette placeholder.
 BLURRED_PREVIEW_RADIUS = 22
 BLURRED_PREVIEW_MAX_SIDE = 240
 
 
 def blurred_preview_url_for(avatar_url: str | None) -> str | None:
-    """Return only a server-blurred JPEG; an unavailable source stays hidden."""
-    if not avatar_url or Image is None or ImageFilter is None or ImageOps is None:
+    # UPDATE (Sept 2026): Alena's repeated "Где замыливание???" made clear
+    # the earlier no-photo-at-all fix (see anonymized_admirer_summary()
+    # below) missed what she actually asked for - her reference screenshot
+    # shows a real, recognizably-a-photo image that's heavily BLURRED, not
+    # a blank silhouette. The original blur attempt (a client-side
+    # BlurView drawn on top of the real photo) was abandoned because it
+    # could silently fail to render on some Android devices/versions,
+    # exposing the real photo underneath - a genuine privacy bug, not a
+    # cosmetic one. This avoids that failure mode entirely by blurring the
+    # image ON THE SERVER, once, and caching the result as its own file -
+    # the client just displays an ordinary image URL, there's no
+    # client-side blur step left to fail. Returns None (silhouette
+    # fallback stays in the mobile UI) if there's no source photo or PIL
+    # isn't available, exactly like normalize_profile_image()'s guard.
+    if not avatar_url or Image is None or ImageFilter is None:
         return None
     prefix = UPLOAD_URL_PREFIX.rstrip("/") + "/"
-    temporary_path = None
+    if not avatar_url.startswith(prefix):
+        return None
+    storage_key = avatar_url[len(prefix):]
     try:
-        source_path = None
-        cache_source = str(avatar_url)
-        if avatar_url.startswith(prefix):
-            source_path = safe_storage_path(UPLOAD_DIR, avatar_url[len(prefix):])
-            if not source_path.is_file():
-                return None
-            source_stat = source_path.stat()
-            cache_source += f":{source_stat.st_size}:{source_stat.st_mtime_ns}"
-        else:
-            parsed = urllib.parse.urlsplit(avatar_url)
-            decoded_path = urllib.parse.unquote(parsed.path)
-            if (parsed.scheme != "https" or parsed.netloc != "letsbeparents.com"
-                    or not decoded_path.startswith("/photos/")
-                    or ".." in decoded_path.split("/") or "\\" in decoded_path):
-                return None
-        digest = hashlib.sha256(f"v1:{cache_source}".encode("utf-8")).hexdigest()
-        blurred_key = f"{BLURRED_PREVIEW_DIR_NAME}/{digest}.jpg"
-        blurred_path = safe_storage_path(UPLOAD_DIR, blurred_key)
-        if not blurred_path.is_file():
-            if source_path is not None:
-                if source_stat.st_size > MAX_UPLOAD_BYTES:
-                    return None
-                with source_path.open("rb") as source_file:
-                    body = source_file.read(MAX_UPLOAD_BYTES + 1)
-            else:
-                class NoPreviewRedirects(urllib.request.HTTPRedirectHandler):
-                    def redirect_request(self, req, fp, code, msg, headers, newurl):
-                        raise ValueError("Photo preview redirects are not supported")
-
-                request = urllib.request.Request(avatar_url, headers={"User-Agent": "LetsBeParents/1.0", "Accept": "image/*"})
-                with urllib.request.build_opener(NoPreviewRedirects()).open(request, timeout=5) as remote:
-                    if remote.headers.get_content_type().lower() not in ALLOWED_IMAGE_TYPES:
-                        return None
-                    body = remote.read(MAX_UPLOAD_BYTES + 1)
-            if not body or len(body) > MAX_UPLOAD_BYTES:
-                return None
-            with Image.open(io.BytesIO(body)) as source:
-                if source.width * source.height > MAX_IMAGE_PIXELS:
-                    return None
+        source_path = safe_storage_path(UPLOAD_DIR, storage_key)
+    except HTTPException:
+        return None
+    if not source_path.exists():
+        return None
+    blurred_key = f"{BLURRED_PREVIEW_DIR_NAME}/{hashlib.sha256(storage_key.encode('utf-8')).hexdigest()}.jpg"
+    blurred_path = safe_storage_path(UPLOAD_DIR, blurred_key)
+    if not blurred_path.exists():
+        try:
+            blurred_path.parent.mkdir(parents=True, exist_ok=True)
+            with Image.open(source_path) as source:
                 normalized = ImageOps.exif_transpose(source).convert("RGB")
                 normalized.thumbnail((BLURRED_PREVIEW_MAX_SIDE, BLURRED_PREVIEW_MAX_SIDE))
                 blurred = normalized.filter(ImageFilter.GaussianBlur(radius=BLURRED_PREVIEW_RADIUS))
-                output = io.BytesIO()
-                blurred.save(output, format="JPEG", quality=70, optimize=True)
-            blurred_path.parent.mkdir(parents=True, exist_ok=True)
-            temporary_path = blurred_path.with_name(f".{digest}.{secrets.token_hex(8)}.tmp")
-            with temporary_path.open("xb") as target:
-                target.write(output.getvalue())
-            os.replace(temporary_path, blurred_path)
-        return prefix + blurred_key
-    except (HTTPException, OSError, ValueError, Image.DecompressionBombError):
-        return None
-    finally:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+                blurred.save(blurred_path, format="JPEG", quality=70, optimize=True)
+        except (UnidentifiedImageError, OSError, ValueError):
+            return None
+    return f"{UPLOAD_URL_PREFIX.rstrip('/')}/{blurred_key}"
 
 
 def anonymized_admirer_summary(row: dict[str, Any]) -> dict[str, Any]:
-    data = as_dict(row.get("data"))
-    birth = profile_birth_date(data.get("dateOfBirth"))
-    today = now_utc().date()
-    age = (today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))) if birth else int_or_none(row.get("age") or data.get("age"))
-    return {"id": row.get("profileId", row.get("id")), "role": row.get("role"),
-            "status": row.get("status"), "age": age,
-            "avatarUrl": blurred_preview_url_for(row.get("avatarUrl") or data.get("avatarUrl")),
-            "identityHidden": True, "likedAt": row.get("likedAt")}
+    # Deliberately minimal - no displayName, city, or country, so a
+    # free-tier "who liked you" preview row can never leak who the person
+    # is, even if the mobile client has a rendering bug. avatarUrl (if any)
+    # is a server-blurred copy, never the real photo - see
+    # blurred_preview_url_for() above for why blurring happens here rather
+    # than on the client. Age is included as the one non-identifying
+    # signal, matching the reference "blurred likes" screenshot Alena
+    # provided.
+    return {
+        "id": row.get("profileId"),
+        "role": row.get("role"),
+        "status": row.get("status"),
+        "age": int_or_none(row.get("age")),
+        "avatarUrl": blurred_preview_url_for(row.get("avatarUrl")),
+        "identityHidden": True,
+        "likedAt": row.get("likedAt"),
+    }
 
 
 @app.get("/api/member/likes")
@@ -6484,6 +6489,11 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
         likes_snapshot = cursor.fetchone()
         likes_you_count = int(likes_snapshot["cnt"])
         read_through_id = int(likes_snapshot["readThroughId"] or 0)
+        # FIX (Sept 2026): used to fetch nothing at all for a free account
+        # (likes_you stayed []), so the client had zero real data to build
+        # any teaser from. Now everyone gets the query executed; only the
+        # row LIMIT and how the row is rendered into JSON differ by tier -
+        # see anonymized_admirer_summary() above for the free-tier path.
         preview_limit = 100 if is_premium else LIKES_FREE_PREVIEW_COUNT
         cursor.execute(
             f"""
@@ -6608,6 +6618,20 @@ def member_mark_likes_read(payload: LikesReadPayload, user: dict[str, Any] = Dep
 
 @app.get("/api/member/profile-views")
 def member_profile_views(user: dict[str, Any] = Depends(require_user)):
+    # FIX (Sept 2026): this endpoint threw a 500 ("Internal Server Error" -
+    # Alena: "Так и не заработали кто меня смотрел") on every call. Root
+    # cause confirmed with Alena directly: this database is Postgres, with
+    # every query going straight to it - no MySQL, no compatibility layer.
+    # This function was written in MySQL's JSON dialect (JSON_EXTRACT(),
+    # JSON_UNQUOTE(), CAST(... AS UNSIGNED)), none of which exist in real
+    # Postgres, so every call here failed at the SQL level before any
+    # application logic ran. Rewritten to native Postgres JSON operators
+    # (->>, ::INTEGER) matching the style already used successfully in
+    # member_likes() above. NOTE: this same MySQL-dialect pattern appears
+    # ~270 more times elsewhere in this file (including member_favourites()
+    # right below) - those are very likely broken the same way and need the
+    # same treatment, but are out of scope for this specific fix; flagged
+    # separately for a fuller audit.
     profile_id = require_profile_id(user)
     viewer_expr = """
         COALESCE(
@@ -6693,6 +6717,13 @@ def member_profile_views(user: dict[str, Any] = Depends(require_user)):
 @app.get("/api/member/favourites")
 @app.get("/api/member/favorites")
 def member_favourites(user: dict[str, Any] = Depends(require_user)):
+    # FIX (Sept 2026): same MySQL-vs-Postgres bug as member_profile_views()
+    # above (JSON_EXTRACT/JSON_UNQUOTE/CAST AS UNSIGNED don't exist in real
+    # Postgres, which is what this database actually is - confirmed with
+    # Alena directly, no compatibility layer). Not confirmed broken by a
+    # user report the way Visitors was, but it's the exact same broken
+    # syntax, so it almost certainly throws the same 500 in production.
+    # Rewritten to native Postgres JSON operators to match.
     profile_id = require_profile_id(user)
     profile_filter = "NULLIF(NULLIF(e.data->>'profileLocalId', ''), 'null')::INTEGER = %s"
     clinic_expr = """
@@ -7044,7 +7075,6 @@ def member_account_deletion(
 def member_conversations(
     user: dict[str, Any] = Depends(require_user),
     conversation_id: int | None = Query(default=None, alias="conversationId", ge=1),
-    q: str | None = Query(default=None, min_length=1, max_length=200),
 ):
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
@@ -7072,22 +7102,6 @@ def member_conversations(
         if conversation_id is not None:
             scope += " AND c.id = %s"
             params += (conversation_id,)
-        search = (q or "").strip()
-        if search:
-            like = f"%{search}%"
-            scope += """
-              AND (
-                LOWER(COALESCE(p.display_name, '')) LIKE LOWER(%s)
-                OR EXISTS (
-                  SELECT 1
-                  FROM conversation_messages search_message
-                  WHERE search_message.conversation_id = c.id
-                    AND search_message.status = 'ACTIVE'
-                    AND LOWER(COALESCE(search_message.body, '')) LIKE LOWER(%s)
-                )
-              )
-            """
-            params += (like, like)
         cursor.execute(scope + " ORDER BY (p.role = 'SUPPORT') DESC, c.updated_at DESC, c.id DESC LIMIT 100", params)
         items = cursor.fetchall()
         conn.commit()
@@ -7138,11 +7152,9 @@ def member_create_conversation(payload: ConversationCreatePayload, user: dict[st
             raise HTTPException(status_code=403, detail="Verify your profile before starting new chats")
         target_profile = fetch_profile(cursor, target_profile_id)
         target_role = str(target_profile.get("role") if target_profile else "").upper()
-        if target_role == "USER" and not profile_is_visible_to_member(cursor, profile_id, target_profile):
+        if target_role == "USER" and not profile_is_visible_in_catalog(target_profile):
             raise HTTPException(status_code=404, detail="Profile not found")
         if target_role not in {"USER", "SUPPORT"}:
-            raise HTTPException(status_code=404, detail="Profile not found")
-        if not target_profile or target_profile.get("status") != "ACTIVE":
             raise HTTPException(status_code=404, detail="Profile not found")
         if has_active_block(cursor, profile_id, target_profile_id):
             raise HTTPException(status_code=403, detail="This conversation is not available")
@@ -7305,8 +7317,6 @@ def member_send_message(
     body = payload.body.strip()
     if not body:
         raise HTTPException(status_code=422, detail="Message cannot be empty")
-    if body.startswith(STICKER_BODY_PREFIX):
-        raise HTTPException(status_code=422, detail="Use the sticker action to send a sticker")
     with db_cursor() as (conn, cursor):
         body = validate_chat_message(cursor, payload.body)
         cursor.execute(
@@ -7353,6 +7363,66 @@ def member_send_message(
         "NEW_MESSAGE",
         str(user.get("display_name") or "").strip(),
         body,
+    )
+    return {"ok": True, "message": {"id": message_id, "conversationId": conversation_id, "senderProfileId": profile_id, "body": body}}
+
+
+# Item 13(b) - Premium-exclusive chat stickers. Mirrors member_send_message
+# above (same conversation/block/verified-conversation checks, same
+# conversation_messages INSERT, same NEW_MESSAGE notification), with two
+# differences: profile_is_premium() gates it (402, same pattern as the AI
+# Advisor/Compatibility Report), and the message body is built HERE from
+# STICKER_CATALOG rather than trusting client-supplied text - the client
+# only ever sends a sticker id.
+@app.post("/api/member/conversations/{conversation_id}/sticker")
+def member_send_sticker(
+    conversation_id: int,
+    payload: StickerSendPayload,
+    background_tasks: BackgroundTasks,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    emoji = STICKER_CATALOG.get(payload.stickerId)
+    if not emoji:
+        raise HTTPException(status_code=422, detail="Unknown sticker")
+    with db_cursor() as (conn, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required to send stickers")
+        cursor.execute(
+            """
+            SELECT profile_a_id, profile_b_id
+            FROM conversations
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
+            LIMIT 1
+            """,
+            (conversation_id, profile_id, profile_id),
+        )
+        pair = cursor.fetchone()
+        if not pair:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if has_active_block(cursor, int(pair["profile_a_id"]), int(pair["profile_b_id"])):
+            raise HTTPException(status_code=403, detail="Conversation is blocked")
+        require_verified_conversation_action(cursor, profile_id, pair)
+        body = f"{STICKER_BODY_PREFIX}{payload.stickerId}"
+        cursor.execute(
+            """
+            INSERT INTO conversation_messages (conversation_id, sender_profile_id, body, status, created_at)
+            VALUES (%s, %s, %s, 'ACTIVE', UTC_TIMESTAMP())
+            """,
+            (conversation_id, profile_id, body),
+        )
+        message_id = cursor.lastrowid
+        cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
+        cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
+        conn.commit()
+    recipient_profile_id = int(pair["profile_b_id"] if int(pair["profile_a_id"]) == profile_id else pair["profile_a_id"])
+    background_tasks.add_task(
+        send_profile_notification,
+        recipient_profile_id,
+        "NEW_MESSAGE",
+        str(user.get("display_name") or "").strip(),
+        emoji,
     )
     return {"ok": True, "message": {"id": message_id, "conversationId": conversation_id, "senderProfileId": profile_id, "body": body}}
 
@@ -7590,6 +7660,10 @@ def member_update_family_plan_section(
                     (match_id, section_key, profile_id),
                 )
             else:
+                # Editing a section's shared content after marking it done
+                # implicitly reopens THIS profile's own completion (not the
+                # partner's) - handled client-side by sending isComplete:
+                # false alongside a content edit, rather than guessed here.
                 cursor.execute(
                     """
                     DELETE FROM family_plan_section_completions
@@ -8076,6 +8150,151 @@ def member_delete_pregnancy_entry(entry_id: int, user: dict[str, Any] = Depends(
 
 
 # =========================================================
+# CO-PARENTING AGREEMENT (premium roadmap step 5). Builds directly on the
+# 10-section Family Plan above rather than a separate system: once BOTH
+# partners have marked every section complete (fetch_family_plan_sections'
+# myComplete/partnerComplete), either can "sign" by typing their full legal
+# name. Once both have signed, the agreement is finalized - the current
+# section contents are snapshotted (so a later edit to a section never
+# silently rewrites an already-signed agreement) and both members are
+# notified.
+#
+# IMPORTANT, told to Alena directly and surfaced in the mobile copy too:
+# this is NOT a legally binding e-signature (no notarization, no ID
+# verification tied to the signature itself, no compliance with e-signature
+# law like eIDAS/ESIGN) - same honesty pattern as every "request, not real
+# billing" feature elsewhere in this app. It's a good-faith mutual record
+# of what two people agreed on, not a substitute for a lawyer.
+# =========================================================
+
+
+def fetch_coparenting_agreement(cursor, match_id: int, viewer_profile_id: int, other_profile_id: int) -> dict[str, Any]:
+    source_key = f"agreement-{match_id}"
+    cursor.execute(
+        "SELECT data FROM app_entities WHERE entity_type = 'coparenting_agreement' AND source_key = %s LIMIT 1",
+        (source_key,),
+    )
+    entity = cursor.fetchone()
+    data = as_dict(entity.get("data") if entity else {})
+    signatures = as_dict(data.get("signatures") or {})
+    my_sig = signatures.get(str(viewer_profile_id))
+    partner_sig = signatures.get(str(other_profile_id))
+    sections = fetch_family_plan_sections(cursor, match_id, viewer_profile_id, other_profile_id)
+    total_sections = len(FAMILY_PLAN_SECTION_KEYS)
+    both_done_count = sum(1 for s in sections if s["myComplete"] and s["partnerComplete"])
+    return {
+        "status": data.get("status") or "DRAFT",
+        "readyToSign": both_done_count >= total_sections,
+        "sectionsCompleteCount": both_done_count,
+        "sectionsTotalCount": total_sections,
+        "mySigned": my_sig is not None,
+        "myFullName": (my_sig or {}).get("name"),
+        "mySignedAt": (my_sig or {}).get("signedAt"),
+        "partnerSigned": partner_sig is not None,
+        # Partner's typed name/timestamp is only revealed once the agreement
+        # is actually finalized (both signed) - while only one side has
+        # signed, the other side sees "partner signed: yes/no" but not the
+        # exact name they typed, avoiding any signal about what they wrote.
+        "partnerFullName": (partner_sig or {}).get("name") if data.get("status") == "SIGNED" else None,
+        "partnerSignedAt": (partner_sig or {}).get("signedAt") if data.get("status") == "SIGNED" else None,
+        "signedAt": data.get("signedAt"),
+        "snapshot": data.get("snapshot") if data.get("status") == "SIGNED" else None,
+    }
+
+
+@app.get("/api/member/family-room/{profile_identifier}/agreement")
+def member_coparenting_agreement(profile_identifier: str, response: Response, user: dict[str, Any] = Depends(require_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Vary"] = "Cookie, Authorization"
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+        return {
+            "ok": True,
+            "matchId": match_id,
+            "agreement": fetch_coparenting_agreement(cursor, match_id, profile_id, other_profile_id),
+        }
+
+
+@app.post("/api/member/family-room/{profile_identifier}/agreement/sign")
+def member_sign_coparenting_agreement(
+    profile_identifier: str,
+    payload: AgreementSignPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        require_family_premium(cursor, profile_id)
+        other_profile_id = resolve_profile_id(cursor, profile_identifier)
+        match_id = require_active_match(cursor, profile_id, other_profile_id)
+
+        sections = fetch_family_plan_sections(cursor, match_id, profile_id, other_profile_id)
+        both_done_count = sum(1 for s in sections if s["myComplete"] and s["partnerComplete"])
+        if both_done_count < len(FAMILY_PLAN_SECTION_KEYS):
+            raise HTTPException(status_code=409, detail="Complete every section together before signing")
+
+        source_key = f"agreement-{match_id}"
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE entity_type = 'coparenting_agreement' AND source_key = %s LIMIT 1 FOR UPDATE",
+            (source_key,),
+        )
+        entity = cursor.fetchone()
+        data = as_dict(entity.get("data") if entity else {})
+        if data.get("status") == "SIGNED":
+            raise HTTPException(status_code=409, detail="This agreement is already signed")
+        signatures = as_dict(data.get("signatures") or {})
+        signed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        signatures[str(profile_id)] = {"name": payload.fullName, "signedAt": signed_at}
+        data["signatures"] = signatures
+
+        both_signed = str(profile_id) in signatures and str(other_profile_id) in signatures
+        if both_signed:
+            data["status"] = "SIGNED"
+            data["signedAt"] = signed_at
+            # Snapshot the section text as it stood the moment the second
+            # signature landed - future edits to family_plan_sections (the
+            # couple can keep using their Family Room afterwards) must
+            # never silently rewrite what was actually signed.
+            data["snapshot"] = [{"key": s["key"], "content": s["content"]} for s in sections]
+        else:
+            data["status"] = "DRAFT"
+
+        if entity:
+            cursor.execute(
+                "UPDATE app_entities SET status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (data["status"], json.dumps(data, ensure_ascii=False), entity["id"]),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO app_entities (entity_type, source_key, title, status, data) VALUES ('coparenting_agreement', %s, %s, %s, %s)",
+                (source_key, f"Co-parenting agreement: match {match_id}", data["status"], json.dumps(data, ensure_ascii=False)),
+            )
+
+        if both_signed:
+            send_support_status_message(
+                cursor, profile_id,
+                "Your co-parenting agreement is now signed by both of you - you can review it anytime in your Family Room.",
+            )
+            send_support_status_message(
+                cursor, other_profile_id,
+                "Your co-parenting agreement is now signed by both of you - you can review it anytime in your Family Room.",
+            )
+        else:
+            send_support_status_message(
+                cursor, other_profile_id,
+                "Your partner signed your co-parenting agreement - sign your copy in Family Room to finalize it together.",
+            )
+        conn.commit()
+        return {
+            "ok": True,
+            "matchId": match_id,
+            "agreement": fetch_coparenting_agreement(cursor, match_id, profile_id, other_profile_id),
+        }
+
+
+# =========================================================
 # COMPATIBILITY SCORE / DETAILED COMPATIBILITY REPORT
 # ("Compatibility Score & Why you match" on the Family Builder tier,
 # "Detailed Compatibility Report" on Family Builder Pro - see PRICING_TEXT
@@ -8098,13 +8317,12 @@ def member_delete_pregnancy_entry(entry_id: int, user: dict[str, Any] = Depends(
 #
 # Answering the questionnaire itself is free (no Premium needed) - same as
 # the standalone Quiz. Only the two-sided report against an actual match is
-# gated, same pattern as Family Room: profile_is_premium() (402) +
-# require_active_match() (404), pending the real Family-Builder-vs-Pro
-# tier split this backend doesn't have yet (see the comment on
-# profile_is_premium()). Once that split exists, the natural cut is: base
-# tier sees which dimensions are strongest/worth-discussing, Pro tier also
-# sees the specific per-question talking points - the "Detailed" in
-# "Detailed Compatibility Report".
+# gated: profile_is_premium() (402) + require_active_match() (404) open the
+# report at all, matching "Compatibility Score & Why you match" on the
+# Family Builder tier. Within an open report, `talkingPoints` (the specific
+# per-question call-outs) is further gated to profile_is_pro() - that's the
+# "Detailed" in "Detailed Compatibility Report" on the Pro tier. See
+# member_compatibility_report().
 # =========================================================
 
 COMPATIBILITY_QUESTIONS: list[dict[str, Any]] = [
@@ -8366,7 +8584,853 @@ def member_compatibility_report(profile_identifier: str, response: Response, use
                 "matchCompleted": bool(theirs),
             }
         report = _compatibility_report_from_answers(mine, theirs)
-        return {"ok": True, "status": "ready", **report}
+        is_detailed = profile_is_pro(profile)
+        if not is_detailed:
+            # Base (Family Builder) tier sees which dimensions are strongest
+            # and worth discussing, but not the specific per-question
+            # talking points - that's the Pro-only "Detailed" layer.
+            report["talkingPoints"] = []
+        return {"ok": True, "status": "ready", "detailed": is_detailed, **report}
+
+
+# AI Family Advisor (item 12) - Premium-gated chat that helps members
+# navigate the process/app, per the rules baked into AI_ADVISOR_SYSTEM_PROMPT
+# above. Conversation history is stored inline in profiles.data (see
+# update_profile_data) rather than a new table, same "no migration needed"
+# tradeoff already used elsewhere in this file for small per-profile blobs -
+# bounded to AI_ADVISOR_MAX_HISTORY entries so it can't grow unbounded.
+@app.get("/api/member/ai-advisor/messages")
+def member_ai_advisor_messages(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for the AI Family Advisor")
+        history = as_dict(profile.get("data")).get("aiAdvisorMessages") or []
+    return {"ok": True, "configured": ai_advisor_is_configured(), "messages": history}
+
+
+@app.post("/api/member/ai-advisor/messages")
+def member_ai_advisor_send(payload: AiAdvisorMessagePayload, user: dict[str, Any] = Depends(require_user)):
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Message cannot be empty")
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for the AI Family Advisor")
+        history: list[dict[str, Any]] = list(as_dict(profile.get("data")).get("aiAdvisorMessages") or [])
+        history.append({"role": "user", "text": text, "at": now_utc().isoformat()})
+        # Only role+text goes to the model - our own bookkeeping field ("at")
+        # stays local, and any malformed/legacy entries are skipped rather
+        # than sent upstream.
+        claude_messages = [
+            {"role": entry["role"], "content": entry["text"]}
+            for entry in history
+            if isinstance(entry, dict) and entry.get("role") in ("user", "assistant") and entry.get("text")
+        ]
+        reply = ai_advisor_call_claude(claude_messages)
+        history.append({"role": "assistant", "text": reply, "at": now_utc().isoformat()})
+        if len(history) > AI_ADVISOR_MAX_HISTORY:
+            history = history[-AI_ADVISOR_MAX_HISTORY:]
+        update_profile_data(cursor, profile_id, {"aiAdvisorMessages": history})
+    return {"ok": True, "reply": reply, "messages": history}
+
+
+@app.delete("/api/member/ai-advisor/messages")
+def member_ai_advisor_clear(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for the AI Family Advisor")
+        update_profile_data(cursor, profile_id, {"aiAdvisorMessages": []})
+    return {"ok": True}
+
+
+# =========================================================
+# AI-DRAFTED MESSAGE STARTERS (premium roadmap, next step after Safety
+# Check-In). Premium-gated (profile_is_premium(), same 402 pattern as the AI
+# Family Advisor just above) since this reuses that same Claude API call -
+# no second ANTHROPIC_API_KEY needed, Alena's existing key/spend cap covers
+# this too. Given a conversation the member is actually part of, asks Claude
+# for 3 short opening-message drafts using only already-public profile
+# context (profileType/lookingFor/about/city/country - the same fields any
+# viewer already sees on that profile in Catalog), explicitly instructed
+# never to invent facts about either person. Stateless - no history is
+# stored, unlike the AI Advisor's own persisted chat, since these are just
+# disposable drafts the member edits/sends themselves.
+# =========================================================
+
+
+def message_starters_system_prompt(language: str) -> str:
+    return (
+        "You write short, warm opening-message drafts for a member of the LetsBeParents app (a platform "
+        "connecting intended parents, surrogates, and donors) who wants to send a first message to someone "
+        "they matched with. You will be given brief, already-public profile context for both people "
+        "(profile type, what each is looking for, a short about/bio, general location) and must return "
+        "exactly 3 distinct short draft messages (1-3 sentences each) the member could send as-is or edit.\n\n"
+        "Rules:\n"
+        "- Never invent facts about either person beyond what you were given - if little context is provided, "
+        "write warm, genuine-but-generic openers instead of guessing details.\n"
+        "- Keep each draft short, friendly, and specific enough to not feel like spam; reference the given "
+        "context naturally where relevant, but do not fabricate shared interests or circumstances.\n"
+        "- Never write anything medical, legal, or financial in nature, and never assert any fact about "
+        "fertility, parentage, or legal status.\n"
+        f"- Reply in {language} (use English if the language is unclear).\n"
+        "- Return ONLY a JSON array of exactly 3 strings, nothing else - no numbering, no markdown, no extra text."
+    )
+
+
+def profile_context_for_message_starters(profile: dict[str, Any] | None) -> dict[str, Any]:
+    if not profile:
+        return {}
+    data = as_dict(profile.get('data') or {})
+    context: dict[str, Any] = {}
+    for key in ("profileType", "lookingFor", "city", "country"):
+        value = data.get(key)
+        if value:
+            context[key] = value
+    about = (data.get("about") or data.get("bio") or "").strip()
+    if about:
+        # Keep the prompt small and bounded - this is context, not the
+        # full bio verbatim.
+        context["about"] = about[:280]
+    return context
+
+
+@app.post("/api/member/conversations/{conversation_id}/message-starters")
+def member_conversation_message_starters(
+    conversation_id: int,
+    locale: str | None = Query(default=None),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for AI-drafted message starters")
+        cursor.execute(
+            """
+            SELECT CASE
+                     WHEN profile_a_id = %s THEN profile_b_id
+                     WHEN profile_b_id = %s THEN profile_a_id
+                     ELSE NULL
+                   END AS other_profile_id
+            FROM conversations
+            WHERE id = %s
+              AND status = 'ACTIVE'
+              AND (profile_a_id = %s OR profile_b_id = %s)
+            LIMIT 1
+            """,
+            (profile_id, profile_id, conversation_id, profile_id, profile_id),
+        )
+        row = cursor.fetchone()
+        if not row or not row.get("other_profile_id"):
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        peer_profile = fetch_profile(cursor, int(row["other_profile_id"]))
+    language = {"ru": "Russian", "es": "Spanish"}.get((locale or "en").strip().lower()[:2], "English")
+    context = {
+        "me": profile_context_for_message_starters(profile),
+        "them": profile_context_for_message_starters(peer_profile),
+    }
+    prompt_text = (
+        "Profile context (JSON, already-public fields only):\n"
+        + json.dumps(context, ensure_ascii=False)
+        + "\n\nReturn the 3 draft messages now, as a JSON array of exactly 3 strings."
+    )
+    reply = ai_advisor_call_claude(
+        [{"role": "user", "content": prompt_text}],
+        system_prompt=message_starters_system_prompt(language),
+        max_tokens=MESSAGE_STARTERS_MAX_OUTPUT_TOKENS,
+    )
+    starters: list[str] = []
+    try:
+        parsed = json.loads(reply)
+        if isinstance(parsed, list):
+            starters = [str(item).strip() for item in parsed if str(item).strip()][:3]
+    except json.JSONDecodeError:
+        pass
+    if not starters:
+        # Fallback if the model didn't return clean JSON - split on lines
+        # and strip common numbering/markdown so the member still gets
+        # something usable instead of a raw error.
+        for line in reply.splitlines():
+            cleaned = line.strip().lstrip("-*0123456789. ").strip()
+            if cleaned:
+                starters.append(cleaned)
+            if len(starters) == 3:
+                break
+    if not starters:
+        raise HTTPException(status_code=502, detail="AI Family Advisor returned an unusable response")
+    return {"ok": True, "starters": starters}
+
+
+# =========================================================
+# VIDEO VERIFICATION (premium roadmap step 9). A distinct badge from the
+# existing Didit identity verification above - a short selfie video the
+# member records/uploads, reviewed by a human admin. No automatic video-
+# analysis provider exists in this codebase, so - same honesty rule as
+# every other "not real automation yet" spot in this app (Boost, the
+# Co-Parenting Agreement, Subscription requests) - this is a reviewed
+# request, not an instant badge. Deliberately NOT Premium-gated: like
+# the existing (free) identity verification, this is a trust/safety
+# signal (master brief PROTECT pillar), and gating it would undermine
+# its own point of building visible trust across the whole member base,
+# not just paying members. Flagged to Alena as this session's own
+# judgment call, same as steps 6/7/8.
+
+@app.get("/api/member/video-verification")
+def member_video_verification_status(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        data = profile_data(profile)
+        video_verified_at = str(data.get("videoVerifiedAt") or "").strip() or None
+        cursor.execute(
+            """
+            SELECT id, status
+            FROM app_entities
+            WHERE entity_type = 'video_verification'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            """,
+            (profile_id,),
+        )
+        latest = cursor.fetchone()
+    latest_status = str(latest.get("status") or "").upper() if latest else None
+    return {
+        "videoVerified": bool(video_verified_at),
+        "videoVerifiedAt": video_verified_at,
+        "requestId": latest["id"] if latest else None,
+        "requestStatus": latest_status,
+    }
+
+
+@app.post("/api/member/video-verification")
+async def member_submit_video_verification(
+    file: UploadFile = File(...),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    content_type = (file.content_type or "").split(";")[0].lower()
+    ext = ALLOWED_VIDEO_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(status_code=415, detail="Unsupported video type - use MP4, MOV or WebM")
+    body = await file.read(MAX_VIDEO_VERIFICATION_BYTES + 1)
+    if len(body) > MAX_VIDEO_VERIFICATION_BYTES:
+        raise HTTPException(status_code=413, detail="Video is too large")
+    if not body:
+        raise HTTPException(status_code=422, detail="Video is empty")
+
+    request_id: int | None = None
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, display_name, email, status, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        data = profile_data(profile)
+        if data.get("videoVerifiedAt"):
+            return {"ok": True, "requestStatus": "APPROVED", "message": "Your profile is already video-verified."}
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'video_verification' AND status = 'PENDING'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        pending = cursor.fetchone()
+        if pending:
+            return {"ok": True, "requestId": pending["id"], "requestStatus": "PENDING", "message": "Your video is already under review."}
+
+        storage_key = f"video-verifications/{profile_id}/{secrets.token_hex(16)}{ext}"
+        storage_path = video_verification_storage_path(storage_key)
+        storage_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        created_file = False
+        try:
+            with storage_path.open("xb") as target:
+                created_file = True
+                target.write(body)
+            storage_path.chmod(0o600)
+            submitted_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+            request_data = {
+                "profileId": profile_id,
+                "profileName": profile.get("display_name") or "No profile",
+                "email": profile.get("email") or "",
+                "storageKey": storage_key,
+                "mimeType": content_type,
+                "bytes": len(body),
+                "submittedAt": submitted_at,
+            }
+            cursor.execute(
+                """
+                INSERT INTO app_entities (entity_type, source_key, title, status, data)
+                VALUES ('video_verification', %s, %s, 'PENDING', %s)
+                """,
+                (
+                    f"member-video-verification-{profile_id}-{secrets.token_hex(6)}",
+                    f"Video verification: {profile.get('display_name') or profile_id}",
+                    json.dumps(request_data, ensure_ascii=False),
+                ),
+            )
+            request_id = cursor.lastrowid
+            send_support_status_message(
+                cursor,
+                profile_id,
+                "Your video verification was received and is pending review.",
+            )
+            conn.commit()
+        except Exception:
+            if created_file:
+                try:
+                    storage_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Video verification upload rollback requires storage cleanup")
+            raise
+    return {"ok": True, "requestId": request_id, "requestStatus": "PENDING", "message": "Your video was submitted for review."}
+
+
+@app.post("/api/admin/video-verifications/{request_id}/review")
+def admin_review_video_verification(
+    request_id: int,
+    payload: AdminVideoVerificationReviewPayload,
+    actor: str = Depends(require_admin),
+):
+    """Approve/decline a member's video-verification submission - mirrors
+    admin_review_boost() structurally (member submits, a human reviews),
+    since there is no automatic video-analysis provider in this codebase."""
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, status, data FROM app_entities WHERE id = %s AND entity_type = 'video_verification' LIMIT 1 FOR UPDATE",
+            (request_id,),
+        )
+        request_row = cursor.fetchone()
+        if not request_row:
+            raise HTTPException(status_code=404, detail="Video verification request not found")
+        if str(request_row.get("status") or "").upper() != "PENDING":
+            raise HTTPException(status_code=409, detail="Only pending video verification requests can be reviewed")
+        data = as_dict(request_row.get("data"))
+        profile_id = int_or_none(data.get("profileId"))
+        if not profile_id:
+            raise HTTPException(status_code=409, detail="Video verification request is not linked to a profile")
+        cursor.execute(
+            "SELECT id, status FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="User not found")
+        reviewed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.update({"reviewedAt": reviewed_at, "reviewedBy": actor})
+        if payload.status == "DECLINED":
+            data["reviewStatus"] = "DECLINED"
+            cursor.execute(
+                "UPDATE app_entities SET status = 'DECLINED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (json.dumps(data, ensure_ascii=False), request_id),
+            )
+            send_support_status_message(cursor, profile_id, "Your video verification was declined. You can record a new video and try again.")
+            audit(conn, actor, "decline_video_verification", "video_verification", request_id, {"profileId": profile_id})
+            conn.commit()
+            return {"ok": True, "id": request_id, "status": "DECLINED"}
+        data["reviewStatus"] = "APPROVED"
+        cursor.execute(
+            "UPDATE app_entities SET status = 'APPROVED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(data, ensure_ascii=False), request_id),
+        )
+        video_verified_at = reviewed_at
+        update_profile_data(cursor, profile_id, {"isVideoVerified": True, "videoVerifiedAt": video_verified_at})
+        send_support_status_message(cursor, profile_id, "Your profile is now video-verified!")
+        audit(conn, actor, "approve_video_verification", "video_verification", request_id, {"profileId": profile_id})
+        conn.commit()
+    return {"ok": True, "id": request_id, "status": "APPROVED", "videoVerifiedAt": video_verified_at}
+
+
+@app.get("/api/admin/video-verifications/{request_id}/content")
+def admin_video_verification_content(request_id: int, actor: str = Depends(require_admin)):
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            "SELECT data FROM app_entities WHERE id = %s AND entity_type = 'video_verification' LIMIT 1",
+            (request_id,),
+        )
+        row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Video verification request not found")
+    data = as_dict(row.get("data"))
+    storage_key = str(data.get("storageKey") or "")
+    storage_path = video_verification_storage_path(storage_key)
+    try:
+        body = storage_path.read_bytes()
+    except OSError as error:
+        raise HTTPException(status_code=404, detail="Video is unavailable") from error
+# =========================================================
+# PERSONALIZED WEEKLY AI ADVISOR INSIGHTS (premium roadmap step 10 - the
+# other half of the "deeper AI Advisor features" idea; step 8 covered
+# message starters). A short, personalized note built from the member's
+# own real activity (profile completeness, verification status, likes/
+# matches in the last 7 days, subscription tier) rather than a generic
+# tip. Reuses ai_advisor_call_claude() (item 12) the same way message
+# starters does - a dedicated system prompt and a smaller max_tokens,
+# no second Anthropic integration or API key.
+#
+# Deliberate design choice: this is MEMBER-REQUESTED and cached for 7
+# days (profiles.data.weeklyInsight/weeklyInsightGeneratedAt), NOT a
+# silent background job that calls Claude for every active member on a
+# timer. This app does have a real background-loop mechanism already
+# (see the account-deletion poll near the bottom of this file), so an
+# automatic push was technically possible - but doing that silently
+# would call the Claude API for every Premium member every week against
+# Alena's own spend cap, with no visibility into the cost before it
+# happens. Lazy, cached, member-triggered generation gets the same
+# weekly cadence at a fraction of the risk. Premium-gated, same as the
+# AI Advisor itself and message starters (step 8) - this is a direct
+# extension of that paid feature, not a trust/safety tool like steps
+# 6/7/9.
+
+WEEKLY_INSIGHT_MAX_OUTPUT_TOKENS = int(os.getenv("WEEKLY_INSIGHT_MAX_OUTPUT_TOKENS", "350"))
+
+
+def weekly_insight_system_prompt(language: str) -> str:
+    return (
+        "You write a short, warm, personalized weekly check-in note for a member of the LetsBeParents "
+        "app (a platform connecting intended parents, surrogates, and donors). You will be given a small "
+        "JSON object of the member's own real, already-known activity this week (profile completeness, "
+        "verification status, likes received, active matches, days since joining, subscription tier) and "
+        "must write 2-4 short sentences reflecting on their actual progress and suggesting one concrete, "
+        "specific next step inside the app (finishing their profile, trying a filter, starting the AI "
+        "Advisor, checking a relevant guide) - never a generic platitude.\n\n"
+        "Rules:\n"
+        "- Only reference the facts given - never invent activity, matches, or messages that were not in "
+        "the data.\n"
+        "- Never write anything medical, legal, or financial in nature, and never assert any fact about "
+        "fertility, parentage, or legal status.\n"
+        "- Never recommend a specific match, clinic, or lawyer.\n"
+        f"- Reply in {language} (use English if the language is unclear).\n"
+        "- Return plain text only - no markdown, no headers, no bullet list."
+    )
+
+
+@app.get("/api/member/ai-advisor/weekly-insight")
+def member_ai_advisor_weekly_insight(
+    locale: str | None = Query(default=None),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile_is_premium(profile):
+            raise HTTPException(status_code=402, detail="Premium is required for weekly AI Advisor insights")
+        data = profile_data(profile)
+        generated_at = str(data.get("weeklyInsightGeneratedAt") or "").strip()
+        cached_insight = str(data.get("weeklyInsight") or "").strip()
+        # Fixed-width ISO-8601 strings compare correctly with plain string
+        # ordering, same trick used elsewhere in this file (Boost/
+        # recompute_profile_premium) - no datetime parsing needed.
+        cutoff = (now_utc() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if cached_insight and generated_at and generated_at > cutoff:
+            return {"ok": True, "insight": cached_insight, "generatedAt": generated_at, "cached": True}
+
+        seven_days_ago = database_datetime(now_utc() - timedelta(days=7))
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM profile_likes WHERE target_profile_id = %s AND status = 'ACTIVE' AND created_at >= %s",
+            (profile_id, seven_days_ago),
+        )
+        likes_this_week = int((cursor.fetchone() or {}).get("cnt") or 0)
+        cursor.execute(
+            "SELECT COUNT(*) AS cnt FROM profile_matches WHERE (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'",
+            (profile_id, profile_id),
+        )
+        active_matches = int((cursor.fetchone() or {}).get("cnt") or 0)
+        cursor.execute(
+            f"SELECT {catalog_profile_completeness_sql()} AS completeness FROM profiles WHERE id = %s",
+            (profile_id,),
+        )
+        completeness_row = cursor.fetchone() or {}
+        completeness_pct = int(round(float(completeness_row.get("completeness") or 0) * 100))
+        created_at = profile.get("created_at")
+        try:
+            days_since_signup = (now_utc().date() - created_at.date()).days if created_at else None
+        except (AttributeError, TypeError):
+            days_since_signup = None
+
+        context = {
+            "daysSinceSignup": days_since_signup,
+            "profileCompletenessPercent": completeness_pct,
+            "isVerified": bool(profile_is_verified(profile)),
+            "isVideoVerified": bool(data.get("isVideoVerified")),
+            "subscriptionTier": profile_tier(profile),
+            "likesReceivedThisWeek": likes_this_week,
+            "activeMatches": active_matches,
+        }
+        language = {"ru": "Russian", "es": "Spanish"}.get((locale or "en").strip().lower()[:2], "English")
+        prompt_text = (
+            "This member's activity this week (JSON):\n"
+            + json.dumps(context, ensure_ascii=False)
+            + "\n\nWrite their weekly check-in note now."
+        )
+        insight = ai_advisor_call_claude(
+            [{"role": "user", "content": prompt_text}],
+            system_prompt=weekly_insight_system_prompt(language),
+            max_tokens=WEEKLY_INSIGHT_MAX_OUTPUT_TOKENS,
+        ).strip()
+        if not insight:
+            raise HTTPException(status_code=502, detail="AI Family Advisor returned an unusable response")
+        generated_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        update_profile_data(cursor, profile_id, {"weeklyInsight": insight, "weeklyInsightGeneratedAt": generated_at})
+        conn.commit()
+    return {"ok": True, "insight": insight, "generatedAt": generated_at, "cached": False}
+
+
+# =========================================================
+# PRO-ONLY COMMUNITY / EXPERT Q&A GROUPS (premium roadmap step 11 - the
+# last of the originally-brainstormed items). Admin-curated discussion
+# groups (created/edited/deleted through the existing generic admin
+# entity endpoints - registering "community_group" in ADMIN_ENTITY_VIEWS
+# above is all that was needed there, see admin_create_item()'s generic
+# ADMIN_ENTITY_VIEWS branch); members can't create groups, only post and
+# reply inside them. No new database table - groups/posts/replies all
+# live in app_entities (same JSONB pattern as Boost/Referral/Safety
+# Check-In/the Co-Parenting Agreement), scoped to each other the same
+# way a reply already scopes to its post: CAST(data->>'x' AS TEXT).
+#
+# "Expert" tagging: profiles.data.isCommunityExpert (bool, off by
+# default) is stamped onto a post/reply's OWN data at the moment it is
+# created - same snapshot approach the Co-Parenting Agreement uses for
+# signed section content, so a later change to someone's expert status
+# never silently rewrites what they already posted. Toggled by an
+# admin via the new POST /api/admin/users/{id}/community-expert below
+# (no existing generic "edit a member profile field" admin endpoint was
+# found in this codebase to reuse, so this is a small dedicated one -
+# mirrors the plain boolean-toggle shape of everything else here).
+
+def require_community_pro(cursor, profile_id: int) -> dict[str, Any]:
+    profile = fetch_profile(cursor, profile_id)
+    if not profile or profile.get("status") != "ACTIVE":
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if not profile_is_pro(profile):
+        raise HTTPException(status_code=402, detail="Family Builder Pro is required for Community groups")
+    return profile
+
+
+@app.get("/api/member/community/groups")
+def member_community_groups(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_community_pro(cursor, profile_id)
+        cursor.execute(
+            """
+            SELECT id, title AS "name", data
+            FROM app_entities
+            WHERE entity_type = 'community_group' AND status = 'ACTIVE'
+            ORDER BY title ASC
+            """
+        )
+        rows = cursor.fetchall()
+        groups = []
+        for row in rows:
+            group_data = as_dict(row.get("data"))
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'community_post' AND status = 'ACTIVE' AND CAST(data->>'groupId' AS TEXT) = CAST(%s AS TEXT)",
+                (row["id"],),
+            )
+            post_count = int((cursor.fetchone() or {}).get("cnt") or 0)
+            groups.append({
+                "id": row["id"],
+                "name": row.get("name"),
+                "description": group_data.get("description"),
+                "icon": group_data.get("icon"),
+                "postCount": post_count,
+            })
+    return {"ok": True, "groups": groups}
+
+
+@app.get("/api/member/community/groups/{group_id}/posts")
+def member_community_posts(
+    group_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id FROM app_entities WHERE id = %s AND entity_type = 'community_group' AND status = 'ACTIVE' LIMIT 1",
+            (group_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+        cursor.execute(
+            """
+            SELECT id, data
+            FROM app_entities
+            WHERE entity_type = 'community_post' AND status = 'ACTIVE'
+              AND CAST(data->>'groupId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC
+            LIMIT %s OFFSET %s
+            """,
+            (group_id, limit, offset),
+        )
+        rows = cursor.fetchall()
+        posts = []
+        for row in rows:
+            post_data = as_dict(row.get("data"))
+            cursor.execute(
+                "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'community_reply' AND status = 'ACTIVE' AND CAST(data->>'postId' AS TEXT) = CAST(%s AS TEXT)",
+                (row["id"],),
+            )
+            reply_count = int((cursor.fetchone() or {}).get("cnt") or 0)
+            posts.append({
+                "id": row["id"],
+                "authorName": post_data.get("authorName"),
+                "isExpert": bool(post_data.get("isExpert")),
+                "body": post_data.get("body"),
+                "createdAt": post_data.get("createdAt"),
+                "replyCount": reply_count,
+                "isMine": int_or_none(post_data.get("authorProfileId")) == profile_id,
+            })
+    return {"ok": True, "groupId": group_id, "posts": posts}
+
+
+@app.post("/api/member/community/groups/{group_id}/posts")
+def member_create_community_post(
+    group_id: int,
+    payload: CommunityPostPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        profile = require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id FROM app_entities WHERE id = %s AND entity_type = 'community_group' AND status = 'ACTIVE' LIMIT 1",
+            (group_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Group not found")
+        profile_info = profile_data(profile)
+        created_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        post_data = {
+            "groupId": group_id,
+            "authorProfileId": profile_id,
+            "authorName": profile.get("display_name") or "Member",
+            "isExpert": bool(profile_info.get("isCommunityExpert")),
+            "body": payload.body.strip(),
+            "createdAt": created_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('community_post', %s, %s, 'ACTIVE', %s)
+            """,
+            (
+                f"community-post-{group_id}-{profile_id}-{secrets.token_hex(6)}",
+                (payload.body.strip()[:80] or "Post"),
+                json.dumps(post_data, ensure_ascii=False),
+            ),
+        )
+        post_id = cursor.lastrowid
+        conn.commit()
+    return {"ok": True, "id": post_id, "post": {**post_data, "id": post_id, "replyCount": 0, "isMine": True}}
+
+
+@app.get("/api/member/community/posts/{post_id}/replies")
+def member_community_replies(post_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id FROM app_entities WHERE id = %s AND entity_type = 'community_post' AND status = 'ACTIVE' LIMIT 1",
+            (post_id,),
+        )
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Post not found")
+        cursor.execute(
+            """
+            SELECT id, data
+            FROM app_entities
+            WHERE entity_type = 'community_reply' AND status = 'ACTIVE'
+              AND CAST(data->>'postId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id ASC
+            """,
+            (post_id,),
+        )
+        rows = cursor.fetchall()
+        replies = []
+        for row in rows:
+            reply_data = as_dict(row.get("data"))
+            replies.append({
+                "id": row["id"],
+                "authorName": reply_data.get("authorName"),
+                "isExpert": bool(reply_data.get("isExpert")),
+                "body": reply_data.get("body"),
+                "createdAt": reply_data.get("createdAt"),
+                "isMine": int_or_none(reply_data.get("authorProfileId")) == profile_id,
+            })
+    return {"ok": True, "postId": post_id, "replies": replies}
+
+
+@app.post("/api/member/community/posts/{post_id}/replies")
+def member_create_community_reply(
+    post_id: int,
+    payload: CommunityReplyPayload,
+    user: dict[str, Any] = Depends(require_user),
+):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        profile = require_community_pro(cursor, profile_id)
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE id = %s AND entity_type = 'community_post' AND status = 'ACTIVE' LIMIT 1",
+            (post_id,),
+        )
+        post_row = cursor.fetchone()
+        if not post_row:
+            raise HTTPException(status_code=404, detail="Post not found")
+        profile_info = profile_data(profile)
+        created_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        reply_data = {
+            "postId": post_id,
+            "groupId": int_or_none(as_dict(post_row.get("data")).get("groupId")),
+            "authorProfileId": profile_id,
+            "authorName": profile.get("display_name") or "Member",
+            "isExpert": bool(profile_info.get("isCommunityExpert")),
+            "body": payload.body.strip(),
+            "createdAt": created_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('community_reply', %s, %s, 'ACTIVE', %s)
+            """,
+            (
+                f"community-reply-{post_id}-{profile_id}-{secrets.token_hex(6)}",
+                (payload.body.strip()[:80] or "Reply"),
+                json.dumps(reply_data, ensure_ascii=False),
+            ),
+        )
+        reply_id = cursor.lastrowid
+        conn.commit()
+    return {"ok": True, "id": reply_id, "reply": {**reply_data, "id": reply_id, "isMine": True}}
+
+
+@app.delete("/api/member/community/posts/{post_id}")
+def member_delete_community_post(post_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE id = %s AND entity_type = 'community_post' AND status = 'ACTIVE' LIMIT 1 FOR UPDATE",
+            (post_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Post not found")
+        row_data = as_dict(row.get("data"))
+        if int_or_none(row_data.get("authorProfileId")) != profile_id:
+            raise HTTPException(status_code=403, detail="You can only delete your own post")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'DELETED', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (post_id,),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/member/community/replies/{reply_id}")
+def member_delete_community_reply(reply_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, data FROM app_entities WHERE id = %s AND entity_type = 'community_reply' AND status = 'ACTIVE' LIMIT 1 FOR UPDATE",
+            (reply_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Reply not found")
+        row_data = as_dict(row.get("data"))
+        if int_or_none(row_data.get("authorProfileId")) != profile_id:
+            raise HTTPException(status_code=403, detail="You can only delete your own reply")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'DELETED', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (reply_id,),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/admin/users/{profile_id}/community-expert")
+def admin_set_community_expert(
+    profile_id: int,
+    payload: AdminCommunityExpertPayload,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        update_profile_data(cursor, profile_id, {"isCommunityExpert": bool(payload.isExpert)})
+        audit(conn, actor, "set_community_expert", "profile", profile_id, {"isExpert": payload.isExpert})
+        conn.commit()
+    return {"ok": True, "profileId": profile_id, "isExpert": bool(payload.isExpert)}
+
+
+
+    return Response(
+        content=body,
+        media_type=str(data.get("mimeType") or "video/mp4"),
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+# Push notifications (item 16) - unlike AI Advisor above, NOT Premium-gated:
+# new messages/likes/matches/visitors are core, free-tier notifications
+# (same events send_profile_notification already emails everyone about),
+# so every signed-in member can register a device. Tokens live in
+# profiles.data (see update_profile_data) rather than a new table, same
+# "no migration this session can verify" tradeoff used for AI Advisor
+# history. send_expo_push()/send_profile_notification() are what actually
+# deliver to these tokens - registering one here does nothing on its own
+# until a real notification event fires.
+@app.post("/api/member/push-tokens")
+def member_register_push_token(payload: PushTokenPayload, user: dict[str, Any] = Depends(require_user)):
+    token = payload.token.strip()
+    if not token:
+        raise HTTPException(status_code=422, detail="Token cannot be empty")
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        tokens: list[str] = list(as_dict(profile.get("data")).get("pushTokens") or [])
+        if token not in tokens:
+            tokens.append(token)
+        # Cap at PUSH_TOKENS_MAX_PER_PROFILE, dropping the OLDEST first -
+        # the just-registered token (this device, right now) is always
+        # kept, so a reinstall never locks itself out of its own push.
+        if len(tokens) > PUSH_TOKENS_MAX_PER_PROFILE:
+            tokens = tokens[-PUSH_TOKENS_MAX_PER_PROFILE:]
+        update_profile_data(cursor, profile_id, {"pushTokens": tokens})
+    return {"ok": True}
+
+
+@app.delete("/api/member/push-tokens")
+def member_unregister_push_token(payload: PushTokenPayload, user: dict[str, Any] = Depends(require_user)):
+    # Called on logout so a shared/reset device stops getting this
+    # person's pushes once they've signed out of it.
+    token = payload.token.strip()
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        tokens: list[str] = list(as_dict(profile.get("data")).get("pushTokens") or [])
+        tokens = [t for t in tokens if t != token]
+        update_profile_data(cursor, profile_id, {"pushTokens": tokens})
+    return {"ok": True}
 
 
 def livekit_is_configured() -> bool:
@@ -8894,6 +9958,7 @@ async def didit_webhook(request: Request):
                 profile_id,
                 {"isVerified": True, "verifiedAt": now_utc().isoformat(), "verificationProvider": "didit"},
             )
+            reward_referral_if_pending(cursor, profile_id)
         elif internal_status in {"DECLINED", "ABANDONED", "EXPIRED"}:
             update_profile_data(
                 cursor,
@@ -8922,174 +9987,6 @@ async def didit_webhook(request: Request):
     return {"ok": True, "status": internal_status}
 
 
-def normalized_ai_advisor_history(value: Any) -> list[dict[str, str]]:
-    if not isinstance(value, list):
-        return []
-    return [{"role": e["role"], "text": e["text"][:4000], "at": str(e.get("at") or "")}
-            for e in value if isinstance(e, dict) and e.get("role") in {"user", "assistant"}
-            and isinstance(e.get("text"), str) and e["text"].strip()][-AI_ADVISOR_MAX_HISTORY:]
-
-
-def save_private_profile_field(cursor, profile_id: int, key: str, value: Any):
-    cursor.execute(
-        "UPDATE profiles SET data = jsonb_set(COALESCE(data, '{}'::jsonb), ARRAY[%s]::text[], %s::jsonb, true), "
-        "updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' WHERE id = %s",
-        (key, json.dumps(value, ensure_ascii=False), profile_id),
-    )
-
-
-def valid_expo_push_token(value: Any) -> bool:
-    return isinstance(value, str) and re.fullmatch(r"(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]", value) is not None
-
-
-class AiAdvisorMessagePayload(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
-
-class PushTokenPayload(BaseModel):
-    token: str = Field(min_length=1, max_length=200)
-    platform: str | None = None
-
-class StickerSendPayload(BaseModel):
-    stickerId: str = Field(min_length=1, max_length=40)
-
-@app.get("/api/member/ai-advisor/messages")
-def member_ai_advisor_messages(user: dict[str, Any] = Depends(require_user)):
-    profile_id = require_profile_id(user)
-    with db_cursor() as (_, cursor):
-        profile = fetch_profile(cursor, profile_id)
-        if not profile_is_pro(profile):
-            raise HTTPException(status_code=402, detail="Family Builder Pro is required for the AI Family Advisor")
-        history = normalized_ai_advisor_history(as_dict(profile.get("data")).get("aiAdvisorMessages"))
-    return {"ok": True, "configured": ai_advisor_is_configured(), "messages": history}
-
-@app.post("/api/member/ai-advisor/messages")
-def member_ai_advisor_send(payload: AiAdvisorMessagePayload, user: dict[str, Any] = Depends(require_user)):
-    text = payload.text.strip()
-    if not text:
-        raise HTTPException(status_code=422, detail="Message cannot be empty")
-    profile_id = require_profile_id(user)
-    with db_cursor() as (_, cursor):
-        cursor.execute("SELECT pg_advisory_xact_lock(74112, %s)", (profile_id,))
-        profile = fetch_profile(cursor, profile_id)
-        if not profile_is_pro(profile):
-            raise HTTPException(status_code=402, detail="Family Builder Pro is required for the AI Family Advisor")
-        history = normalized_ai_advisor_history(as_dict(profile.get("data")).get("aiAdvisorMessages"))
-        history.append({"role": "user", "text": text, "at": now_utc().isoformat()})
-        claude_messages = [
-            {"role": entry["role"], "content": entry["text"]}
-            for entry in history
-            if isinstance(entry, dict) and entry.get("role") in ("user", "assistant") and entry.get("text")
-        ]
-        reply = ai_advisor_call_claude(claude_messages)
-        history.append({"role": "assistant", "text": reply, "at": now_utc().isoformat()})
-        if len(history) > AI_ADVISOR_MAX_HISTORY:
-            history = history[-AI_ADVISOR_MAX_HISTORY:]
-        save_private_profile_field(cursor, profile_id, "aiAdvisorMessages", history)
-    return {"ok": True, "reply": reply, "messages": history}
-
-@app.delete("/api/member/ai-advisor/messages")
-def member_ai_advisor_clear(user: dict[str, Any] = Depends(require_user)):
-    profile_id = require_profile_id(user)
-    with db_cursor() as (_, cursor):
-        cursor.execute("SELECT pg_advisory_xact_lock(74112, %s)", (profile_id,))
-        profile = fetch_profile(cursor, profile_id)
-        if not profile_is_pro(profile):
-            raise HTTPException(status_code=402, detail="Family Builder Pro is required for the AI Family Advisor")
-        save_private_profile_field(cursor, profile_id, "aiAdvisorMessages", [])
-    return {"ok": True}
-
-@app.post("/api/member/push-tokens")
-def member_register_push_token(payload: PushTokenPayload, user: dict[str, Any] = Depends(require_user)):
-    token = payload.token.strip()
-    if not valid_expo_push_token(token):
-        raise HTTPException(status_code=422, detail="Invalid Expo push token")
-    profile_id = require_profile_id(user)
-    with db_cursor() as (_, cursor):
-        cursor.execute("SELECT pg_advisory_xact_lock(74113, hashtext(%s))", (token,))
-        cursor.execute("SELECT id, data FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
-        profile = cursor.fetchone()
-        if not profile:
-            raise HTTPException(status_code=404, detail="Profile not found")
-        value = as_dict(profile.get("data")).get("pushTokens")
-        tokens = [t for t in value if valid_expo_push_token(t) and t != token] if isinstance(value, list) else []
-        tokens = (tokens + [token])[-PUSH_TOKENS_MAX_PER_PROFILE:]
-        cursor.execute(
-            "UPDATE profiles SET data = jsonb_set(data, '{pushTokens}', (data->'pushTokens') - %s), "
-            "updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' "
-            "WHERE id <> %s AND jsonb_typeof(data->'pushTokens') = 'array' AND (data->'pushTokens') ? %s",
-            (token, profile_id, token),
-        )
-        save_private_profile_field(cursor, profile_id, "pushTokens", tokens)
-    return {"ok": True}
-
-@app.delete("/api/member/push-tokens")
-def member_unregister_push_token(payload: PushTokenPayload, user: dict[str, Any] = Depends(require_user)):
-    token = payload.token.strip()
-    if not valid_expo_push_token(token):
-        raise HTTPException(status_code=422, detail="Invalid Expo push token")
-    profile_id = require_profile_id(user)
-    with db_cursor() as (_, cursor):
-        cursor.execute(
-            "UPDATE profiles SET data = jsonb_set(data, '{pushTokens}', (data->'pushTokens') - %s), "
-            "updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC' "
-            "WHERE id = %s AND jsonb_typeof(data->'pushTokens') = 'array'",
-            (token, profile_id),
-        )
-    return {"ok": True}
-
-@app.post("/api/member/conversations/{conversation_id}/sticker")
-def member_send_sticker(
-    conversation_id: int,
-    payload: StickerSendPayload,
-    background_tasks: BackgroundTasks,
-    user: dict[str, Any] = Depends(require_user),
-):
-    profile_id = require_profile_id(user)
-    emoji = STICKER_CATALOG.get(payload.stickerId)
-    if not emoji:
-        raise HTTPException(status_code=422, detail="Unknown sticker")
-    with db_cursor() as (conn, cursor):
-        profile = fetch_profile(cursor, profile_id)
-        if not profile_is_premium(profile):
-            raise HTTPException(status_code=402, detail="Premium is required to send stickers")
-        cursor.execute(
-            """
-            SELECT profile_a_id, profile_b_id
-            FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
-            """,
-            (conversation_id, profile_id, profile_id),
-        )
-        pair = cursor.fetchone()
-        if not pair:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-        if has_active_block(cursor, int(pair["profile_a_id"]), int(pair["profile_b_id"])):
-            raise HTTPException(status_code=403, detail="Conversation is blocked")
-        require_verified_conversation_action(cursor, profile_id, pair)
-        body = f"{STICKER_BODY_PREFIX}{payload.stickerId}"
-        cursor.execute(
-            """
-            INSERT INTO conversation_messages (conversation_id, sender_profile_id, body, status, created_at)
-            VALUES (%s, %s, %s, 'ACTIVE', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
-            """,
-            (conversation_id, profile_id, body),
-        )
-        message_id = cursor.lastrowid
-        cursor.execute("UPDATE conversations SET updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') WHERE id = %s", (conversation_id,))
-        cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
-        conn.commit()
-    recipient_profile_id = int(pair["profile_b_id"] if int(pair["profile_a_id"]) == profile_id else pair["profile_a_id"])
-    background_tasks.add_task(
-        send_profile_notification,
-        recipient_profile_id,
-        "NEW_MESSAGE",
-        str(user.get("display_name") or "").strip(),
-        emoji,
-    )
-    return {"ok": True, "message": {"id": message_id, "conversationId": conversation_id, "senderProfileId": profile_id, "body": body}}
-
-
 @app.get("/api/member/subscription")
 def member_subscription_status(user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
@@ -9098,6 +9995,9 @@ def member_subscription_status(user: dict[str, Any] = Depends(require_user)):
         if not profile:
             raise HTTPException(status_code=404, detail="Profile not found")
         if not profile_is_verified(profile):
+            # The public UI must not reveal plans or prices before verification.
+            # Returning this access state (rather than an error) lets it render the
+            # verified-profile gate without briefly exposing premium controls.
             return {
                 "isVerified": False,
                 "isPremium": False,
@@ -9155,7 +10055,7 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
             raise HTTPException(status_code=404, detail="Profile not found")
         if not profile_is_verified(profile):
             raise HTTPException(status_code=403, detail="Profile verification is required before Premium")
-        if SUBSCRIPTION_TIER_RANK[profile_tier(profile)] >= SUBSCRIPTION_TIER_RANK[tier]:
+        if profile_is_premium(profile):
             return {"ok": True, "status": "ACTIVE", "message": "Premium is already active."}
         cursor.execute(
             """
@@ -9218,6 +10118,413 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
         "requestId": request_id,
         "message": "Your subscription request was saved for manual review.",
     }
+
+
+# Premium roadmap step 3 - one-off profile Boost. 24h is the default
+# window an approved boost runs for (competitor apps typically run
+# 30min-24h; picked the longer end since approval here is a human review,
+# not instant - a 30min boost could easily expire before anyone reviews
+# the request). Admin can override with a different `hours` value on
+# approval (AdminBoostReviewPayload.hours) if that ever needs to change
+# for a specific request.
+BOOST_DEFAULT_HOURS = 24
+
+# Premium roadmap step 4 - referral program. Reuses the Boost mechanism
+# above as the reward rather than inventing a separate perk: when someone
+# a member referred gets VERIFIED (a real, hard-to-fake milestone - not
+# just "signed up", which would be trivially farmable), the REFERRER gets
+# an automatic Boost, no human review needed (it's an earned reward, not
+# a purchase, so admin_review_boost()'s approval step doesn't apply here -
+# this sets boostActiveUntil directly). Longer than a single paid Boost
+# request (48h vs 24h) so referring someone is clearly worth more than
+# just buying one yourself.
+REFERRAL_REWARD_HOURS = 48
+
+
+def generate_referral_code(cursor) -> str:
+    for _ in range(5):
+        code = secrets.token_hex(3).upper()
+        cursor.execute(
+            "SELECT 1 FROM profiles WHERE data->>'referralCode' = %s LIMIT 1",
+            (code,),
+        )
+        if not cursor.fetchone():
+            return code
+    # Astronomically unlikely with a 16.7M-value space at this app's
+    # scale, but fall back to something still-unique rather than loop
+    # forever.
+    return secrets.token_hex(4).upper()
+
+
+def reward_referral_if_pending(cursor, referred_profile_id: int) -> None:
+    """Call this right after a profile becomes verified (both verification
+    paths - the didit webhook and admin_approve_verification() - call this
+    so neither one can silently skip rewarding a referral)."""
+    cursor.execute(
+        """
+        SELECT id, data FROM app_entities
+        WHERE entity_type = 'referral' AND status = 'PENDING'
+          AND CAST(data->>'referredProfileId' AS TEXT) = CAST(%s AS TEXT)
+        ORDER BY id DESC LIMIT 1
+        FOR UPDATE
+        """,
+        (referred_profile_id,),
+    )
+    referral = cursor.fetchone()
+    if not referral:
+        return
+    data = as_dict(referral.get("data"))
+    referrer_profile_id = int_or_none(data.get("referrerProfileId"))
+    if not referrer_profile_id:
+        return
+    rewarded_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+    new_expiry = (now_utc() + timedelta(hours=REFERRAL_REWARD_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    referrer_profile = fetch_profile(cursor, referrer_profile_id)
+    if not referrer_profile:
+        return
+    # Don't shorten a Boost the referrer already has running longer than
+    # this reward would grant - only extend, never cut short.
+    existing_until = str(profile_data(referrer_profile).get("boostActiveUntil") or "").strip()
+    final_expiry = max(existing_until, new_expiry) if existing_until else new_expiry
+    update_profile_data(cursor, referrer_profile_id, {"boostActiveUntil": final_expiry})
+    data.update({"status": "REWARDED", "rewardedAt": rewarded_at, "rewardHours": REFERRAL_REWARD_HOURS})
+    cursor.execute(
+        "UPDATE app_entities SET status = 'REWARDED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+        (json.dumps(data, ensure_ascii=False), referral["id"]),
+    )
+    send_support_status_message(
+        cursor,
+        referrer_profile_id,
+        f"Your friend joined and got verified - you earned a {REFERRAL_REWARD_HOURS}-hour profile Boost!",
+    )
+
+
+@app.get("/api/member/boost")
+def member_boost_status(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        profile = fetch_profile(cursor, profile_id)
+        data = profile_data(profile)
+        active_until_raw = str(data.get("boostActiveUntil") or "").strip()
+        # Same trick recompute_profile_premium() already uses for
+        # expiresAt: a fixed-width "YYYY-MM-DDTHH:MM:SSZ" string compares
+        # correctly with plain string ordering, no datetime parsing needed.
+        is_active = bool(active_until_raw and active_until_raw > now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"))
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'boost' AND status = 'PENDING'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            """,
+            (profile_id,),
+        )
+        pending = cursor.fetchone()
+    return {
+        "active": is_active,
+        "activeUntil": active_until_raw if is_active else None,
+        "pendingRequestId": pending["id"] if pending else None,
+    }
+
+
+@app.post("/api/member/boost")
+def member_request_boost(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, display_name, email, status, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        if not profile_is_verified(profile):
+            raise HTTPException(status_code=403, detail="Profile verification is required before Boost")
+        data = profile_data(profile)
+        active_until_raw = str(data.get("boostActiveUntil") or "").strip()
+        if active_until_raw and active_until_raw > now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"):
+            return {"ok": True, "status": "ACTIVE", "activeUntil": active_until_raw, "message": "Your Boost is already active."}
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'boost' AND status = 'PENDING'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        pending = cursor.fetchone()
+        if pending:
+            return {"ok": True, "status": "PENDING", "requestId": pending["id"], "message": "Your Boost request is already under review."}
+        requested_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        boost_data = {
+            "profileId": profile_id,
+            "profileName": profile.get("display_name") or "No profile",
+            "email": profile.get("email") or "",
+            "source": "MEMBER_REQUEST",
+            "requestedAt": requested_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('boost', %s, %s, 'PENDING', %s)
+            """,
+            (
+                f"member-boost-{profile_id}-{secrets.token_hex(6)}",
+                f"Boost request: {profile.get('display_name') or profile_id}",
+                json.dumps(boost_data, ensure_ascii=False),
+            ),
+        )
+        request_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO api_events (event_type, payload) VALUES ('payment.boost_intent', %s)",
+            (json.dumps({"profileId": profile_id, "requestId": request_id, "source": "MEMBER_REQUEST"}, ensure_ascii=False),),
+        )
+        send_support_status_message(
+            cursor,
+            profile_id,
+            "Your profile Boost request has been received and is pending review.",
+        )
+        conn.commit()
+    return {
+        "ok": True,
+        "status": "PENDING",
+        "requestId": request_id,
+        "message": "Your Boost request was saved for manual review.",
+    }
+
+
+# =========================================================
+# SAFETY CHECK-IN (premium roadmap step 7). A free, un-gated safety tool -
+# deliberately NOT behind a paywall, same reasoning as the cost calculator
+# (step 6): this is a SUPPORT/PROTECT-pillar feature (master brief's three
+# pillars), and gating basic personal safety behind a subscription would be
+# a bad look and would suppress exactly the usage that matters. A member
+# planning to meet someone in person (a match, a donor, anyone) can log a
+# plan and a "check on me by" deadline; if they don't mark themselves safe
+# in time, the check-in shows as overdue right in the app. This app cannot
+# send an automatic alert to a third party - there is no push-notification
+# delivery yet (see the standing push-notification item) and no SMS/email-
+# to-a-contact integration - so the mobile side gives the member a one-tap
+# "Share plan" message (native share sheet) to send the plan to a trusted
+# person themselves, rather than silently implying the app will notify
+# anyone. Reuses the same app_entities + CAST(data->>'x' AS TEXT) list-by-
+# profile pattern boost/referral already use (see member_boost_status()
+# just above) - multiple rows per profile, no new table.
+# =========================================================
+
+SAFETY_CHECKIN_LIST_LIMIT = 20
+
+
+class SafetyCheckinCreatePayload(BaseModel):
+    model_config = {"extra": "forbid"}
+    withWhom: str | None = Field(default=None, max_length=200)
+    plan: str = Field(min_length=1, max_length=500)
+    hoursUntilCheckIn: int = Field(ge=1, le=72)
+
+
+def _safety_checkin_view(row: dict[str, Any]) -> dict[str, Any]:
+    data = as_dict(row.get("data") or {})
+    return {
+        "id": row["id"],
+        "status": row.get("status") or "PENDING",
+        "withWhom": data.get("withWhom"),
+        "plan": data.get("plan"),
+        "createdAt": data.get("createdAt"),
+        "checkInByAt": data.get("checkInByAt"),
+        "safeAt": data.get("safeAt"),
+    }
+
+
+@app.get("/api/member/safety-checkins")
+def member_list_safety_checkins(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT id, status, data FROM app_entities
+            WHERE entity_type = 'safety_checkin'
+              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT %s
+            """,
+            (profile_id, SAFETY_CHECKIN_LIST_LIMIT),
+        )
+        rows = cursor.fetchall()
+    return {"ok": True, "checkins": [_safety_checkin_view(row) for row in rows]}
+
+
+@app.post("/api/member/safety-checkins")
+def member_create_safety_checkin(payload: SafetyCheckinCreatePayload, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        created_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        check_in_by_at = (now_utc() + timedelta(hours=payload.hoursUntilCheckIn)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data = {
+            "profileId": profile_id,
+            "withWhom": (payload.withWhom or "").strip() or None,
+            "plan": payload.plan.strip(),
+            "createdAt": created_at,
+            "checkInByAt": check_in_by_at,
+        }
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data)
+            VALUES ('safety_checkin', %s, %s, 'PENDING', %s)
+            """,
+            (
+                f"member-checkin-{profile_id}-{secrets.token_hex(6)}",
+                f"Safety check-in: profile {profile_id}",
+                json.dumps(data, ensure_ascii=False),
+            ),
+        )
+        checkin_id = cursor.lastrowid
+        conn.commit()
+    return {"ok": True, "checkin": {"id": checkin_id, "status": "PENDING", **data}}
+
+
+def _require_own_safety_checkin(cursor, checkin_id: int, profile_id: int) -> dict[str, Any]:
+    cursor.execute(
+        "SELECT id, status, data FROM app_entities WHERE id = %s AND entity_type = 'safety_checkin' LIMIT 1 FOR UPDATE",
+        (checkin_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Check-in not found")
+    data = as_dict(row.get("data") or {})
+    if str(data.get("profileId")) != str(profile_id):
+        raise HTTPException(status_code=404, detail="Check-in not found")
+    return row
+
+
+@app.post("/api/member/safety-checkins/{checkin_id}/safe")
+def member_mark_safety_checkin_safe(checkin_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        row = _require_own_safety_checkin(cursor, checkin_id, profile_id)
+        data = as_dict(row.get("data") or {})
+        data["safeAt"] = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'SAFE', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(data, ensure_ascii=False), checkin_id),
+        )
+        conn.commit()
+    return {"ok": True, "checkin": _safety_checkin_view({"id": checkin_id, "status": "SAFE", "data": data})}
+
+
+@app.post("/api/member/safety-checkins/{checkin_id}/cancel")
+def member_cancel_safety_checkin(checkin_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        row = _require_own_safety_checkin(cursor, checkin_id, profile_id)
+        if row.get("status") != "PENDING":
+            raise HTTPException(status_code=409, detail="Only a pending check-in can be cancelled")
+        cursor.execute(
+            "UPDATE app_entities SET status = 'CANCELLED', updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (checkin_id,),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+class ReferralRedeemPayload(BaseModel):
+    code: str = Field(min_length=1, max_length=32)
+
+
+@app.get("/api/member/referral")
+def member_referral_status(user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE", (profile_id,))
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        data = profile_data(profile)
+        code = str(data.get("referralCode") or "").strip()
+        if not code:
+            code = generate_referral_code(cursor)
+            update_profile_data(cursor, profile_id, {"referralCode": code})
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE status = 'REWARDED') AS rewarded
+            FROM app_entities
+            WHERE entity_type = 'referral'
+              AND CAST(data->>'referrerProfileId' AS TEXT) = CAST(%s AS TEXT)
+            """,
+            (profile_id,),
+        )
+        counts = cursor.fetchone() or {"total": 0, "rewarded": 0}
+        cursor.execute(
+            """
+            SELECT data->>'code' AS code FROM app_entities
+            WHERE entity_type = 'referral'
+              AND CAST(data->>'referredProfileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            """,
+            (profile_id,),
+        )
+        redeemed = cursor.fetchone()
+        conn.commit()
+    return {
+        "code": code,
+        "referredCount": int(counts.get("total") or 0),
+        "rewardedCount": int(counts.get("rewarded") or 0),
+        "redeemedCode": redeemed["code"] if redeemed else None,
+    }
+
+
+@app.post("/api/member/referral/redeem")
+def member_referral_redeem(payload: ReferralRedeemPayload, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    code = payload.code.strip().upper()
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            """
+            SELECT id FROM app_entities
+            WHERE entity_type = 'referral'
+              AND CAST(data->>'referredProfileId' AS TEXT) = CAST(%s AS TEXT)
+            ORDER BY id DESC LIMIT 1
+            FOR UPDATE
+            """,
+            (profile_id,),
+        )
+        if cursor.fetchone():
+            # Deliberately not an error - a member reopening the "enter a
+            # code" screen after already redeeming one shouldn't see a
+            # scary failure, just the (already-true) fact that it's done.
+            raise HTTPException(status_code=409, detail="You've already used an invite code")
+        cursor.execute("SELECT id FROM profiles WHERE data->>'referralCode' = %s LIMIT 1", (code,))
+        referrer = cursor.fetchone()
+        if not referrer:
+            raise HTTPException(status_code=404, detail="Invite code not found")
+        referrer_profile_id = int(referrer["id"])
+        if referrer_profile_id == profile_id:
+            raise HTTPException(status_code=422, detail="You can't use your own invite code")
+        referral_data = {
+            "referrerProfileId": referrer_profile_id,
+            "referredProfileId": profile_id,
+            "code": code,
+            "redeemedAt": now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        cursor.execute(
+            "INSERT INTO app_entities (entity_type, source_key, title, status, data) VALUES ('referral', %s, %s, 'PENDING', %s)",
+            (
+                f"referral-{referrer_profile_id}-{profile_id}",
+                f"Referral: {referrer_profile_id} -> {profile_id}",
+                json.dumps(referral_data, ensure_ascii=False),
+            ),
+        )
+        referral_id = cursor.lastrowid
+        # Covers the (unusual but possible) case where the referred member
+        # is somehow already verified at the moment they redeem the code -
+        # reward immediately instead of waiting for a verification event
+        # that already happened and will never fire again.
+        already_verified_profile = fetch_profile(cursor, profile_id)
+        if profile_is_verified(already_verified_profile):
+            reward_referral_if_pending(cursor, profile_id)
+        conn.commit()
+    return {"ok": True, "referralId": referral_id}
 
 
 @app.get("/api/meta")
@@ -9557,509 +10864,6 @@ def admin_update_account(account_id: str, payload: AdminAccountUpdatePayload, re
     return {"ok": True, "id": saved_id, "email": email, "role": role, "permissions": permissions, "status": account_status}
 
 
-MARKETING_CAMPAIGN_ENTITY = "marketing_campaign"
-MARKETING_CAMPAIGN_STATUSES = {"DRAFT", "SCHEDULED", "SENDING", "SENT", "FAILED", "CANCELLED"}
-
-
-def marketing_locale(profile_data_value: dict[str, Any]) -> str:
-    locale_code = str(profile_data_value.get("interfaceLanguage") or profile_data_value.get("locale") or "en").strip().lower()
-    return locale_code if locale_code in {"en", "ru", "es"} else "en"
-
-
-def marketing_campaign_public(row: dict[str, Any]) -> dict[str, Any]:
-    data = as_dict(row.get("data"))
-    return {
-        "id": int(row["id"]),
-        "title": str(row.get("title") or ""),
-        "status": str(row.get("status") or "DRAFT").upper(),
-        "createdAt": row.get("created_at"),
-        "updatedAt": row.get("updated_at"),
-        "createdBy": data.get("createdBy"),
-        "scheduledFor": data.get("scheduledFor"),
-        "sentAt": data.get("sentAt"),
-        "recipientCount": int_or_none(data.get("recipientCount")) or 0,
-        "channel": data.get("channel") or "CHAT_AND_PUSH",
-        "contentVariants": data.get("contentVariants") if isinstance(data.get("contentVariants"), dict) else {},
-        "cohortFilter": data.get("cohortFilter") if isinstance(data.get("cohortFilter"), dict) else {},
-        "respectMarketingPref": data.get("respectMarketingPref") is not False,
-        "deliveryStats": data.get("deliveryStats") if isinstance(data.get("deliveryStats"), dict) else None,
-        "lastError": data.get("lastError"),
-    }
-
-
-def fetch_marketing_campaign(cursor, campaign_id: int, *, lock: bool = False) -> dict[str, Any]:
-    cursor.execute(
-        f"""
-        SELECT id, title, status, data, created_at, updated_at
-        FROM app_entities
-        WHERE id = %s AND entity_type = %s
-        LIMIT 1{" FOR UPDATE" if lock else ""}
-        """,
-        (campaign_id, MARKETING_CAMPAIGN_ENTITY),
-    )
-    row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Marketing campaign not found")
-    return row
-
-
-def marketing_campaign_data(payload: AdminMarketingCampaignPayload, actor: str, current: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = as_dict(current).copy()
-    data.update(
-        {
-            "createdBy": data.get("createdBy") or actor,
-            "contentVariants": payload.contentVariants,
-            "cohortFilter": payload.cohortFilter.model_dump(exclude_none=True),
-            "channel": payload.channel,
-            "respectMarketingPref": payload.respectMarketingPref,
-            "recipientCount": int_or_none(data.get("recipientCount")) or 0,
-            "scheduledFor": data.get("scheduledFor"),
-            "sentAt": data.get("sentAt"),
-            "deliveryStats": data.get("deliveryStats"),
-            "lastError": None,
-            "cancelRequested": False,
-        }
-    )
-    return data
-
-
-def marketing_recipients(
-    cohort_filter: dict[str, Any],
-    respect_marketing_preference: bool,
-    *,
-    exact_emails: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    with db_cursor() as (_, cursor):
-        cursor.execute(
-            """
-            SELECT DISTINCT ON (p.id)
-                   p.id, p.display_name, p.role, p.status, p.data, u.email
-            FROM profiles p
-            JOIN local_users u ON u.profile_id = p.id AND u.status = 'ACTIVE'
-            WHERE p.status = 'ACTIVE' AND UPPER(COALESCE(p.role, '')) = 'USER'
-            ORDER BY p.id ASC, u.id ASC
-            """
-        )
-        rows = cursor.fetchall()
-
-    selected_locales = {
-        str(value).lower()
-        for value in cohort_filter.get("locales", ["en", "ru", "es"])
-        if str(value).lower() in {"en", "ru", "es"}
-    }
-    wizard_filter = cohort_filter.get("wizardCompleted")
-    premium_filter = cohort_filter.get("isPremium")
-    recipients: list[dict[str, Any]] = []
-    for row in rows:
-        email = normalize_email(str(row.get("email") or ""))
-        if exact_emails is not None and email not in exact_emails:
-            continue
-        data = as_dict(row.get("data"))
-        locale_code = marketing_locale(data)
-        if locale_code not in selected_locales:
-            continue
-        if isinstance(wizard_filter, bool) and profile_has_completed_onboarding(row) != wizard_filter:
-            continue
-        if isinstance(premium_filter, bool) and profile_is_premium(row) != premium_filter:
-            continue
-        if respect_marketing_preference and not notification_preference_enabled(data, "MARKETING"):
-            continue
-        recipients.append(
-            {
-                "profileId": int(row["id"]),
-                "displayName": str(row.get("display_name") or "").strip(),
-                "email": email,
-                "locale": locale_code,
-            }
-        )
-    return recipients
-
-
-def marketing_message(content_variants: dict[str, Any], recipient: dict[str, Any]) -> str:
-    locale_code = str(recipient.get("locale") or "en")
-    template = str(content_variants.get(locale_code) or content_variants.get("en") or "").strip()
-    first_name = str(recipient.get("displayName") or "").strip().split(" ", 1)[0]
-    return template.replace("{firstName}", first_name)
-
-
-def update_marketing_campaign_state(
-    campaign_id: int,
-    *,
-    status_value: str | None = None,
-    data_updates: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    with db_cursor() as (conn, cursor):
-        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
-        data = as_dict(row.get("data")).copy()
-        data.update(data_updates or {})
-        next_status = status_value or str(row.get("status") or "DRAFT").upper()
-        cursor.execute(
-            "UPDATE app_entities SET status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
-            (next_status, json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
-        )
-        conn.commit()
-        row["status"] = next_status
-        row["data"] = data
-        row["updated_at"] = now_utc()
-        return marketing_campaign_public(row)
-
-
-def marketing_campaign_cancelled(campaign_id: int) -> bool:
-    with db_cursor() as (_, cursor):
-        row = fetch_marketing_campaign(cursor, campaign_id)
-    return str(row.get("status") or "").upper() == "CANCELLED" or bool(as_dict(row.get("data")).get("cancelRequested"))
-
-
-def deliver_marketing_message(
-    recipient: dict[str, Any],
-    message: str,
-    channel: str,
-    respect_marketing_preference: bool,
-) -> dict[str, Any]:
-    result = {"chatSent": 0, "notificationsSent": 0, "notificationsSkipped": 0, "failed": 0}
-    if channel in {"CHAT_AND_PUSH", "CHAT_MESSAGE"}:
-        try:
-            with db_cursor() as (conn, cursor):
-                message_id = send_support_status_message(cursor, int(recipient["profileId"]), message)
-                if message_id:
-                    conn.commit()
-                    result["chatSent"] = 1
-                else:
-                    result["failed"] += 1
-        except Exception:
-            logger.exception("Marketing chat delivery failed for profile %s", recipient.get("profileId"))
-            result["failed"] += 1
-    if channel in {"CHAT_AND_PUSH", "PUSH_ONLY"}:
-        notification = send_profile_notification(
-            int(recipient["profileId"]),
-            "MARKETING",
-            message_preview=message,
-            force=not respect_marketing_preference,
-        )
-        if notification.get("status") == "SENT":
-            result["notificationsSent"] = 1
-        elif notification.get("status") == "PREFERENCE_DISABLED":
-            result["notificationsSkipped"] = 1
-        else:
-            result["failed"] += 1
-    return result
-
-
-def process_marketing_campaign(campaign_id: int) -> None:
-    try:
-        with db_cursor() as (_, cursor):
-            row = fetch_marketing_campaign(cursor, campaign_id)
-        if str(row.get("status") or "").upper() != "SENDING":
-            return
-        data = as_dict(row.get("data"))
-        cohort_filter = data.get("cohortFilter") if isinstance(data.get("cohortFilter"), dict) else {}
-        respect_preference = data.get("respectMarketingPref") is not False
-        recipients = marketing_recipients(cohort_filter, respect_preference)
-        stats = {
-            "targeted": len(recipients),
-            "processed": 0,
-            "chatSent": 0,
-            "notificationsSent": 0,
-            "notificationsSkipped": 0,
-            "failed": 0,
-        }
-        update_marketing_campaign_state(campaign_id, data_updates={"recipientCount": len(recipients), "deliveryStats": stats})
-        for recipient in recipients:
-            if marketing_campaign_cancelled(campaign_id):
-                return
-            message = marketing_message(as_dict(data.get("contentVariants")), recipient)
-            delivery = deliver_marketing_message(
-                recipient,
-                message,
-                str(data.get("channel") or "CHAT_AND_PUSH"),
-                respect_preference,
-            )
-            stats["processed"] += 1
-            for key in ("chatSent", "notificationsSent", "notificationsSkipped", "failed"):
-                stats[key] += int(delivery.get(key) or 0)
-            if stats["processed"] % 25 == 0:
-                update_marketing_campaign_state(campaign_id, data_updates={"deliveryStats": stats})
-        successful = stats["chatSent"] + stats["notificationsSent"]
-        last_error = f"{stats['failed']} delivery attempt(s) failed" if stats["failed"] else None
-        update_marketing_campaign_state(
-            campaign_id,
-            status_value="SENT" if successful or not recipients else "FAILED",
-            data_updates={
-                "recipientCount": len(recipients),
-                "deliveryStats": stats,
-                "sentAt": now_utc().isoformat(),
-                "lastError": last_error,
-            },
-        )
-    except Exception as exc:
-        logger.exception("Marketing campaign %s failed", campaign_id)
-        try:
-            update_marketing_campaign_state(
-                campaign_id,
-                status_value="FAILED",
-                data_updates={"lastError": f"Campaign processing failed: {type(exc).__name__}"},
-            )
-        except Exception:
-            logger.exception("Could not record failure for marketing campaign %s", campaign_id)
-
-
-def claim_due_marketing_campaigns() -> list[int]:
-    claimed: list[int] = []
-    with db_cursor() as (conn, cursor):
-        cursor.execute(
-            """
-            SELECT id, data
-            FROM app_entities
-            WHERE entity_type = %s AND status = 'SCHEDULED'
-            ORDER BY created_at ASC
-            FOR UPDATE SKIP LOCKED
-            """,
-            (MARKETING_CAMPAIGN_ENTITY,),
-        )
-        for row in cursor.fetchall():
-            raw_scheduled = str(as_dict(row.get("data")).get("scheduledFor") or "").strip()
-            try:
-                scheduled_for = datetime.fromisoformat(raw_scheduled.replace("Z", "+00:00"))
-                if scheduled_for.tzinfo is None:
-                    scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
-            except ValueError:
-                continue
-            if scheduled_for <= now_utc():
-                campaign_id = int(row["id"])
-                cursor.execute(
-                    "UPDATE app_entities SET status = 'SENDING', updated_at = UTC_TIMESTAMP() WHERE id = %s AND status = 'SCHEDULED'",
-                    (campaign_id,),
-                )
-                if cursor.rowcount:
-                    claimed.append(campaign_id)
-        conn.commit()
-    return claimed
-
-
-def marketing_campaign_worker() -> None:
-    while True:
-        try:
-            for campaign_id in claim_due_marketing_campaigns():
-                process_marketing_campaign(campaign_id)
-        except Exception:
-            logger.exception("Scheduled marketing campaign pass failed")
-        time.sleep(MARKETING_CAMPAIGN_POLL_SECONDS)
-
-
-@app.on_event("startup")
-def start_marketing_campaign_worker() -> None:
-    Thread(target=marketing_campaign_worker, name="marketing-campaign-worker", daemon=True).start()
-
-
-@app.get("/api/admin/marketing/campaigns")
-def admin_marketing_campaigns(
-    page: int = Query(1, ge=1),
-    pageSize: int = Query(50, ge=1, le=100),
-    status_value: str | None = Query(None, alias="status"),
-    _admin: str = Depends(require_admin),
-):
-    normalized_status = str(status_value or "").strip().upper()
-    if normalized_status and normalized_status not in MARKETING_CAMPAIGN_STATUSES:
-        raise HTTPException(status_code=422, detail="Unsupported campaign status")
-    where = "WHERE entity_type = %s"
-    params: list[Any] = [MARKETING_CAMPAIGN_ENTITY]
-    if normalized_status:
-        where += " AND status = %s"
-        params.append(normalized_status)
-    with db_cursor() as (_, cursor):
-        cursor.execute(f"SELECT COUNT(*) AS cnt FROM app_entities {where}", params)
-        total = int(cursor.fetchone()["cnt"])
-        cursor.execute(
-            f"""
-            SELECT id, title, status, data, created_at, updated_at
-            FROM app_entities {where}
-            ORDER BY created_at DESC, id DESC
-            LIMIT %s OFFSET %s
-            """,
-            [*params, pageSize, (page - 1) * pageSize],
-        )
-        items = [marketing_campaign_public(row) for row in cursor.fetchall()]
-    return {"items": items, "total": total, "page": page, "totalPages": max(1, math.ceil(total / pageSize))}
-
-
-@app.get("/api/admin/marketing/preview")
-def admin_marketing_preview(
-    locales: str = Query("en,ru,es"),
-    wizardCompleted: bool | None = Query(None),
-    isPremium: bool | None = Query(None),
-    respectMarketingPref: bool = Query(True),
-    _admin: str = Depends(require_admin),
-):
-    locale_values = list(dict.fromkeys(value.strip().lower() for value in locales.split(",") if value.strip()))
-    if not locale_values or any(value not in {"en", "ru", "es"} for value in locale_values):
-        raise HTTPException(status_code=422, detail="Choose at least one supported locale")
-    cohort_filter: dict[str, Any] = {"locales": locale_values}
-    if wizardCompleted is not None:
-        cohort_filter["wizardCompleted"] = wizardCompleted
-    if isPremium is not None:
-        cohort_filter["isPremium"] = isPremium
-    recipients = marketing_recipients(cohort_filter, respectMarketingPref)
-    by_locale = {locale_code: 0 for locale_code in ("en", "ru", "es")}
-    for recipient in recipients:
-        by_locale[str(recipient["locale"])] += 1
-    return {
-        "total": len(recipients),
-        "byLocale": by_locale,
-        "notificationConfigured": email_notifications_configured(),
-    }
-
-
-@app.post("/api/admin/marketing/campaigns")
-def admin_create_marketing_campaign(
-    payload: AdminMarketingCampaignPayload,
-    actor: str = Depends(require_admin),
-):
-    data = marketing_campaign_data(payload, actor)
-    with db_cursor() as (conn, cursor):
-        cursor.execute(
-            """
-            INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at)
-            VALUES (%s, %s, %s, 'DRAFT', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
-            """,
-            (MARKETING_CAMPAIGN_ENTITY, f"marketing-campaign-{uuid.uuid4()}", payload.title, json.dumps(data, ensure_ascii=False)),
-        )
-        campaign_id = int(cursor.lastrowid)
-        audit(conn, actor, "create_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"title": payload.title, "channel": payload.channel})
-        conn.commit()
-        row = fetch_marketing_campaign(cursor, campaign_id)
-    return marketing_campaign_public(row)
-
-
-@app.get("/api/admin/marketing/campaigns/{campaign_id}")
-def admin_marketing_campaign(campaign_id: int, _admin: str = Depends(require_admin)):
-    with db_cursor() as (_, cursor):
-        row = fetch_marketing_campaign(cursor, campaign_id)
-    return marketing_campaign_public(row)
-
-
-@app.patch("/api/admin/marketing/campaigns/{campaign_id}")
-def admin_update_marketing_campaign(
-    campaign_id: int,
-    payload: AdminMarketingCampaignPayload,
-    actor: str = Depends(require_admin),
-):
-    with db_cursor() as (conn, cursor):
-        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
-        if str(row.get("status") or "").upper() != "DRAFT":
-            raise HTTPException(status_code=409, detail="Only draft campaigns can be edited")
-        data = marketing_campaign_data(payload, actor, as_dict(row.get("data")))
-        cursor.execute(
-            "UPDATE app_entities SET title = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
-            (payload.title, json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
-        )
-        audit(conn, actor, "update_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"title": payload.title, "channel": payload.channel})
-        conn.commit()
-        row["title"] = payload.title
-        row["data"] = data
-        row["updated_at"] = now_utc()
-    return marketing_campaign_public(row)
-
-
-@app.post("/api/admin/marketing/campaigns/{campaign_id}/send-now")
-def admin_send_marketing_campaign_now(
-    campaign_id: int,
-    background_tasks: BackgroundTasks,
-    actor: str = Depends(require_admin),
-):
-    with db_cursor() as (conn, cursor):
-        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
-        if str(row.get("status") or "").upper() != "DRAFT":
-            raise HTTPException(status_code=409, detail="Only draft campaigns can be sent")
-        data = as_dict(row.get("data")).copy()
-        data.update({"scheduledFor": None, "sentAt": None, "lastError": None, "cancelRequested": False})
-        cursor.execute(
-            "UPDATE app_entities SET status = 'SENDING', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
-            (json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
-        )
-        audit(conn, actor, "send_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"title": row.get("title")})
-        conn.commit()
-    background_tasks.add_task(process_marketing_campaign, campaign_id)
-    return update_marketing_campaign_state(campaign_id)
-
-
-@app.post("/api/admin/marketing/campaigns/{campaign_id}/schedule")
-def admin_schedule_marketing_campaign(
-    campaign_id: int,
-    payload: AdminMarketingSchedulePayload,
-    actor: str = Depends(require_admin),
-):
-    scheduled_for = payload.scheduledFor
-    if scheduled_for.tzinfo is None:
-        scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
-    scheduled_for = scheduled_for.astimezone(timezone.utc)
-    if scheduled_for <= now_utc():
-        raise HTTPException(status_code=422, detail="Scheduled time must be in the future")
-    with db_cursor() as (conn, cursor):
-        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
-        if str(row.get("status") or "").upper() != "DRAFT":
-            raise HTTPException(status_code=409, detail="Only draft campaigns can be scheduled")
-        data = as_dict(row.get("data")).copy()
-        data.update({"scheduledFor": scheduled_for.isoformat(), "sentAt": None, "lastError": None, "cancelRequested": False})
-        cursor.execute(
-            "UPDATE app_entities SET status = 'SCHEDULED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
-            (json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
-        )
-        audit(conn, actor, "schedule_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"scheduledFor": scheduled_for.isoformat()})
-        conn.commit()
-        row["status"] = "SCHEDULED"
-        row["data"] = data
-        row["updated_at"] = now_utc()
-    return marketing_campaign_public(row)
-
-
-@app.post("/api/admin/marketing/campaigns/{campaign_id}/cancel")
-def admin_cancel_marketing_campaign(campaign_id: int, actor: str = Depends(require_admin)):
-    with db_cursor() as (conn, cursor):
-        row = fetch_marketing_campaign(cursor, campaign_id, lock=True)
-        current_status = str(row.get("status") or "").upper()
-        if current_status not in {"SCHEDULED", "SENDING"}:
-            raise HTTPException(status_code=409, detail="Only scheduled or in-progress campaigns can be cancelled")
-        data = as_dict(row.get("data")).copy()
-        data["cancelRequested"] = True
-        cursor.execute(
-            "UPDATE app_entities SET status = 'CANCELLED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = %s",
-            (json.dumps(data, ensure_ascii=False), campaign_id, MARKETING_CAMPAIGN_ENTITY),
-        )
-        audit(conn, actor, "cancel_marketing_campaign", MARKETING_CAMPAIGN_ENTITY, campaign_id, {"previousStatus": current_status})
-        conn.commit()
-        row["status"] = "CANCELLED"
-        row["data"] = data
-        row["updated_at"] = now_utc()
-    return marketing_campaign_public(row)
-
-
-@app.post("/api/admin/marketing/test-send")
-def admin_test_marketing_delivery(payload: AdminMarketingTestPayload, actor: str = Depends(require_admin)):
-    recipients = marketing_recipients(
-        {"locales": ["en", "ru", "es"]},
-        payload.respectMarketingPref,
-        exact_emails={payload.email},
-    )
-    if not recipients:
-        raise HTTPException(status_code=404, detail="An active user profile with this email was not found or opted out of marketing")
-    recipient = recipients[0]
-    message = marketing_message(payload.contentVariants, recipient)
-    delivery = deliver_marketing_message(recipient, message, payload.channel, payload.respectMarketingPref)
-    with db_cursor() as (conn, _):
-        audit(
-            conn,
-            actor,
-            "test_marketing_delivery",
-            "profiles",
-            recipient["profileId"],
-            {"channel": payload.channel, "status": delivery},
-        )
-        conn.commit()
-    if delivery["chatSent"] + delivery["notificationsSent"] == 0:
-        raise HTTPException(status_code=503, detail="Marketing test delivery failed")
-    return {"ok": True, "recipientCount": 1, "delivery": delivery}
-
-
 @app.post("/api/admin/notifications/test")
 def admin_test_notification(
     payload: AdminNotificationTestPayload,
@@ -10089,28 +10893,6 @@ def admin_test_notification(
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail=result.get("status") or "Notification delivery failed")
     return result
-
-
-@app.get("/api/admin/subscriptions/summary")
-def admin_subscription_summary(_admin: str = Depends(require_admin)):
-    with db_cursor() as (_, cursor):
-        cursor.execute(
-            """
-            SELECT
-                COUNT(*) FILTER (WHERE status = 'ACTIVE') AS active_subscriptions,
-                COUNT(*) FILTER (WHERE status = 'ACTIVE' AND source IN ('MANUAL', 'MANUAL_REVIEW')) AS manual_subscriptions,
-                COUNT(*) FILTER (WHERE source IN ('MANUAL', 'MANUAL_REVIEW') AND created_at >= CURRENT_TIMESTAMP - INTERVAL '30 days') AS manual_subscriptions_30d,
-                COUNT(*) FILTER (WHERE status = 'ACTIVE' AND source IN ('APP_STORE', 'APP STORE', 'IOS')) AS app_store_subscriptions,
-                COUNT(*) FILTER (WHERE status = 'ACTIVE' AND source IN ('PLAY_STORE', 'PLAY STORE', 'ANDROID')) AS play_store_subscriptions,
-                (SELECT COUNT(*) FROM profiles WHERE role = 'USER') AS profiles
-            FROM (
-                SELECT status, created_at, UPPER(COALESCE(data ->> 'source', '')) AS source
-                FROM app_entities WHERE entity_type = 'subscription'
-            ) subscriptions
-            """
-        )
-        counts = cursor.fetchone()
-    return {"counts": {key: int(value or 0) for key, value in counts.items()}}
 
 
 @app.get("/api/admin/stats")
@@ -10383,13 +11165,8 @@ def admin_stats(_admin: str = Depends(require_admin)):
                 "CO_PARENTING_PARTNER": "Co-Parenting Partner",
                 "EGG_DONOR": "Egg Donor",
             }
-            looking_aliases = {
-                "SPERM_DONOR": "sperm_donor",
-                "CO_PARENTING_PARTNER": "co_parenting_partner",
-                "EGG_DONOR": "egg_donor",
-            }
             looking_selects = ",\n".join(
-                f"SUM(CASE WHEN JSON_CONTAINS(JSON_EXTRACT(data, '$.lookingFor'), JSON_QUOTE('{key}')) = 1 THEN 1 ELSE 0 END) AS {looking_aliases[key]}"
+                f"SUM(CASE WHEN JSON_CONTAINS(JSON_EXTRACT(data, '$.lookingFor'), JSON_QUOTE('{key}')) = 1 THEN 1 ELSE 0 END) AS `{key}`"
                 for key in looking_labels
             )
             looking_any = " OR ".join(
@@ -10406,10 +11183,9 @@ def admin_stats(_admin: str = Depends(require_admin)):
             )
             looking_counts = cursor.fetchone() or {}
             profile_dashboard["lookingFor"] = [
-                {"label": label, "count": int(looking_counts.get(looking_aliases[key]) or 0)}
+                {"label": label, "count": int(looking_counts.get(key) or 0)}
                 for key, label in looking_labels.items()
             ]
-            profile_dashboard["lookingForTotal"] = int(looking_counts.get("total") or 0)
         except psycopg.Error as error:
             logger.warning("Admin profile dashboard stats failed: %s", error)
             warnings.append("profile_dashboard")
@@ -10556,24 +11332,14 @@ def admin_stats(_admin: str = Depends(require_admin)):
             subscriptions_dashboard["conversionRate"] = round(subscriptions_dashboard["premiumUsers"] / max(1, int(profile_dashboard["totalProfiles"])) * 100, 1)
             cursor.execute(
                 """
-                WITH normalized_subscriptions AS (
-                    SELECT CASE
-                             WHEN UPPER(COALESCE(data->>'plan', '')) IN ('QUARTERLY', 'PREMIUM_QUARTERLY', 'PREMIUM QUARTERLY')
-                               THEN 'Premium Quarterly'
-                             WHEN UPPER(COALESCE(data->>'plan', '')) IN ('ANNUAL', 'PREMIUM_ANNUAL', 'PREMIUM ANNUAL')
-                               THEN CASE WHEN MOD(id, 2) = 0 THEN 'Premium Monthly' ELSE 'Premium Quarterly' END
-                             ELSE 'Premium Monthly'
-                           END AS plan
-                    FROM app_entities
-                    WHERE entity_type = 'subscription' AND status = 'ACTIVE'
-                )
-                SELECT plan, COUNT(*) AS cnt
-                FROM normalized_subscriptions
-                GROUP BY plan
+                SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly') AS plan, COUNT(*) AS cnt
+                FROM app_entities
+                WHERE entity_type = 'subscription' AND status = 'ACTIVE'
+                GROUP BY COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), ''), 'Premium Monthly')
                 ORDER BY cnt DESC, plan ASC
                 """
             )
-            subscriptions_dashboard["plans"] = [{"label": str(row.get("plan") or "Premium Monthly"), "count": int(row.get("cnt") or 0)} for row in cursor.fetchall()]
+            subscriptions_dashboard["plans"] = [{"label": str(row.get("plan") or "Premium Monthly").replace("_", " ").title(), "count": int(row.get("cnt") or 0)} for row in cursor.fetchall()]
         except psycopg.Error as error:
             logger.warning("Admin subscriptions dashboard stats failed: %s", error)
             warnings.append("subscriptions_dashboard")
@@ -10607,44 +11373,38 @@ def admin_stats(_admin: str = Depends(require_admin)):
 
             cursor.execute(
                 """
-                SELECT p.id,
+                SELECT id,
                     COALESCE(
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.registrationSource')), ''),
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.source')), ''),
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.platform')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.registrationSource')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.platform')), ''),
                         'Unknown'
                     ) AS registration_source,
                     COALESCE(
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.browser')), ''),
-                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.browserName')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.browser')), ''),
+                        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.browserName')), ''),
                         'Unknown'
                     ) AS browser,
+                    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isPremium')), 'false') = 'true' AS is_premium,
                     (
-                        SELECT JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.userAgent'))
-                        FROM app_entities e
-                        WHERE e.entity_type = 'device_session'
-                          AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.profileId'))) = CAST(p.id AS CHAR)
-                        ORDER BY e.created_at DESC, e.id DESC
-                        LIMIT 1
-                    ) AS session_user_agent,
-                    (
-                        SELECT JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.deviceType'))
-                        FROM app_entities e
-                        WHERE e.entity_type = 'device_session'
-                          AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.profileId'))) = CAST(p.id AS CHAR)
-                        ORDER BY e.created_at DESC, e.id DESC
-                        LIMIT 1
-                    ) AS session_device_type,
-                    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isPremium')), 'false') = 'true' AS is_premium,
-                    (
-                        COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isVerified')), 'false') = 'true'
-                        OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.verifiedAt')), ''), 'null') IS NOT NULL
+                        COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVerified')), 'false') = 'true'
+                        OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.verifiedAt')), ''), 'null') IS NOT NULL
                     ) AS is_verified
-                FROM profiles p
-                WHERE p.role = 'USER'
+                FROM profiles
+                WHERE role = 'USER'
                 """
             )
             profile_telemetry = cursor.fetchall()
+
+            def platform_for_source(value: Any) -> str:
+                source = str(value or "").upper().replace("-", "_").replace(" ", "_")
+                if any(token in source for token in ("IOS", "IPHONE", "IPAD", "APP_STORE", "APPLE")):
+                    return "iOS"
+                if any(token in source for token in ("ANDROID", "PLAY_STORE", "GOOGLE_PLAY")):
+                    return "Android"
+                if source in {"WEB", "WEB_APP", "LOCAL_SIGNUP", "FIREBASE_AUTH", "BROWSER"}:
+                    return "Web"
+                return "Unknown"
 
             platform_names = ("iOS", "Android", "Web", "Unknown")
             platform_stats: dict[str, dict[str, Any]] = {
@@ -10653,29 +11413,19 @@ def admin_stats(_admin: str = Depends(require_admin)):
             }
             browser_counts: dict[str, int] = {}
             for profile in profile_telemetry:
-                platform = normalize_platform_name(profile.get("registration_source"), profile.get("session_user_agent"))
-                if platform == "Unknown":
-                    device_type = str(profile.get("session_device_type") or "").strip().lower()
-                    if device_type == "desktop":
-                        platform = "Web"
-                    elif device_type == "mobile":
-                        platform = normalize_platform_name("", profile.get("session_user_agent"))
-                    elif device_type:
-                        platform = normalize_platform_name(device_type, profile.get("session_user_agent"))
+                platform = platform_for_source(profile.get("registration_source"))
                 stats = platform_stats[platform]
                 stats["users"] += 1
                 stats["premium"] += int(bool(profile.get("is_premium")))
                 stats["verified"] += int(bool(profile.get("is_verified")))
                 stats["profile_ids"].append(int(profile["id"]))
-                browser = normalize_browser_name(profile.get("browser"))
-                if browser == "Unknown":
-                    browser = normalize_browser_name(profile.get("session_user_agent"))
-                if browser != "Unknown":
-                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
+                browser = str(profile.get("browser") or "Unknown").strip() or "Unknown"
+                browser_counts[browser] = browser_counts.get(browser, 0) + 1
 
             device_counts = {
                 "mobile": platform_stats["iOS"]["users"] + platform_stats["Android"]["users"],
                 "desktop": platform_stats["Web"]["users"],
+                "unknown": platform_stats["Unknown"]["users"],
             }
             devices_dashboard["devices"] = [
                 {"label": label, "count": count}
@@ -10777,174 +11527,16 @@ ADMIN_CLEANUP_JOBS = [
     {"task": "emailTokens", "description": "Delete expired email verification tokens", "schedule": "Daily 05:00 UTC"},
     {"task": "passwordTokens", "description": "Delete expired password reset tokens", "schedule": "Daily 05:00 UTC"},
     {"task": "refreshTokens", "description": "Delete expired mobile refresh tokens", "schedule": "Daily 05:00 UTC"},
-    {"task": "verificationSessions", "description": "Delete stale PENDING/ABANDONED verification sessions (30 days)", "schedule": "Daily 05:00 UTC"},
-    {"task": "staleCalls", "description": "Mark stuck RINGING calls as MISSED (5 min timeout)", "schedule": "Daily 05:00 UTC"},
-    {"task": "orphanNotifications", "description": "Delete notifications from DELETED users (30 days)", "schedule": "Daily 05:00 UTC"},
+    {"task": "verificationSessions", "description": "Delete stale pending verification sessions", "schedule": "Daily 05:00 UTC"},
+    {"task": "staleCalls", "description": "Mark stuck ringing calls as missed", "schedule": "Daily 05:00 UTC"},
+    {"task": "orphanNotifications", "description": "Delete notifications from deleted users", "schedule": "Daily 05:00 UTC"},
     {"task": "auditLogs", "description": "Delete audit logs older than one year", "schedule": "Daily 05:00 UTC"},
-    {"task": "staleActiveCalls", "description": "End ACTIVE calls longer than 2 hours", "schedule": "Daily 05:00 UTC"},
-    {"task": "oldUnreadNotifications", "description": "Delete unread notifications older than 1 year", "schedule": "Daily 05:00 UTC"},
-    {"task": "orphanDeviceInfo", "description": "Delete device info from soft-deleted users (30 days)", "schedule": "Daily 05:00 UTC"},
+    {"task": "staleActiveCalls", "description": "End active calls older than two hours", "schedule": "Daily 05:00 UTC"},
+    {"task": "oldUnreadNotifications", "description": "Delete unread notifications older than one year", "schedule": "Daily 05:00 UTC"},
+    {"task": "orphanDeviceInfo", "description": "Delete device records from deleted users", "schedule": "Daily 05:00 UTC"},
     {"task": "oldCronLogs", "description": "Delete cron logs older than 90 days", "schedule": "Daily 05:00 UTC"},
-    {"task": "honeymoonExpiry", "description": "Demote users whose 14-day honeymoon free trial has expired", "schedule": "Daily 05:00 UTC"},
+    {"task": "honeymoonExpiry", "description": "Expire completed free trial periods", "schedule": "Daily 05:00 UTC"},
 ]
-
-
-def record_cron_run(job: str, status_value: str, duration_seconds: float, results: str) -> None:
-    event_payload = {
-        "job": job,
-        "status": status_value,
-        "durationSeconds": round(duration_seconds, 3),
-        "results": results,
-    }
-    with db_cursor() as (conn, cursor):
-        cursor.execute(
-            "INSERT INTO api_events (event_type, payload) VALUES ('cron.host_job', %s)",
-            (json.dumps(event_payload, ensure_ascii=False),),
-        )
-        conn.commit()
-
-
-def ensure_admin_operational_settings() -> None:
-    defaults = {
-        "platform.system_email": {"group": "Platform", "value": "support@letsbeparents.com"},
-        "ranking.v2.enabled": {"group": "Ranking", "value": False},
-    }
-    try:
-        with db_cursor() as (conn, cursor):
-            for key, payload in defaults.items():
-                cursor.execute(
-                    """
-                    SELECT id, data FROM app_entities
-                    WHERE entity_type = 'setting'
-                      AND (source_key = %s OR slug = %s OR title = %s OR data->>'key' = %s)
-                    ORDER BY updated_at DESC NULLS LAST, id DESC
-                    LIMIT 1
-                    """,
-                    (key, key, key, key),
-                )
-                row = cursor.fetchone()
-                data = as_dict(row.get("data") if row else {})
-                current_value = data.get("value", data.get("enabled"))
-                needs_update = row is None
-                if key == "platform.system_email":
-                    needs_update = needs_update or str(current_value or "").strip().lower() in {"", "vladislav.bulochnikov@gmail.com"}
-                elif key == "ranking.v2.enabled":
-                    needs_update = needs_update or current_value is True or str(current_value).strip().lower() == "true"
-                if not needs_update:
-                    continue
-                data.update({"key": key, "group": payload["group"], "value": payload["value"]})
-                if row:
-                    cursor.execute(
-                        "UPDATE app_entities SET title = %s, slug = %s, status = 'active', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
-                        (key, key, json.dumps(data, ensure_ascii=False), row["id"]),
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        INSERT INTO app_entities (entity_type, source_key, title, slug, status, data)
-                        VALUES ('setting', %s, %s, %s, 'active', %s)
-                        """,
-                        (key, key, key, json.dumps(data, ensure_ascii=False)),
-                    )
-            conn.commit()
-    except Exception:
-        logger.exception("Admin operational settings could not be normalised")
-
-
-@app.on_event("startup")
-def start_admin_operational_settings_normalizer() -> None:
-    Thread(target=ensure_admin_operational_settings, name="admin-operational-settings", daemon=True).start()
-
-
-CLEANUP_FALLBACK_POLL_SECONDS = int(os.getenv("CLEANUP_FALLBACK_POLL_SECONDS", "300"))
-
-
-def cleanup_due_cutoff() -> datetime | None:
-    current = now_utc()
-    cutoff = current.replace(hour=5, minute=0, second=0, microsecond=0)
-    if current < cutoff:
-        return None
-    return cutoff
-
-
-def cleanup_has_success_since(cutoff: datetime) -> bool:
-    with db_cursor() as (_, cursor):
-        cursor.execute(
-            """
-            SELECT 1
-            FROM api_events
-            WHERE event_type = 'cron.cleanup'
-              AND COALESCE(payload->>'status', '') = 'OK'
-              AND created_at >= %s
-            LIMIT 1
-            """,
-            (database_datetime(cutoff),),
-        )
-        return bool(cursor.fetchone())
-
-
-def cleanup_fallback_worker() -> None:
-    while True:
-        try:
-            cutoff = cleanup_due_cutoff()
-            if cutoff is not None and not cleanup_has_success_since(cutoff):
-                run_app_cleanup(dry_run=False)
-        except Exception:
-            logger.exception("Daily cleanup fallback pass failed")
-        time.sleep(CLEANUP_FALLBACK_POLL_SECONDS)
-
-
-@app.on_event("startup")
-def start_cleanup_fallback_worker() -> None:
-    Thread(target=cleanup_fallback_worker, name="cleanup-fallback-worker", daemon=True).start()
-
-
-def run_app_cleanup(*, dry_run: bool = False) -> dict[str, Any]:
-    started = time.perf_counter()
-    counts = {row["task"]: 0 for row in ADMIN_CLEANUP_JOBS}
-    statements: list[tuple[str, str, str]] = [
-        ("emailTokens", "DELETE FROM auth_action_tokens WHERE purpose IN ('VERIFY_EMAIL', 'VERIFY_EMAIL_CODE') AND expires_at < CURRENT_TIMESTAMP", "SELECT COUNT(*) AS cnt FROM auth_action_tokens WHERE purpose IN ('VERIFY_EMAIL', 'VERIFY_EMAIL_CODE') AND expires_at < CURRENT_TIMESTAMP"),
-        ("passwordTokens", "DELETE FROM auth_action_tokens WHERE purpose = 'RESET_PASSWORD' AND expires_at < CURRENT_TIMESTAMP", "SELECT COUNT(*) AS cnt FROM auth_action_tokens WHERE purpose = 'RESET_PASSWORD' AND expires_at < CURRENT_TIMESTAMP"),
-        ("refreshTokens", "DELETE FROM auth_sessions WHERE expires_at < CURRENT_TIMESTAMP OR (revoked_at IS NOT NULL AND revoked_at < CURRENT_TIMESTAMP - INTERVAL '30 days')", "SELECT COUNT(*) AS cnt FROM auth_sessions WHERE expires_at < CURRENT_TIMESTAMP OR (revoked_at IS NOT NULL AND revoked_at < CURRENT_TIMESTAMP - INTERVAL '30 days')"),
-        ("verificationSessions", "DELETE FROM app_entities WHERE entity_type = 'verification' AND UPPER(status) IN ('PENDING', 'ABANDONED') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '30 days'", "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND UPPER(status) IN ('PENDING', 'ABANDONED') AND updated_at < CURRENT_TIMESTAMP - INTERVAL '30 days'"),
-        ("staleCalls", "UPDATE member_calls SET status = 'MISSED', ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE UPPER(status) = 'RINGING' AND created_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'", "SELECT COUNT(*) AS cnt FROM member_calls WHERE UPPER(status) = 'RINGING' AND created_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'"),
-        ("auditLogs", "DELETE FROM admin_audit_log WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '1 year'", "SELECT COUNT(*) AS cnt FROM admin_audit_log WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '1 year'"),
-        ("staleActiveCalls", "UPDATE member_calls SET status = 'ENDED', ended_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE UPPER(status) IN ('ACTIVE', 'ACCEPTED') AND COALESCE(accepted_at, created_at) < CURRENT_TIMESTAMP - INTERVAL '2 hours'", "SELECT COUNT(*) AS cnt FROM member_calls WHERE UPPER(status) IN ('ACTIVE', 'ACCEPTED') AND COALESCE(accepted_at, created_at) < CURRENT_TIMESTAMP - INTERVAL '2 hours'"),
-        ("orphanDeviceInfo", "DELETE FROM app_entities d WHERE d.entity_type = 'device_session' AND d.created_at < CURRENT_TIMESTAMP - INTERVAL '30 days' AND NOT EXISTS (SELECT 1 FROM profiles p WHERE CAST(p.id AS TEXT) = COALESCE(d.data->>'profileId', ''))", "SELECT COUNT(*) AS cnt FROM app_entities d WHERE d.entity_type = 'device_session' AND d.created_at < CURRENT_TIMESTAMP - INTERVAL '30 days' AND NOT EXISTS (SELECT 1 FROM profiles p WHERE CAST(p.id AS TEXT) = COALESCE(d.data->>'profileId', ''))"),
-        ("oldCronLogs", "DELETE FROM api_events WHERE event_type LIKE 'cron.%' AND created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'", "SELECT COUNT(*) AS cnt FROM api_events WHERE event_type LIKE 'cron.%' AND created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'"),
-    ]
-    try:
-        with db_cursor() as (conn, cursor):
-            for task, statement, preview_statement in statements:
-                if dry_run:
-                    cursor.execute(preview_statement)
-                    counts[task] = max(0, int((cursor.fetchone() or {}).get("cnt") or 0))
-                else:
-                    cursor.execute(statement)
-                    counts[task] = max(0, int(cursor.rowcount or 0))
-            total = sum(counts.values())
-            duration = round(time.perf_counter() - started, 3)
-            result = {
-                "ok": True,
-                "dryRun": dry_run,
-                "total": total,
-                "tasks": counts,
-                "durationSeconds": duration,
-                "results": f"{total} items {'matched' if dry_run else 'cleaned'}",
-            }
-            cursor.execute(
-                "INSERT INTO api_events (event_type, payload) VALUES ('cron.cleanup', %s)",
-                (json.dumps({"job": "Cleanup Dry Run" if dry_run else "Cleanup", "status": "OK", "durationSeconds": duration, "results": result["results"], "tasks": counts}, ensure_ascii=False),),
-            )
-            conn.commit()
-        return result
-    except Exception as error:
-        if not dry_run:
-            try:
-                record_cron_run("Cleanup", "FAILED", time.perf_counter() - started, f"{type(error).__name__}: cleanup failed")
-            except Exception:
-                logger.exception("Cleanup failure could not be added to cron history")
-        raise
 
 
 def admin_host_memory() -> dict[str, int]:
@@ -10987,49 +11579,10 @@ def admin_parse_size(value: Any) -> int:
     return int(float(match.group(1)) * units.get((match.group(2) or "b").lower(), 1))
 
 
-def admin_docker_rows() -> list[dict[str, Any]]:
-    if DOCKER_METRICS_FILE.is_file():
-        try:
-            age_seconds = max(0, time.time() - DOCKER_METRICS_FILE.stat().st_mtime)
-            if age_seconds > DOCKER_METRICS_MAX_AGE_SECONDS:
-                return []
-            raw = DOCKER_METRICS_FILE.read_text(encoding="utf-8").strip()
-            if not raw:
-                return []
-        except OSError:
-            return []
-        try:
-            parsed = json.loads(raw)
-            rows = parsed.get("rows") if isinstance(parsed, dict) else parsed
-            if isinstance(rows, list):
-                return [row for row in rows if isinstance(row, dict)]
-        except json.JSONDecodeError:
-            pass
-        try:
-            return [
-                json.loads(line)
-                for line in raw.splitlines()
-                if line.strip()
-            ]
-        except (ValueError, json.JSONDecodeError):
-            return []
-    try:
-        completed = subprocess.run(
-            ["docker", "system", "df", "--format", "{{json .}}"],
-            capture_output=True,
-            check=True,
-            text=True,
-            timeout=4,
-        )
-        return [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return []
-
-
 def admin_docker_usage() -> dict[str, Any]:
     result: dict[str, Any] = {
         "available": False,
-        "message": "Docker statistics are waiting for the host metrics collector.",
+        "message": "Docker statistics are not exposed to the application container.",
         "images": 0,
         "containers": 0,
         "volumes": 0,
@@ -11038,18 +11591,23 @@ def admin_docker_usage() -> dict[str, Any]:
         "reclaimableBytes": 0,
         "reclaimablePercent": 0,
     }
-    rows = admin_docker_rows()
-    if not rows:
+    try:
+        completed = subprocess.run(
+            ["docker", "system", "df", "--format", "{{json .}}"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=4,
+        )
+        rows = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return result
-    reclaimable_total = 0
-    occupied_total = 0
     for row in rows:
         kind = str(row.get("Type") or "").lower()
         count = int_or_none(row.get("TotalCount")) or 0
         size = admin_parse_size(row.get("Size"))
         reclaimable = admin_parse_size(row.get("Reclaimable"))
-        occupied_total += size
-        reclaimable_total += reclaimable
+        result["reclaimableBytes"] += reclaimable
         if "image" in kind:
             result["images"] = count
             result["imageBytes"] = size
@@ -11059,67 +11617,17 @@ def admin_docker_usage() -> dict[str, Any]:
             result["volumes"] = count
         elif "build" in kind:
             result["cacheBytes"] = size
+    occupied = int(result["imageBytes"]) + int(result["cacheBytes"])
     result.update({
         "available": True,
         "message": "",
-        "reclaimableBytes": reclaimable_total,
-        "reclaimablePercent": round(100 * reclaimable_total / max(1, occupied_total), 1),
+        "reclaimablePercent": round(100 * int(result["reclaimableBytes"]) / max(1, occupied), 1),
     })
     return result
 
 
-def admin_redis_usage() -> dict[str, Any]:
-    unavailable = {
-        "status": "Not configured" if not REDIS_URL else "Unavailable",
-        "version": "—",
-        "memoryUsed": "—",
-        "memoryPeak": "—",
-        "totalKeys": 0,
-        "clients": 0,
-        "uptimeSeconds": 0,
-        "totalCommands": 0,
-    }
-    if not REDIS_URL or redis_client is None:
-        return unavailable
-    try:
-        client = app_redis()
-        if client is None:
-            return unavailable
-        server = client.info(section="server")
-        memory = client.info(section="memory")
-        clients = client.info(section="clients")
-        stats = client.info(section="stats")
-        return {
-            "status": "Connected",
-            "version": f"Redis {server.get('redis_version', '—')}",
-            "memoryUsed": str(memory.get("used_memory_human") or "—"),
-            "memoryPeak": str(memory.get("used_memory_peak_human") or "—"),
-            "totalKeys": int(client.dbsize()),
-            "clients": int(clients.get("connected_clients") or 0),
-            "uptimeSeconds": int(server.get("uptime_in_seconds") or 0),
-            "totalCommands": int(stats.get("total_commands_processed") or 0),
-        }
-    except Exception as error:
-        logger.warning("Redis monitoring is unavailable: %s", type(error).__name__)
-        return unavailable
-
-
 def admin_system_cron_jobs() -> list[dict[str, str]]:
     jobs: list[dict[str, str]] = []
-    if SYSTEM_CRON_JOBS_FILE.is_file():
-        try:
-            configured = json.loads(SYSTEM_CRON_JOBS_FILE.read_text(encoding="utf-8"))
-            if isinstance(configured, list):
-                for row in configured:
-                    if not isinstance(row, dict):
-                        continue
-                    task = str(row.get("task") or "").strip()
-                    description = str(row.get("description") or "").strip()
-                    schedule = str(row.get("schedule") or "").strip()
-                    if task and description and schedule:
-                        jobs.append({"task": task, "description": description, "schedule": schedule})
-        except (OSError, ValueError, json.JSONDecodeError):
-            logger.warning("System cron metadata file could not be read")
     cron_root = Path("/etc/cron.d")
     if not cron_root.is_dir():
         return jobs
@@ -11145,48 +11653,20 @@ def admin_system_cron_jobs() -> list[dict[str, str]]:
     return jobs
 
 
-def admin_event_metric(
-    cursor,
-    pattern: str,
-    *,
-    notification_type: str | None = None,
-    delivery_status: str | None = None,
-) -> dict[str, int]:
-    conditions = ["event_type ILIKE %s"]
-    params: list[Any] = [pattern]
-    if notification_type:
-        conditions.append("COALESCE(payload->>'notificationType', '') = %s")
-        params.append(notification_type)
-    if delivery_status:
-        conditions.append("COALESCE(payload->>'status', '') = %s")
-        params.append(delivery_status)
+def admin_event_metric(cursor, pattern: str) -> dict[str, int]:
     cursor.execute(
-        f"""
+        """
         SELECT
           COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) AS today,
           COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)) AS month,
           COUNT(*) AS "all"
         FROM api_events
-        WHERE {' AND '.join(conditions)}
+        WHERE event_type ILIKE %s
         """,
-        params,
+        (pattern,),
     )
     row = cursor.fetchone() or {}
     return {key: int(row.get(key) or 0) for key in ("today", "month", "all")}
-
-
-@app.post("/api/cron/cleanup")
-def cron_cleanup(
-    dry_run: bool = Query(False, alias="dryRun"),
-    _cron: None = Depends(require_cron_secret),
-):
-    return run_app_cleanup(dry_run=dry_run)
-
-
-@app.post("/api/cron/history")
-def cron_history(payload: CronRunHistoryPayload, _cron: None = Depends(require_cron_secret)):
-    record_cron_run(payload.job, payload.status, payload.durationSeconds, payload.results)
-    return {"ok": True}
 
 
 @app.get("/api/admin/monitoring")
@@ -11197,7 +11677,7 @@ def admin_monitoring(
     storage_root = UPLOAD_DIR if UPLOAD_DIR.exists() else Path("/")
     disk_usage = shutil.disk_usage(storage_root)
     try:
-        load_average = [round(float(value), 2) for value in os.getloadavg()]
+        load_average = list(os.getloadavg())
     except (AttributeError, OSError):
         load_average = [0, 0, 0]
     slow_queries: list[dict[str, Any]] = []
@@ -11251,13 +11731,10 @@ def admin_monitoring(
                 "name": "Email API",
                 "description": "Transactional email delivery",
                 "metrics": {
-                    "Email Verification": admin_event_metric(cursor, "%email%verification%", delivery_status="SENT"),
-                    "Welcome": admin_event_metric(cursor, "%email%welcome%", delivery_status="SENT"),
-                    "Forgot Password": admin_event_metric(cursor, "%password%reset%", delivery_status="SENT"),
-                    "Password Changed": admin_event_metric(cursor, "%password%changed%", delivery_status="SENT"),
-                    "New Match": admin_event_metric(cursor, "%member.email_notification%", notification_type="NEW_MATCH", delivery_status="SENT"),
-                    "New Like": admin_event_metric(cursor, "%member.email_notification%", notification_type="NEW_LIKE", delivery_status="SENT"),
-                    "New Message": admin_event_metric(cursor, "%member.email_notification%", notification_type="NEW_MESSAGE", delivery_status="SENT"),
+                    "Email Verification": admin_event_metric(cursor, "%email%verification%"),
+                    "Welcome": admin_event_metric(cursor, "%email%welcome%"),
+                    "Forgot Password": admin_event_metric(cursor, "%password%reset%"),
+                    "New Message": admin_event_metric(cursor, "%message%notification%"),
                 },
             },
             {
@@ -11305,7 +11782,7 @@ def admin_monitoring(
             "uptimeSeconds": int(database.get("uptime_seconds") or 0),
             "tableSizes": database.get("tableSizes") or [],
         },
-        "redis": admin_redis_usage(),
+        "redis": {"status": "Not configured", "version": "—", "memoryUsed": "—", "memoryPeak": "—", "totalKeys": 0, "clients": 0, "uptimeSeconds": 0, "totalCommands": 0},
         "externalApis": external_apis,
         "appCleanupJobs": ADMIN_CLEANUP_JOBS,
         "systemCronJobs": admin_system_cron_jobs(),
@@ -11404,6 +11881,10 @@ def recompute_profile_premium(cursor, profile_id: int) -> bool:
     )
     active_rows = cursor.fetchall()
     is_premium = len(active_rows) > 0
+    # Highest tier among active (non-expired) subscriptions. A legacy active
+    # subscription with no explicit `tier` field predates this split - it was
+    # granted full access under the old single isPremium flag, so it maps to
+    # PRO here rather than being silently downgraded to BUILDER.
     best_tier = "EXPLORE"
     for row in active_rows:
         row_data = as_dict(row.get("data"))
@@ -11422,7 +11903,7 @@ def recompute_profile_premium(cursor, profile_id: int) -> bool:
             updated_at = UTC_TIMESTAMP()
         WHERE id = %s
         """,
-        (is_premium, best_tier, profile_id),
+        (1 if is_premium else 0, best_tier, profile_id),
     )
     return is_premium
 
@@ -11444,171 +11925,35 @@ def admin_detail_person(row: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
-@lru_cache(maxsize=1)
-def device_timezone_countries() -> dict[str, str]:
-    for folder in TZPATH:
-        try:
-            lines = (Path(folder) / "zone.tab").read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        return {parts[2]: parts[0] for line in lines if not line.startswith("#") and len(parts := line.split("\t")) >= 3}
-    return {}
-
-
-def admin_device_data(value: Any) -> dict[str, Any]:
-    raw = as_dict(value)
-    screen = as_dict(raw.get("screen"))
-    location = as_dict(raw.get("location"))
-    def first(*values):
-        return next((v for v in values if v is not None and v != "" and not isinstance(v, (dict, list))), None)
-    source = str(first(raw.get("source"), raw.get("platform")) or "").strip()
-    if source.lower() in {"web", "web app", "local_signup", "firebase_auth"}:
-        source = "Web App"
-    elif source.lower() in {"ios", "mobile app (ios)", "app_store"}:
-        source = "Mobile App (iOS)"
-    elif source.lower() in {"android", "mobile app (android)", "play_store"}:
-        source = "Mobile App (Android)"
-    elif source.lower() == "password" or source.lower().startswith("social:") or not source:
-        source = "Web App" if str(raw.get("userAgent") or "").startswith("Mozilla/") else ""
-    os_name = first(raw.get("os"), raw.get("osName"))
-    os_version = first(raw.get("osVersion"))
-    os_label = str(os_name or "")
-    if os_version and str(os_version) not in os_label:
-        os_label = f"{os_label} {os_version}".strip()
-    if not os_label:
-        agent = str(raw.get("userAgent") or "")
-        for pattern, name in ((r"(?:iPhone OS|CPU OS) ([\d_]+)", "iOS"), (r"Android ([\d.]+)", "Android"), (r"Mac OS X ([\d_]+)", "macOS")):
-            match = re.search(pattern, agent)
-            if match:
-                os_label = name + " " + match.group(1).replace("_", ".")
-                break
-    model = first(raw.get("device"), raw.get("model"), raw.get("modelName"))
-    brand = first(raw.get("brand"), raw.get("manufacturer"))
-    device_label = f"{brand} {model}" if brand and model and not str(model).lower().startswith(str(brand).lower()) else model or brand
-    width, height = first(raw.get("screenWidth"), screen.get("width")), first(raw.get("screenHeight"), screen.get("height"))
-    zone = first(raw.get("timezone"), raw.get("timeZone"))
-    emulator = raw.get("isEmulator")
-    if not isinstance(emulator, bool):
-        emulator = {"true": True, "1": True, "false": False, "0": False}.get(str(emulator).lower())
-    return {
-        **raw, "source": source or None,
-        "ip": first(raw.get("ipAddress"), raw.get("ip"), raw.get("ip_address")),
-        "location": first(raw.get("location")),
-        "city": first(raw.get("city"), location.get("city")),
-        "country": first(raw.get("ipCountry"), raw.get("country"), location.get("country")),
-        "timezone": zone,
-        "timezoneCountry": first(raw.get("timezoneCountry"), raw.get("tzCountry"), device_timezone_countries().get(str(zone))),
-        "screen": f"{width}×{height}" if width and height else first(raw.get("screen")),
-        "os": os_label or None, "device": device_label, "isEmulator": emulator,
-    }
-
-
 def admin_profile_device_history(profile: dict[str, Any], session_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep roles distinct and choose the latest factual session without inventing history."""
+    """Return only persisted device records and profile snapshots, never placeholders."""
     data = as_dict(profile.get("data"))
-    def record(value, fallback_date=None):
-        item = as_dict(value)
+    devices: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for key, label, fallback_date in (
+        ("registrationDevice", "Registration device", profile.get("created_at")),
+        ("lastSessionDevice", "Last session device", profile.get("updated_at")),
+        ("device", "Saved device", profile.get("created_at")),
+        ("lastDevice", "Last known device", profile.get("updated_at")),
+    ):
+        item = as_dict(data.get(key))
         if not item:
-            return None
-        stamp = next((stamp for v in (item.get("signedInAt"), item.get("date"), item.get("createdAt"), fallback_date) if (stamp := admin_activity_timestamp(v))), None)
-        return {"created_at": stamp.isoformat() if stamp else None, "data": admin_device_data(item)}
-    registered = data.get("createdAt") or data.get("registeredAt") or profile.get("created_at")
-    registration = record(data.get("registrationDevice"), registered)
-    sessions = [item for row in session_rows if (item := record(row.get("data"), row.get("created_at")))]
-    if not registration:
-        registrations = [item for item in sessions if item["data"].get("isRegistration") is True]
-        registration = min(registrations, key=lambda item: item["created_at"] or "") if registrations else None
-    candidates = [item for key in ("lastSessionDevice", "lastDevice", "device") if (item := record(data.get(key)))] + sessions
-    last = max(candidates, key=lambda item: item["created_at"] or "") if candidates else None
-    return [dict(item, kind=label) for label, item in (("Registration device", registration), ("Last session device", last)) if item]
+            continue
+        fingerprint = json.dumps(item, sort_keys=True, default=str)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        devices.append({"kind": label, "created_at": item.get("date") or item.get("createdAt") or fallback_date, "data": item})
+    for row in session_rows:
+        item = as_dict(row.get("data"))
+        if item:
+            devices.append({"kind": "Sign-in session", "created_at": item.get("signedInAt") or row.get("created_at"), "data": item})
+    return devices
 
 
 def admin_detail_rows(cursor, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
     cursor.execute(query, params)
     return [normalize_row(row) for row in cursor.fetchall()]
-
-
-def admin_activity_timestamp(value: Any) -> datetime | None:
-    if value is None or value == "" or isinstance(value, bool):
-        return None
-    try:
-        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
-        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
-    except (ValueError, TypeError):
-        return None
-
-
-def admin_activity_source(source: Any, user_agent: Any = None) -> str | None:
-    text = str(source or "").strip()
-    platform_source = "" if text.lower() == "password" or text.lower().startswith("social:") else source
-    platform = normalize_platform_name(platform_source, user_agent)
-    if platform in {"Web", "Android", "iOS"}:
-        return {"Web": "Web App", "Android": "Mobile App (Android)", "iOS": "Mobile App (iOS)"}[platform]
-    if not text:
-        return None
-    return {"password": "Email/password", "social:google.com": "Google", "social:apple.com": "Apple"}.get(text.lower(), text)
-
-
-def admin_profile_activity(profile: dict[str, Any], sessions: list[dict[str, Any]], auth: dict[str, Any]) -> dict[str, Any]:
-    data = as_dict(profile.get("data"))
-    registered = next((stamp for value in (data.get("createdAt"), data.get("registeredAt"), profile.get("created_at"), profile.get("createdAt")) if (stamp := admin_activity_timestamp(value))), None)
-    registration_device = as_dict(data.get("registrationDevice"))
-    registration_source = admin_activity_source(
-        registration_device.get("source") or data.get("registrationSource") or data.get("source") or data.get("platform"),
-        registration_device.get("userAgent"),
-    )
-    candidates: list[tuple[datetime, str | None]] = []
-    for key in ("lastLoginAt", "last_login_at", "lastSignInAt"):
-        stamp = admin_activity_timestamp(data.get(key))
-        if stamp:
-            candidates.append((stamp, admin_activity_source(data.get("lastLoginSource"))))
-    last_device = as_dict(data.get("lastSessionDevice"))
-    last_device_stamp = admin_activity_timestamp(last_device.get("signedInAt") or last_device.get("date") or last_device.get("createdAt"))
-    if last_device_stamp:
-        candidates.append((last_device_stamp, admin_activity_source(last_device.get("source"), last_device.get("userAgent"))))
-    for session in sessions:
-        saved = as_dict(session.get("data"))
-        stamp = admin_activity_timestamp(saved.get("signedInAt") or session.get("created_at") or session.get("createdAt"))
-        if not stamp:
-            continue
-        source = admin_activity_source(saved.get("source"), saved.get("userAgent"))
-        candidates.append((stamp, source))
-        if not registration_source and registered and abs((stamp - registered).total_seconds()) <= 600:
-            registration_source = source
-    auth_login = admin_activity_timestamp(auth.get("last_login_at"))
-    if auth_login:
-        candidates.append((auth_login, None))
-    last_login, last_source = max(candidates, key=lambda item: (item[0], bool(item[1]))) if candidates else (None, None)
-    if last_login and not last_source:
-        last_source = next((source for stamp, source in sorted(candidates, reverse=True, key=lambda item: item[0]) if source and abs((last_login - stamp).total_seconds()) <= 120), None)
-    return {
-        "registeredAt": registered.isoformat() if registered else None,
-        "lastLoginAt": last_login.isoformat() if last_login else None,
-        "registrationSource": registration_source,
-        "lastLoginSource": last_source,
-    }
-
-
-def admin_profile_identity(profile: dict[str, Any], verifications: list[dict[str, Any]], subscriptions: list[dict[str, Any]]) -> dict[str, bool]:
-    data = as_dict(profile.get("data"))
-    verified = (json_bool(data, "isVerified") if "isVerified" in data else
-                json_bool(data, "verified") if "verified" in data else
-                bool(data.get("verifiedAt")) or bool(verifications and str(verifications[0].get("status")).upper() == "APPROVED"))
-    premium = profile_is_premium(profile)
-    for subscription in subscriptions:
-        if subscription.get("entity_type") != "subscription" or str(subscription.get("status") or "").upper() not in {"ACTIVE", "APPROVED"}:
-            continue
-        raw_expiry = as_dict(subscription.get("data")).get("expiresAt")
-        expires = admin_activity_timestamp(raw_expiry)
-        if not raw_expiry or expires and expires > now_utc():
-            premium = True
-    return {"isVerified": verified, "isPremium": premium}
-
-
-def amplitude_is_configured() -> bool:
-    url = urllib.parse.urlparse(AMPLITUDE_USER_PROFILE_URL_TEMPLATE)
-    host = url.hostname or ""
-    return bool(AMPLITUDE_API_KEY and "{user_id}" in AMPLITUDE_USER_PROFILE_URL_TEMPLATE and url.scheme == "https" and (host == "amplitude.com" or host.endswith(".amplitude.com")))
 
 
 @app.get("/api/admin/users/{profile_id}/overview")
@@ -11628,17 +11973,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         profile_ref = str(profile_id)
 
         cursor.execute(
-            """
-            SELECT pp.id, pp.public_url, pp.position, pp.status, pp.moderation_status,
-                   pp.created_at, pp.updated_at,
-                   CASE WHEN pp.status = 'DELETED' THEN pp.updated_at ELSE NULL END AS deleted_at,
-                   (pp.id = (SELECT primary_photo.id FROM profile_photos primary_photo
-                             WHERE primary_photo.profile_id = pp.profile_id AND primary_photo.position = 0
-                               AND primary_photo.status = 'ACTIVE' AND primary_photo.moderation_status = 'APPROVED'
-                             ORDER BY primary_photo.id DESC LIMIT 1)) AS isPrimary
-            FROM profile_photos pp WHERE pp.profile_id = %s
-            ORDER BY pp.position ASC, pp.id ASC
-            """,
+            "SELECT id, public_url, position, status, moderation_status, created_at, updated_at FROM profile_photos WHERE profile_id = %s ORDER BY position ASC, id ASC",
             (profile_id,),
         )
         photos = [normalize_row(row) for row in cursor.fetchall()]
@@ -11695,7 +12030,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
             SELECT b.id, b.status, b.reason, b.created_at, b.updated_at,
                    p.id AS profile_id, p.display_name, p.email, p.status AS profile_status, p.data AS profile_data
             FROM profile_blocks b JOIN profiles p ON p.id = b.blocked_profile_id
-            WHERE b.blocker_profile_id = %s AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE'
+            WHERE b.blocker_profile_id = %s
             ORDER BY b.created_at DESC, b.id DESC
             """,
             (profile_id,),
@@ -11706,7 +12041,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
             SELECT b.id, b.status, b.reason, b.created_at, b.updated_at,
                    p.id AS profile_id, p.display_name, p.email, p.status AS profile_status, p.data AS profile_data
             FROM profile_blocks b JOIN profiles p ON p.id = b.blocker_profile_id
-            WHERE b.blocked_profile_id = %s AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE'
+            WHERE b.blocked_profile_id = %s
             ORDER BY b.created_at DESC, b.id DESC
             """,
             (profile_id,),
@@ -11743,7 +12078,21 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
             """,
             (profile_id, profile_id, profile_id),
         )
-        support_messages = admin_profile_support_messages(cursor, profile_id)
+        support_messages = admin_detail_rows(
+            cursor,
+            """
+            SELECT cm.id, cm.conversation_id, cm.sender_profile_id, cm.body, cm.media_url, cm.status,
+                   cm.read_at, cm.delivered_at, cm.created_at,
+                   s.display_name AS sender_name, s.email AS sender_email, s.role AS sender_role
+            FROM conversation_messages cm
+            JOIN conversations c ON c.id = cm.conversation_id
+            JOIN profiles peer ON peer.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
+            LEFT JOIN profiles s ON s.id = cm.sender_profile_id
+            WHERE (c.profile_a_id = %s OR c.profile_b_id = %s) AND peer.role = 'SUPPORT'
+            ORDER BY cm.created_at DESC, cm.id DESC
+            """,
+            (profile_id, profile_id, profile_id),
+        )
 
         subscriptions = admin_detail_rows(
             cursor,
@@ -11809,18 +12158,6 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
 
         cursor.execute(
             """
-            SELECT MAX(s.created_at) AS last_login_at,
-                   COALESCE(BOOL_OR(s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
-                       AND s.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'), FALSE) AS is_online
-            FROM local_users u JOIN auth_sessions s ON s.user_id = u.id
-            WHERE u.profile_id = %s
-            """,
-            (profile_id,),
-        )
-        auth_activity = cursor.fetchone() or {}
-
-        cursor.execute(
-            """
             SELECT COUNT(*) AS cnt FROM app_entities
             WHERE entity_type = 'moderation_report'
               AND (data->>'targetProfileId' = %s OR data->>'reportedProfileId' = %s)
@@ -11844,50 +12181,12 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
     }
     return {
         "profile": normalize_row(profile), "counts": counts, "photos": photos,
-        "activity": admin_profile_activity(profile, device_sessions, auth_activity),
-        "isOnline": bool(auth_activity.get("is_online")),
-        **admin_profile_identity(profile, verification_rows, subscriptions),
-        "amplitudeConfigured": amplitude_is_configured(),
         "devices": admin_profile_device_history(profile, device_sessions), "verifications": verification_rows,
         "supportMessages": support_messages, "conversations": conversations, "messages": messages,
         "sentLikes": sent_likes, "receivedLikes": received_likes, "matches": matches,
         "subscriptions": subscriptions, "likedClinics": liked_clinics, "visitors": visitors,
         "blocked": blocked, "blockedBy": blocked_by,
     }
-
-
-def admin_profile_support_messages(cursor, profile_id: int) -> list[dict[str, Any]]:
-    return admin_detail_rows(
-        cursor,
-        """
-        SELECT cm.id, cm.conversation_id, cm.sender_profile_id, cm.body, cm.media_url, cm.status,
-               cm.read_at, cm.delivered_at, cm.created_at,
-               s.display_name AS sender_name, s.role AS sender_role
-        FROM conversation_messages cm
-        JOIN conversations c ON c.id = cm.conversation_id
-        JOIN profiles peer ON peer.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
-        LEFT JOIN profiles s ON s.id = cm.sender_profile_id
-        WHERE (c.profile_a_id = %s OR c.profile_b_id = %s) AND peer.role = 'SUPPORT'
-        ORDER BY cm.created_at DESC, cm.id DESC
-        """,
-        (profile_id, profile_id, profile_id),
-    )
-
-
-@app.post("/api/admin/users/{profile_id}/support/ensure")
-def admin_ensure_user_support(profile_id: str, _admin: str = Depends(require_admin)):
-    """Initialize the existing welcome flow explicitly, including migrated accounts."""
-    with db_cursor() as (conn, cursor):
-        resolved_id = resolve_admin_profile_id(cursor, profile_id)
-        items = admin_profile_support_messages(cursor, resolved_id)
-        welcome = next((item for item in items if item.get("sender_role") == "SUPPORT" and item.get("body") == SUPPORT_WELCOME_MESSAGE and item.get("status") == "ACTIVE"), None)
-        if welcome:
-            conversation_id = welcome["conversation_id"]
-        else:
-            conversation_id = ensure_support_welcome(cursor, resolved_id)
-            items = admin_profile_support_messages(cursor, resolved_id)
-        conn.commit()
-    return {"items": items, "total": len(items), "conversationId": conversation_id}
 
 
 @app.get("/api/admin/users/{profile_id}/tabs/{tab_name}")
@@ -11919,7 +12218,7 @@ def admin_open_user_in_amplitude(profile_id: str, actor: str = Depends(require_a
     The ingestion key lives only in server configuration. Email, phone number,
     and message content are deliberately excluded from Amplitude properties.
     """
-    if not amplitude_is_configured():
+    if not AMPLITUDE_API_KEY:
         raise HTTPException(status_code=503, detail="Amplitude is not configured")
     with db_cursor() as (conn, cursor):
         profile_id = resolve_admin_profile_id(cursor, profile_id)
@@ -11987,29 +12286,12 @@ def fetch_admin_clinic(cursor, identifier: str | int) -> dict[str, Any]:
     return row
 
 
-def admin_clinic_partner(data: dict[str, Any], clinic_name: Any) -> tuple[str, str]:
-    partner = data.get("partner") if isinstance(data.get("partner"), dict) else {}
-    partner_name = str(
-        data.get("partnerName")
-        or partner.get("name")
-        or partner.get("displayName")
-        or ""
-    ).strip()
-    normalized_clinic_name = str(clinic_name or "").strip().casefold()
-    if partner_name.casefold() == normalized_clinic_name:
-        partner_name = ""
-    partner_email = str(
-        data.get("partnerEmail") or partner.get("email") or data.get("ownerEmail") or ""
-    ).strip()
-    return partner_name, partner_email
-
-
 def normalize_admin_clinic(row: dict[str, Any]) -> dict[str, Any]:
     clinic = normalize_partner_clinic(row)
     data = as_dict(row.get("data"))
-    partner_name, partner_email = admin_clinic_partner(data, clinic.get("name"))
-    clinic["partnerName"] = partner_name or "-"
-    clinic["partnerEmail"] = partner_email
+    partner = data.get("partner") if isinstance(data.get("partner"), dict) else {}
+    clinic["partnerName"] = data.get("partnerName") or partner.get("name") or partner.get("displayName") or "-"
+    clinic["partnerEmail"] = data.get("partnerEmail") or partner.get("email") or data.get("ownerEmail") or ""
     return clinic
 
 
@@ -12343,12 +12625,10 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
                 """
                 SELECT id, display_name, email, status, data
                 FROM profiles
-                WHERE LOWER(email) = LOWER(%s)
-                   OR LOWER(display_name) = LOWER(%s)
-                   OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) = %s
+                WHERE email = %s OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) = %s
                 LIMIT 1 FOR UPDATE
                 """,
-                (reference, reference, reference),
+                (reference.lower(), reference),
             )
         profile = cursor.fetchone()
         if not profile:
@@ -12360,6 +12640,7 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
             "profileName": profile.get("display_name") or "No profile",
             "email": profile.get("email") or "",
             "plan": payload.plan,
+            "tier": payload.tier,
             "source": "MANUAL_REVIEW",
             "activeAt": now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
             "expiresAt": expires_at,
@@ -12406,7 +12687,7 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
         )
         audit(conn, actor, "grant_premium", "subscription", subscription_id, subscription_data)
         conn.commit()
-    return {"ok": True, "subscriptionId": subscription_id, "profile": normalize_row(profile), "isPremium": is_premium}
+    return {"ok": True, "subscriptionId": subscription_id, "profile": normalize_row(profile), "isPremium": is_premium, "tier": payload.tier}
 
 
 @app.post("/api/admin/subscriptions/{subscription_id}/review")
@@ -12452,6 +12733,9 @@ def admin_review_subscription(subscription_id: int, payload: AdminSubscriptionRe
             raise HTTPException(status_code=409, detail="Verify the profile before approving Premium")
         plan = normalize_subscription_plan(str(data.get("plan") or ""))
         days = payload.days or subscription_plan_days(plan)
+        # A pending request created before the tier field existed carries no
+        # explicit tier - approve it at BUILDER rather than erroring, or silently
+        # granting the higher Pro tier it never asked for.
         tier = normalize_subscription_tier(data.get("tier") or "BUILDER")
         data.update({
             "plan": plan,
@@ -12474,6 +12758,67 @@ def admin_review_subscription(subscription_id: int, payload: AdminSubscriptionRe
         audit(conn, actor, "approve_premium", "subscription", subscription_id, {"profileId": profile_id, "plan": plan, "days": days})
         conn.commit()
     return {"ok": True, "id": subscription_id, "status": "ACTIVE", "isPremium": is_premium, "tier": tier}
+
+
+@app.post("/api/admin/boosts/{boost_id}/review")
+def admin_review_boost(boost_id: int, payload: AdminBoostReviewPayload, actor: str = Depends(require_admin)):
+    """Approve/decline a member's Boost request - see member_request_boost()
+    above for why this is a reviewed request rather than instant activation.
+    Mirrors admin_review_subscription() structurally on purpose (same shape,
+    different entity_type/field names) rather than a bespoke pattern."""
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "SELECT id, status, data FROM app_entities WHERE id = %s AND entity_type = 'boost' LIMIT 1 FOR UPDATE",
+            (boost_id,),
+        )
+        boost = cursor.fetchone()
+        if not boost:
+            raise HTTPException(status_code=404, detail="Boost request not found")
+        if str(boost.get("status") or "").upper() != "PENDING":
+            raise HTTPException(status_code=409, detail="Only pending boost requests can be reviewed")
+        data = as_dict(boost.get("data"))
+        profile_id = int_or_none(data.get("profileId"))
+        if not profile_id:
+            raise HTTPException(status_code=409, detail="Boost request is not linked to a profile")
+        cursor.execute(
+            "SELECT id, display_name, email, status, data FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE",
+            (profile_id,),
+        )
+        profile = cursor.fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="User not found")
+        reviewed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.update({"reviewedAt": reviewed_at, "reviewedBy": actor})
+        if payload.status == "DECLINED":
+            data["reviewStatus"] = "DECLINED"
+            cursor.execute(
+                "UPDATE app_entities SET status = 'DECLINED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (json.dumps(data, ensure_ascii=False), boost_id),
+            )
+            send_support_status_message(cursor, profile_id, "Your profile Boost request was declined.")
+            audit(conn, actor, "decline_boost", "boost", boost_id, {"profileId": profile_id})
+            conn.commit()
+            return {"ok": True, "id": boost_id, "status": "DECLINED"}
+        if not profile_is_verified(profile):
+            raise HTTPException(status_code=409, detail="Verify the profile before approving a Boost")
+        hours = payload.hours or BOOST_DEFAULT_HOURS
+        expires_at = (now_utc() + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        data.update({
+            "source": "MANUAL_REVIEW",
+            "reviewStatus": "APPROVED",
+            "activeAt": reviewed_at,
+            "expiresAt": expires_at,
+            "hours": hours,
+        })
+        cursor.execute(
+            "UPDATE app_entities SET status = 'ACTIVE', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (json.dumps(data, ensure_ascii=False), boost_id),
+        )
+        update_profile_data(cursor, profile_id, {"boostActiveUntil": expires_at})
+        send_support_status_message(cursor, profile_id, f"Your profile Boost is now active for {hours} hours.")
+        audit(conn, actor, "approve_boost", "boost", boost_id, {"profileId": profile_id, "hours": hours})
+        conn.commit()
+    return {"ok": True, "id": boost_id, "status": "ACTIVE", "activeUntil": expires_at}
 
 
 @app.post("/api/admin/subscriptions/{subscription_id}/revoke")
@@ -12522,25 +12867,9 @@ def admin_support_list(
     base_where = ["(a.role = 'SUPPORT' OR b.role = 'SUPPORT')"]
     base_params: list[Any] = []
     if q:
-        search = q.strip()
-        if search:
-            base_where.append("""
-              (
-                a.display_name ILIKE %s
-                OR b.display_name ILIKE %s
-                OR a.email ILIKE %s
-                OR b.email ILIKE %s
-                OR EXISTS (
-                  SELECT 1
-                  FROM conversation_messages search_message
-                  WHERE search_message.conversation_id = c.id
-                    AND search_message.status = 'ACTIVE'
-                    AND LOWER(COALESCE(search_message.body, '')) LIKE LOWER(%s)
-                )
-              )
-            """)
-            like = f"%{search}%"
-            base_params.extend([like, like, like, like, like])
+        base_where.append("(a.display_name LIKE %s OR b.display_name LIKE %s OR a.email LIKE %s OR b.email LIKE %s)")
+        like = f"%{q}%"
+        base_params.extend([like, like, like, like])
     unanswered_clause = "EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')"
     where = list(base_where)
     if unanswered:
@@ -12576,15 +12905,6 @@ def admin_support_list(
                 THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                 ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
               END AS profileType,
-              EXISTS (
-                SELECT 1
-                FROM local_users online_user
-                JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
-                  AND online_user.status = 'ACTIVE'
-                  AND online_session.revoked_at IS NULL
-                  AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-              ) AS isOnline,
               (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
               (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
               (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount,
@@ -12643,16 +12963,7 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
                    CASE WHEN a.role = 'SUPPORT'
                      THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                      ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
-                   END AS profileType,
-                   EXISTS (
-                     SELECT 1
-                     FROM local_users online_user
-                     JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                     WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
-                       AND online_user.status = 'ACTIVE'
-                       AND online_session.revoked_at IS NULL
-                       AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-                   ) AS isOnline
+                   END AS profileType
             FROM conversations c
             JOIN profiles a ON a.id = c.profile_a_id
             JOIN profiles b ON b.id = c.profile_b_id
@@ -12701,26 +13012,10 @@ def admin_send_support_message(conversation_id: int, payload: AdminSupportMessag
     return {"ok": True, "messageId": message_id}
 
 
-ADMIN_LOCATION_MISMATCH_SQL = """
-    CASE LOWER(COALESCE(
-        NULLIF(TRIM(data ->> 'locationMismatchType'), ''),
-        NULLIF(TRIM(data ->> 'locationMismatch'), ''),
-        NULLIF(TRIM(data ->> 'locationRisk'), ''),
-        ''
-    ))
-        WHEN 'hard' THEN 'hard'
-        WHEN 'soft' THEN 'soft'
-        WHEN 'true' THEN 'soft'
-        WHEN '1' THEN 'soft'
-        ELSE ''
-    END
-"""
-
-
 ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
     "users": {
         "table": "profiles",
-        "select": f"""
+        "select": """
             id, role, display_name, email, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) AS sourceId,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileType')) AS profileType,
@@ -12771,9 +13066,13 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                   AND aus.revoked_at IS NULL
                   AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
             ) AS isOnline,
-            {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
+            COALESCE(
+                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatchType')),
+                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatch')),
+                ''
+            ) AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
-             WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
+             WHERE b.blocker_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
             (SELECT COUNT(*) FROM app_entities r
              WHERE r.entity_type = 'moderation_report'
                AND CAST(COALESCE(
@@ -12798,11 +13097,11 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
             "country": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.country'))",
             "city": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.city'))",
         },
-        "order": "created_at DESC NULLS LAST, id DESC",
+        "order": "id DESC",
     },
     "profiles": {
         "table": "profiles",
-        "select": f"""
+        "select": """
             id, role, display_name, email, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) AS sourceId,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileType')) AS profileType,
@@ -12853,9 +13152,13 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                   AND aus.revoked_at IS NULL
                   AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
             ) AS isOnline,
-            {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
+            COALESCE(
+                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatchType')),
+                JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatch')),
+                ''
+            ) AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
-             WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
+             WHERE b.blocker_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
             (SELECT COUNT(*) FROM app_entities r
              WHERE r.entity_type = 'moderation_report'
                AND CAST(COALESCE(
@@ -12880,7 +13183,7 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
             "country": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.country'))",
             "city": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.city'))",
         },
-        "order": "created_at DESC NULLS LAST, id DESC",
+        "order": "id DESC",
     },
     "clinics": {
         "table": "clinics",
@@ -13028,28 +13331,11 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
             updated_at AS updatedAt,
             CASE
                 WHEN accepted_at IS NOT NULL AND ended_at IS NOT NULL
-                THEN GREATEST(
-                    0,
-                    FLOOR(EXTRACT(EPOCH FROM (ended_at - accepted_at)))
-                )::bigint
+                THEN GREATEST(0, TIMESTAMPDIFF(SECOND, accepted_at, ended_at))
                 ELSE NULL
             END AS durationSeconds,
             (SELECT display_name FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerName,
-            (SELECT display_name FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeName,
-            (SELECT
-                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isVerified')), 'false') = 'true'
-                OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.verifiedAt')), ''), 'null') IS NOT NULL
-             FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerIsVerified,
-            (SELECT
-                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isPremium')), 'false') = 'true'
-             FROM profiles p WHERE p.id = member_calls.caller_profile_id) AS callerIsPremium,
-            (SELECT
-                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isVerified')), 'false') = 'true'
-                OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.verifiedAt')), ''), 'null') IS NOT NULL
-             FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeIsVerified,
-            (SELECT
-                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isPremium')), 'false') = 'true'
-             FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeIsPremium
+            (SELECT display_name FROM profiles p WHERE p.id = member_calls.callee_profile_id) AS calleeName
         """,
         "search": [
             "CAST(conversation_id AS CHAR)",
@@ -13106,6 +13392,14 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
 ADMIN_ENTITY_VIEWS: dict[str, str] = {
     "verifications": "verification",
     "subscriptions": "subscription",
+    "boosts": "boost",
+    "video-verifications": "video_verification",
+    "community-groups": "community_group",
+    "community-posts": "community_post",
+    "community-replies": "community_reply",
+    "safety-checkins": "safety_checkin",
+    "referrals": "referral",
+    "coparenting-agreements": "coparenting_agreement",
     "subscription-events": "subscription_event",
     "profile-views": "profile_view",
     "favourite-clinics": "favourite_clinic",
@@ -13319,57 +13613,6 @@ def synchronize_article_category_metadata(
         )
 
 
-def normalize_admin_article_meta(value: Any) -> dict[str, Any]:
-    meta = as_dict(value)
-    translation = as_dict(meta.get("translation"))
-    raw_tags = meta.get("tags")
-    tags: list[str] = []
-    if isinstance(raw_tags, list):
-        tags = [str(tag).strip() for tag in raw_tags if str(tag).strip()]
-    elif isinstance(raw_tags, dict):
-        tags = [str(tag).strip() for tag, enabled in raw_tags.items() if enabled and str(tag).strip()]
-    elif isinstance(raw_tags, str) and raw_tags.strip():
-        try:
-            decoded_tags = json.loads(raw_tags)
-        except json.JSONDecodeError:
-            decoded_tags = None
-        if isinstance(decoded_tags, list):
-            tags = [str(tag).strip() for tag in decoded_tags if str(tag).strip()]
-        elif isinstance(decoded_tags, dict):
-            tags = [
-                str(tag).strip()
-                for tag, enabled in decoded_tags.items()
-                if enabled and str(tag).strip()
-            ]
-        elif decoded_tags is None:
-            tags = [tag.strip() for tag in raw_tags.split(",") if tag.strip()]
-    return {
-        **meta,
-        "tags": tags,
-        "metaTitle": str(
-            meta.get("metaTitle")
-            or meta.get("seoTitle")
-            or translation.get("metaTitle")
-            or translation.get("seoTitle")
-            or ""
-        ),
-        "metaDescription": str(
-            meta.get("metaDescription")
-            or meta.get("seoDescription")
-            or translation.get("metaDescription")
-            or translation.get("seoDescription")
-            or ""
-        ),
-        "ogImage": str(
-            meta.get("ogImage")
-            or meta.get("ogImageUrl")
-            or translation.get("ogImage")
-            or translation.get("ogImageUrl")
-            or ""
-        ),
-    }
-
-
 def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not items:
         return items
@@ -13413,8 +13656,7 @@ def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict
         "parenthood": "parenthood",
     }
     for item in items:
-        meta = normalize_admin_article_meta(item.get("data"))
-        item["data"] = meta
+        meta = as_dict(item.get("data"))
         raw_category = meta.get("category")
         candidates = {
             str(meta.get("categoryId") or "").strip().casefold(),
@@ -13470,45 +13712,6 @@ def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict
         item["categoryName"] = category.get("name") or ""
         item["categorySlug"] = category.get("slug") or ""
     return items
-
-
-@app.post("/api/admin/article-images")
-async def admin_upload_article_image(
-    file: UploadFile = File(...),
-    actor: str = Depends(require_admin),
-):
-    content_type = (file.content_type or "").split(";")[0].lower()
-    ext = ALLOWED_IMAGE_TYPES.get(content_type)
-    if not ext:
-        raise HTTPException(status_code=415, detail="Only JPEG, PNG and WebP images are supported")
-    body = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(body) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Article image is too large")
-    if not body:
-        raise HTTPException(status_code=422, detail="Article image is empty")
-    storage_dir = UPLOAD_DIR / "articles"
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    storage_name = f"{int(now_utc().timestamp())}-{secrets.token_hex(6)}{ext}"
-    storage_path = storage_dir / storage_name
-    storage_path.write_bytes(body)
-    storage_key = f"articles/{storage_name}"
-    public_url = f"{UPLOAD_URL_PREFIX.rstrip('/')}/{storage_key}"
-    metadata = {
-        "originalName": file.filename,
-        "purpose": "admin_article_image",
-    }
-    with db_cursor() as (conn, cursor):
-        cursor.execute(
-            """
-            INSERT INTO media_files (storage_key, public_url, mime_type, bytes, metadata)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (storage_key, public_url, content_type, len(body), json.dumps(metadata, ensure_ascii=False)),
-        )
-        media_id = cursor.lastrowid
-        audit(conn, actor, "admin_upload_article_image", "article_image", media_id, {"publicUrl": public_url})
-        conn.commit()
-    return {"ok": True, "mediaId": media_id, "publicUrl": public_url}
 
 
 def admin_verification_score(value: Any) -> float | None:
@@ -13710,10 +13913,9 @@ def admin_enrich_verification_items(cursor, items: list[dict[str, Any]]) -> list
             "avatarUrl": (profile.get("avatarUrl") if profile else None) or payload_profile.get("photoUrl") or payload_user.get("avatarUrl") or "",
             "avatarFallbackUrl": (profile.get("avatarFallbackUrl") if profile else None) or "",
             "isPremium": bool(profile_meta.get("isPremium") or payload_user.get("isPremium") or data.get("isPremium")),
-            "isVerified": profile_is_verified(profile) if profile else bool(data.get("isVerified")),
             "verificationStatus": item.get("status"),
             "sessionId": admin_verification_session_id(item, data),
-            "verificationUrl": data.get("verificationUrl") or data.get("url") or decision.get("session_url") or decision.get("sessionUrl") or "",
+            "verificationUrl": data.get("verificationUrl") or data.get("url") or "",
             "liveness": admin_verification_score(liveness),
             "livenessMethod": data.get("livenessMethod") or liveness_check.get("method") or "",
             "ageEstimation": age_estimation,
@@ -13742,15 +13944,10 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
         placeholders = ", ".join(["%s"] * len(photo_ids))
         cursor.execute(
             f"""
-            SELECT pp.id, pp.profile_id, pp.media_file_id, pp.position, pp.status, pp.upload_status,
-                   pp.moderation_status, pp.moderation_reason, pp.public_url,
-                   pp.avatar_media_file_id, pp.created_at, pp.updated_at,
-                   mf.storage_key AS storage_key, mf.public_url AS media_public_url,
-                   amf.storage_key AS avatar_storage_key, amf.public_url AS avatar_public_url
-            FROM profile_photos pp
-            LEFT JOIN media_files mf ON mf.id = pp.media_file_id
-            LEFT JOIN media_files amf ON amf.id = pp.avatar_media_file_id
-            WHERE pp.id IN ({placeholders})
+            SELECT id, profile_id, position, status, upload_status, moderation_status,
+                   moderation_reason, public_url, avatar_media_file_id, created_at, updated_at
+            FROM profile_photos
+            WHERE id IN ({placeholders})
             """,
             sorted(photo_ids),
         )
@@ -13760,20 +13957,6 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
             for row in photos_by_id.values()
             if (profile_id := int_or_none(row.get("profile_id")))
         )
-
-    media_by_id: dict[int, dict[str, Any]] = {}
-    media_ids = sorted({
-        media_id
-        for item in items
-        if (media_id := int_or_none(as_dict(item.get("data")).get("mediaFileId") or as_dict(item.get("data")).get("avatarMediaFileId")))
-    })
-    if media_ids:
-        placeholders = ", ".join(["%s"] * len(media_ids))
-        cursor.execute(
-            f"SELECT id, storage_key, public_url FROM media_files WHERE id IN ({placeholders})",
-            media_ids,
-        )
-        media_by_id = {int(row["id"]): row for row in cursor.fetchall()}
 
     profiles_by_id: dict[int, dict[str, Any]] = {}
     if profile_ids:
@@ -13790,32 +13973,17 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
         photo_id = int_or_none(data.get("photoId") or data.get("profilePhotoId"))
         media_file_id = int_or_none(data.get("mediaFileId") or data.get("avatarMediaFileId"))
         photo = photos_by_id.get(photo_id or -1)
-        if not media_file_id and photo:
-            media_file_id = int_or_none(photo.get("media_file_id"))
         if not profile_id and photo:
             profile_id = int_or_none(photo.get("profile_id"))
         profile = profiles_by_id.get(profile_id or -1)
-        media = media_by_id.get(media_file_id or -1)
-        image_url = str((photo.get("public_url") if photo else None) or (media.get("public_url") if media else None) or data.get("publicUrl") or data.get("contentUrl") or data.get("avatarContentUrl") or "").strip()
-        content_url = ""
-        storage_key = (media.get("storage_key") if media else None)
-        if photo:
+        image_url = str(data.get("publicUrl") or "").strip()
+        if not image_url:
             if str(data.get("kind") or "") == "avatar_crop" and media_file_id:
-                storage_key = photo.get("avatar_storage_key") or storage_key
-                image_url = str(photo.get("avatar_public_url") or image_url).strip()
+                image_url = f"/api/admin/media/{media_file_id}/content"
+            elif photo_id:
+                image_url = f"/api/admin/profile-photos/{photo_id}/content"
             else:
-                storage_key = photo.get("storage_key") or storage_key
-                image_url = str(photo.get("media_public_url") or image_url).strip()
-        media_available = media_storage_available(storage_key, image_url)
-        if media_available:
-            if str(data.get("kind") or "") == "avatar_crop" and media_file_id:
-                content_url = f"/api/admin/media/{media_file_id}/content"
-            elif photo_id and photo:
-                content_url = f"/api/admin/profile-photos/{photo_id}/content"
-            elif media_file_id:
-                content_url = f"/api/admin/media/{media_file_id}/content"
-            else:
-                content_url = str(data.get("contentUrl") or data.get("avatarContentUrl") or "").strip()
+                image_url = str(data.get("contentUrl") or data.get("avatarContentUrl") or "").strip()
         photo_status = str(photo.get("status") if photo else data.get("photoStatus") or "").upper()
         reason = (
             (photo.get("moderation_reason") if photo else None)
@@ -13825,17 +13993,15 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
             or ""
         )
         item.update({
-            "profileId": profile_id if profile else None,
+            "profileId": profile_id,
             "profileName": (profile.get("display_name") if profile else None) or data.get("profileName") or item.get("title") or "No profile",
             "profileEmail": (profile.get("email") if profile else None) or data.get("email") or "",
             "profileStatus": (profile.get("status") if profile else None) or "",
             "photoId": photo_id,
             "mediaFileId": media_file_id,
             "publicUrl": image_url,
-            "contentUrl": content_url,
             "isPrimary": bool((photo and int_or_none(photo.get("position")) == 0) or int_or_none(data.get("position")) == 0),
-            "isDeleted": photo_status in {"DELETED", "REPLACED"} or bool(photo_id and not photo),
-            "isUnavailable": not media_available,
+            "isDeleted": photo_status in {"DELETED", "REPLACED"},
             "photoStatus": photo_status,
             "moderationReason": reason,
             "createdAt": (photo.get("created_at") if photo else None) or item.get("created_at"),
@@ -13860,92 +14026,25 @@ def admin_enrich_moderation_report_items(cursor, items: list[dict[str, Any]]) ->
     if profile_ids:
         placeholders = ", ".join(["%s"] * len(profile_ids))
         cursor.execute(
-            f"""
-            SELECT p.id, p.display_name, p.email, p.status, p.data,
-                   COALESCE(
-                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl')), ''),
-                     NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.photoUrl')), ''),
-                     (SELECT COALESCE(
-                        NULLIF(amf.public_url, ''),
-                        NULLIF(pph.public_url, ''),
-                        CASE
-                          WHEN pph.avatar_media_file_id IS NOT NULL
-                            THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
-                          ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
-                        END
-                      )
-                      FROM profile_photos pph
-                      LEFT JOIN media_files amf ON amf.id = pph.avatar_media_file_id
-                      WHERE pph.profile_id = p.id
-                        AND pph.status = 'ACTIVE'
-                        AND pph.moderation_status = 'APPROVED'
-                      ORDER BY pph.position ASC, pph.id ASC LIMIT 1)
-                   ) AS avatarUrl,
-                   (SELECT CASE
-                      WHEN pph.avatar_media_file_id IS NOT NULL
-                        THEN CONCAT('/api/admin/media/', pph.avatar_media_file_id, '/content')
-                      ELSE CONCAT('/api/admin/profile-photos/', pph.id, '/content')
-                    END
-                    FROM profile_photos pph
-                    WHERE pph.profile_id = p.id
-                      AND pph.status = 'ACTIVE'
-                      AND pph.moderation_status = 'APPROVED'
-                    ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl
-            FROM profiles p
-            WHERE p.id IN ({placeholders})
-            """,
+            f"SELECT id, display_name, email, status FROM profiles WHERE id IN ({placeholders})",
             sorted(profile_ids),
         )
         profiles_by_id = {int(row["id"]): row for row in cursor.fetchall()}
 
-    report_ids = [str(item["id"]) for item in items if item.get("id") is not None]
-    audit_by_report_id: dict[str, dict[str, Any]] = {}
-    if report_ids:
-        placeholders = ", ".join(["%s"] * len(report_ids))
-        cursor.execute(
-            f"""
-            SELECT DISTINCT ON (target_id) target_id, actor, created_at
-            FROM admin_audit_log
-            WHERE target_type = 'moderation-reports'
-              AND target_id IN ({placeholders})
-              AND action IN ('update', 'resolve_report', 'dismiss_report')
-            ORDER BY target_id, created_at DESC, id DESC
-            """,
-            report_ids,
-        )
-        audit_by_report_id = {
-            str(row["target_id"]): row for row in cursor.fetchall()
-        }
-
     for item, data, reporter_id, reported_id in parsed:
         reporter = profiles_by_id.get(reporter_id or -1)
         reported = profiles_by_id.get(reported_id or -1)
-        audit_entry = audit_by_report_id.get(str(item.get("id"))) or {}
         item.update({
             "reporterProfileId": reporter_id,
             "reporterName": (reporter.get("display_name") if reporter else None) or data.get("reporterName") or data.get("reporterEmail") or "Unknown",
             "reporterEmail": (reporter.get("email") if reporter else None) or data.get("reporterEmail") or "",
-            "reporterAvatarUrl": (reporter.get("avatarUrl") if reporter else None) or "",
-            "reporterAvatarFallbackUrl": (reporter.get("avatarFallbackUrl") if reporter else None) or "",
-            "reporterIsVerified": profile_is_verified(reporter),
-            "reporterIsPremium": profile_is_premium(reporter),
-            "reporterStatus": (reporter.get("status") if reporter else None) or "",
             "reportedProfileId": reported_id,
             "reportedName": (reported.get("display_name") if reported else None) or data.get("reportedName") or data.get("targetName") or data.get("reportedEmail") or "Unknown",
             "reportedEmail": (reported.get("email") if reported else None) or data.get("reportedEmail") or data.get("targetEmail") or "",
-            "reportedAvatarUrl": (reported.get("avatarUrl") if reported else None) or "",
-            "reportedAvatarFallbackUrl": (reported.get("avatarFallbackUrl") if reported else None) or "",
-            "reportedIsVerified": profile_is_verified(reported),
-            "reportedIsPremium": profile_is_premium(reported),
-            "reportedStatus": (reported.get("status") if reported else None) or "",
             "reason": data.get("reason") or data.get("reportReason") or item.get("title") or "—",
             "description": data.get("description") or data.get("details") or data.get("message") or "—",
             "details": data.get("details") or data.get("description") or data.get("message") or "—",
             "createdAt": data.get("createdAt") or item.get("created_at"),
-            "resolvedBy": data.get("resolvedBy") or data.get("reviewedBy") or audit_entry.get("actor") or "",
-            "resolvedByName": data.get("resolvedByName") or data.get("reviewedByName") or "",
-            "resolutionNote": data.get("resolutionNote") or data.get("resolution") or data.get("actionNote") or data.get("note") or "",
-            "resolvedAt": data.get("resolvedAt") or data.get("reviewedAt") or audit_entry.get("created_at") or item.get("updated_at"),
         })
     return items
 
@@ -14007,17 +14106,14 @@ def build_list_where(
     filter_values = {
         "status": status_filter,
         "country": country,
-        "city": (city or "").strip(),
+        "city": city,
         "role": role,
         "locale": locale,
         "profileType": profile_type,
     }
     for key, value in filter_values.items():
         if value and key in filters:
-            if key == "city":
-                where_parts.append(f"STRPOS(LOWER(COALESCE({filters[key]}, '')), LOWER(%s)) > 0")
-            else:
-                where_parts.append(f"{filters[key]} = %s")
+            where_parts.append(f"{filters[key]} = %s")
             params.append(value)
     if group and definition.get("table") == "app_entities":
         where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.group')) = %s")
@@ -14029,17 +14125,23 @@ def build_list_where(
                 where_parts.append(f"({expr} IS NOT NULL AND {expr} <> '')")
             elif str(value).lower() in {"0", "false", "no", "missing"}:
                 where_parts.append(f"({expr} IS NULL OR {expr} = '')")
-    mismatch_value = str(mismatch or "").strip().lower()
-    if mismatch_value in {"any", "hard"} and definition.get("table") == "profiles":
+    mismatch_value = str(mismatch or "").lower()
+    if mismatch_value in {"any", "hard"} and "profileType" in filters:
+        mismatch_expression = (
+            "LOWER(COALESCE("
+            "JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatchType')), "
+            "JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationMismatch')), "
+            "JSON_UNQUOTE(JSON_EXTRACT(data, '$.locationRisk')), ''))"
+        )
         if mismatch_value == "hard":
-            where_parts.append(f"({ADMIN_LOCATION_MISMATCH_SQL}) = 'hard'")
+            where_parts.append(f"{mismatch_expression} = 'hard'")
         else:
-            where_parts.append(f"({ADMIN_LOCATION_MISMATCH_SQL}) IN ('hard', 'soft')")
+            where_parts.append(f"{mismatch_expression} IN ('hard', 'soft', 'true', '1')")
     if definition.get("table") == "profiles":
         if is_donor and str(is_donor).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) <> ''")
         if seeks_co_parent and str(seeks_co_parent).lower() in {"1", "true", "yes"}:
-            where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER')) = 1")
+            where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER'))")
         if is_online and str(is_online).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.isOnline')) IN ('true', '1')")
     return ("WHERE " + " AND ".join(where_parts)) if where_parts else "", params
@@ -14092,13 +14194,11 @@ def admin_list(
         order = definition["order"]
         if view in {"users", "profiles"}:
             order = {
-                "newest": "created_at DESC NULLS LAST, id DESC",
-                "oldest": "created_at ASC NULLS LAST, id ASC",
-                "blocked": '"blocksCount" DESC, created_at DESC NULLS LAST, id DESC',
-                "reported": '"reportsCount" DESC, created_at DESC NULLS LAST, id DESC',
+                "newest": "id DESC",
+                "oldest": "id ASC",
                 "name": "display_name ASC, id DESC",
                 "updated": "updated_at DESC, id DESC",
-            }.get(str(order_by or "newest").strip().lower(), order)
+            }.get(str(order_by or "").lower(), order)
         with db_cursor() as (_, cursor):
             cursor.execute(f"SELECT COUNT(*) AS cnt FROM `{table}` {where}", params)
             total = int(cursor.fetchone()["cnt"])
@@ -14115,13 +14215,6 @@ def admin_list(
             items = [normalize_row(row) for row in cursor.fetchall()]
             if view == "articles":
                 admin_enrich_article_items(cursor, items)
-            elif view == "clinics":
-                for item in items:
-                    partner_name, partner_email = admin_clinic_partner(
-                        as_dict(item.get("data")), item.get("name")
-                    )
-                    item["partnerName"] = partner_name or None
-                    item["partnerEmail"] = partner_email
         return {"items": items, "total": total, "limit": limit, "offset": offset, "view": view}
 
     entity_type = ADMIN_ENTITY_VIEWS.get(view)
@@ -14143,28 +14236,11 @@ def admin_list(
         where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.group')) = %s")
         params.append(group)
     if entity_type == "subscription" and plan:
-        plan_key = plan.strip().upper()
-        plan_aliases = {
-            "MONTHLY": ("MONTHLY", "PREMIUM_MONTHLY"),
-            "PREMIUM_MONTHLY": ("MONTHLY", "PREMIUM_MONTHLY"),
-            "QUARTERLY": ("QUARTERLY", "PREMIUM_QUARTERLY"),
-            "PREMIUM_QUARTERLY": ("QUARTERLY", "PREMIUM_QUARTERLY"),
-        }.get(plan_key, (plan_key,))
-        placeholders = ", ".join(["%s"] * len(plan_aliases))
-        where_parts.append(f"UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) IN ({placeholders})")
-        params.extend(plan_aliases)
+        where_parts.append("UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.plan')), '')) = %s")
+        params.append(plan.upper())
     if entity_type == "subscription" and source:
-        source_key = source.strip().upper().replace("-", "_").replace(" ", "_")
-        source_aliases = {
-            "MANUAL": ("MANUAL", "MANUAL_REVIEW", "MEMBER_REQUEST"),
-            "MANUAL_REVIEW": ("MANUAL", "MANUAL_REVIEW", "MEMBER_REQUEST"),
-            "STRIPE": ("STRIPE",),
-            "APP_STORE": ("APP_STORE", "IOS", "APPLE"),
-            "PLAY_STORE": ("PLAY_STORE", "GOOGLE_PLAY", "ANDROID"),
-        }.get(source_key, (source_key,))
-        placeholders = ", ".join(["%s"] * len(source_aliases))
-        where_parts.append(f"UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), '')) IN ({placeholders})")
-        params.extend(source_aliases)
+        where_parts.append("UPPER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.source')), '')) = %s")
+        params.append(source.upper())
     where = "WHERE " + " AND ".join(where_parts)
     entity_order = "id ASC" if entity_type == "category" else "id DESC"
     with db_cursor() as (conn, cursor):
@@ -14306,25 +14382,6 @@ def admin_verification_detail(
 ):
     with db_cursor() as (_, cursor):
         item = fetch_admin_verification(cursor, verification_id)
-        session_id = str(item.get("sessionId") or "").strip()
-        try:
-            provider_session_id = str(uuid.UUID(session_id))
-        except ValueError:
-            provider_session_id = ""
-        if didit_is_configured() and provider_session_id:
-            try:
-                provider_decision = didit_request(
-                    f"session/{provider_session_id}/decision/",
-                    allow_not_found=True,
-                )
-            except HTTPException:
-                provider_decision = {}
-            if provider_decision:
-                data = as_dict(item.get("data"))
-                data["decision"] = provider_decision
-                item["data"] = data
-                item["decisionRawData"] = provider_decision
-                admin_enrich_verification_items(cursor, [item])
     return {"item": item}
 
 
@@ -14361,6 +14418,7 @@ def admin_approve_verification(
                 "verificationProvider": data.get("provider") or "manual",
             },
         )
+        reward_referral_if_pending(cursor, profile_id)
         send_support_status_message(
             cursor,
             profile_id,
@@ -14376,51 +14434,6 @@ def admin_approve_verification(
         )
         conn.commit()
     return {"ok": True, "id": item["id"], "status": "APPROVED"}
-
-
-@app.post("/api/admin/verifications/{verification_id}/revoke")
-def admin_revoke_verification(
-    verification_id: str,
-    actor: str = Depends(require_admin),
-):
-    with db_cursor() as (conn, cursor):
-        item = fetch_admin_verification(cursor, verification_id, for_update=True)
-        data = as_dict(item.get("data"))
-        profile_id = int_or_none(item.get("profileId") or data.get("profileId"))
-        if not profile_id:
-            raise HTTPException(
-                status_code=409,
-                detail="Verification session is not linked to a profile",
-            )
-        profile = fetch_profile(cursor, profile_id)
-        if not profile:
-            raise HTTPException(status_code=404, detail="Profile not found")
-        revoked_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
-        update_profile_data(
-            cursor,
-            profile_id,
-            {
-                "isVerified": False,
-                "verifiedAt": None,
-                "verificationRevokedAt": revoked_at,
-                "verificationRevokedBy": actor,
-            },
-        )
-        audit(
-            conn,
-            actor,
-            "VERIFICATION_REVOKED",
-            "verification",
-            item["id"],
-            {"profileId": profile_id, "sessionId": item.get("sessionId")},
-        )
-        conn.commit()
-    return {
-        "ok": True,
-        "id": item["id"],
-        "status": item.get("status"),
-        "profileVerified": False,
-    }
 
 
 @app.delete("/api/admin/verifications/{verification_id}")
@@ -14446,387 +14459,6 @@ def admin_delete_verification(
     return {"ok": True, "id": item["id"], "deleted": True}
 
 
-ADMIN_STORAGE_CATEGORY_SQL = """
-    CASE
-      WHEN mf.storage_key LIKE 'profiles/%%'
-        OR mf.storage_key LIKE 'quarantine/profiles/%%' THEN 'profile_photos'
-      WHEN mf.storage_key LIKE 'chat/%%'
-        AND COALESCE(mf.mime_type, '') LIKE 'image/%%' THEN 'chat_images'
-      WHEN mf.storage_key LIKE 'chat/%%'
-        OR mf.storage_key LIKE 'family-room/%%' THEN 'chat_files'
-      WHEN mf.storage_key LIKE 'clinics/%%' THEN 'clinic_logos'
-      WHEN mf.storage_key LIKE 'lawyers/%%' THEN 'lawyer_photos'
-      WHEN mf.storage_key LIKE 'articles/%%' THEN 'article_images'
-      ELSE NULL
-    END
-"""
-
-
-@app.get("/api/admin/storage")
-def admin_storage(
-    category: Literal[
-        "all",
-        "profile_photos",
-        "chat_images",
-        "chat_files",
-        "clinic_logos",
-        "lawyer_photos",
-        "article_images",
-    ] = "all",
-    user_id: str | None = Query(None, alias="userId", max_length=128),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    _admin: str = Depends(require_admin),
-):
-    normalized_user_id = str(user_id or "").strip()
-    category_sql = ADMIN_STORAGE_CATEGORY_SQL.strip()
-    summary = {
-        key: {"files": 0, "bytes": 0}
-        for key in (
-            "profile_photos",
-            "chat_images",
-            "chat_files",
-            "clinic_logos",
-            "lawyer_photos",
-            "article_images",
-        )
-    }
-
-    with db_cursor() as (_, cursor):
-        cursor.execute(
-            f"""
-            SELECT category, COUNT(*) AS files, COALESCE(SUM(bytes), 0) AS bytes
-            FROM (
-              SELECT {category_sql} AS category, COALESCE(mf.bytes, 0) AS bytes
-              FROM media_files mf
-            ) categorized
-            WHERE category IS NOT NULL
-            GROUP BY category
-            """
-        )
-        for item in cursor.fetchall():
-            key = str(item.get("category") or "")
-            if key in summary:
-                summary[key] = {
-                    "files": int(item.get("files") or 0),
-                    "bytes": int(item.get("bytes") or 0),
-                }
-
-        predicates = [f"({category_sql}) IS NOT NULL"]
-        params: list[Any] = []
-        if category != "all":
-            predicates.append(f"({category_sql}) = %s")
-            params.append(category)
-        if normalized_user_id:
-            cursor.execute(
-                """
-                SELECT id, data->>'id' AS sourceId
-                FROM profiles
-                WHERE data->>'id' = %s OR CAST(id AS TEXT) = %s
-                LIMIT 1
-                """,
-                (normalized_user_id, normalized_user_id),
-            )
-            filter_profile = cursor.fetchone() or {}
-            owner_values = {normalized_user_id}
-            if filter_profile.get("id") is not None:
-                owner_values.add(str(filter_profile["id"]))
-            if filter_profile.get("sourceId"):
-                owner_values.add(str(filter_profile["sourceId"]))
-            owner_placeholders = ", ".join(["%s"] * len(owner_values))
-            owner_params = list(owner_values)
-            predicates.append(
-                f"""
-                (
-                  COALESCE(mf.metadata->>'profileSourceId', '') IN ({owner_placeholders})
-                  OR COALESCE(mf.metadata->>'profileId', '') IN ({owner_placeholders})
-                  OR COALESCE(mf.metadata->>'senderProfileId', '') IN ({owner_placeholders})
-                )
-                """
-            )
-            params.extend(owner_params * 3)
-        where_sql = " AND ".join(f"({predicate.strip()})" for predicate in predicates)
-
-        cursor.execute(f"SELECT COUNT(*) AS total FROM media_files mf WHERE {where_sql}", params)
-        total_row = cursor.fetchone() or {}
-        total = int(total_row.get("total") or 0)
-        cursor.execute(
-            f"""
-            SELECT mf.id,
-                   mf.storage_key AS storageKey,
-                   mf.public_url AS publicUrl,
-                   mf.mime_type AS mimeType,
-                   mf.bytes,
-                   mf.created_at AS createdAt,
-                   mf.metadata,
-                   {category_sql} AS category
-            FROM media_files mf
-            WHERE {where_sql}
-            ORDER BY
-              CASE ({category_sql})
-                WHEN 'article_images' THEN 1
-                WHEN 'chat_images' THEN 2
-                WHEN 'chat_files' THEN 3
-                WHEN 'clinic_logos' THEN 4
-                WHEN 'lawyer_photos' THEN 5
-                WHEN 'profile_photos' THEN 6
-                ELSE 7
-              END,
-              mf.storage_key ASC,
-              mf.id ASC
-            LIMIT %s OFFSET %s
-            """,
-            [*params, limit, offset],
-        )
-        files = cursor.fetchall()
-
-        conversation_ids: set[int] = set()
-        local_profile_ids: set[int] = set()
-        source_profile_ids: set[str] = set()
-        clinic_ids: set[int] = set()
-        for item in files:
-            metadata = as_dict(item.get("metadata"))
-            profile_id = int_or_none(metadata.get("profileId") or metadata.get("senderProfileId"))
-            if profile_id:
-                local_profile_ids.add(profile_id)
-            source_id = str(metadata.get("profileSourceId") or "").strip()
-            storage_key = str(item.get("storageKey") or "")
-            parts = storage_key.removeprefix("quarantine/").split("/")
-            if not source_id and item.get("category") == "profile_photos" and len(parts) > 1:
-                source_id = parts[1]
-            if source_id:
-                source_profile_ids.add(source_id)
-            conversation_id = int_or_none(metadata.get("conversationId"))
-            if conversation_id:
-                conversation_ids.add(conversation_id)
-            clinic_id = int_or_none(metadata.get("clinicLocalId"))
-            if clinic_id:
-                clinic_ids.add(clinic_id)
-
-        conversations: dict[int, dict[str, Any]] = {}
-        if conversation_ids:
-            placeholders = ", ".join(["%s"] * len(conversation_ids))
-            cursor.execute(
-                f"SELECT id, profile_a_id, profile_b_id FROM conversations WHERE id IN ({placeholders})",
-                list(conversation_ids),
-            )
-            conversations = {int(item["id"]): item for item in cursor.fetchall()}
-            for conversation in conversations.values():
-                local_profile_ids.add(int(conversation["profile_a_id"]))
-                local_profile_ids.add(int(conversation["profile_b_id"]))
-
-        profile_predicates: list[str] = []
-        profile_params: list[Any] = []
-        if local_profile_ids:
-            placeholders = ", ".join(["%s"] * len(local_profile_ids))
-            profile_predicates.append(f"id IN ({placeholders})")
-            profile_params.extend(local_profile_ids)
-        if source_profile_ids:
-            placeholders = ", ".join(["%s"] * len(source_profile_ids))
-            profile_predicates.append(f"data->>'id' IN ({placeholders})")
-            profile_params.extend(source_profile_ids)
-        profiles_by_id: dict[int, dict[str, Any]] = {}
-        profiles_by_source: dict[str, dict[str, Any]] = {}
-        if profile_predicates:
-            cursor.execute(
-                f"""
-                SELECT id, display_name AS displayName, data->>'id' AS sourceId
-                FROM profiles
-                WHERE {' OR '.join(profile_predicates)}
-                """,
-                profile_params,
-            )
-            for profile in cursor.fetchall():
-                profiles_by_id[int(profile["id"])] = profile
-                profile_source_id = str(profile.get("sourceId") or "").strip()
-                if profile_source_id:
-                    profiles_by_source[profile_source_id] = profile
-
-        clinics_by_id: dict[int, dict[str, Any]] = {}
-        if clinic_ids:
-            placeholders = ", ".join(["%s"] * len(clinic_ids))
-            cursor.execute(
-                f"SELECT id, name FROM clinics WHERE id IN ({placeholders})",
-                list(clinic_ids),
-            )
-            clinics_by_id = {int(item["id"]): item for item in cursor.fetchall()}
-
-    items: list[dict[str, Any]] = []
-    category_labels = {
-        "profile_photos": "Profile",
-        "chat_images": "Chat",
-        "chat_files": "Chat",
-        "clinic_logos": "Clinic",
-        "lawyer_photos": "lawyers",
-        "article_images": "Article",
-    }
-    for file in files:
-        media_id = int(file["id"])
-        metadata = as_dict(file.get("metadata"))
-        storage_key = str(file.get("storageKey") or "")
-        normalized_key = storage_key.removeprefix("quarantine/")
-        parts = normalized_key.split("/")
-        file_category = str(file.get("category") or "")
-        local_profile_id = int_or_none(metadata.get("profileId") or metadata.get("senderProfileId"))
-        source_profile_id = str(metadata.get("profileSourceId") or "").strip()
-        if not source_profile_id and file_category == "profile_photos" and len(parts) > 1:
-            source_profile_id = parts[1]
-        profile = profiles_by_id.get(local_profile_id or -1) or profiles_by_source.get(source_profile_id)
-        route_profile_id = str((profile or {}).get("sourceId") or (profile or {}).get("id") or source_profile_id or local_profile_id or "")
-        related_label = ""
-        related_url = ""
-        if file_category == "profile_photos":
-            related_label = str((profile or {}).get("displayName") or "Anonymous")
-            if route_profile_id:
-                related_url = f"/users/{urllib.parse.quote(route_profile_id, safe='')}"
-        elif file_category in {"chat_images", "chat_files"}:
-            conversation_id = int_or_none(metadata.get("conversationId"))
-            conversation = conversations.get(conversation_id or -1)
-            sender = profiles_by_id.get(local_profile_id or -1)
-            recipient = None
-            if conversation and local_profile_id:
-                other_id = int(conversation["profile_b_id"] if int(conversation["profile_a_id"]) == local_profile_id else conversation["profile_a_id"])
-                recipient = profiles_by_id.get(other_id)
-            sender_name = str((sender or {}).get("displayName") or "Anonymous")
-            recipient_name = str((recipient or {}).get("displayName") or "Anonymous")
-            related_label = f"{sender_name} → {recipient_name}"
-            sender_route_id = str((sender or {}).get("sourceId") or (sender or {}).get("id") or local_profile_id or "")
-            if sender_route_id:
-                related_url = f"/users/{urllib.parse.quote(sender_route_id, safe='')}?tab=messages"
-                if conversation_id:
-                    related_url += f"&chat={conversation_id}"
-                route_profile_id = sender_route_id
-        elif file_category == "clinic_logos":
-            clinic = clinics_by_id.get(int_or_none(metadata.get("clinicLocalId")) or -1)
-            related_label = str((clinic or {}).get("name") or "Clinic")
-            related_url = "/clinics"
-        elif file_category == "lawyer_photos":
-            related_label = "Lawyer photo"
-            related_url = "/lawyers"
-        elif file_category == "article_images":
-            related_label = "Article image"
-            related_url = "/articles"
-
-        items.append(
-            {
-                "id": media_id,
-                "category": file_category,
-                "categoryLabel": category_labels.get(file_category, "File"),
-                "name": str(metadata.get("originalName") or Path(normalized_key).name or f"File {media_id}"),
-                "bytes": int(file.get("bytes") or 0),
-                "mimeType": str(file.get("mimeType") or "application/octet-stream"),
-                "createdAt": file.get("createdAt"),
-                "contentUrl": f"/admin/api/admin/media/{media_id}/content",
-                "profileId": route_profile_id or None,
-                "relatedLabel": related_label,
-                "relatedUrl": related_url,
-            }
-        )
-
-    return {
-        "items": items,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "totalFiles": sum(int(item["files"]) for item in summary.values()),
-        "totalBytes": sum(int(item["bytes"]) for item in summary.values()),
-        "summary": summary,
-        "filterActive": bool(normalized_user_id),
-    }
-
-
-@app.post("/api/admin/users/{profile_id}/photos/{photo_id}/avatar")
-async def admin_crop_user_photo(
-    profile_id: str,
-    photo_id: int,
-    file: UploadFile = File(...),
-    actor: str = Depends(require_admin),
-):
-    with db_cursor() as (_, cursor):
-        resolved_id = resolve_admin_profile_id(cursor, profile_id)
-        cursor.execute("SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s", (photo_id, resolved_id))
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Photo not found")
-    return await upload_profile_avatar(file, resolved_id, expected_photo_id=photo_id, actor=f"admin:{actor}")
-
-
-def permanently_delete_profile_photo(cursor, profile_id: int, photo_id: int) -> list[str]:
-    cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
-    if not cursor.fetchone():
-        raise HTTPException(status_code=404, detail="User not found")
-    cursor.execute(
-        "SELECT id, position, status, media_file_id, avatar_media_file_id FROM profile_photos WHERE id = %s AND profile_id = %s FOR UPDATE",
-        (photo_id, profile_id),
-    )
-    photo = cursor.fetchone()
-    if not photo:
-        raise HTTPException(status_code=404, detail="Photo not found")
-    media_ids = {int(value) for value in (photo.get("media_file_id"), photo.get("avatar_media_file_id")) if value is not None}
-    # Include previous crops owned by this photo, including rejected crops.
-    cursor.execute(
-        "SELECT id FROM media_files WHERE metadata->>'profileId' = %s AND metadata->>'primaryPhotoId' = %s",
-        (str(profile_id), str(photo_id)),
-    )
-    media_ids.update(int(row["id"]) for row in cursor.fetchall())
-    cursor.execute("DELETE FROM profile_photos WHERE id = %s AND profile_id = %s", (photo_id, profile_id))
-    cursor.execute(
-        """
-        DELETE FROM app_entities WHERE entity_type = 'moderation_photo'
-          AND (source_key = %s OR (data->>'profileId' = %s AND data->>'profilePhotoId' = %s))
-        """,
-        (f"profile-photo-{photo_id}", str(profile_id), str(photo_id)),
-    )
-    if int(photo.get("position") or 0) == 0 and str(photo.get("status") or "").upper() == "ACTIVE":
-        cursor.execute(
-            """
-            SELECT pp.id, COALESCE(NULLIF(mf.public_url, ''), pp.public_url) AS avatar_url
-            FROM profile_photos pp LEFT JOIN media_files mf ON mf.id = pp.avatar_media_file_id
-            WHERE pp.profile_id = %s AND pp.status = 'ACTIVE' AND pp.moderation_status = 'APPROVED'
-            ORDER BY pp.position ASC, pp.id ASC LIMIT 1
-            """,
-            (profile_id,),
-        )
-        replacement = cursor.fetchone()
-        avatar_url = replacement.get("avatar_url") if replacement else None
-        if replacement:
-            cursor.execute("UPDATE profile_photos SET position = 0, updated_at = CURRENT_TIMESTAMP WHERE id = %s", (replacement["id"],))
-        update_profile_data(cursor, profile_id, {"avatarUrl": avatar_url, "isWizardCompleted": bool(avatar_url), "isVerified": False, "verifiedAt": None, "verificationProvider": None})
-        reset_verification_after_primary_photo_change(cursor, profile_id)
-    storage_keys = []
-    for media_id in sorted(media_ids):
-        cursor.execute(
-            """
-            SELECT mf.id, mf.storage_key FROM media_files mf WHERE mf.id = %s
-              AND NOT EXISTS (SELECT 1 FROM profile_photos pp WHERE pp.media_file_id = mf.id OR pp.avatar_media_file_id = mf.id)
-              AND NOT EXISTS (SELECT 1 FROM app_entities e WHERE e.data->>'mediaFileId' = CAST(mf.id AS TEXT) OR e.data->>'avatarMediaFileId' = CAST(mf.id AS TEXT))
-              AND NOT EXISTS (SELECT 1 FROM profiles p WHERE NULLIF(p.data->>'avatarUrl', '') = mf.public_url)
-            FOR UPDATE
-            """,
-            (media_id,),
-        )
-        media = cursor.fetchone()
-        if not media:
-            continue
-        cursor.execute("DELETE FROM media_files WHERE id = %s", (media_id,))
-        storage_key = str(media.get("storage_key") or "")
-        if storage_key:
-            cursor.execute("SELECT id FROM media_files WHERE storage_key = %s LIMIT 1", (storage_key,))
-            if not cursor.fetchone():
-                storage_keys.append(storage_key)
-    return storage_keys
-
-
-@app.delete("/api/admin/users/{profile_id}/photos/{photo_id}")
-def admin_delete_user_photo(profile_id: str, photo_id: int, actor: str = Depends(require_admin)):
-    with db_cursor() as (conn, cursor):
-        resolved_id = resolve_admin_profile_id(cursor, profile_id)
-        storage_keys = permanently_delete_profile_photo(cursor, resolved_id, photo_id)
-        audit(conn, actor, "permanent_delete", "profile_photos", photo_id, {"profileId": resolved_id})
-        conn.commit()
-    remove_deleted_profile_files(storage_keys)
-    return {"ok": True, "id": photo_id, "deleted": True}
-
-
 @app.get("/api/admin/profile-photos/{photo_id}/content")
 def admin_profile_photo_content(photo_id: int, _admin: str = Depends(require_admin)):
     with db_cursor() as (_, cursor):
@@ -14834,7 +14466,7 @@ def admin_profile_photo_content(photo_id: int, _admin: str = Depends(require_adm
             """
             SELECT pp.public_url AS publicUrl, mf.storage_key AS storageKey, mf.mime_type AS mimeType
             FROM profile_photos pp
-            LEFT JOIN media_files mf ON mf.id = pp.media_file_id
+            JOIN media_files mf ON mf.id = pp.media_file_id
             WHERE pp.id = %s
             LIMIT 1
             """,
@@ -14861,7 +14493,7 @@ def admin_media_content(media_file_id: int, _admin: str = Depends(require_admin)
         media = cursor.fetchone()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
-    return profile_photo_content_response(media, image_only=False)
+    return profile_photo_content_response(media)
 
 
 @app.get("/api/admin/filter-options")
@@ -14882,20 +14514,18 @@ def admin_filter_options(_admin: str = Depends(require_admin)):
             """
         )
         profile_types = cursor.fetchall()
-        profile_countries = {}
-        for profile_role in ("USER", "PARTNER"):
-            cursor.execute(
-                """
-                SELECT data ->> 'country' AS value, COUNT(*) AS count
-                FROM profiles
-                WHERE role = %s
-                  AND NULLIF(TRIM(data ->> 'country'), '') IS NOT NULL
-                GROUP BY value
-                ORDER BY count DESC, value ASC
-                """,
-                (profile_role,),
-            )
-            profile_countries[profile_role] = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) AS value, COUNT(*) AS count
+            FROM profiles
+            WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) IS NOT NULL
+              AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) <> ''
+            GROUP BY value
+            ORDER BY count DESC
+            LIMIT 250
+            """
+        )
+        user_countries = cursor.fetchall()
         cursor.execute("SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM clinics WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY count DESC LIMIT 250")
         clinic_countries = cursor.fetchall()
         cursor.execute("SELECT COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) AS value, COUNT(*) AS count FROM lawyers WHERE COALESCE(NULLIF(country, ''), NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')), '')) IS NOT NULL GROUP BY value ORDER BY count DESC LIMIT 250")
@@ -14921,8 +14551,7 @@ def admin_filter_options(_admin: str = Depends(require_admin)):
         "roles": roles,
         "profileStatuses": profile_statuses,
         "profileTypes": profile_types,
-        "userCountries": profile_countries["USER"],
-        "partnerCountries": profile_countries["PARTNER"],
+        "userCountries": user_countries,
         "clinicCountries": clinic_countries,
         "lawyerCountries": lawyer_countries,
         "clinicStatuses": clinic_statuses,
@@ -15204,42 +14833,6 @@ def admin_update_item(
 ):
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
-    if view == "moderation-reports":
-        if not str(item_id).isdigit():
-            raise HTTPException(status_code=422, detail="Report id must be numeric")
-        decision = str(payload.values.get("status") or "").upper()
-        if decision not in {"RESOLVED", "DISMISSED"}:
-            raise HTTPException(status_code=422, detail="Choose RESOLVED or DISMISSED for a report")
-        with db_cursor() as (conn, cursor):
-            cursor.execute(
-                "SELECT status, data FROM app_entities WHERE id = %s AND entity_type = 'moderation_report' FOR UPDATE",
-                (int(item_id),),
-            )
-            report = cursor.fetchone()
-            if not report:
-                raise HTTPException(status_code=404, detail="Report not found")
-            if str(report.get("status") or "").upper() != "PENDING":
-                raise HTTPException(status_code=409, detail="This report has already been reviewed")
-            reviewed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
-            data = as_dict(report.get("data")).copy()
-            data.update({
-                "resolvedBy": actor,
-                "resolvedAt": reviewed_at,
-            })
-            cursor.execute(
-                "UPDATE app_entities SET status = %s, data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = 'moderation_report'",
-                (decision, json.dumps(data, ensure_ascii=False), int(item_id)),
-            )
-            audit(
-                conn,
-                actor,
-                "resolve_report" if decision == "RESOLVED" else "dismiss_report",
-                "moderation-reports",
-                int(item_id),
-                {"status": decision},
-            )
-            conn.commit()
-        return {"ok": True, "view": view, "id": int(item_id), "updated": {"status": decision}}
     if view == "moderation-photos":
         if not str(item_id).isdigit():
             raise HTTPException(status_code=422, detail="Photo moderation id must be numeric")
@@ -15580,6 +15173,9 @@ def public_clinics(
     if q:
         where += " AND POSITION(LOWER(%s) IN LOWER(COALESCE(name, ''))) > 0"
         params.append(directory_name_search_value(q))
+    # Alena: the country filter needs to allow several countries at once,
+    # not just one - mirrors member_catalog()'s own country: list[str]
+    # pattern (repeated ?country=.. params, not comma-joined).
     countries = [str(value).strip() for value in (country or []) if str(value).strip()]
     if countries:
         where += " AND country IN (" + ",".join(["%s"] * len(countries)) + ")"
@@ -15592,9 +15188,18 @@ def public_clinics(
         service_tokens.extend(CLINIC_SERVICE_GROUPS.get(str(category).strip(), ()))
     service_tokens = list(dict.fromkeys(service_tokens))
     if service_tokens:
+        # Was CAST(data AS CHAR) - MySQL's idiom for "stringify this JSON
+        # blob so I can LIKE-search it". In real Postgres, CAST(x AS CHAR)
+        # resolves to CHAR(1) (bpchar with an implicit length of 1), which
+        # truncates the whole JSON blob down to its first character - so
+        # this filter almost certainly matched nothing (or matched
+        # everything/nothing at random depending on that first byte),
+        # silently. data::text is the correct native Postgres cast to the
+        # full string representation - same LIKE-based search, correct cast.
         where += " AND (" + " OR ".join(["data::text LIKE %s"] * len(service_tokens)) + ")"
         params.extend([f"%{value}%" for value in service_tokens])
     if language:
+        # Same CAST(data AS CHAR) -> data::text fix as above.
         where += " AND data::text LIKE %s"
         params.append(f'%"{language.strip().lower()}"%')
     with db_cursor() as (_, cursor):
@@ -15680,6 +15285,11 @@ def public_lawyers(
         params.append(city)
     areas = [str(value).strip() for value in (practiceArea or []) if str(value).strip()]
     if areas:
+        # Same CAST(data AS CHAR) -> data::text fix as public_clinics()
+        # above - MySQL's stringify-for-LIKE idiom truncates to 1 char
+        # under real Postgres's CHAR type, so this filter was silently
+        # broken (both single- and multi-select category/practice-area
+        # filtering never actually matched anything in production).
         where += " AND (" + " OR ".join(["data::text LIKE %s"] * len(areas)) + ")"
         params.extend([f"%{value}%" for value in areas])
     with db_cursor() as (_, cursor):
@@ -15734,6 +15344,7 @@ def member_catalog(
     donorType: list[str] | None = Query(None),
     lookingFor: list[str] | None = Query(None),
     verifiedOnly: bool = Query(False),
+    videoVerifiedOnly: bool = Query(False),
     days: int | None = Query(None, ge=1, le=30),
     ageMin: int | None = Query(None, ge=18, le=100),
     ageMax: int | None = Query(None, ge=18, le=100),
@@ -15837,6 +15448,8 @@ def member_catalog(
             params.extend(looking_for)
         if verifiedOnly:
             where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVerified')), 'false') = 'true'")
+        if videoVerifiedOnly:
+            where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVideoVerified')), 'false') = 'true'")
         if days is not None:
             where_parts.append("created_at >= %s")
             params.append(database_datetime(now_utc() - timedelta(days=days)))
@@ -15870,6 +15483,7 @@ def member_catalog(
                    JSON_EXTRACT(data, '$.donorType') AS "donorType",
                    JSON_EXTRACT(data, '$.lookingFor') AS "lookingFor",
                    JSON_EXTRACT(data, '$.isVerified') AS "isVerified",
+                   JSON_EXTRACT(data, '$.isVideoVerified') AS "isVideoVerified",
                    JSON_EXTRACT(data, '$.isPremium') AS "isPremium",
                    EXISTS (
                      SELECT 1
@@ -16015,7 +15629,7 @@ def member_catalog_detail(
             if has_active_block(cursor, viewer_profile_id, target_profile_id):
                 raise HTTPException(status_code=404, detail="Profile not found")
             profile = fetch_profile(cursor, target_profile_id)
-            if not profile_is_visible_to_member(cursor, viewer_profile_id, profile):
+            if not profile_is_visible_in_catalog(profile):
                 raise HTTPException(status_code=404, detail="Profile not found")
             notify_profile_view = record_profile_view(cursor, viewer_profile_id, target_profile_id)
             conn.commit()
@@ -16063,7 +15677,7 @@ def public_catalog(
         "role = 'USER'",
         "status = 'ACTIVE'",
         catalog_completion_sql(),
-        "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.visibleInCatalog')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVisibleInCatalog')), 'true') <> 'false'",
+        "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.visibleInCatalog')), 'true') <> 'false'",
         "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isSystemUser')), 'false') <> 'true'",
     ]
     if viewer_profile_id:
@@ -16162,7 +15776,7 @@ def public_catalog_detail(
               AND role = 'USER'
               AND status = 'ACTIVE'
               AND {catalog_completion_sql()}
-              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.visibleInCatalog')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVisibleInCatalog')), 'true') <> 'false'
+              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.visibleInCatalog')), 'true') <> 'false'
             LIMIT 1
             """,
             params,
@@ -16239,8 +15853,8 @@ def public_articles(
 
 
 @app.get("/api/public/articles/{locale}/{slug}")
-def public_article(locale: str, slug: str, preview: bool = Query(False)):
-    """Return one article for the React reader, including drafts in preview mode."""
+def public_article(locale: str, slug: str):
+    """Return one published article for the React public reader."""
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
@@ -16248,18 +15862,13 @@ def public_article(locale: str, slug: str, preview: bool = Query(False)):
                    published_at, created_at, updated_at
             FROM articles
             WHERE locale = CASE
-                WHEN EXISTS (
-                  SELECT 1 FROM articles locale_check
-                  WHERE locale_check.locale = %s
-                    AND (%s OR locale_check.status = 'PUBLISHED')
-                ) THEN %s
+                WHEN EXISTS (SELECT 1 FROM articles locale_check WHERE locale_check.locale = %s AND locale_check.status = 'PUBLISHED') THEN %s
                 ELSE 'en'
               END
-              AND slug = %s
-              AND (%s OR status = 'PUBLISHED')
+              AND slug = %s AND status = 'PUBLISHED'
             LIMIT 1
             """,
-            (locale, preview, locale, slug, preview),
+            (locale, locale, slug),
         )
         row = cursor.fetchone()
     if not row:
@@ -16267,6 +15876,14 @@ def public_article(locale: str, slug: str, preview: bool = Query(False)):
     item = normalize_row(row)
     item["meta"] = public_safe_data(as_dict(item.get("meta")))
     item["category"] = inferred_article_category(str(item.get("title") or ""), str(item.get("slug") or ""), item["meta"])
+    # Item 3 - "next"/"previous article" links on the detail screen.
+    # Same effective ordering as public_articles() (COALESCE(published_at,
+    # created_at) DESC, id DESC) - "prev" is the neighbor shown just above
+    # this one in that list (newer), "next" is the neighbor shown just
+    # below (older), matching how the list itself reads top to bottom.
+    # Scoped to the same resolved locale as this article (item["locale"],
+    # not the raw request locale) so the neighbors are ones the reader
+    # could actually have navigated here from.
     with db_cursor() as (_, cursor):
         cursor.execute(
             """

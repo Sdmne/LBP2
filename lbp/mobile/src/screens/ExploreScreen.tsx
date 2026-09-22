@@ -120,6 +120,11 @@ export default function ExploreScreen() {
           <Text style={styles.toolDesc}>{t("explore.tool.familyPlan.desc")}</Text>
           <Text style={styles.toolTag}>{t("explore.tool.familyPlan.tag")}</Text>
         </Pressable>
+        <Pressable style={styles.toolChip} onPress={() => navigation.navigate("CostCalculator")}>
+          <Text style={styles.toolTitle}>{t("explore.tool.costCalculator.title")}</Text>
+          <Text style={styles.toolDesc}>{t("explore.tool.costCalculator.desc")}</Text>
+          <Text style={styles.toolTag}>{t("explore.tool.costCalculator.tag")}</Text>
+        </Pressable>
       </View>
 
       {/* Prototype's .trust-strip: linear-gradient(135deg,var(--tint),var(--tint-pink)), not a flat tint. */}
@@ -162,13 +167,23 @@ export default function ExploreScreen() {
           <Text style={styles.guideChevron}>{"›"}</Text>
         </Pressable>
         <Pressable
-          style={[styles.guideRow, styles.guideRowLast]}
+          style={styles.guideRow}
           onPress={() => navigation.navigate("Directory", { initialKind: "lawyers" })}
         >
           <View style={[styles.guideIconWrap, { backgroundColor: colors.tintPink }]}>
             <Feather name="briefcase" size={17} color={colors.pink} />
           </View>
           <Text style={styles.guideLabel}>{t("directory.lawyers")}</Text>
+          <Text style={styles.guideChevron}>{"›"}</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.guideRow, styles.guideRowLast]}
+          onPress={() => navigation.navigate("SafetyCheckIn")}
+        >
+          <View style={[styles.guideIconWrap, { backgroundColor: colors.tint }]}>
+            <Feather name="shield" size={17} color={colors.blue} />
+          </View>
+          <Text style={styles.guideLabel}>{t("explore.linkSafetyCheckIn")}</Text>
           <Text style={styles.guideChevron}>{"›"}</Text>
         </Pressable>
       </View>

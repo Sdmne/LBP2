@@ -25,7 +25,8 @@ export default function ProfileDetailSections({ profile }: { profile: ProfileDet
   const { t } = useI18n();
   const bio = firstString(profile.data, ["bio", "about", "aboutMe", "description"]);
   const lookingFor = dataList(profile.data, "lookingFor");
-  const contactWithChild = dataString(profile.data, "desiredDonorContact");
+  const contactWithChildRaw = dataString(profile.data, "desiredDonorContact");
+  const contactWithChild = contactWithChildRaw ? catalogOptionLabel("donorContact", contactWithChildRaw) : "";
   const languages = dataList(profile.data, "languages");
   const detailRows = buildDetailRows(t, profile.data);
 

@@ -41,7 +41,13 @@ export default function FiltersScreen({ navigation, route }: Props) {
   const [cities, setCities] = useState<CatalogFilterOptionRow[]>([]);
   const [loadingCountries, setLoadingCountries] = useState(true);
   const [loadingCities, setLoadingCities] = useState(false);
-  const [picker, setPicker] = useState<"country" | "city" | "profileTypes" | "donorTypes" | "lookingFor" | null>(null);
+  // Set from fetchCatalogFilterOptions' isPremium field (already fetched
+  // below for countries/cities - same response, no extra request). Gates
+  // whether the 5 rows below are real pickers or locked upsell rows.
+  const [isPremium, setIsPremium] = useState(false);
+  const [picker, setPicker] = useState<
+    "country" | "city" | "profileTypes" | "donorTypes" | "lookingFor" | "ethnicity" | "hairColor" | "eyeColor" | "education" | "religion" | null
+  >(null);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -56,7 +62,10 @@ export default function FiltersScreen({ navigation, route }: Props) {
   useEffect(() => {
     setLoadingCountries(true);
     fetchCatalogFilterOptions()
-      .then((res) => setCountries(res.countries))
+      .then((res) => {
+        setCountries(res.countries);
+        setIsPremium(res.isPremium);
+      })
       .catch(() => undefined)
       .finally(() => setLoadingCountries(false));
   }, []);
@@ -90,6 +99,28 @@ export default function FiltersScreen({ navigation, route }: Props) {
     return selected
       .map((value) => CATALOG_ENUM_OPTIONS[enumKey]?.find((o) => o.value === value)?.label || value)
       .join(", ");
+  }
+
+  // Premium filters (ethnicity/hairColor/eyeColor/education/religion) are
+  // all single-select strings, unlike the multi-select fields above.
+  const PREMIUM_FIELDS = ["ethnicity", "hairColor", "eyeColor", "education", "religion"] as const;
+  type PremiumField = (typeof PREMIUM_FIELDS)[number];
+
+  function premiumFieldLabel(field: PremiumField): string {
+    const value = filters[field];
+    if (!value) return t("filters.any");
+    return CATALOG_ENUM_OPTIONS[field]?.find((o) => o.value === value)?.label || value;
+  }
+
+  function openPremiumField(field: PremiumField) {
+    if (isPremium) {
+      setPicker(field);
+      return;
+    }
+    Alert.alert(t("filters.premiumLockedTitle"), t("filters.premiumLockedBody"), [
+      { text: t("filters.premiumLockedCancel"), style: "cancel" },
+      { text: t("filters.premiumLockedUpgrade"), onPress: () => navigation.navigate("Subscription") },
+    ]);
   }
 
   function applyAndClose() {
@@ -151,6 +182,14 @@ export default function FiltersScreen({ navigation, route }: Props) {
           />
         </View>
 
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleLabel}>{t("filters.videoVerifiedOnly")}</Text>
+          <Switch
+            value={filters.videoVerifiedOnly}
+            onValueChange={(value) => setFilters((prev) => ({ ...prev, videoVerifiedOnly: value }))}
+          />
+        </View>
+
         <View style={styles.ageRow}>
           <View style={styles.ageCol}>
             <Text style={[styles.label, styles.labelFirst]}>{t("filters.minAge")}</Text>
@@ -178,21 +217,31 @@ export default function FiltersScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        <Pressable
-          style={styles.lockRow}
-          onPress={() => Alert.alert(t("filters.premiumLockedTitle"))}
-        >
-          <Text style={styles.lockLabel}>
-            {"🔒 "}
-            {t("filters.ethnicity")}
-            {"  "}
-            <Text style={styles.lockLabelPremium}>{t("filters.premium")}</Text>
-          </Text>
-          <View style={styles.lockField}>
-            <Text style={styles.lockFieldText}>{t("filters.premiumLockedBody")}</Text>
+        {/* Premium appearance/background filters - real pickers for a
+            Premium viewer (matches the website's CatalogFilterPanel:
+            ethnicity/hairColor/eyeColor/education/religion), a single
+            locked-look row per field for everyone else that offers to open
+            Subscription rather than just silently doing nothing. Alena
+            flagged these as missing on mobile (screenshot of the website's
+            panel) - they previously rendered as one static, non-interactive
+            "Ethnicity — Unlock with Premium" row and nothing else. */}
+        {PREMIUM_FIELDS.map((field) => (
+          <View key={field}>
+            <Text style={styles.label}>
+              {t(`filters.${field}`)}
+              {!isPremium ? <Text style={styles.lockLabelPremium}>{"  " + t("filters.premium")}</Text> : null}
+            </Text>
+            <Pressable
+              style={[styles.field, isPremium && filters[field] && styles.fieldFilled, !isPremium && styles.fieldDisabled]}
+              onPress={() => openPremiumField(field)}
+            >
+              <Text style={[styles.fieldText, isPremium && filters[field] && styles.fieldTextFilled]} numberOfLines={1}>
+                {isPremium ? premiumFieldLabel(field) : t("filters.premiumLockedBody")}
+              </Text>
+              <Text style={styles.chevron}>{isPremium ? "⌄" : "🔒"}</Text>
+            </Pressable>
           </View>
-          <Text style={styles.note}>{t("filters.premiumMoreNote")}</Text>
-        </Pressable>
+        ))}
       </ScrollView>
 
       <View style={[styles.applyBar, { paddingBottom: spacing.lg + insets.bottom }]}>
@@ -263,6 +312,22 @@ export default function FiltersScreen({ navigation, route }: Props) {
           onClose={() => setPicker(null)}
         />
       </Modal>
+
+      {PREMIUM_FIELDS.map((field) => (
+        <Modal key={field} visible={picker === field} animationType="slide" onRequestClose={() => setPicker(null)}>
+          <OptionListPicker
+            title={t(`filters.${field}`)}
+            options={[{ value: "", label: t("filters.any") }, ...CATALOG_ENUM_OPTIONS[field]]}
+            selected={filters[field] ? [filters[field]] : []}
+            multi={false}
+            onToggle={(value) => {
+              setFilters((prev) => ({ ...prev, [field]: value }));
+              setPicker(null);
+            }}
+            onClose={() => setPicker(null)}
+          />
+        </Modal>
+      ))}
     </View>
   );
 }
@@ -296,19 +361,7 @@ const styles = StyleSheet.create({
   toggleLabel: { fontSize: 14.5, fontWeight: "600", color: colors.ink },
   ageRow: { flexDirection: "row", gap: 12 },
   ageCol: { flex: 1 },
-  lockRow: { marginTop: 18, opacity: 0.55 },
-  lockLabel: { fontSize: 14, fontWeight: "700", color: colors.ink, marginBottom: 7, flexDirection: "row", alignItems: "center" },
   lockLabelPremium: { color: colors.pink, fontWeight: "700" },
-  lockField: {
-    height: 48,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.card,
-    justifyContent: "center",
-    paddingHorizontal: 14,
-  },
-  lockFieldText: { fontSize: 12, color: "#a3a3a3" },
   applyBar: {
     position: "absolute",
     left: 0,
@@ -329,3 +382,4 @@ const styles = StyleSheet.create({
   },
   applyButtonText: { color: "#fff", fontSize: 14.5, fontWeight: "700" },
 });
+

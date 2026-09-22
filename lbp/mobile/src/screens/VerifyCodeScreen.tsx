@@ -16,12 +16,17 @@ import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 
 export default function VerifyCodeScreen() {
-  const { user, confirmEmailCode, resendEmailVerification, logout } = useAuth();
+  const { user, confirmEmailCode, resendEmailVerification, logout, initialEmailSendFailed } = useAuth();
   const { t, locale } = useI18n();
   const inputRef = useRef<TextInput>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Seeded from the signup response instead of starting blank - see
+  // AuthContext's initialEmailSendFailed comment. Read once at mount
+  // (deliberately not in the dependency array) so it shows the very first
+  // time this screen appears after a signup whose email never sent, but a
+  // later resend attempt's own notice still overwrites it normally.
+  const [notice, setNotice] = useState<string | null>(initialEmailSendFailed ? t("verifyCode.deliveryFailed") : null);
   const [seconds, setSeconds] = useState(60);
 
   useEffect(() => {
