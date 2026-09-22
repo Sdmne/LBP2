@@ -142,7 +142,7 @@ export default function SubscriptionScreen() {
     );
   }
 
-  const freeLikes = status.limits?.freeLikesPerDay ?? 3;
+  const freeLikes = status.limits?.freeLikesPerDay ?? 5;
   const premiumLikes = status.limits?.premiumLikesPerDay ?? 15;
 
   // Builder and Explore land on the same tier-comparison screen with Pro
@@ -374,7 +374,13 @@ function TierComparison({
           </TableGroup>
 
           <TableGroup title={t("subscription.groupConnect")}>
-            <TableRow label={t("subscription.connectRowLabel")} builder pro />
+            <TableRow label={t("subscription.connectRowLabel")} free="1" builder pro />
+            {/* FIX (2026-09-22, Alena): free accounts get a 1-profile
+                preview here too now (backend: PROFILE_VIEWS_FREE_PREVIEW_COUNT),
+                previously fully locked out with no row shown at all - see
+                the matching website row ("See profile visitors") this was
+                missing parity with. */}
+            <TableRow label={t("subscription.profileVisitorsRowLabel")} free="1" builder pro />
             <TableRow label={t("subscription.builderFeature4")} builder pro />
             <TableRow label={t("subscription.messageStartersFeature")} builder pro />
           </TableGroup>

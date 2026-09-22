@@ -12,14 +12,32 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://test.letsbeparents.com"
+        "EXPO_PUBLIC_API_BASE_URL": "https://test.letsbeparents.com",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBdlNeoWhdVQ-UAvjJEABsQeQ0Xo9XC-T0",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "let-s-be-parents.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "let-s-be-parents",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "let-s-be-parents.appspot.com",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "955790669399",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:955790669399:web:b0ccef1c25bc40d10fd512",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "955790669399-433cb7rspjjuou34b0lmvogb4ic3bq3j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "955790669399-g9m3liu8ag3alhkm9fmghd56q6dm826f.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "955790669399-b15sj78qmuc13g9k4dejbjanalbkpi76.apps.googleusercontent.com"
       },
       "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://test.letsbeparents.com"
+        "EXPO_PUBLIC_API_BASE_URL": "https://test.letsbeparents.com",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBdlNeoWhdVQ-UAvjJEABsQeQ0Xo9XC-T0",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "let-s-be-parents.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "let-s-be-parents",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "let-s-be-parents.appspot.com",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "955790669399",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:955790669399:web:b0ccef1c25bc40d10fd512",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "955790669399-433cb7rspjjuou34b0lmvogb4ic3bq3j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "955790669399-g9m3liu8ag3alhkm9fmghd56q6dm826f.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "955790669399-b15sj78qmuc13g9k4dejbjanalbkpi76.apps.googleusercontent.com"
       },
       "channel": "production"
     }

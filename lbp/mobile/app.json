@@ -29,7 +29,8 @@
               "com.letsBeParents.letsBeParents"
             ]
           }
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       },
       "bitcode": false
     },

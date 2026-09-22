@@ -181,7 +181,7 @@ PRIORITY_SUPPORT_MESSAGE = (
 )
 PARTNER_SERVICES_FILE = Path(__file__).with_name("partner_services.json")
 CATALOG_LOCATIONS_FILE = Path(__file__).with_name("catalog_locations.json")
-FREE_DAILY_LIKE_LIMIT = 3
+FREE_DAILY_LIKE_LIMIT = 5  # was 3 - raised per Alena, 2026-09-22
 PREMIUM_DAILY_LIKE_LIMIT = 15
 FREE_DAILY_COLD_CHAT_LIMIT = 0
 PREMIUM_DAILY_COLD_CHAT_LIMIT = 5
@@ -7683,7 +7683,8 @@ def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depend
     return {"ok": True, "liked": False}
 
 
-LIKES_FREE_PREVIEW_COUNT = 4
+LIKES_FREE_PREVIEW_COUNT = 1  # was 4 - lowered per Alena, 2026-09-22 (matches pricing table: free = 1)
+PROFILE_VIEWS_FREE_PREVIEW_COUNT = 1  # Alena, 2026-09-22: free accounts see 1 (blurred) profile visitor instead of none
 
 
 BLURRED_PREVIEW_DIR_NAME = "blurred-previews"
@@ -7983,45 +7984,53 @@ def member_profile_views(user: dict[str, Any] = Depends(require_user)):
             (profile_id, profile_id, profile_id),
         )
         total = int(cursor.fetchone()["cnt"])
+        # FIX (2026-09-22, Alena): free accounts used to get an empty items
+        # list here (locked out entirely) - now they get PROFILE_VIEWS_FREE_
+        # PREVIEW_COUNT (1) blurred/anonymized entries, same teaser pattern
+        # already used for member_likes()'s free preview (see
+        # LIKES_FREE_PREVIEW_COUNT / anonymized_admirer_summary above).
+        preview_limit = 100 if is_premium else PROFILE_VIEWS_FREE_PREVIEW_COUNT
+        cursor.execute(
+            f"""
+            SELECT e.id AS viewId, e.created_at, e.updated_at,
+                   e.data->>'viewCount' AS viewCount,
+                   e.data->>'lastViewedAt' AS lastViewedAt,
+                   p.id AS profileId, p.display_name AS displayName, p.role, p.status,
+                   p.data->>'country' AS country,
+                   p.data->>'city' AS city,
+                   p.data->>'avatarUrl' AS avatarUrl,
+                   p.data
+            FROM app_entities e
+            LEFT JOIN handover_source_map viewed_map
+              ON viewed_map.source_table = 'User'
+             AND viewed_map.source_id = (e.data->>'viewedId')
+            LEFT JOIN local_users viewed_user ON viewed_user.id = viewed_map.local_id
+            JOIN profiles p ON p.id = {viewer_expr}
+            WHERE e.entity_type = 'profile_view'
+              AND LOWER(COALESCE(e.status, 'active')) = 'active'
+              AND {viewed_expr} = %s
+              AND p.status = 'ACTIVE'
+              AND NOT EXISTS (
+                SELECT 1 FROM profile_blocks b
+                WHERE b.status = 'ACTIVE'
+                  AND ((b.blocker_profile_id = %s AND b.blocked_profile_id = p.id)
+                    OR (b.blocker_profile_id = p.id AND b.blocked_profile_id = %s))
+              )
+            ORDER BY COALESCE(e.data->>'lastViewedAt', e.updated_at::text, e.created_at::text) DESC
+            LIMIT %s
+            """,
+            (profile_id, profile_id, profile_id, preview_limit),
+        )
         items = []
-        if is_premium:
-            cursor.execute(
-                f"""
-                SELECT e.id AS viewId, e.created_at, e.updated_at,
-                       e.data->>'viewCount' AS viewCount,
-                       e.data->>'lastViewedAt' AS lastViewedAt,
-                       p.id AS profileId, p.display_name AS displayName, p.role, p.status,
-                       p.data->>'country' AS country,
-                       p.data->>'city' AS city,
-                       p.data->>'avatarUrl' AS avatarUrl,
-                       p.data
-                FROM app_entities e
-                LEFT JOIN handover_source_map viewed_map
-                  ON viewed_map.source_table = 'User'
-                 AND viewed_map.source_id = (e.data->>'viewedId')
-                LEFT JOIN local_users viewed_user ON viewed_user.id = viewed_map.local_id
-                JOIN profiles p ON p.id = {viewer_expr}
-                WHERE e.entity_type = 'profile_view'
-                  AND LOWER(COALESCE(e.status, 'active')) = 'active'
-                  AND {viewed_expr} = %s
-                  AND p.status = 'ACTIVE'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM profile_blocks b
-                    WHERE b.status = 'ACTIVE'
-                      AND ((b.blocker_profile_id = %s AND b.blocked_profile_id = p.id)
-                        OR (b.blocker_profile_id = p.id AND b.blocked_profile_id = %s))
-                  )
-                ORDER BY COALESCE(e.data->>'lastViewedAt', e.updated_at::text, e.created_at::text) DESC
-                LIMIT 100
-                """,
-                (profile_id, profile_id, profile_id),
-            )
-            for row in cursor.fetchall():
+        for row in cursor.fetchall():
+            if is_premium:
                 item = public_profile_summary({**row, "id": row["profileId"]})
-                item["viewId"] = row["viewId"]
-                item["viewCount"] = int_or_none(row.get("viewCount")) or 1
-                item["lastViewedAt"] = row.get("lastViewedAt") or row.get("updated_at") or row.get("created_at")
-                items.append(item)
+            else:
+                item = anonymized_admirer_summary({**row, "id": row["profileId"]})
+            item["viewId"] = row["viewId"]
+            item["viewCount"] = int_or_none(row.get("viewCount")) or 1
+            item["lastViewedAt"] = row.get("lastViewedAt") or row.get("updated_at") or row.get("created_at")
+            items.append(item)
     return {"items": items, "total": total, "locked": not is_premium}
 
 

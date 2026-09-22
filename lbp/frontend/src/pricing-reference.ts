@@ -7,7 +7,7 @@ export const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Free forever", altNote: "",
         tagline: "Create your profile and start discovering.",
-        features: ["Full profile & basic discovery", "3 likes per day", "Basic matching"],
+        features: ["Full profile & basic discovery", "5 likes per day", "Basic matching"],
         cta: "Get started free", badge: "",
       },
       {
@@ -30,12 +30,12 @@ export const PRICING_TEXT = {
     compareSub: "See exactly what's included in each plan.",
     matrixGroups: [
       { name: "Match better", rows: [
-        { label: "Daily likes", values: ["3", "15", "Unlimited"] },
+        { label: "Daily likes", values: ["5", "15", "Unlimited"] },
         { label: "Reach out first", values: ["", "5/day", "Unlimited"] },
         { label: "Advanced family filters", values: ["", "check", "check"] },
         { label: "Priority in catalog", values: ["", "check", "check"] },
-        { label: "See who liked you", values: ["", "check", "check"] },
-        { label: "See profile visitors", values: ["", "check", "check"] },
+        { label: "See who liked you", values: ["1", "check", "check"] },
+        { label: "See profile visitors", values: ["1", "check", "check"] },
       ] },
       { name: "Understand compatibility", rows: [
         { label: "Compatibility Score", values: ["", "check", "check"] },
@@ -65,7 +65,7 @@ export const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Бесплатно навсегда", altNote: "",
         tagline: "Создайте профиль и начните знакомиться.",
-        features: ["Полный профиль и базовый поиск", "3 лайка в день", "Базовый подбор пар"],
+        features: ["Полный профиль и базовый поиск", "5 лайков в день", "Базовый подбор пар"],
         cta: "Начать бесплатно", badge: "",
       },
       {
@@ -88,12 +88,12 @@ export const PRICING_TEXT = {
     compareSub: "Точный список того, что включено в каждый тариф.",
     matrixGroups: [
       { name: "Больше совпадений", rows: [
-        { label: "Лайки в день", values: ["3", "15", "Без ограничений"] },
+        { label: "Лайки в день", values: ["5", "15", "Без ограничений"] },
         { label: "Первым написать", values: ["", "5 в день", "Без ограничений"] },
         { label: "Расширенные семейные фильтры", values: ["", "check", "check"] },
         { label: "Приоритет в каталоге", values: ["", "check", "check"] },
-        { label: "Кто лайкнул вас", values: ["", "check", "check"] },
-        { label: "Кто смотрел профиль", values: ["", "check", "check"] },
+        { label: "Кто лайкнул вас", values: ["1", "check", "check"] },
+        { label: "Кто смотрел профиль", values: ["1", "check", "check"] },
       ] },
       { name: "Понимание совместимости", rows: [
         { label: "Оценка совместимости", values: ["", "check", "check"] },
@@ -123,7 +123,7 @@ export const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Gratis para siempre", altNote: "",
         tagline: "Crea tu perfil y empieza a descubrir.",
-        features: ["Perfil completo y descubrimiento básico", "3 likes al día", "Emparejamiento básico"],
+        features: ["Perfil completo y descubrimiento básico", "5 likes al día", "Emparejamiento básico"],
         cta: "Empieza gratis", badge: "",
       },
       {
@@ -146,12 +146,12 @@ export const PRICING_TEXT = {
     compareSub: "Mira exactamente qué incluye cada plan.",
     matrixGroups: [
       { name: "Mejores coincidencias", rows: [
-        { label: "Me gusta diarios", values: ["3", "15", "Ilimitado"] },
+        { label: "Me gusta diarios", values: ["5", "15", "Ilimitado"] },
         { label: "Escribir primero", values: ["", "5/día", "Ilimitado"] },
         { label: "Filtros familiares avanzados", values: ["", "check", "check"] },
         { label: "Prioridad en el catálogo", values: ["", "check", "check"] },
-        { label: "Ver quién te dio like", values: ["", "check", "check"] },
-        { label: "Ver visitantes del perfil", values: ["", "check", "check"] },
+        { label: "Ver quién te dio like", values: ["1", "check", "check"] },
+        { label: "Ver visitantes del perfil", values: ["1", "check", "check"] },
       ] },
       { name: "Entender la compatibilidad", rows: [
         { label: "Puntuación de compatibilidad", values: ["", "check", "check"] },
