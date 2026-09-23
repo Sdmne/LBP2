@@ -96,6 +96,35 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   // CFBundleURLTypes entry for "com.letsBeParents.letsBeParents" in
   // app.json, so the OS knows which app to hand the redirect back to.
   // See app.json's android.intentFilters / ios.infoPlist.CFBundleURLTypes.
+  // FOLLOW-UP (2026-09-22): that fix registered the intent-filter but
+  // Alena's own on-device test (a real <a href> link, opened in a real
+  // browser, not Claude's sandboxed viewers - see the OAuth test page
+  // delivered to her) showed tapping the link still did nothing.
+  // AndroidManifest.xml (via `npx expo prebuild --platform android`)
+  // confirmed the intent-filter WAS present with the exact declared
+  // scheme, mixed-case, matching Application.applicationId. Suspected
+  // root cause: Chrome/Android's URL canonicalization lowercases the
+  // scheme of a tapped link before resolving which app handles it
+  // (standard URL-normalization behavior), while Android's intent-filter
+  // scheme match is a case-SENSITIVE string compare against exactly what
+  // was declared in the manifest. A mixed-case scheme like
+  // "com.letsBeParents.letsBeParents" registered in the manifest never
+  // matches the lowercased "com.letsbeparents.letsbeparents" the browser
+  // actually dispatches - so nothing happens, silently, exactly what she
+  // saw. Can't just change the scheme's case globally: it's derived at
+  // runtime from Application.applicationId, which is fixed to the real
+  // (mixed-case) package name/bundle ID already published to the stores.
+  // Fix: app.json's android.intentFilters now registers BOTH the
+  // original mixed-case scheme AND an all-lowercase variant
+  // ("com.letsbeparents.letsbeparents") in the same intent-filter's data
+  // array, so whichever case the browser ends up dispatching, one entry
+  // matches. iOS was left untouched here - only Android was ever shown
+  // broken, and Apple's URL scheme matching is documented as
+  // case-insensitive - but if Apple sign-in / redirect ever shows this
+  // same silent-nothing symptom on iOS, this scheme-casing mismatch is
+  // the first thing to check there too. NOT YET RE-VERIFIED ON DEVICE -
+  // needs a fresh Android build (the installed build predates this
+  // change) and a repeat of the same real-browser link test.
   const [request, , promptAsync] = Google.useAuthRequest({
     iosClientId: GOOGLE_OAUTH_CLIENT_IDS.ios || undefined,
     androidClientId: GOOGLE_OAUTH_CLIENT_IDS.android || undefined,

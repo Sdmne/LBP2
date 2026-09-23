@@ -157,16 +157,11 @@ export default function SettingsScreen({ navigation }: Props) {
     // other three get real, permanent rows using the exact same
     // navigation/browser-opening logic WhatsNewScreen already uses for them.
     { icon: "sunrise", label: t("whatsnew.quizAiTitle"), onPress: () => navigation.navigate("CompatibilityQuiz") },
-    {
-      icon: "message-square",
-      label: t("whatsnew.askAiTitle"),
-      onPress: () => void WebBrowser.openBrowserAsync(`${SITE_BASE_URL}/${locale}/tools/ask-ai`),
-    },
-    {
-      icon: "edit-3",
-      label: t("whatsnew.agreementDraftTitle"),
-      onPress: () => void WebBrowser.openBrowserAsync(`${SITE_BASE_URL}/${locale}/tools/agreement-draft`),
-    },
+    // UPDATE (Sept 2026): these two used to open the free website tools in
+    // the in-app browser - now real native screens (Alena: "Конечно хочу",
+    // same request/reasoning as WhatsNewScreen.tsx's openItem()).
+    { icon: "message-square", label: t("whatsnew.askAiTitle"), onPress: () => navigation.navigate("AskAi") },
+    { icon: "edit-3", label: t("whatsnew.agreementDraftTitle"), onPress: () => navigation.navigate("AgreementDraft") },
     { icon: "slash", label: t("settings.blockedUsers"), onPress: () => navigation.navigate("BlockedUsers") },
     { icon: "bookmark", label: t("settings.savedListings"), onPress: () => navigation.navigate("Favourites") },
     { icon: "heart", label: t("settings.compatibilityProfile"), onPress: () => navigation.navigate("CompatibilityAnswers") },

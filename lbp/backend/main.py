@@ -7684,7 +7684,7 @@ def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depend
 
 
 LIKES_FREE_PREVIEW_COUNT = 1  # was 4 - lowered per Alena, 2026-09-22 (matches pricing table: free = 1)
-PROFILE_VIEWS_FREE_PREVIEW_COUNT = 1  # Alena, 2026-09-22: free accounts see 1 (blurred) profile visitor instead of none
+PROFILE_VIEWS_FREE_PREVIEW_COUNT = 2  # was 1 - raised per Alena, 2026-09-22 (pricing table: free = 2 visitors, 1 like)
 
 
 BLURRED_PREVIEW_DIR_NAME = "blurred-previews"
@@ -7826,10 +7826,21 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
             """,
             (profile_id, profile_id, profile_id, preview_limit),
         )
-        if is_premium:
-            likes_you = [public_profile_summary({**row, "id": row["profileId"]}) for row in cursor.fetchall()]
-        else:
-            likes_you = [anonymized_admirer_summary({**row, "id": row["profileId"]}) for row in cursor.fetchall()]
+        # UPDATE (2026-09-22, Alena): "должен быть виден 1 кто лайкнул и
+        # возможность перейти на него" - the free-tier row(s) here were
+        # being anonymized (anonymized_admirer_summary) even though
+        # preview_limit above already caps what's fetched to exactly
+        # LIKES_FREE_PREVIEW_COUNT for a non-Premium viewer. There's
+        # nothing left to hide within that already-bounded set: the
+        # anonymization was hiding the very rows the free tier is supposed
+        # to reveal, contradicting the pricing table's own "See who liked
+        # you: 1" row (SubscriptionScreen.tsx / pricing-reference.ts).
+        # Real identity (public_profile_summary, same call the Premium
+        # branch uses) for every row actually returned here now - anything
+        # beyond the free quota simply never gets fetched in the first
+        # place (LIMIT preview_limit above), so there's no separate
+        # "blur the rest of this batch" step needed.
+        likes_you = [public_profile_summary({**row, "id": row["profileId"]}) for row in cursor.fetchall()]
         cursor.execute(
             f"""
             SELECT l.id, l.created_at AS "likedAt",
@@ -7985,10 +7996,10 @@ def member_profile_views(user: dict[str, Any] = Depends(require_user)):
         )
         total = int(cursor.fetchone()["cnt"])
         # FIX (2026-09-22, Alena): free accounts used to get an empty items
-        # list here (locked out entirely) - now they get PROFILE_VIEWS_FREE_
-        # PREVIEW_COUNT (1) blurred/anonymized entries, same teaser pattern
-        # already used for member_likes()'s free preview (see
-        # LIKES_FREE_PREVIEW_COUNT / anonymized_admirer_summary above).
+        # list here (locked out entirely) - now they get
+        # PROFILE_VIEWS_FREE_PREVIEW_COUNT (2) real, tappable entries, same
+        # "reveal the free quota, don't fetch past it" pattern as
+        # member_likes()'s free preview just below.
         preview_limit = 100 if is_premium else PROFILE_VIEWS_FREE_PREVIEW_COUNT
         cursor.execute(
             f"""
@@ -8021,12 +8032,15 @@ def member_profile_views(user: dict[str, Any] = Depends(require_user)):
             """,
             (profile_id, profile_id, profile_id, preview_limit),
         )
+        # UPDATE (2026-09-22, Alena): same fix as member_likes() above -
+        # "2 visitors... и возможность перейти на них же". preview_limit
+        # already caps a free viewer's fetch to PROFILE_VIEWS_FREE_PREVIEW_
+        # COUNT, so every row actually returned here is within the free
+        # quota and should show real identity, not the anonymized/blurred
+        # placeholder this used to send unconditionally for non-Premium.
         items = []
         for row in cursor.fetchall():
-            if is_premium:
-                item = public_profile_summary({**row, "id": row["profileId"]})
-            else:
-                item = anonymized_admirer_summary({**row, "id": row["profileId"]})
+            item = public_profile_summary({**row, "id": row["profileId"]})
             item["viewId"] = row["viewId"]
             item["viewCount"] = int_or_none(row.get("viewCount")) or 1
             item["lastViewedAt"] = row.get("lastViewedAt") or row.get("updated_at") or row.get("created_at")

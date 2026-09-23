@@ -29,6 +29,8 @@ import SubscriptionScreen from "../screens/SubscriptionScreen";
 import LikesPaywallScreen from "../screens/LikesPaywallScreen";
 import PurchasesScreen from "../screens/PurchasesScreen";
 import AiAdvisorScreen from "../screens/AiAdvisorScreen";
+import AskAiScreen from "../screens/AskAiScreen";
+import AgreementDraftScreen from "../screens/AgreementDraftScreen";
 import PrivacyScreen from "../screens/PrivacyScreen";
 import BlockedUsersScreen from "../screens/BlockedUsersScreen";
 import ReportProfileScreen from "../screens/ReportProfileScreen";
@@ -87,6 +89,8 @@ export type RootStackParamList = {
   Purchases: undefined;
   LikesPaywall: undefined;
   AiAdvisor: undefined;
+  AskAi: undefined;
+  AgreementDraft: undefined;
   Privacy: undefined;
   BlockedUsers: undefined;
   ReportProfile: { profileId: number; displayName?: string | null };
@@ -272,6 +276,8 @@ export default function RootNavigator() {
             />
             <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: true, title: t("nav.settingsTitle") }} />
             <Stack.Screen name="AiAdvisor" component={AiAdvisorScreen} options={{ headerShown: true, title: t("nav.aiAdvisorTitle") }} />
+            <Stack.Screen name="AskAi" component={AskAiScreen} options={{ headerShown: true, title: t("whatsnew.askAiTitle") }} />
+            <Stack.Screen name="AgreementDraft" component={AgreementDraftScreen} options={{ headerShown: true, title: t("whatsnew.agreementDraftTitle") }} />
             <Stack.Screen name="Photos" component={PhotosScreen} options={{ headerShown: true, title: t("nav.photosTitle") }} />
             <Stack.Screen
               name="Verification"

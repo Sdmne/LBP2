@@ -375,12 +375,14 @@ function TierComparison({
 
           <TableGroup title={t("subscription.groupConnect")}>
             <TableRow label={t("subscription.connectRowLabel")} free="1" builder pro />
-            {/* FIX (2026-09-22, Alena): free accounts get a 1-profile
-                preview here too now (backend: PROFILE_VIEWS_FREE_PREVIEW_COUNT),
+            {/* FIX (2026-09-22, Alena): free accounts get a profile-visitor
+                preview here too now (backend: PROFILE_VIEWS_FREE_PREVIEW_COUNT,
+                raised from 1 to 2 same day per Alena's "2 кто смотрел и 1 кто
+                лайкнул" - visitors and likes are deliberately different counts),
                 previously fully locked out with no row shown at all - see
                 the matching website row ("See profile visitors") this was
                 missing parity with. */}
-            <TableRow label={t("subscription.profileVisitorsRowLabel")} free="1" builder pro />
+            <TableRow label={t("subscription.profileVisitorsRowLabel")} free="2" builder pro />
             <TableRow label={t("subscription.builderFeature4")} builder pro />
             <TableRow label={t("subscription.messageStartersFeature")} builder pro />
           </TableGroup>

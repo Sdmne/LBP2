@@ -4,13 +4,11 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as WebBrowser from "expo-web-browser";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import GradientBackground from "../components/GradientBackground";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import { markWhatsNewSeen } from "../utils/whatsNew";
-import { SITE_BASE_URL } from "../config";
 
 // Mirrors the website's new homepage "What's new" section (Alena: "и в
 // приложении надо какой-то экран создать при входе первый раз что
@@ -83,7 +81,7 @@ const TIER_COLORS: Record<Tier, { bg: string; text: string }> = {
 };
 
 export default function WhatsNewScreen() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
@@ -148,15 +146,16 @@ export default function WhatsNewScreen() {
         navigation.navigate("CompatibilityQuiz");
         return;
       case "askAi":
+        // UPDATE (Sept 2026): used to open the free website tool in the
+        // in-app browser (expo-web-browser) - Alena, after seeing this:
+        // "И почему переход на сайт из приложения?? Все это должно быть в
+        // самом приложении" - confirmed she wants a real native screen
+        // ("Конечно хочу"). Now navigates to AskAiScreen.tsx, which calls
+        // the same public/ask-ai endpoint directly.
+        navigation.navigate("AskAi");
+        return;
       case "agreementDraft":
-        // Both are free public website tools with no native screen of
-        // their own (backend/main.py's public/ask-ai and
-        // public/agreement-draft, item 25) - open them in the in-app
-        // browser, same pattern SubscriptionScreen.tsx already uses for
-        // the Terms/Privacy links. Never removed WhatsNewScreen from the
-        // stack in the first place (no navigation call at all), so it
-        // wasn't affected by this bug, but left as-is either way.
-        void WebBrowser.openBrowserAsync(`${SITE_BASE_URL}/${locale}/tools/${key === "askAi" ? "ask-ai" : "agreement-draft"}`);
+        navigation.navigate("AgreementDraft");
         return;
       case "familyPlanAi":
         // No generic entry point (needs a matched profileId, same as
