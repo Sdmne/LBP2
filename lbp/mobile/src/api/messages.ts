@@ -111,8 +111,16 @@ export async function sendAttachment(conversationId: number, localUri: string): 
   const headers = new Headers();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
+  // UPDATE (Sept 2026): Alena - "фото долго не грузит" (photo takes a
+  // long time to upload) - a full-resolution phone photo can be several
+  // MB even after ImagePicker's JPEG quality compression (there's no
+  // dimension-capping step in this project - see ChatScreen.tsx's
+  // handleAttach comment), so on a slow connection the old 30s timeout
+  // could abort a genuinely-in-progress upload and make a slow send look
+  // like a broken one. Raised to 2 minutes - still bounded, just no longer
+  // trigger-happy on mobile data.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const timeout = setTimeout(() => controller.abort(), 120_000);
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}/api/member/conversations/${conversationId}/attachments`, {

@@ -27,9 +27,9 @@ import type { ConversationMessage } from "../api/types";
 import { useAuth } from "../context/AuthContext";
 import { useCall } from "../context/CallContext";
 import { useI18n } from "../i18n/I18nContext";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors, radius, spacing } from "../theme";
-import ChatWallpaper, { CHAT_WALLPAPER_VARIANTS, type ChatWallpaperVariant } from "../components/ChatWallpaper";
+import ChatWallpaper, { CHAT_WALLPAPER_VARIANTS, wallpaperThemeIcon, type ChatWallpaperVariant } from "../components/ChatWallpaper";
 import { EMOJI_CATEGORIES } from "../data/emojiData";
 import { STICKERS } from "../data/stickerData";
 import { stickerEmojiFromBody } from "../utils/stickers";
@@ -220,6 +220,18 @@ export default function ChatScreen({ route, navigation }: Props) {
   // (backend already had POST .../attachments built, nothing on mobile
   // called it). Images only via the picker (same as PhotosScreen); the
   // backend also accepts PDFs but there's no "pick a document" UI here yet.
+  //
+  // UPDATE (Sept 2026): Alena - "фото долго не грузит" (photo takes a long
+  // time to upload), then clarified she hadn't installed a new build - so
+  // this genuinely is just a slow upload, not a stale-build illusion like
+  // the keyboard/composer report earlier. There's no expo-image-manipulator
+  // in this project (adding it means a new native module, i.e. another
+  // `eas build`, which she's not doing right now) so the only zero-build
+  // lever here is JPEG quality - dropped from 0.8 to 0.5, still fine for a
+  // chat bubble/thumbnail, meaningfully smaller upload. The real fix (an
+  // actual attachingLabel visible while the request is inflight, not just
+  // a small spinner on the paperclip icon that's easy to miss) is the
+  // `attachingLabel` state below.
   async function handleAttach() {
     if (attaching) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -229,7 +241,7 @@ export default function ChatScreen({ route, navigation }: Props) {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
+      quality: 0.5,
     });
     if (result.canceled || !result.assets?.[0]?.uri) return;
     setAttaching(true);
@@ -533,6 +545,16 @@ export default function ChatScreen({ route, navigation }: Props) {
           )}
         </View>
       ) : null}
+      {/* UPDATE (Sept 2026): the paperclip's own tiny spinner was easy to
+          miss during a slow upload, which is exactly what made "фото
+          долго не грузит" read as broken rather than just slow - this
+          banner is the same information, just impossible to miss. */}
+      {attaching ? (
+        <View style={styles.attachingBanner}>
+          <ActivityIndicator size="small" color={colors.pink} />
+          <Text style={styles.attachingBannerText}>{t("chat.attachSending")}</Text>
+        </View>
+      ) : null}
       <View style={[styles.inputBar, { paddingBottom: Math.max(spacing.sm, insets.bottom) }]}>
         <Pressable style={styles.inputIconButton} onPress={() => void handleAttach()} disabled={attaching} hitSlop={6}>
           {attaching ? <ActivityIndicator size="small" color={colors.muted} /> : <Feather name="paperclip" size={19} color={colors.muted} />}
@@ -594,29 +616,40 @@ export default function ChatScreen({ route, navigation }: Props) {
         </Pressable>
       </Modal>
 
-      {/* Item 11 - wallpaper picker. Only "rainbow" exists as a real image
-          option so far (Alena's matching cloud+star asset is still
-          pending) - "pattern" is the existing icon-grid default, always
-          available. */}
+      {/* Item 11/12 - wallpaper picker. "rainbow" is the one real bundled
+          image (Alena's matching cloud+star asset is still pending); every
+          other option, including the original "pattern" default, is one
+          of ChatWallpaper's icon-grid themes - see wallpaperThemeIcon()
+          there for the icon+color each one renders with. Wrapped in a
+          ScrollView with a maxHeight since 12 options in a wrapping grid
+          can run taller than a short device's screen. */}
       <Modal visible={wallpaperPickerVisible} transparent animationType="fade" onRequestClose={() => setWallpaperPickerVisible(false)}>
         <Pressable style={styles.menuOverlay} onPress={() => setWallpaperPickerVisible(false)}>
           <View style={[styles.menuSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
             <View style={styles.menuHandle} />
             <Text style={styles.wallpaperPickerTitle}>{t("chat.wallpaperPickerTitle")}</Text>
-            <View style={styles.wallpaperOptionsRow}>
-              <Pressable style={styles.wallpaperOption} onPress={() => chooseWallpaper("pattern")}>
-                <View style={[styles.wallpaperThumb, styles.wallpaperThumbPattern]}>
-                  <Feather name="grid" size={22} color={colors.muted} />
-                </View>
-                <Text style={styles.wallpaperOptionLabel}>{t("chat.wallpaperPattern")}</Text>
-                {wallpaperVariant === "pattern" ? <Feather name="check-circle" size={16} color={colors.pink} /> : null}
-              </Pressable>
-              <Pressable style={styles.wallpaperOption} onPress={() => chooseWallpaper("rainbow")}>
-                <Image source={require("../../assets/chat-backgrounds/rainbow.png")} style={styles.wallpaperThumb} />
-                <Text style={styles.wallpaperOptionLabel}>{t("chat.wallpaperRainbow")}</Text>
-                {wallpaperVariant === "rainbow" ? <Feather name="check-circle" size={16} color={colors.pink} /> : null}
-              </Pressable>
-            </View>
+            <ScrollView style={styles.wallpaperOptionsScroll} showsVerticalScrollIndicator={false}>
+              <View style={styles.wallpaperOptionsRow}>
+                {CHAT_WALLPAPER_VARIANTS.map((v) => {
+                  const themeIcon = wallpaperThemeIcon(v);
+                  return (
+                    <Pressable key={v} style={styles.wallpaperOption} onPress={() => chooseWallpaper(v)}>
+                      {v === "rainbow" ? (
+                        <Image source={require("../../assets/chat-backgrounds/rainbow.png")} style={styles.wallpaperThumb} />
+                      ) : (
+                        <View style={[styles.wallpaperThumb, styles.wallpaperThumbPattern]}>
+                          <MaterialCommunityIcons name={themeIcon!.icon} size={26} color={themeIcon!.color} />
+                        </View>
+                      )}
+                      <Text style={styles.wallpaperOptionLabel} numberOfLines={1}>
+                        {t(`chat.wallpaper${v.charAt(0).toUpperCase()}${v.slice(1)}` as any)}
+                      </Text>
+                      {wallpaperVariant === v ? <Feather name="check-circle" size={16} color={colors.pink} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
           </View>
         </Pressable>
       </Modal>
@@ -798,6 +831,15 @@ const styles = StyleSheet.create({
   // makes it read as "a sticker" rather than "a message that's just an
   // emoji".
   stickerMessageEmoji: { fontSize: 64, marginVertical: 2 },
+  attachingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.tintPink,
+  },
+  attachingBannerText: { fontSize: 12.5, color: colors.ink, flex: 1 },
   menuOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(2,8,23,0.45)" },
   menuSheet: {
     backgroundColor: colors.card,
@@ -810,11 +852,15 @@ const styles = StyleSheet.create({
   menuRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 52 },
   menuRowText: { fontSize: 15, fontWeight: "600", color: colors.ink, flex: 1 },
   wallpaperPickerTitle: { fontSize: 16, fontWeight: "800", color: colors.ink, marginBottom: spacing.md },
-  wallpaperOptionsRow: { flexDirection: "row", gap: spacing.md },
-  wallpaperOption: { alignItems: "center", gap: 6 },
-  wallpaperThumb: { width: 72, height: 72, borderRadius: 14, backgroundColor: colors.bgSoft },
+  // Item 12: 12 options now (was 2), so this wraps into a grid instead of
+  // a single row. maxHeight on the ScrollView keeps the sheet from running
+  // off a short screen; the grid itself just wraps normally.
+  wallpaperOptionsScroll: { maxHeight: 340 },
+  wallpaperOptionsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
+  wallpaperOption: { alignItems: "center", gap: 6, width: 72 },
+  wallpaperThumb: { width: 64, height: 64, borderRadius: 14, backgroundColor: colors.bgSoft },
   wallpaperThumbPattern: { alignItems: "center", justifyContent: "center" },
-  wallpaperOptionLabel: { fontSize: 12.5, fontWeight: "600", color: colors.ink },
+  wallpaperOptionLabel: { fontSize: 11.5, fontWeight: "600", color: colors.ink, textAlign: "center" },
   startersLoading: { marginVertical: spacing.lg },
   startersList: { gap: spacing.sm, marginBottom: spacing.md },
   starterOption: {

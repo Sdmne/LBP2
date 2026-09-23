@@ -162,23 +162,30 @@ export default function ProfileWizardScreen({ navigation }: Props) {
   const questionnaireTotal = goal === "parents" ? 3 : 2;
   const questionnaireStepNumber = current === "role" ? 1 : current === "goal" ? 2 : 3;
 
+  // UPDATE (Sept 2026): same fix as EditProfileScreen.tsx - Alena's
+  // "Опять страна и город сокращены!" report. These catalog lists were
+  // only ever fetched lazily when their picker sheet was opened, so a
+  // country/city carried over into the wizard (e.g. re-entering it with
+  // partial data) rendered as the raw stored value until the picker was
+  // opened once. Now also fetched eagerly whenever there's a saved value
+  // to resolve.
   useEffect(() => {
-    if (picker !== "country" || countries.length || loadingCountries) return;
+    if (countries.length || loadingCountries || (picker !== "country" && !country)) return;
     setLoadingCountries(true);
     fetchCatalogFilterOptions()
       .then((res) => setCountries(res.countries))
       .catch(() => undefined)
       .finally(() => setLoadingCountries(false));
-  }, [picker, countries.length, loadingCountries]);
+  }, [picker, country, countries.length, loadingCountries]);
 
   useEffect(() => {
-    if (picker !== "city" || !country) return;
+    if (!country || cities.length || loadingCities || (picker !== "city" && !city)) return;
     setLoadingCities(true);
     fetchCatalogFilterOptions(country)
       .then((res) => setCities(res.cities))
       .catch(() => undefined)
       .finally(() => setLoadingCities(false));
-  }, [picker, country]);
+  }, [picker, country, city, cities.length, loadingCities]);
 
   // Photos step needs to know what's already there in case this screen is
   // ever reached with existing photos (not expected on a truly fresh
@@ -612,7 +619,11 @@ export default function ProfileWizardScreen({ navigation }: Props) {
           onPress={() => country && setPicker("city")}
         >
           <Text style={[styles.fieldText, city && styles.fieldTextFilled]} numberOfLines={1}>
-            {country ? city || t("editProfile.selectCity") : t("filters.selectCountryFirst")}
+            {country
+              ? city
+                ? cities.find((c) => c.value === city)?.label || city
+                : t("editProfile.selectCity")
+              : t("filters.selectCountryFirst")}
           </Text>
           {country ? <Text style={styles.chevron}>{"⌄"}</Text> : null}
         </Pressable>
@@ -867,6 +878,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
             if (value !== country) {
               setCity("");
               setCityPlaceId("");
+              setCities([]);
             }
             setCountry(value);
             setPicker(null);

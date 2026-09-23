@@ -3,7 +3,8 @@ import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { RESOURCES_CATEGORIES, CATEGORY_ICON } from "../data/resources";
+import { RESOURCES_CATEGORIES, CATEGORY_ICON, localizedCategory, localizedTool } from "../data/resources";
+import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
@@ -19,19 +20,31 @@ import GradientBackground from "../components/GradientBackground";
 // the prototype's blue/pink/green icon-wrap colors, so nothing here is
 // invented. Moved to data/resources.ts (CATEGORY_ICON) so
 // ResourceCategoryScreen.tsx can share the exact same mapping.
-
+//
+// UPDATE (Sept 2026, cont'd): "Проверь по всем языкам" - own labels now
+// through t(); the two "Start here" template shortcuts (planning
+// template / questions-to-ask) point at fixed, known tools, but their
+// TITLE still comes from RESOURCES_CATEGORIES data (not a hand-typed
+// string), so it goes through localizedTool() like everywhere else the
+// tool title is shown - otherwise it stayed English even after
+// "документы скачивается на англ" was fixed everywhere else. Only the
+// "meta" subtitle here is a fixed translated string (t()), since that
+// text is specific to this shortcut row, not part of the tool data.
+// The category list below IS data-driven, so that one goes through
+// localizedCategory().
 export default function ResourcesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
+  const { t, locale } = useI18n();
+  const planningTemplateTool = localizedTool(RESOURCES_CATEGORIES[0], RESOURCES_CATEGORIES[0].tools[0], locale);
+  const questionsToAskTool = localizedTool(RESOURCES_CATEGORIES[0], RESOURCES_CATEGORIES[0].tools[1], locale);
 
   return (
     <GradientBackground variant="soft">
     <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}>
-      <Text style={styles.sub}>
-        Guides, templates and tools to help you plan your path to parenthood.
-      </Text>
+      <Text style={styles.sub}>{t("resources.indexSubtitle")}</Text>
 
-      <Text style={styles.groupTitle}>Start here</Text>
+      <Text style={styles.groupTitle}>{t("resources.startHere")}</Text>
       <View style={styles.card}>
         <Pressable
           style={styles.row}
@@ -41,10 +54,10 @@ export default function ResourcesScreen() {
             <Text style={styles.icon}>🧭</Text>
           </View>
           <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>Compatibility Quiz</Text>
-            <Text style={styles.rowMeta}>26 questions, ~5 min — reflect, not score</Text>
+            <Text style={styles.rowTitle}>{t("resources.compatibilityQuizTitle")}</Text>
+            <Text style={styles.rowMeta}>{t("resources.compatibilityQuizMeta")}</Text>
           </View>
-          <Text style={styles.chevron}>{"\u203a"}</Text>
+          <Text style={styles.chevron}>{"›"}</Text>
         </Pressable>
         <Pressable
           style={[styles.row, styles.rowDivider]}
@@ -54,10 +67,10 @@ export default function ResourcesScreen() {
             <Text style={styles.icon}>📄</Text>
           </View>
           <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>Co-Parenting Planning Template</Text>
-            <Text style={styles.rowMeta}>10 sections to align with a co-parent</Text>
+            <Text style={styles.rowTitle}>{planningTemplateTool.title}</Text>
+            <Text style={styles.rowMeta}>{t("resources.planningTemplateMeta")}</Text>
           </View>
-          <Text style={styles.chevron}>{"\u203a"}</Text>
+          <Text style={styles.chevron}>{"›"}</Text>
         </Pressable>
         <Pressable
           style={[styles.row, styles.rowDivider]}
@@ -67,17 +80,18 @@ export default function ResourcesScreen() {
             <Text style={styles.icon}>❓</Text>
           </View>
           <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>Questions to Ask a Potential Co-Parent</Text>
-            <Text style={styles.rowMeta}>A conversation starter list</Text>
+            <Text style={styles.rowTitle}>{questionsToAskTool.title}</Text>
+            <Text style={styles.rowMeta}>{t("resources.questionsToAskMeta")}</Text>
           </View>
-          <Text style={styles.chevron}>{"\u203a"}</Text>
+          <Text style={styles.chevron}>{"›"}</Text>
         </Pressable>
       </View>
 
-      <Text style={styles.groupTitle}>Browse by category</Text>
+      <Text style={styles.groupTitle}>{t("resources.browseByCategory")}</Text>
       <View style={styles.card}>
-        {RESOURCES_CATEGORIES.map((cat, i) => {
-          const iconInfo = CATEGORY_ICON[cat.icon] || { emoji: "\ud83d\udcc4", bg: colors.bgSoft };
+        {RESOURCES_CATEGORIES.map((baseCat, i) => {
+          const cat = localizedCategory(baseCat, locale);
+          const iconInfo = CATEGORY_ICON[cat.icon] || { emoji: "📄", bg: colors.bgSoft };
           return (
             <Pressable
               key={cat.slug}
@@ -91,19 +105,16 @@ export default function ResourcesScreen() {
                 <Text style={styles.rowTitle}>{cat.eyebrow}</Text>
                 <Text style={styles.rowMeta}>{cat.description}</Text>
               </View>
-              <Text style={styles.chevron}>{"\u203a"}</Text>
+              <Text style={styles.chevron}>{"›"}</Text>
             </Pressable>
           );
         })}
       </View>
 
       <View style={styles.proCard}>
-        <Text style={styles.proIcon}>{"\ud83d\udcac"}</Text>
-        <Text style={styles.proTitle}>Looking for professional guidance?</Text>
-        <Text style={styles.proBody}>
-          Some questions are better discussed with a qualified professional. LetsBeParents is building a trusted
-          space to connect people with psychological, medical and other professional support when they need it.
-        </Text>
+        <Text style={styles.proIcon}>{"💬"}</Text>
+        <Text style={styles.proTitle}>{t("resources.proTitle")}</Text>
+        <Text style={styles.proBody}>{t("resources.proBody")}</Text>
       </View>
     </ScrollView>
     </GradientBackground>

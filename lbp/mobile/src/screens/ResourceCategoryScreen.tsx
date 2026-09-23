@@ -2,7 +2,8 @@ import React from "react";
 import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { RESOURCES_CATEGORIES, CATEGORY_ICON } from "../data/resources";
+import { RESOURCES_CATEGORIES, CATEGORY_ICON, localizedCategory, localizedTool } from "../data/resources";
+import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
@@ -11,26 +12,34 @@ type Props = NativeStackScreenProps<RootStackParamList, "ResourceCategory">;
 
 // Mirrors the website's ResourceCategory component: a tool grid for one
 // category, plus the compatibility-quiz promo strip on co-parenting only.
+//
+// UPDATE (Sept 2026): same "Проверь по всем языкам" pass as
+// ResourceToolScreen.tsx - own labels through t(), category/tool copy
+// through localizedCategory()/localizedTool() (data/resources.ts).
 export default function ResourceCategoryScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const cat = RESOURCES_CATEGORIES.find((item) => item.slug === route.params.slug);
+  const { t, locale } = useI18n();
+  const baseCat = RESOURCES_CATEGORIES.find((item) => item.slug === route.params.slug);
   // Alena: this screen was flat gray/white for every category (screenshots
   // of Co-parenting/Fertility/Parenthood planning all looked identical) -
   // ResourcesScreen.tsx already colors each category with its own tint
   // (blue/pink/green, from the prototype) via CATEGORY_ICON, this screen
   // just never carried that through. Reusing the exact same mapping here.
-  const iconInfo = cat ? CATEGORY_ICON[cat.icon] || { emoji: "📄", bg: colors.bgSoft, accent: colors.gradientStart } : null;
+  const iconInfo = baseCat ? CATEGORY_ICON[baseCat.icon] || { emoji: "📄", bg: colors.bgSoft, accent: colors.gradientStart } : null;
 
-  if (!cat) {
+  if (!baseCat) {
     return (
       <View style={styles.container}>
-        <Text style={styles.notFoundTitle}>Resource category not found</Text>
+        <Text style={styles.notFoundTitle}>{t("resources.categoryNotFound")}</Text>
         <Pressable style={styles.backButton} onPress={() => navigation.navigate("Resources")}>
-          <Text style={styles.backButtonText}>Back to Resources & Tools</Text>
+          <Text style={styles.backButtonText}>{t("resources.backToResources")}</Text>
         </Pressable>
       </View>
     );
   }
+
+  const cat = localizedCategory(baseCat, locale);
+  const tools = baseCat.tools.map((tool) => localizedTool(baseCat, tool, locale));
 
   return (
     <GradientBackground variant="soft">
@@ -41,7 +50,7 @@ export default function ResourceCategoryScreen({ route, navigation }: Props) {
       <Text style={styles.heroTitle}>{cat.title}</Text>
       <Text style={styles.heroBody}>{cat.description}</Text>
 
-      {cat.tools.map((tool) => (
+      {tools.map((tool) => (
         <Pressable
           key={tool.slug}
           style={[styles.toolCard, { borderLeftColor: iconInfo!.accent }]}
@@ -53,19 +62,18 @@ export default function ResourceCategoryScreen({ route, navigation }: Props) {
           {tool.tag ? <Text style={styles.toolTag}>{tool.tag}</Text> : null}
           <Text style={styles.toolTitle}>{tool.title}</Text>
           <Text style={styles.toolBody}>{tool.description}</Text>
-          <Text style={[styles.toolLink, { color: iconInfo!.accent }]}>{tool.downloadUrl ? "Download the template" : "View resource"} →</Text>
+          <Text style={[styles.toolLink, { color: iconInfo!.accent }]}>
+            {tool.downloadUrl ? t("resources.downloadTemplateLink") : t("resources.viewResource")} →
+          </Text>
         </Pressable>
       ))}
 
       {cat.slug === "co-parenting" ? (
         <View style={styles.quizStrip}>
-          <Text style={styles.quizTitle}>Not sure you're on the same page yet?</Text>
-          <Text style={styles.quizBody}>
-            The Co-Parenting Compatibility Quiz helps you and a potential co-parent see where your expectations
-            align - and what's worth discussing further.
-          </Text>
+          <Text style={styles.quizTitle}>{t("resources.quizPromptTitle")}</Text>
+          <Text style={styles.quizBody}>{t("resources.quizPromptBody")}</Text>
           <Pressable style={styles.quizButton} onPress={() => navigation.navigate("CompatibilityQuiz")}>
-            <Text style={styles.quizButtonText}>Take the quiz →</Text>
+            <Text style={styles.quizButtonText}>{t("resources.quizPromptCta")}</Text>
           </Pressable>
         </View>
       ) : null}

@@ -264,23 +264,34 @@ export default function EditProfileScreen({ navigation }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // UPDATE (Sept 2026): Alena - "Опять страна и город сокращены!" - the
+  // country/city fields showed the raw stored value ("AR", or whatever
+  // catalog "value" the city was saved as) instead of the full display
+  // name, because these catalog lists were only ever fetched lazily when
+  // their picker sheet was actually opened. A saved profile with
+  // country="AR" rendered as literally "AR" the whole time the screen was
+  // open, until she tapped into the picker at least once (which triggered
+  // the fetch and, from then on, resolved the label correctly). Now also
+  // fetched eagerly whenever there's a saved value to resolve, so the
+  // field shows "Argentina" from the moment the screen loads - not just
+  // after a picker visit.
   useEffect(() => {
-    if (picker !== "country" || countries.length || loadingCountries) return;
+    if (countries.length || loadingCountries || (picker !== "country" && !country)) return;
     setLoadingCountries(true);
     fetchCatalogFilterOptions()
       .then((res) => setCountries(res.countries))
       .catch(() => undefined)
       .finally(() => setLoadingCountries(false));
-  }, [picker, countries.length, loadingCountries]);
+  }, [picker, country, countries.length, loadingCountries]);
 
   useEffect(() => {
-    if (picker !== "city" || !country) return;
+    if (!country || cities.length || loadingCities || (picker !== "city" && !city)) return;
     setLoadingCities(true);
     fetchCatalogFilterOptions(country)
       .then((res) => setCities(res.cities))
       .catch(() => undefined)
       .finally(() => setLoadingCities(false));
-  }, [picker, country]);
+  }, [picker, country, city, cities.length, loadingCities]);
 
   function toggleLanguage(value: string) {
     setLanguages((prev) => (prev.includes(value) ? prev.filter((l) => l !== value) : [...prev, value]));
@@ -420,7 +431,11 @@ export default function EditProfileScreen({ navigation }: Props) {
               onPress={() => country && setPicker("city")}
             >
               <Text style={[styles.fieldText, city && styles.fieldTextFilled]} numberOfLines={1}>
-                {country ? city || t("editProfile.selectCity") : t("filters.selectCountryFirst")}
+                {country
+                  ? city
+                    ? cities.find((c) => c.value === city)?.label || city
+                    : t("editProfile.selectCity")
+                  : t("filters.selectCountryFirst")}
               </Text>
               {country ? <Text style={styles.chevron}>{"⌄"}</Text> : null}
             </Pressable>
@@ -512,6 +527,7 @@ export default function EditProfileScreen({ navigation }: Props) {
             if (value !== country) {
               setCity("");
               setCityPlaceId("");
+              setCities([]);
             }
             setCountry(value);
             setPicker(null);

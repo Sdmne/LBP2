@@ -19,6 +19,16 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Props = NativeStackScreenProps<RootStackParamList, "ProfileDetail">;
 
+// Fixed bottom pill bar's own real rendered height (see bottomBar/pillBtn
+// styles below): pillBtn height (52) + bottomBar's paddingTop (spacing.sm)
+// + bottomBar's own paddingBottom (spacing.sm, BEFORE insets.bottom - that
+// part is added separately wherever this constant is used, since
+// bottomBar adds insets.bottom to its paddingBottom too). Kept as one
+// named constant instead of a bare number so the ScrollView's own bottom
+// padding can never drift out of sync with the bar again - see that
+// paddingBottom's own comment for the bug this caused when it did.
+const BOTTOM_BAR_RESERVED_HEIGHT = 52 + spacing.sm + spacing.sm;
+
 // GET /api/member/catalog/{id} - member_catalog_detail() in main.py, wraps
 // public_profile_summary() (see the comment there): a stable set of top
 // level fields (id, displayName, city, country, avatarUrl, isVerified,
@@ -57,6 +67,16 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
   const [messaging, setMessaging] = useState(false);
   const [liking, setLiking] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  // Alena: "если нет фото может какую-то заставки сделаем?" - noticed on
+  // a profile whose avatarUrl pointed at a broken/missing image: the
+  // photos.length > 0 branch below was already taken (avatarUrl is a
+  // non-empty string), so the "no photo at all" placeholder further down
+  // never rendered - <Image> just silently failed to load, leaving only
+  // its own backgroundColor (colors.border) visible: a plain grey box,
+  // no icon, exactly what she flagged. Tracked per-index so a multi-photo
+  // profile with one bad URL still shows its other real photos normally,
+  // only swapping the placeholder in for the specific one that failed.
+  const [failedPhotoIndices, setFailedPhotoIndices] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     api
@@ -64,6 +84,26 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
       .then((res) => setProfile("profile" in res ? res.profile : res))
       .catch((err) => setError(err instanceof ApiError ? err.message : t("profileDetail.loadError")));
   }, [profileId, t]);
+
+  // UPDATE (Sept 2026): Alena's video - "Не видно что написано внизу про
+  // заблокировать и тд" (the "..." menu's Block row showed only a bare
+  // spinner, no icon/text). Root cause: React Navigation can reuse this
+  // SAME screen instance when navigating from one profile straight to
+  // another (rather than always mounting a fresh one) - `profileId`
+  // changes and the effect above refetches, but per-visit interaction
+  // state (blocking/messaging/liking/menuVisible/failedPhotoIndices) was
+  // never reset, so a Block request still in flight (or a menu left open)
+  // against the PREVIOUS profile leaked into this one. `blocking` stuck
+  // `true` on a fresh profile view is exactly "Block row renders only its
+  // ActivityIndicator, no text" - see the JSX below, which only shows the
+  // icon+label pair when `!blocking`.
+  useEffect(() => {
+    setBlocking(false);
+    setMessaging(false);
+    setLiking(false);
+    setMenuVisible(false);
+    setFailedPhotoIndices({});
+  }, [profileId]);
 
   useEffect(() => {
     if (isSelf) return;
@@ -179,8 +219,21 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
 
   return (
     <GradientBackground variant="vivid">
+      {/* BOTTOM_BAR_RESERVED_HEIGHT below must track bottomBar's own real
+          rendered height (pillBtn's 52 + its own paddingTop/paddingBottom,
+          both spacing.sm) - insets.bottom is added separately below since
+          bottomBar already adds it to its own paddingBottom too. This was
+          previously a bare "92" that had drifted out of sync with
+          bottomBar's actual height, leaving a gap of empty transparent
+          ScrollView content below the last card row and above the fixed
+          bar - which, sitting directly on GradientBackground's vivid
+          gradient, read as a solid lilac/purple stripe (Alena: "внизу
+          живота фиолетовая полоса"). Same underlying bug shape as the
+          "без сиреневого" fix above this component (any unfilled gap over
+          the vivid gradient reads as a stray purple block), just at the
+          opposite end of the screen. */}
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + 92 + insets.bottom }]}
+        contentContainerStyle={[styles.container, { paddingBottom: spacing.md + BOTTOM_BAR_RESERVED_HEIGHT + insets.bottom }]}
       >
         {/* Redesigned (2026-09-13) against Alena's Figma reference: name/
             location/badges now sit directly on the photo, over a dark
@@ -196,9 +249,20 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
         <View style={styles.photoWrap}>
           {photos.length > 0 ? (
             <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
-              {photos.map((url, i) => (
-                <Image key={i} source={{ uri: url }} style={styles.photo} />
-              ))}
+              {photos.map((url, i) =>
+                failedPhotoIndices[i] ? (
+                  <View key={i} style={[styles.photo, styles.photoPlaceholder]}>
+                    <Feather name="user" size={56} color={colors.blue} />
+                  </View>
+                ) : (
+                  <Image
+                    key={i}
+                    source={{ uri: url }}
+                    style={styles.photo}
+                    onError={() => setFailedPhotoIndices((prev) => ({ ...prev, [i]: true }))}
+                  />
+                ),
+              )}
             </ScrollView>
           ) : (
             <View style={[styles.photo, styles.photoPlaceholder]}>
@@ -315,7 +379,10 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
                 </Pressable>
                 <Pressable style={styles.menuRow} onPress={handleBlock} disabled={blocking}>
                   {blocking ? (
-                    <ActivityIndicator color={colors.danger} />
+                    <>
+                      <ActivityIndicator color={colors.danger} />
+                      <Text style={[styles.menuRowText, styles.menuRowTextDanger]}>{t("profileDetail.blocking")}</Text>
+                    </>
                   ) : (
                     <>
                       <Feather name="slash" size={18} color={colors.danger} />

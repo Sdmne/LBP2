@@ -8,8 +8,9 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { RESOURCES_CATEGORIES } from "../data/resources";
+import { RESOURCES_CATEGORIES, localizedCategory, localizedTool, resourceFormatLabel, RESOURCE_FREE_WORD } from "../data/resources";
 import { SITE_BASE_URL } from "../config";
+import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -20,44 +21,62 @@ type Props = NativeStackScreenProps<RootStackParamList, "ResourceTool">;
 // .docx to local storage with expo-file-system and hands it to the OS share
 // sheet (expo-sharing) so the person can save it to Files/Drive/print/etc -
 // same end result (they get the real file), different mechanism.
+//
+// UPDATE (Sept 2026): Alena - "документы скачивается на англ, а мы же
+// переводили все 10 документов" / "Проверь по всем языкам" - this screen's
+// own labels now go through t() like every other screen, and the tool's
+// title/description/sections/sampleQuestions/disclaimer/downloadUrl are
+// resolved through localizedTool() (data/resources.ts) for the viewer's
+// current locale, falling back to English per-field exactly like the
+// website does - see that file's header comment for where the translated
+// copy and the translated .docx files themselves came from.
 export default function ResourceToolScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const { t, locale } = useI18n();
   const [downloading, setDownloading] = useState(false);
 
-  const cat = RESOURCES_CATEGORIES.find((item) => item.slug === route.params.categorySlug);
-  const tool = cat?.tools.find((item) => item.slug === route.params.toolSlug);
+  const baseCat = RESOURCES_CATEGORIES.find((item) => item.slug === route.params.categorySlug);
+  const baseTool = baseCat?.tools.find((item) => item.slug === route.params.toolSlug);
 
-  if (!cat || !tool) {
+  if (!baseCat || !baseTool) {
     return (
       <View style={styles.container}>
-        <Text style={styles.notFoundTitle}>Resource not found</Text>
+        <Text style={styles.notFoundTitle}>{t("resources.notFound")}</Text>
         <Pressable style={styles.backButton} onPress={() => navigation.navigate("Resources")}>
-          <Text style={styles.backButtonText}>Back to Resources & Tools</Text>
+          <Text style={styles.backButtonText}>{t("resources.backToResources")}</Text>
         </Pressable>
       </View>
     );
   }
 
+  const cat = localizedCategory(baseCat, locale);
+  const tool = localizedTool(baseCat, baseTool, locale);
+
   async function handleDownload() {
-    if (!tool!.downloadUrl) return;
+    if (!tool.downloadUrl) return;
     setDownloading(true);
     try {
-      const remoteUrl = `${SITE_BASE_URL}${tool!.downloadUrl}`;
-      const localUri = `${FileSystem.cacheDirectory}${tool!.downloadName || "resource.docx"}`;
+      const remoteUrl = `${SITE_BASE_URL}${tool.downloadUrl}`;
+      const localUri = `${FileSystem.cacheDirectory}${baseTool!.downloadName || "resource.docx"}`;
       const { uri } = await FileSystem.downloadAsync(remoteUrl, localUri);
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri);
       } else {
-        Alert.alert("Downloaded", `Saved to ${uri}`);
+        Alert.alert(t("resources.downloadedTitle"), t("resources.downloadedBody", { path: uri }));
       }
     } catch (err) {
-      Alert.alert("Couldn't download this file", "Check your connection and try again.");
+      Alert.alert(t("resources.downloadErrorTitle"), t("resources.downloadErrorBody"));
     } finally {
       setDownloading(false);
     }
   }
 
-  const related = cat.tools.filter((item) => item.slug !== tool.slug).slice(0, 3);
+  const related = cat.tools
+    .filter((item) => item.slug !== tool.slug)
+    .slice(0, 3)
+    .map((item) => localizedTool(baseCat, item, locale));
+
+  const format = tool.sections ? resourceFormatLabel(tool.sections.length, locale, RESOURCE_FREE_WORD[locale]) : tool.format;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}>
@@ -67,21 +86,18 @@ export default function ResourceToolScreen({ route, navigation }: Props) {
       {tool.downloadUrl ? (
         <View style={styles.downloadRow}>
           <Pressable style={styles.downloadButton} onPress={handleDownload} disabled={downloading}>
-            {downloading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.downloadButtonText}>Download the template →</Text>}
+            {downloading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.downloadButtonText}>{t("resources.downloadTemplate")}</Text>}
           </Pressable>
-          {tool.format ? <Text style={styles.format}>{tool.format}</Text> : null}
+          {format ? <Text style={styles.format}>{format}</Text> : null}
         </View>
       ) : (
-        <Text style={styles.comingSoon}>Coming soon</Text>
+        <Text style={styles.comingSoon}>{t("resources.comingSoon")}</Text>
       )}
 
       {tool.sections ? (
         <>
-          <Text style={styles.sectionHeading}>What's inside</Text>
-          <Text style={styles.sectionSub}>
-            {tool.sections.length} sections, each with open questions for both of you to answer - independently
-            first, then together.
-          </Text>
+          <Text style={styles.sectionHeading}>{t("resources.whatsInside")}</Text>
+          <Text style={styles.sectionSub}>{t("resources.sectionsIntro", { count: tool.sections.length })}</Text>
           {tool.sections.map((section, index) => (
             <View key={section} style={styles.sectionRow}>
               <Text style={styles.sectionIndex}>{String(index + 1).padStart(2, "0")}</Text>
@@ -91,7 +107,7 @@ export default function ResourceToolScreen({ route, navigation }: Props) {
 
           {tool.sampleQuestions ? (
             <View style={styles.samplesBox}>
-              <Text style={styles.samplesLabel}>A few sample questions from section 1</Text>
+              <Text style={styles.samplesLabel}>{t("resources.sampleQuestionsLabel")}</Text>
               {tool.sampleQuestions.map((q) => (
                 <Text key={q} style={styles.sampleQuestion}>
                   "{q}"
@@ -104,7 +120,7 @@ export default function ResourceToolScreen({ route, navigation }: Props) {
 
           {related.length > 0 ? (
             <View style={styles.relatedBox}>
-              <Text style={styles.relatedHeading}>Related resources</Text>
+              <Text style={styles.relatedHeading}>{t("resources.relatedHeading")}</Text>
               {related.map((item) => (
                 <Pressable
                   key={item.slug}
@@ -118,9 +134,7 @@ export default function ResourceToolScreen({ route, navigation }: Props) {
         </>
       ) : (
         <View style={styles.comingSoonBox}>
-          <Text style={styles.comingSoonText}>
-            We're finishing this resource - check back soon, or explore what's already available in {cat.eyebrow}.
-          </Text>
+          <Text style={styles.comingSoonText}>{t("resources.comingSoonBody", { category: cat.eyebrow })}</Text>
         </View>
       )}
     </ScrollView>
