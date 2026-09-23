@@ -36,7 +36,6 @@ const isConfigured = Object.values(FIREBASE_CONFIG).every(Boolean);
 // catch block below so SocialAuthButtons.tsx can show it on screen - no
 // device log access to read `console.error` output directly otherwise.
 // Remove once Google/Apple sign-in is confirmed working end to end.
-export let firebaseAuthError: string | null = null;
 
 let auth: Auth | null = null;
 if (isConfigured) {
@@ -58,12 +57,11 @@ if (isConfigured) {
       auth = getAuth(app);
     }
   } catch (err) {
-    firebaseAuthError = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     console.error("[firebase] Auth failed to initialize - Google/Apple sign-in disabled, rest of the app unaffected", err);
     auth = null;
   }
 } else {
-  firebaseAuthError = `FIREBASE_CONFIG incomplete: ${JSON.stringify(FIREBASE_CONFIG)}`;
+  console.error("[firebase] Auth configuration is incomplete - Google/Apple sign-in disabled");
 }
 
 export const firebaseAuth = auth;
