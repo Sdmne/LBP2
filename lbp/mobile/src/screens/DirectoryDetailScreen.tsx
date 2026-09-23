@@ -90,9 +90,6 @@ export default function DirectoryDetailScreen({ route }: Props) {
         )}
         <Text style={styles.name}>{item.name}</Text>
         <Text style={styles.subtitle}>📍 {[item.city, item.country].filter(Boolean).join(", ") || t("common.locationNotSet")}</Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{t("directoryDetail.verifiedPartner")}</Text>
-        </View>
       </View>
 
       {tags.length > 0 ? (

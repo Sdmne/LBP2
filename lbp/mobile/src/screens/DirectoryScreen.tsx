@@ -367,9 +367,6 @@ export default function DirectoryScreen({ route, navigation }: Props) {
                     <Text style={styles.meta} numberOfLines={1}>
                       {metaParts.join(" · ") || t("common.locationNotSet")}
                     </Text>
-                    <View style={styles.partnerTag}>
-                      <Text style={styles.partnerTagText}>{t("directory.partnerTag")}</Text>
-                    </View>
                   </View>
                 </View>
                 <Pressable hitSlop={8} onPress={() => void toggleFavourite(item)}>
