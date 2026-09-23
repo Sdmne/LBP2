@@ -370,7 +370,7 @@ export default function DirectoryScreen({ route, navigation }: Props) {
                   </View>
                 </View>
                 <Pressable hitSlop={8} onPress={() => void toggleFavourite(item)}>
-                  <Text style={styles.heart}>{isFav ? "❤️" : "🤍"}</Text>
+                  <Feather name="heart" size={20} color={isFav ? colors.pink : "#c9c9c9"} />
                 </Pressable>
               </Pressable>
             );
