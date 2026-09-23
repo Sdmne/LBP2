@@ -124,6 +124,34 @@ export default function ChatScreen({ route, navigation }: Props) {
   // Tracks which message ids failed to load so a real fallback (icon +
   // message + open-in-browser) renders instead of empty space.
   const [imageLoadErrors, setImageLoadErrors] = useState<Set<number>>(new Set());
+  // UPDATE (Sept 23): Alena - "послала фото и опять сразу его нет" - then
+  // confirmed it wasn't actually lost server-side: force-closing and
+  // reopening the app made the exact same photo appear immediately, i.e.
+  // a plain re-fetch + fresh <Image> succeeded right away. The old
+  // onError handler above (still kept for a truly dead URL) marked a
+  // message permanently failed on the very FIRST load attempt with no
+  // retry at all - so any one-off hiccup right after upload (this is a
+  // freshly-written file the very same request just finished writing;
+  // see member_send_attachment in main.py) reads as "the photo is gone"
+  // forever, for that screen mount, instead of "try again". Gives each
+  // image up to 3 attempts, with a short backoff and a cache-busting
+  // query param (RN's <Image> won't naturally retry the same failed URI),
+  // before falling back to the permanent error placeholder.
+  const [imageRetryCounts, setImageRetryCounts] = useState<Record<number, number>>({});
+  const imageRetryCountsRef = useRef(imageRetryCounts);
+  imageRetryCountsRef.current = imageRetryCounts;
+  const IMAGE_MAX_RETRIES = 3;
+  const IMAGE_RETRY_DELAY_MS = 900;
+  const handleImageLoadError = useCallback((messageId: number) => {
+    const attempts = (imageRetryCountsRef.current[messageId] || 0) + 1;
+    if (attempts >= IMAGE_MAX_RETRIES) {
+      setImageLoadErrors((errs) => new Set(errs).add(messageId));
+      return;
+    }
+    setTimeout(() => {
+      setImageRetryCounts((cur) => ({ ...cur, [messageId]: attempts }));
+    }, IMAGE_RETRY_DELAY_MS * attempts);
+  }, []);
   // Premium roadmap: AI-drafted message starters. Stateless per-open - no
   // history kept, unlike the AI Advisor's own persisted chat, since these
   // are disposable drafts the member reviews/edits before sending.
@@ -453,9 +481,17 @@ export default function ChatScreen({ route, navigation }: Props) {
                   ) : (
                     <Pressable onPress={() => item.mediaUrl && Linking.openURL(item.mediaUrl)}>
                       <Image
-                        source={{ uri: item.mediaUrl! }}
+                        // Cache-busting query param keyed on the retry
+                        // count: RN's <Image> won't naturally re-attempt
+                        // a URI that already failed, so the retry has to
+                        // actually be a different request.
+                        source={{
+                          uri: imageRetryCounts[item.id]
+                            ? `${item.mediaUrl!}${item.mediaUrl!.includes("?") ? "&" : "?"}retry=${imageRetryCounts[item.id]}`
+                            : item.mediaUrl!,
+                        }}
                         style={styles.msgPhoto}
-                        onError={() => setImageLoadErrors((prev) => new Set(prev).add(item.id))}
+                        onError={() => handleImageLoadError(item.id)}
                       />
                     </Pressable>
                   )
