@@ -44,6 +44,25 @@ type Tab = "likesYou" | "matches" | "myLikes" | "visitors";
 // higher on screen. Must match LIKES_FREE_PREVIEW_COUNT in main.py.
 const FREE_PREVIEW_COUNT = 4;
 
+// UPDATE (Sept 23, Alena): "где я просила сделать видимым 1 лайк и 2
+// просмотра в бесплатной версии с возможностью перехода" - reverses the
+// "надо замылить чтобы не было видно вообще" instruction below (kept that
+// comment in place for history/context, don't re-blur these on a future
+// pass without re-confirming with her first - this exact toggle has
+// flipped more than once on this screen).
+//
+// The backend (member_likes()/member_profile_views() in main.py) has
+// already been sending real, unblurred, tappable rows for its own free
+// quota since 2026-09-22 - LIKES_FREE_PREVIEW_COUNT = 1,
+// PROFILE_VIEWS_FREE_PREVIEW_COUNT = 2 - this frontend just never stopped
+// force-blurring every row in previewMode regardless, which is what left
+// the free tier showing 4 fully-generic "Someone liked you" + lock rows
+// instead of Alena's actual current spec: the first REAL_UNLOCKED_COUNT
+// rows shown clear and tappable through to the profile, the rest (up to
+// FREE_PREVIEW_COUNT above) as the locked teaser. Must match those two
+// backend constants per tab.
+const REAL_UNLOCKED_COUNT: Partial<Record<Tab, number>> = { likesYou: 1, visitors: 2 };
+
 export default function LikesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -397,17 +416,19 @@ export default function LikesScreen({ navigation }: Props) {
               </View>
             ) : null
           }
-          renderItem={({ item }) => {
+          renderItem={({ item, index }) => {
             const visitor = tab === "visitors" ? (item as ProfileVisitor) : null;
-            // Alena, precisely: "надо замылить чтобы не было видно вообще
-            // кто лайк поставил" - a free viewer must not be able to tell
-            // WHO liked them, not even for the handful of rows shown as a
-            // teaser. So every row is blurred while previewMode is on
-            // (profileItems is already capped to FREE_PREVIEW_COUNT rows
-            // in that case - see where it's built above), not just rows
-            // past some "free" cutoff the way an earlier version of this
-            // screen did it.
-            const previewLocked = previewMode;
+            // Alena, precisely (kept for history - see the
+            // REAL_UNLOCKED_COUNT comment up top, this was later
+            // reversed): "надо замылить чтобы не было видно вообще кто
+            // лайк поставил" - every row used to be blurred while
+            // previewMode was on. Now only rows past the real backend
+            // quota (REAL_UNLOCKED_COUNT per tab - the same rows
+            // member_likes()/member_profile_views() actually send real,
+            // unblurred identity for) are locked; the first
+            // REAL_UNLOCKED_COUNT rows render as normal, tappable-through
+            // cards below.
+            const previewLocked = previewMode && index >= (REAL_UNLOCKED_COUNT[tab] ?? 0);
             // Reference mockup (#scr-likes): a "message" + "like back" round
             // button pair on rows for people you haven't acted on yet.
             // Doesn't apply to Matches (already mutual) or My likes (you
