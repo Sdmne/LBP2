@@ -222,18 +222,20 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
       {/* BOTTOM_BAR_RESERVED_HEIGHT below must track bottomBar's own real
           rendered height (pillBtn's 52 + its own paddingTop/paddingBottom,
           both spacing.sm) - insets.bottom is added separately below since
-          bottomBar already adds it to its own paddingBottom too. This was
-          previously a bare "92" that had drifted out of sync with
-          bottomBar's actual height, leaving a gap of empty transparent
-          ScrollView content below the last card row and above the fixed
-          bar - which, sitting directly on GradientBackground's vivid
-          gradient, read as a solid lilac/purple stripe (Alena: "внизу
-          живота фиолетовая полоса"). Same underlying bug shape as the
-          "без сиреневого" fix above this component (any unfilled gap over
-          the vivid gradient reads as a stray purple block), just at the
-          opposite end of the screen. */}
+          bottomBar already adds it to its own paddingBottom too. Previously
+          this also added an extra spacing.md on top "for breathing room",
+          which left exactly that much unfilled ScrollView content below
+          the last card row and above the fixed bar - sitting directly on
+          GradientBackground's vivid gradient, that gap read as a solid
+          lilac/purple stripe (Alena screenshot, Sept 23: purple strip
+          between the Family Room/Compatibility Report pills and the
+          Send message/Like bar). Dropped the extra spacing.md so the last
+          card sits flush against the bar's top edge - same underlying bug
+          shape as the "без сиреневого" fix above this component (any
+          unfilled gap over the vivid gradient reads as a stray purple
+          block), just at the opposite end of the screen. */}
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: spacing.md + BOTTOM_BAR_RESERVED_HEIGHT + insets.bottom }]}
+        contentContainerStyle={[styles.container, { paddingBottom: BOTTOM_BAR_RESERVED_HEIGHT + insets.bottom }]}
       >
         {/* Redesigned (2026-09-13) against Alena's Figma reference: name/
             location/badges now sit directly on the photo, over a dark
@@ -371,7 +373,7 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
 
           <Modal visible={menuVisible} transparent animationType="fade" onRequestClose={() => setMenuVisible(false)}>
             <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
-              <View style={styles.menuSheet}>
+              <View style={[styles.menuSheet, { paddingBottom: 28 + insets.bottom }]}>
                 <View style={styles.menuHandle} />
                 <Pressable style={styles.menuRow} onPress={handleReport}>
                   <Feather name="flag" size={18} color={colors.ink} />
@@ -526,7 +528,7 @@ const styles = StyleSheet.create({
   pillBtnPink: { backgroundColor: colors.pink },
   pillBtnText: { color: "#fff", fontSize: 14.5, fontWeight: "700" },
   menuOverlay: { flex: 1, backgroundColor: "rgba(2,8,23,0.4)", justifyContent: "flex-end" },
-  menuSheet: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 10, paddingBottom: 28, paddingHorizontal: spacing.lg },
+  menuSheet: { backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 10, paddingHorizontal: spacing.lg },
   menuHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: "center", marginBottom: 12 },
   menuRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14 },
   menuRowText: { fontSize: 15, fontWeight: "600", color: colors.ink },
