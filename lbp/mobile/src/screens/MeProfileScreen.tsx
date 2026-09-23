@@ -19,6 +19,8 @@ import { fetchBoostStatus, requestBoost, type BoostStatus } from "../api/boost";
 import { fetchMe } from "../api/profile";
 import { ApiError } from "../api/client";
 import type { SubscriptionTier } from "../api/types";
+import * as Application from "expo-application";
+import * as Updates from "expo-updates";
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Me">;
 
@@ -394,6 +396,19 @@ export default function MeProfileScreen(_props: Props) {
       <Pressable style={styles.logout} onPress={handleLogout} disabled={loggingOut}>
         {loggingOut ? <ActivityIndicator color={colors.pink} /> : <Text style={styles.logoutText}>{t("me.logout")}</Text>}
       </Pressable>
+
+      {/* Alena asked repeatedly for a visible version number on this screen
+          (the one she actually opens, unlike Settings' own copy of this same
+          footer - see SettingsScreen.tsx). Also shows the applied OTA update
+          id/message so a screenshot from here settles "did the update
+          actually reach my phone" without guessing - Updates.updateId is
+          null when running the embedded (non-OTA-updated) build, not an
+          error, so that's rendered as "embedded build" rather than "?". */}
+      <Text style={styles.versionFooter}>
+        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"})
+        {"\n"}
+        {Updates.updateId ? `update ${Updates.updateId.slice(0, 8)}` : "embedded build"}
+      </Text>
     </ScrollView>
     </GradientBackground>
   );
@@ -576,5 +591,6 @@ const styles = StyleSheet.create({
   },
   rowChevron: { fontSize: 18, color: "#a3a3a3" },
   logout: { alignItems: "center", paddingVertical: spacing.lg },
+  versionFooter: { fontSize: 11, color: colors.muted, textAlign: "center", lineHeight: 16 },
   logoutText: { color: colors.pink, fontSize: 13.5, fontWeight: "600" },
 });
