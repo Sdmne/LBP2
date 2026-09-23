@@ -29,7 +29,7 @@ import { useCall } from "../context/CallContext";
 import { useI18n } from "../i18n/I18nContext";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { colors, radius, spacing } from "../theme";
-import ChatWallpaper, { CHAT_WALLPAPER_VARIANTS, wallpaperThemeIcon, type ChatWallpaperVariant } from "../components/ChatWallpaper";
+import ChatWallpaper, { CHAT_WALLPAPER_VARIANTS, wallpaperThemeIcon, wallpaperImageSource, type ChatWallpaperVariant } from "../components/ChatWallpaper";
 import { EMOJI_CATEGORIES } from "../data/emojiData";
 import { STICKERS } from "../data/stickerData";
 import { stickerEmojiFromBody } from "../utils/stickers";
@@ -652,13 +652,13 @@ export default function ChatScreen({ route, navigation }: Props) {
         </Pressable>
       </Modal>
 
-      {/* Item 11/12 - wallpaper picker. "rainbow" is the one real bundled
-          image (Alena's matching cloud+star asset is still pending); every
-          other option, including the original "pattern" default, is one
-          of ChatWallpaper's icon-grid themes - see wallpaperThemeIcon()
-          there for the icon+color each one renders with. Wrapped in a
-          ScrollView with a maxHeight since 12 options in a wrapping grid
-          can run taller than a short device's screen. */}
+      {/* Item 11/12, updated Sept 23 - wallpaper picker. Most options are
+          now real bundled images (wallpaperImageSource); only "pattern",
+          "hearts" and "stars" are still ChatWallpaper's icon-grid themes -
+          see wallpaperThemeIcon() there for the icon+color those three
+          render with. Wrapped in a ScrollView with a maxHeight since 14
+          options in a wrapping grid can run taller than a short device's
+          screen. */}
       <Modal visible={wallpaperPickerVisible} transparent animationType="fade" onRequestClose={() => setWallpaperPickerVisible(false)}>
         <Pressable style={styles.menuOverlay} onPress={() => setWallpaperPickerVisible(false)}>
           <View style={[styles.menuSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
@@ -668,10 +668,11 @@ export default function ChatScreen({ route, navigation }: Props) {
               <View style={styles.wallpaperOptionsRow}>
                 {CHAT_WALLPAPER_VARIANTS.map((v) => {
                   const themeIcon = wallpaperThemeIcon(v);
+                  const imageSource = wallpaperImageSource(v);
                   return (
                     <Pressable key={v} style={styles.wallpaperOption} onPress={() => chooseWallpaper(v)}>
-                      {v === "rainbow" ? (
-                        <Image source={require("../../assets/chat-backgrounds/rainbow.png")} style={styles.wallpaperThumb} />
+                      {imageSource ? (
+                        <Image source={imageSource} style={styles.wallpaperThumb} />
                       ) : (
                         <View style={[styles.wallpaperThumb, styles.wallpaperThumbPattern]}>
                           <MaterialCommunityIcons name={themeIcon!.icon} size={26} color={themeIcon!.color} />

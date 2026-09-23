@@ -39,52 +39,90 @@ import { colors } from "../theme";
 // UPDATE (Sept 2026, item 12): Alena - "добавь сюда штук 10 еще других
 // фонов" (add ~10 more backgrounds here). A real bundled image like
 // rainbow.png needs her to actually supply the artwork (still only one
-// exists), so these ten reuse the exact same zero-native-risk icon-grid
-// mechanism as the original "pattern" variant above - just a different
-// MaterialCommunityIcons set + tint color per theme. No new assets, no
-// native module, so this ships as a plain JS change (no new `eas build`
-// required just for this).
+// existed at the time), so these ten reused the icon-grid mechanism as a
+// placeholder - just a different MaterialCommunityIcons set + tint color
+// per theme, no new assets needed yet.
+//
+// UPDATE (Sept 23): Alena sent the real artwork - "вот новые фоны. Те что
+// ты недавно добавил кроме первых 2х убери" (here are the real
+// backgrounds; remove the ones you recently added except the first 2).
+// Dropped clouds/flowers/animals/sweets/night/nature/party/garden (kept
+// hearts/stars, the first 2 of that batch), and replaced the removed
+// eight with these 10 real bundled images instead. Generalized the old
+// "rainbow is the one special image variant" handling below into
+// WALLPAPER_IMAGES so adding a real-image variant is just one map entry,
+// not a second special case.
 export type ChatWallpaperVariant =
   | "pattern"
   | "rainbow"
   | "hearts"
   | "stars"
-  | "clouds"
-  | "flowers"
-  | "animals"
-  | "sweets"
-  | "night"
-  | "nature"
-  | "party"
-  | "garden";
+  | "babyBears"
+  | "heartsBlush"
+  | "babyBlue"
+  | "sleepyClouds"
+  | "bunnies"
+  | "rainbowSun"
+  | "moonStars"
+  | "flowersPeach"
+  | "whales"
+  | "blossomPink";
 
 export const CHAT_WALLPAPER_VARIANTS: ChatWallpaperVariant[] = [
   "pattern",
   "rainbow",
   "hearts",
   "stars",
-  "clouds",
-  "flowers",
-  "animals",
-  "sweets",
-  "night",
-  "nature",
-  "party",
-  "garden",
+  "babyBears",
+  "heartsBlush",
+  "babyBlue",
+  "sleepyClouds",
+  "bunnies",
+  "rainbowSun",
+  "moonStars",
+  "flowersPeach",
+  "whales",
+  "blossomPink",
 ];
 
-const RAINBOW_IMAGE = require("../../assets/chat-backgrounds/rainbow.png");
+// Every real bundled-image variant (as opposed to the icon-grid pattern
+// themes in ICON_THEMES below). Rendered full-bleed with resizeMode
+// "cover" - same treatment "rainbow" always had - since none of these
+// have been confirmed seamless-tileable at the edges either.
+const WALLPAPER_IMAGES: Partial<Record<ChatWallpaperVariant, ReturnType<typeof require>>> = {
+  rainbow: require("../../assets/chat-backgrounds/rainbow.png"),
+  babyBears: require("../../assets/chat-backgrounds/baby-bears.png"),
+  heartsBlush: require("../../assets/chat-backgrounds/hearts-blush.png"),
+  babyBlue: require("../../assets/chat-backgrounds/baby-blue.png"),
+  sleepyClouds: require("../../assets/chat-backgrounds/sleepy-clouds.png"),
+  bunnies: require("../../assets/chat-backgrounds/bunnies.png"),
+  rainbowSun: require("../../assets/chat-backgrounds/rainbow-sun.png"),
+  moonStars: require("../../assets/chat-backgrounds/moon-stars.png"),
+  flowersPeach: require("../../assets/chat-backgrounds/flowers-peach.png"),
+  whales: require("../../assets/chat-backgrounds/whales.png"),
+  blossomPink: require("../../assets/chat-backgrounds/blossom-pink.png"),
+};
+
+// Used by ChatScreen.tsx's picker sheet to render a real thumbnail for
+// any image-backed variant, instead of hardcoding the "rainbow" case.
+export function wallpaperImageSource(variant: ChatWallpaperVariant): ReturnType<typeof require> | null {
+  return WALLPAPER_IMAGES[variant] ?? null;
+}
 // UPDATE (Sept 2026): Alena, after using it while actually chatting:
 // "можно сделать фон на сообщениях прозрачный чтобы не отвлекал" - the
-// full-opacity image was too visually loud once real message bubbles sat
-// on top of it. Faded via ImageBackground's own `imageStyle` (which styles
-// only the inner <Image>, not children) rather than the container's
-// `style`/opacity, so the message bubbles/input bar layered on top stay
-// fully opaque - only the wallpaper itself washes out toward the white
-// container background behind it.
-const RAINBOW_OPACITY = 0.32;
+// full-opacity rainbow image was too visually loud once real message
+// bubbles sat on top of it. Faded via ImageBackground's own `imageStyle`
+// (which styles only the inner <Image>, not children) rather than the
+// container's `style`/opacity, so the message bubbles/input bar layered
+// on top stay fully opaque - only the wallpaper itself washes out toward
+// the white container background behind it. Applied to every image
+// variant added since (Sept 23), same reasoning.
+const WALLPAPER_IMAGE_OPACITY = 0.32;
 
-type IconThemeKey = Exclude<ChatWallpaperVariant, "rainbow">;
+// Only "pattern"/"hearts"/"stars" are still icon-grid themes now (the
+// eight others that used to fill this out were removed, see the Sept 23
+// update above) - every other variant is a real image in WALLPAPER_IMAGES.
+type IconThemeKey = "pattern" | "hearts" | "stars";
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
 
 type IconTheme = {
@@ -92,29 +130,22 @@ type IconTheme = {
   color: string;
 };
 
-// Every non-"rainbow" variant is one of these: a distinct icon set plus a
-// tint color from the app's existing palette (theme.ts) - no new colors
-// invented, just reused the way every other screen already does.
 const ICON_THEMES: Record<IconThemeKey, IconTheme> = {
   pattern: { icons: ["teddy-bear", "baby-carriage", "balloon", "ribbon"], color: colors.line },
   hearts: { icons: ["heart-outline", "heart-multiple-outline"], color: colors.pink },
   stars: { icons: ["star-outline", "star-four-points-outline", "creation"], color: colors.premium },
-  clouds: { icons: ["weather-cloudy", "weather-sunny", "weather-partly-cloudy"], color: colors.blue },
-  flowers: { icons: ["flower-outline", "flower-tulip-outline", "flower-poppy"], color: colors.pinkSoft },
-  animals: { icons: ["paw", "cat", "dog-side", "rabbit"], color: colors.blueDark },
-  sweets: { icons: ["cupcake", "candy-outline", "ice-cream"], color: colors.pink },
-  night: { icons: ["weather-night", "star-outline", "moon-waning-crescent"], color: colors.muted },
-  nature: { icons: ["leaf", "tree-outline", "sprout-outline"], color: colors.success },
-  party: { icons: ["gift-outline", "kite", "pinwheel-outline"], color: colors.premium },
-  garden: { icons: ["butterfly-outline", "bee-flower", "flower"], color: colors.success },
 };
+
+function isIconThemeKey(variant: ChatWallpaperVariant): variant is IconThemeKey {
+  return variant === "pattern" || variant === "hearts" || variant === "stars";
+}
 
 // Used by the wallpaper picker sheet (ChatScreen.tsx) to render each
 // option's thumbnail without duplicating the icon/color choices above.
-// Returns null for "rainbow" - that one has a real image thumbnail
-// instead of an icon.
+// Returns null for any image-backed variant (wallpaperImageSource above
+// covers those instead).
 export function wallpaperThemeIcon(variant: ChatWallpaperVariant): { icon: IconName; color: string } | null {
-  if (variant === "rainbow") return null;
+  if (!isIconThemeKey(variant)) return null;
   const theme = ICON_THEMES[variant];
   return { icon: theme.icons[0], color: theme.color };
 }
@@ -161,16 +192,17 @@ export default function ChatWallpaper({
   variant?: ChatWallpaperVariant;
 }) {
   const { width, height } = Dimensions.get("window");
-  const theme = variant === "rainbow" ? null : ICON_THEMES[variant] ?? ICON_THEMES.pattern;
+  const imageSource = WALLPAPER_IMAGES[variant];
+  const theme = imageSource ? null : ICON_THEMES[variant as IconThemeKey] ?? ICON_THEMES.pattern;
   const cells = useMemo(() => (theme ? buildGrid(width, height, theme.icons) : []), [width, height, theme]);
 
-  if (variant === "rainbow") {
+  if (imageSource) {
     return (
       <ImageBackground
-        source={RAINBOW_IMAGE}
+        source={imageSource}
         resizeMode="cover"
         style={[styles.container, style]}
-        imageStyle={styles.rainbowImage}
+        imageStyle={styles.wallpaperImage}
       >
         {children}
       </ImageBackground>
@@ -200,6 +232,6 @@ export default function ChatWallpaper({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.white },
-  rainbowImage: { opacity: RAINBOW_OPACITY },
+  wallpaperImage: { opacity: WALLPAPER_IMAGE_OPACITY },
   icon: { position: "absolute", opacity: ICON_OPACITY },
 });
