@@ -227,6 +227,12 @@ const nav: ReadonlyArray<{
     view: "marketing",
     icon: "megaphone",
   },
+  {
+    path: "/community-groups",
+    title: "Community Groups",
+    view: "community-groups",
+    icon: "messageSquare",
+  },
   { path: "/settings", title: "Settings", view: "settings", icon: "settings" },
 ];
 const columnsByView: Record<string, string[]> = {
@@ -252,6 +258,7 @@ const columnsByView: Record<string, string[]> = {
   ],
   clinics: ["name", "location", "partner", "services", "status"],
   lawyers: ["name", "location", "practiceAreas", "status"],
+  "community-groups": ["title", "status", "locale"],
 };
 const detailTabs: Array<[string, string, string, AdminIconName, boolean]> = [
   ["profile", "Profile", "profile", "circleUser", false],
@@ -7237,6 +7244,7 @@ function GenericList({ view }: { view: string }) {
     "static-pages",
     "marketing",
     "settings",
+    "community-groups",
   ].includes(view);
   const hasRowAction = editable || view === "subscriptions" || view === "users";
   const itemId = (row: RecordValue) => row.id ?? row.entityId;
