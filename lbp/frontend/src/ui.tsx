@@ -878,7 +878,7 @@ function Shell({
   const [headerScrolled, setHeaderScrolled] = useState(() => window.scrollY > 24);
   const isLanding = new RegExp(`^/${locale}/?$`).test(pathname);
   const isAuth = new RegExp(`^/${locale}/auth/`).test(pathname);
-  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email)/?$`).test(pathname);
+  const isStandaloneAuth = new RegExp(`^/${locale}/auth/(?:reset-password|verify-email|verification-return)/?$`).test(pathname);
   const isChat = new RegExp(`^/${locale}/(?:chat|messages)(?:/|$)`).test(pathname);
   const isProfileTool = new RegExp(`^/${locale}/(?:profile/(?:edit|photos|verification)|photos|verification)/?$`).test(pathname);
   const hasMemberMenu = Boolean(session);
@@ -2651,6 +2651,38 @@ function VerifyEmail() {
           {!confirmed && <button className="standalone-auth-resend" type="button" disabled={busy} onClick={() => void resend()}>{copy.resend}</button>}
           <p className="standalone-auth-message" data-kind={status === copy.invalid || status === copy.invalidCode || status === copy.deliveryFailed || status === copy.generic ? "error" : "info"}>{status}</p>
           <StandaloneAuthBackLink locale={locale} label={copy.back} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const mobileVerificationReturnCopy: Record<CookieLocale, { title: string; body: string; openApp: string }> = {
+  en: { title: "Verification completed", body: "Returning to LetsBeParents to show your current verification status.", openApp: "Return to the app" },
+  ru: { title: "Верификация завершена", body: "Возвращаемся в LetsBeParents, чтобы показать актуальный статус верификации.", openApp: "Вернуться в приложение" },
+  es: { title: "Verificación completada", body: "Volviendo a LetsBeParents para mostrar el estado actual de tu verificación.", openApp: "Volver a la aplicación" },
+  pt: { title: "Verificação concluída", body: "A voltar ao LetsBeParents para mostrar o estado atual da verificação.", openApp: "Voltar à aplicação" },
+  fr: { title: "Vérification terminée", body: "Retour vers LetsBeParents pour afficher le statut actuel de votre vérification.", openApp: "Retourner dans l’application" },
+  de: { title: "Verifizierung abgeschlossen", body: "Zurück zu LetsBeParents, um den aktuellen Verifizierungsstatus anzuzeigen.", openApp: "Zur App zurückkehren" },
+  it: { title: "Verifica completata", body: "Ritorno a LetsBeParents per mostrare lo stato attuale della verifica.", openApp: "Torna all’app" },
+  pl: { title: "Weryfikacja zakończona", body: "Wracamy do LetsBeParents, aby pokazać aktualny status weryfikacji.", openApp: "Wróć do aplikacji" },
+};
+
+function MobileVerificationReturn() {
+  const copy = mobileVerificationReturnCopy[localeOf()];
+  const appUrl = "letsbeparents://verification?didit=complete";
+  useEffect(() => {
+    const timer = window.setTimeout(() => window.location.assign(appUrl), 150);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <section className="standalone-auth-page">
+      <div className="standalone-auth-visual"><img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" /></div>
+      <div className="standalone-auth-form-wrap">
+        <div className="standalone-auth-form-card" aria-live="polite">
+          <h1>{copy.title}</h1>
+          <p>{copy.body}</p>
+          <button className="standalone-auth-primary" onClick={() => window.location.assign(appUrl)}>{copy.openApp}</button>
         </div>
       </div>
     </section>
@@ -17176,6 +17208,10 @@ export function WebApp() {
         element={content(<VerifyEmail />)}
       />
       <Route
+        path="/:locale/auth/verification-return"
+        element={content(<MobileVerificationReturn />)}
+      />
+      <Route
         path="/:locale/catalog"
         element={session ? content(<Catalog session={session} />) : <Navigate to={`/${locale}/auth/login`} replace />}
       />
@@ -17236,7 +17272,14 @@ export function WebApp() {
       />
  <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={legacyLocaleOf(localeOf())} />)} />
  <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)} />
- <Route path="/:locale/profile/verification" element={content(<MemberProfileVerification locale={legacyLocaleOf(localeOf())} />)} />
+      <Route
+        path="/:locale/profile/verification"
+        element={
+          !session && new URLSearchParams(location.search).get("didit") === "complete"
+            ? content(<MobileVerificationReturn />)
+            : content(<MemberProfileVerification locale={legacyLocaleOf(localeOf())} />)
+        }
+      />
       <Route path="/:locale/profile/notifications" element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} view="notifications" />)} />
       <Route path="/:locale/profile/blocked" element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} view="blocked" />)} />
       <Route

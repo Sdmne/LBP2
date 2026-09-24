@@ -12,6 +12,6 @@ export function startVerification(locale: Locale = "en") {
   // default rather than inventing a new value.
   return api.post<{ ok: true; status: string; sessionId: string | null; url: string | null; existing?: boolean }>(
     "/api/member/verification",
-    { verificationType: "profile", payload: { locale } },
+    { verificationType: "profile", payload: { locale, client: "mobile" } },
   );
 }

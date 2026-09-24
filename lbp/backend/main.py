@@ -11253,7 +11253,13 @@ def member_submit_verification(payload: VerificationPayload, user: dict[str, Any
     portrait_image = didit_portrait_base64(primary_photo["publicUrl"])
     requested_locale = str(payload.payload.get("locale") or "en").strip().lower()
     language = requested_locale if requested_locale in {"en", "ru", "es"} else "en"
-    callback = f"{PUBLIC_APP_URL}/{language}/profile/verification/?didit=complete"
+    requested_client = str(payload.payload.get("client") or "web").strip().lower()
+    client = "mobile" if requested_client == "mobile" else "web"
+    callback = (
+        f"{PUBLIC_APP_URL}/{language}/auth/verification-return?didit=complete"
+        if client == "mobile"
+        else f"{PUBLIC_APP_URL}/{language}/profile/verification/?didit=complete"
+    )
     attempt_id = uuid.uuid4().hex[:12]
     vendor_data = f"profile-{profile_id}-photo-{primary_photo['id']}-attempt-{attempt_id}"
     session = didit_request(
@@ -11289,6 +11295,8 @@ def member_submit_verification(payload: VerificationPayload, user: dict[str, Any
         "providerStatus": session.get("status"),
         "attemptId": attempt_id,
         "referencePhotoId": primary_photo.get("id"),
+        "client": client,
+        "callback": callback,
         "startedAt": now_utc().isoformat(),
     }
     with db_cursor() as (conn, cursor):

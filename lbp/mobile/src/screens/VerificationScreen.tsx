@@ -19,6 +19,9 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 // the ID/selfie data submitted during a verification session, not their
 // general site privacy policy.
 const DIDIT_PRIVACY_URL = "https://didit.me/terms/verification-privacy-notice/";
+const MOBILE_VERIFICATION_RETURN_URL = "letsbeparents://verification?didit=complete";
+
+WebBrowser.maybeCompleteAuthSession();
 
 const STATUS_KEYS: Record<string, { title: string; body: string }> = {
   NOT_STARTED: { title: "verification.notStartedTitle", body: "verification.notStartedBody" },
@@ -68,11 +71,12 @@ export default function VerificationScreen() {
   setError(null);
   try {
   const verificationLocale = locale === "ru" || locale === "es" ? locale : "en";
-  const res = await startVerification(verificationLocale);
+      const res = await startVerification(verificationLocale);
       if (res.url) {
-        await WebBrowser.openBrowserAsync(res.url);
-        // The person completes verification in the browser, then Didit
-        // calls the backend's webhook - refresh once they're back.
+        await WebBrowser.openAuthSessionAsync(res.url, MOBILE_VERIFICATION_RETURN_URL);
+        // The public completion page returns to this app scheme. Once the
+        // browser closes, refresh the same screen so APPROVED/IN_REVIEW is
+        // shown immediately instead of leaving the person on web login.
         await load();
       }
     } catch (err) {

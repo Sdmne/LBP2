@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import { fetchReferralStatus, redeemReferralCode } from "../api/referral";
 import { ApiError } from "../api/client";
 import type { ReferralStatus } from "../api/referral";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
+import { SITE_BASE_URL } from "../config";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // Premium roadmap step 4 - "Invite friends". Reached from MeProfileScreen's
@@ -14,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 // shown only until redeemedCode comes back non-null (the backend only ever
 // accepts one redemption per profile - see member_referral_redeem()).
 export default function ReferralScreen() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const insets = useSafeAreaInsets();
   const [status, setStatus] = useState<ReferralStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -22,6 +24,7 @@ export default function ReferralScreen() {
   const [redeemInput, setRedeemInput] = useState("");
   const [redeeming, setRedeeming] = useState(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -37,9 +40,11 @@ export default function ReferralScreen() {
     load().finally(() => setLoading(false));
   }, [load]);
 
+  const inviteLink = status ? `${SITE_BASE_URL}/${locale}/auth/register?invite=${encodeURIComponent(status.code)}` : "";
+
   function handleShare() {
     if (!status) return;
-    const message = t("referral.shareMessage", { code: status.code });
+    const message = `${t("referral.shareMessage", { code: status.code })}\n${inviteLink}`;
     // Alena: "Здесь нет поделиться" - tapping Share visibly did nothing.
     // Share.share() used to fail completely silently (bare .catch(() =>
     // undefined)) on whatever error it hit, so a rejection here - a real
@@ -51,6 +56,13 @@ export default function ReferralScreen() {
     Share.share({ message }).catch(() => {
       Alert.alert(t("common.shareUnavailableTitle"), message);
     });
+  }
+
+  async function handleCopyCode() {
+    if (!status) return;
+    await Clipboard.setStringAsync(status.code);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
   }
 
   async function handleRedeem() {
@@ -95,7 +107,11 @@ export default function ReferralScreen() {
 
       <View style={styles.codeCard}>
         <Text style={styles.codeLabel}>{t("referral.yourCode")}</Text>
-        <Text style={styles.code}>{status.code}</Text>
+        <Pressable style={styles.codeRow} onPress={handleCopyCode} hitSlop={8}>
+          <Text style={styles.code}>{status.code}</Text>
+          <Feather name={codeCopied ? "check" : "copy"} size={18} color={codeCopied ? colors.success : colors.muted} />
+        </Pressable>
+        {codeCopied ? <Text style={styles.codeCopiedText}>{t("referral.codeCopied")}</Text> : null}
         <Pressable style={styles.shareBtn} onPress={handleShare}>
           <Feather name="share-2" size={15} color="#fff" />
           <Text style={styles.shareBtnText}>{t("referral.share")}</Text>
@@ -173,7 +189,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   codeLabel: { fontSize: 11.5, color: colors.muted, fontWeight: "600" },
-  code: { fontSize: 30, fontWeight: "800", color: colors.ink, letterSpacing: 4, marginTop: 6, marginBottom: spacing.md },
+  codeRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: 6, marginBottom: 4 },
+  code: { fontSize: 30, fontWeight: "800", color: colors.ink, letterSpacing: 4 },
+  codeCopiedText: { fontSize: 11.5, color: colors.success, fontWeight: "600", marginBottom: spacing.md },
   shareBtn: {
     flexDirection: "row",
     alignItems: "center",
