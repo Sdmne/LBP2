@@ -129,6 +129,9 @@ PASSWORD_RESET_MINUTES = 60
 AUTH_EMAIL_RESEND_SECONDS = 60
 ACCOUNT_DELETION_DAYS = 30
 ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "3600")))
+ACCOUNT_DELETION_PENDING_STATUS = "DELETION_PENDING"
+ACCOUNT_DELETION_LEGACY_PENDING_STATUS = "PENDING_DELETION"
+DELETED_ACCOUNT_EMAIL_DOMAIN = "deleted.invalid"
 MARKETING_CAMPAIGN_POLL_SECONDS = max(15, int(os.getenv("MARKETING_CAMPAIGN_POLL_SECONDS", "30")))
 DOCKER_METRICS_FILE = Path(os.getenv("DOCKER_METRICS_FILE", "/run/metrics/docker-system-df.jsonl"))
 DOCKER_METRICS_MAX_AGE_SECONDS = max(60, int(os.getenv("DOCKER_METRICS_MAX_AGE_SECONDS", "3900")))
@@ -8339,6 +8342,52 @@ def member_report_profile(profile_identifier: str, payload: MemberReportPayload,
     return {"ok": True, "status": "PENDING"}
 
 
+def release_account_identity_for_deletion(
+    cursor,
+    profile_id: int,
+    local_user_ids: list[int] | None = None,
+) -> list[int]:
+    """Release all sign-in identifiers for a profile pending deletion.
+
+    A deletion request must end access immediately without reserving the
+    member's email or social identity for the following 30-day retention
+    window.  The retained profile is still later removed by the deletion
+    worker, but it can no longer be found by either authentication path.
+    """
+    if local_user_ids is None:
+        cursor.execute("SELECT id FROM local_users WHERE profile_id = %s", (profile_id,))
+        local_user_ids = [int(row["id"]) for row in cursor.fetchall()]
+    else:
+        local_user_ids = [int(user_id) for user_id in local_user_ids]
+    if not local_user_ids:
+        return []
+
+    placeholder_email = f"deleted-user-{local_user_ids[0]}@{DELETED_ACCOUNT_EMAIL_DOMAIN}"
+    update_profile_data(cursor, profile_id, {
+        "email": placeholder_email,
+        "firebaseUid": None,
+    })
+    cursor.execute(
+        "UPDATE profiles SET email = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+        (placeholder_email, profile_id),
+    )
+    placeholders = ", ".join(["%s"] * len(local_user_ids))
+    for user_id in local_user_ids:
+        cursor.execute(
+            """
+            UPDATE local_users
+            SET email = %s, password_hash = NULL, password_login_enabled = FALSE,
+                email_verified_at = NULL, updated_at = UTC_TIMESTAMP()
+            WHERE id = %s
+            """,
+            (f"deleted-user-{user_id}@{DELETED_ACCOUNT_EMAIL_DOMAIN}", user_id),
+        )
+    cursor.execute(f"DELETE FROM auth_sessions WHERE user_id IN ({placeholders})", local_user_ids)
+    cursor.execute(f"DELETE FROM auth_action_tokens WHERE user_id IN ({placeholders})", local_user_ids)
+    cursor.execute(f"DELETE FROM firebase_identities WHERE user_id IN ({placeholders})", local_user_ids)
+    return local_user_ids
+
+
 @app.post("/api/member/account-deletion")
 def member_account_deletion(
     payload: AccountDeletionPayload,
@@ -8381,17 +8430,20 @@ def member_account_deletion(
             "visibleInCatalog": False,
             "isVisibleInCatalog": False,
         })
+        # Deletion takes the account out of the service immediately, but the
+        # profile record is retained for the statutory grace period so the
+        # scheduled worker can remove its remaining content.  The old login
+        # identity must *not* be retained for that period: otherwise an
+        # already-deleted member cannot register again with the same email or
+        # Google/Apple identity.
+        release_account_identity_for_deletion(cursor, profile_id, [int(user["id"])])
         cursor.execute(
-            "UPDATE profiles SET status = 'DELETION_PENDING', updated_at = UTC_TIMESTAMP() WHERE id = %s",
-            (profile_id,),
+            "UPDATE profiles SET status = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (ACCOUNT_DELETION_PENDING_STATUS, profile_id),
         )
         cursor.execute(
-            "UPDATE local_users SET status = 'DELETION_PENDING', updated_at = UTC_TIMESTAMP() WHERE id = %s",
-            (user["id"],),
-        )
-        cursor.execute(
-            "UPDATE auth_sessions SET revoked_at = UTC_TIMESTAMP() WHERE user_id = %s AND revoked_at IS NULL",
-            (user["id"],),
+            "UPDATE local_users SET status = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (ACCOUNT_DELETION_PENDING_STATUS, user["id"]),
         )
         audit(conn, user["email"], "USER_DELETION_REQUESTED", "profiles", profile_id, {"email": user["email"], "deleteAfter": body["deleteAfter"]})
         conn.commit()
@@ -8399,7 +8451,7 @@ def member_account_deletion(
     delete_private_cookie(response, COOKIE_LEGACY_SESSION_NAME)
     return {
         "ok": True,
-        "status": "DELETION_PENDING",
+        "status": ACCOUNT_DELETION_PENDING_STATUS,
         "deleteAfter": body["deleteAfter"],
         "message": f"Account access ended. Permanent deletion is scheduled in {ACCOUNT_DELETION_DAYS} days.",
     }
@@ -18588,6 +18640,16 @@ def purge_due_account_deletions() -> None:
         lock_row = cursor.fetchone()
         if not lock_row or not lock_row.get("locked"):
             return
+        # Repair deletion requests created before identities were released at
+        # request time. This runs on every scheduled pass and is idempotent,
+        # so already-stuck accounts stop blocking a new registration as soon
+        # as the release is deployed.
+        cursor.execute(
+            "SELECT id FROM profiles WHERE status IN (%s, %s) ORDER BY id ASC",
+            (ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS),
+        )
+        for pending_profile in cursor.fetchall():
+            release_account_identity_for_deletion(cursor, int(pending_profile["id"]))
         cursor.execute(
             """
             SELECT data
@@ -18613,7 +18675,10 @@ def purge_due_account_deletions() -> None:
             if profile_id and due_at <= current_time:
                 cursor.execute("SELECT status FROM profiles WHERE id = %s LIMIT 1", (profile_id,))
                 profile = cursor.fetchone()
-                if str((profile or {}).get("status") or "").upper() == "PENDING_DELETION":
+                if str((profile or {}).get("status") or "").upper() in {
+                    ACCOUNT_DELETION_PENDING_STATUS,
+                    ACCOUNT_DELETION_LEGACY_PENDING_STATUS,
+                }:
                     due_profile_ids.append(profile_id)
         for profile_id in due_profile_ids:
             try:
@@ -18932,7 +18997,10 @@ def admin_delete_item(view: str, item_id: str, actor: str = Depends(require_admi
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
     if view in ADMIN_MUTATION_TABLES:
-        if view == "users":
+        # Both aliases are exposed by the admin API.  They must have the
+        # same irreversible-delete semantics; previously ``profiles`` only
+        # changed a status flag and left the login identity behind.
+        if view in {"users", "profiles"}:
             with db_cursor() as (conn, cursor):
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
                 deleted = permanently_delete_profile(cursor, resolved_item_id)

@@ -4,8 +4,8 @@ import * as WebBrowser from "expo-web-browser";
 import * as Google from "expo-auth-session/providers/google";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
-import { GoogleAuthProvider, OAuthProvider, signInWithCredential } from "firebase/auth";
-import { firebaseAuth, firebaseAuthError } from "../firebase";
+import { GoogleAuthProvider, OAuthProvider, signInWithCredential } from "@firebase/auth";
+import { firebaseAuth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
 import { useI18n } from "../i18n/I18nContext";
@@ -168,15 +168,15 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
     // block (restore the single silent `return` above) once Google sign-in
     // is confirmed working end to end.
     if (!firebaseAuth) {
-      setError(`DEBUG: firebaseAuth is null - ${firebaseAuthError || "no error captured"}`);
+      setError(t("auth.socialErrorDefault"));
       return;
     }
     if (!googleConfigured) {
-      setError("DEBUG: googleConfigured is false (no Google client ID for this platform)");
+      setError(t("auth.socialErrorDefault"));
       return;
     }
     if (!request) {
-      setError("DEBUG: request is null (Google.useAuthRequest has no request object yet)");
+      setError(t("auth.socialErrorDefault"));
       return;
     }
     setError(null);
