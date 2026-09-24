@@ -15257,6 +15257,37 @@ def normalize_admin_clinic(row: dict[str, Any]) -> dict[str, Any]:
     return clinic
 
 
+# Alena, 2026-09-24: admin could only edit existing clinics/lawyers, never
+# create new ones (no POST endpoint existed at all - PATCH requires an id
+# that's already in the table). This is the minimal "create a draft row"
+# endpoint the new admin "New Clinic"/"New Lawyer" forms call; the row
+# starts inactive with just name/country/city, and everything else
+# (services, languages, contacts, logo/photo) is filled in on the existing
+# ClinicDetail/LawyerDetail edit screen right after, via PATCH as usual.
+@app.post("/api/admin/clinics")
+def admin_create_clinic(payload: AdminCreatePayload, actor: str = Depends(require_admin)):
+    values = payload.values
+    name = str(values.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Clinic name is required")
+    country = str(values.get("country") or "").strip() or None
+    city = str(values.get("city") or "").strip() or None
+    data: dict[str, Any] = {"name": name}
+    if country:
+        data["country"] = country
+    if city:
+        data["city"] = city
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO clinics (name, country, city, status, data, created_at, updated_at) VALUES (%s, %s, %s, 'inactive', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            (name, country, city, json.dumps(data, ensure_ascii=False)),
+        )
+        item_id = cursor.lastrowid
+        audit(conn, actor, "create_clinic", "clinics", item_id, {"name": name})
+        conn.commit()
+    return {"ok": True, "id": item_id}
+
+
 @app.get("/api/admin/clinics/{clinic_identifier}/overview")
 def admin_clinic_overview(clinic_identifier: str, _admin: str = Depends(require_admin)):
     with db_cursor() as (_, cursor):
@@ -15477,6 +15508,32 @@ def normalize_admin_lawyer(row: dict[str, Any]) -> dict[str, Any]:
         "createdAt": row.get("created_at"),
         "updatedAt": row.get("updated_at"),
     }
+
+
+# See admin_create_clinic above for context - same gap, same fix, mirrored
+# for lawyers.
+@app.post("/api/admin/lawyers")
+def admin_create_lawyer(payload: AdminCreatePayload, actor: str = Depends(require_admin)):
+    values = payload.values
+    name = str(values.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Lawyer name is required")
+    country = str(values.get("country") or "").strip() or None
+    city = str(values.get("city") or "").strip() or None
+    data: dict[str, Any] = {"name": name}
+    if country:
+        data["country"] = country
+    if city:
+        data["city"] = city
+    with db_cursor() as (conn, cursor):
+        cursor.execute(
+            "INSERT INTO lawyers (name, country, city, status, data, created_at, updated_at) VALUES (%s, %s, %s, 'inactive', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            (name, country, city, json.dumps(data, ensure_ascii=False)),
+        )
+        item_id = cursor.lastrowid
+        audit(conn, actor, "create_lawyer", "lawyers", item_id, {"name": name})
+        conn.commit()
+    return {"ok": True, "id": item_id}
 
 
 @app.get("/api/admin/lawyers/{lawyer_identifier}/overview")

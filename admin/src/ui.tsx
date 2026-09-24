@@ -7241,6 +7241,8 @@ function GenericList({ view }: { view: string }) {
   ].includes(view);
   const creatable = [
     "articles",
+    "clinics",
+    "lawyers",
     "static-pages",
     "marketing",
     "settings",
@@ -7473,8 +7475,8 @@ function GenericList({ view }: { view: string }) {
             <button
               className={`primary ${view === "articles" ? "article-new-button" : ""}`}
               onClick={() => {
-                if (view === "articles") {
-                  navigate("/articles/new");
+                if (["articles", "clinics", "lawyers"].includes(view)) {
+                  navigate(`/${view}/new`);
                   return;
                 }
                 setEditing({
@@ -7490,7 +7492,9 @@ function GenericList({ view }: { view: string }) {
                 });
               }}
             >
-              {view === "articles" && <AdminIcon name="plus" />}
+              {["articles", "clinics", "lawyers"].includes(view) && (
+                <AdminIcon name="plus" />
+              )}
               New {label(view).replace(/s$/, "")}
             </button>
           )}
@@ -12574,6 +12578,109 @@ function UserDetail() {
   );
 }
 
+// Alena, 2026-09-24: "Create НОВУЮ клинику/юриста через админку пока
+// нельзя - можно только редактировать уже существующие." There was no
+// create endpoint or screen at all. Rather than teach ClinicDetail's
+// overview-driven edit UI (services, languages, visitors...) to also
+// handle a not-yet-existing row, this is a small standalone "create the
+// draft" form (name + country + city) that POSTs to the new
+// /admin/clinics or /admin/lawyers endpoint and then hands off straight
+// into the existing, unmodified ClinicDetail/LawyerDetail edit screen
+// (by id) for everything else, including logo/photo upload.
+function PartnerCreate({ kind }: { kind: "clinics" | "lawyers" }) {
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [country, setCountry] = useState("");
+  const [city, setCity] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const title = kind === "clinics" ? "Clinic" : "Lawyer";
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      setError(`${title} name is required.`);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api.post<{ id: number }>(`/admin/${kind}`, {
+        values: {
+          name: name.trim(),
+          country: country.trim(),
+          city: city.trim(),
+        },
+      });
+      navigate(`/${kind}/${result.id}`);
+    } catch {
+      setError(`Could not create this ${title.toLowerCase()}.`);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="directory-detail">
+      <Link className="back" to={`/${kind}`}>
+        <AdminIcon name="arrowLeft" /> Back to {kind === "clinics" ? "Clinics" : "Lawyers"}
+      </Link>
+      <header className="clinic-heading">
+        <div>
+          <h1>New {title}</h1>
+          <p className="directory-location">
+            Fill in the basics now - services, languages, contacts and the{" "}
+            {kind === "clinics" ? "logo" : "photo"} can be added right after.
+          </p>
+        </div>
+      </header>
+      <form className="clinic-form" onSubmit={submit}>
+        <article>
+          <h3 className="directory-card-title">
+            <AdminIcon name={kind === "clinics" ? "building" : "scale"} /> General
+            Info
+          </h3>
+          <div className="form-grid">
+            <label>
+              Name *
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                autoFocus
+                required
+              />
+            </label>
+            <label>
+              Country
+              <input
+                value={country}
+                onChange={(event) => setCountry(event.target.value)}
+              />
+            </label>
+            <label>
+              City
+              <input
+                value={city}
+                onChange={(event) => setCity(event.target.value)}
+              />
+            </label>
+          </div>
+          {error && <p className="error">{error}</p>}
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => navigate(`/${kind}`)}
+            >
+              Cancel
+            </button>
+            <button className="primary" disabled={busy}>
+              {busy ? "Creating\u2026" : `Create ${title}`}
+            </button>
+          </div>
+        </article>
+      </form>
+    </div>
+  );
+}
+
 function ClinicDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -13735,7 +13842,15 @@ export function AdminApp() {
               element={<VerificationDetail />}
             />
             <Route path="/users/:id" element={<UserDetail />} />
+            <Route
+              path="/clinics/new"
+              element={<PartnerCreate kind="clinics" />}
+            />
             <Route path="/clinics/:id" element={<ClinicDetail />} />
+            <Route
+              path="/lawyers/new"
+              element={<PartnerCreate kind="lawyers" />}
+            />
             <Route path="/lawyers/:id" element={<LawyerDetail />} />
             <Route
               path="/articles/categories"
