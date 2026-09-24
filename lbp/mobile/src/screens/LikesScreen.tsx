@@ -7,6 +7,7 @@ import { ApiError } from "../api/client";
 import { likeProfile, unlikeProfile } from "../api/catalog";
 import { createConversation } from "../api/messages";
 import { fetchLikes, fetchProfileViews, markLikesRead } from "../api/likes";
+import { fetchSubscriptionStatus } from "../api/subscription";
 import type { LikesResponse, ProfileSummary, ProfileVisitor } from "../api/types";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { useI18n } from "../i18n/I18nContext";
@@ -61,7 +62,7 @@ const FREE_PREVIEW_COUNT = 4;
 // rows shown clear and tappable through to the profile, the rest (up to
 // FREE_PREVIEW_COUNT above) as the locked teaser. Must match those two
 // backend constants per tab.
-const REAL_UNLOCKED_COUNT: Partial<Record<Tab, number>> = { likesYou: 1, visitors: 2 };
+const REAL_UNLOCKED_COUNT_FALLBACK: Partial<Record<Tab, number>> = { likesYou: 1, visitors: 2 };
 
 export default function LikesScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -120,6 +121,17 @@ export default function LikesScreen({ navigation }: Props) {
   // view without actually downgrading. Local state only, never sent
   // anywhere - flips how THIS screen renders the data it already has.
   const [previewAsFree, setPreviewAsFree] = useState(false);
+  const [realUnlockedCount, setRealUnlockedCount] = useState<Partial<Record<Tab, number>>>(REAL_UNLOCKED_COUNT_FALLBACK);
+  useEffect(() => {
+    fetchSubscriptionStatus()
+      .then((status) =>
+        setRealUnlockedCount({
+          likesYou: status.limits?.freeLikesPreviewCount ?? REAL_UNLOCKED_COUNT_FALLBACK.likesYou,
+          visitors: status.limits?.freeVisitorsPreviewCount ?? REAL_UNLOCKED_COUNT_FALLBACK.visitors,
+        }),
+      )
+      .catch(() => undefined);
+  }, []);
 
   async function handleMessage(item: ProfileSummary) {
     if (messagingId) return;
@@ -428,7 +440,7 @@ export default function LikesScreen({ navigation }: Props) {
             // unblurred identity for) are locked; the first
             // REAL_UNLOCKED_COUNT rows render as normal, tappable-through
             // cards below.
-            const previewLocked = previewMode && index >= (REAL_UNLOCKED_COUNT[tab] ?? 0);
+            const previewLocked = previewMode && index >= (realUnlockedCount[tab] ?? 0);
             // Reference mockup (#scr-likes): a "message" + "like back" round
             // button pair on rows for people you haven't acted on yet.
             // Doesn't apply to Matches (already mutual) or My likes (you

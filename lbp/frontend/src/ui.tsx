@@ -9160,7 +9160,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Free forever", altNote: "",
         tagline: "Create your profile and start discovering.",
-        features: ["Full profile & basic discovery", "3 likes per day", "Basic matching"],
+        features: ["Full profile & basic discovery", "5 likes per day", "Basic matching"],
         cta: "Get started free", badge: "",
       },
       {
@@ -9183,12 +9183,12 @@ const PRICING_TEXT = {
     compareSub: "See exactly what's included in each plan.",
     matrixGroups: [
       { name: "Match better", rows: [
-        { label: "Daily likes", values: ["3", "15", "Unlimited"] },
+        { label: "Daily likes", values: ["5", "15", "Unlimited"] },
         { label: "Reach out first", values: ["", "5/day", "Unlimited"] },
         { label: "Advanced family filters", values: ["", "check", "check"] },
         { label: "Priority in catalog", values: ["", "check", "check"] },
-        { label: "See who liked you", values: ["", "check", "check"] },
-        { label: "See profile visitors", values: ["", "check", "check"] },
+        { label: "See who liked you", values: ["1", "check", "check"] },
+        { label: "See profile visitors", values: ["2", "check", "check"] },
       ] },
       { name: "Understand compatibility", rows: [
         { label: "Compatibility Score", values: ["", "check", "check"] },
@@ -9242,7 +9242,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Бесплатно навсегда", altNote: "",
         tagline: "Создайте профиль и начните знакомиться.",
-        features: ["Полный профиль и базовый поиск", "3 лайка в день", "Базовый подбор пар"],
+        features: ["Полный профиль и базовый поиск", "5 лайков в день", "Базовый подбор пар"],
         cta: "Начать бесплатно", badge: "",
       },
       {
@@ -9265,12 +9265,12 @@ const PRICING_TEXT = {
     compareSub: "Точный список того, что включено в каждый тариф.",
     matrixGroups: [
       { name: "Больше совпадений", rows: [
-        { label: "Лайки в день", values: ["3", "15", "Без ограничений"] },
+        { label: "Лайки в день", values: ["5", "15", "Без ограничений"] },
         { label: "Первым написать", values: ["", "5 в день", "Без ограничений"] },
         { label: "Расширенные семейные фильтры", values: ["", "check", "check"] },
         { label: "Приоритет в каталоге", values: ["", "check", "check"] },
-        { label: "Кто лайкнул вас", values: ["", "check", "check"] },
-        { label: "Кто смотрел профиль", values: ["", "check", "check"] },
+        { label: "Кто лайкнул вас", values: ["1", "check", "check"] },
+        { label: "Кто смотрел профиль", values: ["2", "check", "check"] },
       ] },
       { name: "Понимание совместимости", rows: [
         { label: "Оценка совместимости", values: ["", "check", "check"] },
@@ -9324,7 +9324,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Gratis para siempre", altNote: "",
         tagline: "Crea tu perfil y empieza a descubrir.",
-        features: ["Perfil completo y descubrimiento básico", "3 likes al día", "Emparejamiento básico"],
+        features: ["Perfil completo y descubrimiento básico", "5 likes al día", "Emparejamiento básico"],
         cta: "Empieza gratis", badge: "",
       },
       {
@@ -9347,12 +9347,12 @@ const PRICING_TEXT = {
     compareSub: "Mira exactamente qué incluye cada plan.",
     matrixGroups: [
       { name: "Mejores coincidencias", rows: [
-        { label: "Me gusta diarios", values: ["3", "15", "Ilimitado"] },
+        { label: "Me gusta diarios", values: ["5", "15", "Ilimitado"] },
         { label: "Escribir primero", values: ["", "5/día", "Ilimitado"] },
         { label: "Filtros familiares avanzados", values: ["", "check", "check"] },
         { label: "Prioridad en el catálogo", values: ["", "check", "check"] },
-        { label: "Ver quién te dio like", values: ["", "check", "check"] },
-        { label: "Ver visitantes del perfil", values: ["", "check", "check"] },
+        { label: "Ver quién te dio like", values: ["1", "check", "check"] },
+        { label: "Ver visitantes del perfil", values: ["2", "check", "check"] },
       ] },
       { name: "Entender la compatibilidad", rows: [
         { label: "Puntuación de compatibilidad", values: ["", "check", "check"] },
@@ -9406,7 +9406,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Grátis para sempre", altNote: "",
         tagline: "Crie o seu perfil e comece a descobrir.",
-        features: ["Perfil completo e descoberta básica", "3 likes por dia", "Compatibilidade básica"],
+        features: ["Perfil completo e descoberta básica", "5 likes por dia", "Compatibilidade básica"],
         cta: "Comece grátis", badge: "",
       },
       {
@@ -9429,12 +9429,12 @@ const PRICING_TEXT = {
     compareSub: "Veja exatamente o que está incluído em cada plano.",
     matrixGroups: [
       { name: "Encontre melhores matches", rows: [
-        { label: "Likes diários", values: ["3", "15", "Ilimitado"] },
+        { label: "Likes diários", values: ["5", "15", "Ilimitado"] },
         { label: "Ser o primeiro a contactar", values: ["", "5/dia", "Ilimitado"] },
         { label: "Filtros familiares avançados", values: ["", "check", "check"] },
         { label: "Prioridade no catálogo", values: ["", "check", "check"] },
-        { label: "Veja quem gostou de si", values: ["", "check", "check"] },
-        { label: "Veja quem visitou o seu perfil", values: ["", "check", "check"] },
+        { label: "Veja quem gostou de si", values: ["1", "check", "check"] },
+        { label: "Veja quem visitou o seu perfil", values: ["2", "check", "check"] },
       ] },
       { name: "Compreenda a compatibilidade", rows: [
         { label: "Pontuação de Compatibilidade", values: ["", "check", "check"] },
@@ -9488,7 +9488,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Gratuit pour toujours", altNote: "",
         tagline: "Créez votre profil et commencez à découvrir.",
-        features: ["Profil complet et découverte de base", "3 likes par jour", "Mise en relation de base"],
+        features: ["Profil complet et découverte de base", "5 likes par jour", "Mise en relation de base"],
         cta: "Commencer gratuitement", badge: "",
       },
       {
@@ -9511,12 +9511,12 @@ const PRICING_TEXT = {
     compareSub: "Découvrez exactement ce qui est inclus dans chaque forfait.",
     matrixGroups: [
       { name: "Mieux matcher", rows: [
-        { label: "Likes quotidiens", values: ["3", "15", "Illimité"] },
+        { label: "Likes quotidiens", values: ["5", "15", "Illimité"] },
         { label: "Prendre contact en premier", values: ["", "5/jour", "Illimité"] },
         { label: "Filtres familiaux avancés", values: ["", "check", "check"] },
         { label: "Priorité dans le catalogue", values: ["", "check", "check"] },
-        { label: "Voir qui vous a liké", values: ["", "check", "check"] },
-        { label: "Voir les visiteurs du profil", values: ["", "check", "check"] },
+        { label: "Voir qui vous a liké", values: ["1", "check", "check"] },
+        { label: "Voir les visiteurs du profil", values: ["2", "check", "check"] },
       ] },
       { name: "Comprendre la compatibilité", rows: [
         { label: "Score de compatibilité", values: ["", "check", "check"] },
@@ -9570,7 +9570,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Für immer kostenlos", altNote: "",
         tagline: "Erstellen Sie Ihr Profil und beginnen Sie zu entdecken.",
-        features: ["Vollständiges Profil & einfache Entdeckung", "3 Likes pro Tag", "Einfaches Matching"],
+        features: ["Vollständiges Profil & einfache Entdeckung", "5 Likes pro Tag", "Einfaches Matching"],
         cta: "Kostenlos starten", badge: "",
       },
       {
@@ -9593,12 +9593,12 @@ const PRICING_TEXT = {
     compareSub: "Sehen Sie genau, was in jedem Plan enthalten ist.",
     matrixGroups: [
       { name: "Besser matchen", rows: [
-        { label: "Likes pro Tag", values: ["3", "15", "Unbegrenzt"] },
+        { label: "Likes pro Tag", values: ["5", "15", "Unbegrenzt"] },
         { label: "Zuerst Kontakt aufnehmen", values: ["", "5/Tag", "Unbegrenzt"] },
         { label: "Erweiterte Familienfilter", values: ["", "check", "check"] },
         { label: "Priorität im Katalog", values: ["", "check", "check"] },
-        { label: "Sehen, wer Sie geliked hat", values: ["", "check", "check"] },
-        { label: "Profilbesucher sehen", values: ["", "check", "check"] },
+        { label: "Sehen, wer Sie geliked hat", values: ["1", "check", "check"] },
+        { label: "Profilbesucher sehen", values: ["2", "check", "check"] },
       ] },
       { name: "Kompatibilität verstehen", rows: [
         { label: "Kompatibilitäts-Score", values: ["", "check", "check"] },
@@ -9652,7 +9652,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Gratis per sempre", altNote: "",
         tagline: "Crea il tuo profilo e inizia a scoprire.",
-        features: ["Profilo completo e scoperta di base", "3 like al giorno", "Abbinamento di base"],
+        features: ["Profilo completo e scoperta di base", "5 like al giorno", "Abbinamento di base"],
         cta: "Inizia gratis", badge: "",
       },
       {
@@ -9675,12 +9675,12 @@ const PRICING_TEXT = {
     compareSub: "Scopri esattamente cosa è incluso in ciascun piano.",
     matrixGroups: [
       { name: "Trova match migliori", rows: [
-        { label: "Like giornalieri", values: ["3", "15", "Illimitati"] },
+        { label: "Like giornalieri", values: ["5", "15", "Illimitati"] },
         { label: "Scrivere per primi", values: ["", "5/giorno", "Illimitato"] },
         { label: "Filtri familiari avanzati", values: ["", "check", "check"] },
         { label: "Priorità nel catalogo", values: ["", "check", "check"] },
-        { label: "Vedi chi ti ha messo like", values: ["", "check", "check"] },
-        { label: "Vedi chi ha visitato il profilo", values: ["", "check", "check"] },
+        { label: "Vedi chi ti ha messo like", values: ["1", "check", "check"] },
+        { label: "Vedi chi ha visitato il profilo", values: ["2", "check", "check"] },
       ] },
       { name: "Capire la compatibilità", rows: [
         { label: "Punteggio di Compatibilità", values: ["", "check", "check"] },
@@ -9734,7 +9734,7 @@ const PRICING_TEXT = {
       {
         key: "explore", name: "Explore", price: "€0", priceNote: "Zawsze za darmo", altNote: "",
         tagline: "Stwórz profil i zacznij odkrywać.",
-        features: ["Pełny profil i podstawowe odkrywanie", "3 polubienia dziennie", "Podstawowe dopasowanie"],
+        features: ["Pełny profil i podstawowe odkrywanie", "5 polubienia dziennie", "Podstawowe dopasowanie"],
         cta: "Zacznij za darmo", badge: "",
       },
       {
@@ -9757,12 +9757,12 @@ const PRICING_TEXT = {
     compareSub: "Zobacz dokładnie, co zawiera każdy plan.",
     matrixGroups: [
       { name: "Dopasuj się lepiej", rows: [
-        { label: "Polubienia dziennie", values: ["3", "15", "Bez limitu"] },
+        { label: "Polubienia dziennie", values: ["5", "15", "Bez limitu"] },
         { label: "Pierwszy kontakt", values: ["", "5/dzień", "Bez limitu"] },
         { label: "Zaawansowane filtry rodzinne", values: ["", "check", "check"] },
         { label: "Priorytet w katalogu", values: ["", "check", "check"] },
-        { label: "Zobacz, kto Cię polubił", values: ["", "check", "check"] },
-        { label: "Zobacz, kto odwiedził profil", values: ["", "check", "check"] },
+        { label: "Zobacz, kto Cię polubił", values: ["1", "check", "check"] },
+        { label: "Zobacz, kto odwiedził profil", values: ["2", "check", "check"] },
       ] },
       { name: "Zrozum kompatybilność", rows: [
         { label: "Wskaźnik Kompatybilności", values: ["", "check", "check"] },

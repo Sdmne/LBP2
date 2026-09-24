@@ -10301,6 +10301,22 @@ function SettingsList({ view }: { view: string }) {
                   fallback: 3,
                 },
                 {
+                  key: "limits.free_likes_preview_count",
+                  title: 'Free plan preview: "who liked you" rows',
+                  description:
+                    "How many real, unblurred Likes entries a free user sees before the rest are locked behind Premium. Shown on the mobile Likes tab and the pricing comparison table.",
+                  type: "number",
+                  fallback: 1,
+                },
+                {
+                  key: "limits.free_visitors_preview_count",
+                  title: "Free plan preview: profile visitors rows",
+                  description:
+                    "How many real, unblurred Visitors entries a free user sees before the rest are locked behind Premium. Shown on the mobile Visitors tab and the pricing comparison table.",
+                  type: "number",
+                  fallback: 2,
+                },
+                {
                   key: "limits.max_message_length",
                   title: "Maximum message length",
                   description:

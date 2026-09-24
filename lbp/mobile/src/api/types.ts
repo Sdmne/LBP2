@@ -231,7 +231,12 @@ export type SubscriptionStatus = {
   isPremium: boolean;
   tier: SubscriptionTier;
   status: "VERIFICATION_REQUIRED" | "NOT_STARTED" | "PENDING" | "ACTIVE" | string;
-  limits: { freeLikesPerDay: number; premiumLikesPerDay: number };
+  limits: {
+    freeLikesPerDay: number;
+    premiumLikesPerDay: number;
+    freeLikesPreviewCount: number;
+    freeVisitorsPreviewCount: number;
+  };
   request: { id: number; plan: string; tier: string | null; createdAt: string; updatedAt: string } | null;
 };
 

@@ -3562,6 +3562,16 @@ RUNTIME_SETTING_DEFAULTS: dict[str, bool | int | str] = {
     "limits.free_cold_chats_per_day": FREE_DAILY_COLD_CHAT_LIMIT,
     "limits.premium_cold_chats_per_day": PREMIUM_DAILY_COLD_CHAT_LIMIT,
     "limits.max_message_length": 5000,
+    # Alena, 2026-09-24: "надо сюда значит и остальное добавить" - the free
+    # tier's "see 1 like / 2 visitors for free" preview counts were two
+    # hardcoded constants (LIKES_FREE_PREVIEW_COUNT/
+    # PROFILE_VIEWS_FREE_PREVIEW_COUNT below, mirrored again on mobile as
+    # REAL_UNLOCKED_COUNT) that only a code change + redeploy could touch.
+    # Promoted to real runtime settings, same admin Settings > Platform >
+    # Limits card as the likes-per-day limit above, so she can adjust these
+    # herself. Defaults match the values Alena set on 2026-09-22.
+    "limits.free_likes_preview_count": 1,
+    "limits.free_visitors_preview_count": 2,
 }
 
 
@@ -7688,8 +7698,13 @@ def member_unlike_profile(profile_identifier: str, user: dict[str, Any] = Depend
     return {"ok": True, "liked": False}
 
 
-LIKES_FREE_PREVIEW_COUNT = 1  # was 4 - lowered per Alena, 2026-09-22 (matches pricing table: free = 1)
-PROFILE_VIEWS_FREE_PREVIEW_COUNT = 2  # was 1 - raised per Alena, 2026-09-22 (pricing table: free = 2 visitors, 1 like)
+# Superseded 2026-09-24 by the runtime settings limits.free_likes_preview_count
+# / limits.free_visitors_preview_count (RUNTIME_SETTING_DEFAULTS above,
+# editable from admin Settings > Platform > Limits) - member_likes() and
+# member_profile_views() read those now, not these. Left defined (same
+# values) only in case something else still imports them by name.
+LIKES_FREE_PREVIEW_COUNT = 1
+PROFILE_VIEWS_FREE_PREVIEW_COUNT = 2
 
 
 BLURRED_PREVIEW_DIR_NAME = "blurred-previews"
@@ -7811,7 +7826,7 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
         likes_snapshot = cursor.fetchone()
         likes_you_count = int(likes_snapshot["cnt"])
         read_through_id = int(likes_snapshot["readThroughId"] or 0)
-        preview_limit = 100 if is_premium else LIKES_FREE_PREVIEW_COUNT
+        preview_limit = 100 if is_premium else int(runtime_settings(cursor)["limits.free_likes_preview_count"])
         cursor.execute(
             f"""
             SELECT l.id, l.created_at AS "likedAt",
@@ -8005,7 +8020,7 @@ def member_profile_views(user: dict[str, Any] = Depends(require_user)):
         # PROFILE_VIEWS_FREE_PREVIEW_COUNT (2) real, tappable entries, same
         # "reveal the free quota, don't fetch past it" pattern as
         # member_likes()'s free preview just below.
-        preview_limit = 100 if is_premium else PROFILE_VIEWS_FREE_PREVIEW_COUNT
+        preview_limit = 100 if is_premium else int(runtime_settings(cursor)["limits.free_visitors_preview_count"])
         cursor.execute(
             f"""
             SELECT e.id AS viewId, e.created_at, e.updated_at,
@@ -12018,6 +12033,8 @@ def member_subscription_status(user: dict[str, Any] = Depends(require_user)):
         "limits": {
             "freeLikesPerDay": int(settings["limits.free_likes_per_day"]),
             "premiumLikesPerDay": int(settings["limits.premium_likes_per_day"]),
+            "freeLikesPreviewCount": int(settings["limits.free_likes_preview_count"]),
+            "freeVisitorsPreviewCount": int(settings["limits.free_visitors_preview_count"]),
         },
         "request": {
             "id": subscription.get("id"),
