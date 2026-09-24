@@ -235,7 +235,7 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
           unfilled gap over the vivid gradient reads as a stray purple
           block), just at the opposite end of the screen. */}
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingBottom: BOTTOM_BAR_RESERVED_HEIGHT + insets.bottom }]}
+        contentContainerStyle={[styles.container, { paddingBottom: BOTTOM_BAR_RESERVED_HEIGHT + insets.bottom, flexGrow: 1 }]}
       >
         {/* Redesigned (2026-09-13) against Alena's Figma reference: name/
             location/badges now sit directly on the photo, over a dark
@@ -312,6 +312,20 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
           </View>
         </View>
 
+        {/* UPDATE (Sept 2026): Alena - "сиреневая полоса так и осталась" -
+            the two earlier "без сиреневого" fixes (see the comments above
+            photoWrap and on the ScrollView's paddingBottom) only closed the
+            gaps caused by fixed spacing; they didn't address the case where
+            a profile simply has little data (few Looking-for tags, no bio,
+            nothing in detailRows) - ProfileDetailSections' infoCard sizes
+            to its own content, so a short profile leaves the vivid gradient
+            exposed below it, down to BOTTOM_BAR_RESERVED_HEIGHT's reserved
+            gap for the fixed bar. Wrapping the sections + family-links row
+            in a flex:1, colors.card-backed container makes that background
+            stretch to fill any leftover vertical space (a no-op when
+            content already overflows the screen, since ScrollView ignores
+            flexGrow on its content once it's taller than the viewport). */}
+        <View style={styles.contentFill}>
         <ProfileDetailSections profile={profile} />
 
         {!isSelf ? (
@@ -339,6 +353,7 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
                 top-level pill is removed. */}
           </View>
         ) : null}
+        </View>
       </ScrollView>
 
       {!isSelf ? (
@@ -408,6 +423,10 @@ const styles = StyleSheet.create({
   // photoWrap is the positioning root for the scrim + overlaid text below -
   // photo itself is unchanged (full-width, fixed height).
   photoWrap: { position: "relative" },
+  // See the "сиреневая полоса" comment above where this is used - fills
+  // any leftover ScrollView space with the same white the info card uses,
+  // so a short profile's tail never exposes the vivid gradient behind it.
+  contentFill: { flex: 1, backgroundColor: colors.card },
   photo: { width: 390, height: 390, backgroundColor: colors.border },
   photoPlaceholder: { alignItems: "center", justifyContent: "center", width: "100%" },
   headerMenuBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },

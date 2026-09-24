@@ -90,6 +90,18 @@ export default function DirectoryDetailScreen({ route }: Props) {
         )}
         <Text style={styles.name}>{item.name}</Text>
         <Text style={styles.subtitle}>📍 {[item.city, item.country].filter(Boolean).join(", ") || t("common.locationNotSet")}</Text>
+        {/* UPDATE (Sept 2026): Alena - "пропало что вериф партнер" - the
+            badge/badgeText styles below existed already (this screen's own
+            comment at the top of the file describes "a green verified-
+            partner badge" in the hero) but nothing ever rendered them -
+            there was no isVerified/verified field on DirectoryItem to
+            read. Backend now exposes item.verified; admin has a matching
+            toggle on the clinic/lawyer edit screen. */}
+        {item.verified ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{t("directoryDetail.verifiedPartner")}</Text>
+          </View>
+        ) : null}
       </View>
 
       {tags.length > 0 ? (

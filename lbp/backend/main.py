@@ -3209,9 +3209,11 @@ def directory_public_record(row: dict[str, Any], kind: str, include_contact: boo
         "linkedinUrl",
         "state",
         "zip",
+        "verified",
     ):
         if key not in item or item.get(key) is None:
             item[key] = safe.get(key)
+    item["verified"] = bool(item.get("verified"))
     if include_contact:
         contact = {
             "website": raw.get("website"),
@@ -15416,7 +15418,7 @@ def admin_clinic_overview(clinic_identifier: str, _admin: str = Depends(require_
 
 @app.patch("/api/admin/clinics/{clinic_identifier}")
 def admin_update_clinic(clinic_identifier: str, payload: AdminPatchPayload, actor: str = Depends(require_admin)):
-    allowed = {"name", "slug", "logoUrl", "location", "country", "region", "city", "latitude", "longitude", "establishedYear", "hours", "website", "phone", "email", "hospitalAffiliations", "credentials", "honorsAwards", "aboutHtml", "languages", "services", "isActive", "chatEnabled"}
+    allowed = {"name", "slug", "logoUrl", "location", "country", "region", "city", "latitude", "longitude", "establishedYear", "hours", "website", "phone", "email", "hospitalAffiliations", "credentials", "honorsAwards", "aboutHtml", "languages", "services", "isActive", "chatEnabled", "verified"}
     values = {key: value for key, value in payload.values.items() if key in allowed}
     with db_cursor() as (conn, cursor):
         row = fetch_admin_clinic(cursor, clinic_identifier)
@@ -15610,7 +15612,7 @@ def admin_update_lawyer(lawyer_identifier: str, payload: AdminPatchPayload, acto
     allowed = {
         "name", "slug", "photoUrl", "location", "country", "state", "city", "zip",
         "latitude", "longitude", "website", "phone", "fax", "facebookUrl",
-        "instagramUrl", "linkedinUrl", "practiceAreas", "isActive",
+        "instagramUrl", "linkedinUrl", "practiceAreas", "isActive", "verified",
     }
     values = {key: value for key, value in payload.values.items() if key in allowed}
     with db_cursor() as (conn, cursor):

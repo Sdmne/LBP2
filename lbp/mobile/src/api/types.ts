@@ -269,6 +269,7 @@ export type DirectoryItem = {
   practiceAreas?: unknown;
   servicesCount?: number | null;
   practiceAreasCount?: number | null;
+  verified?: boolean | null;
   kind: "clinics" | "lawyers";
   data?: Record<string, unknown>;
   [key: string]: unknown;

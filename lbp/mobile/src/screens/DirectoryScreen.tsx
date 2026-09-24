@@ -362,11 +362,23 @@ export default function DirectoryScreen({ route, navigation }: Props) {
                     {item.name}
                   </Text>
                   {/* Meta text + the partner badge sit on the same line -
-                      Alena's reference had it inline, not stacked below. */}
+                      Alena's reference had it inline, not stacked below.
+                      UPDATE (Sept 2026): Alena - "пропало что вериф
+                      партнер" - this comment described a badge that was
+                      never actually rendered (no isVerified/verified field
+                      existed anywhere yet); backend now exposes
+                      item.verified (admin has a matching toggle), so this
+                      finally renders for real instead of just being
+                      described in a comment. */}
                   <View style={styles.metaRow}>
                     <Text style={styles.meta} numberOfLines={1}>
                       {metaParts.join(" · ") || t("common.locationNotSet")}
                     </Text>
+                    {item.verified ? (
+                      <View style={styles.verifiedPartnerBadge}>
+                        <Text style={styles.verifiedPartnerBadgeText}>{t("directoryDetail.verifiedPartner")}</Text>
+                      </View>
+                    ) : null}
                   </View>
                 </View>
                 <Pressable hitSlop={8} onPress={() => void toggleFavourite(item)}>
@@ -488,6 +500,8 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, gap: 2 },
   name: { fontSize: 14, fontWeight: "600", color: colors.ink },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  verifiedPartnerBadge: { backgroundColor: "#e4f7ec", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  verifiedPartnerBadgeText: { fontSize: 10.5, fontWeight: "700", color: "#1e9e5a" },
   meta: { fontSize: 12, color: colors.muted, flexShrink: 1 },
   partnerTag: { alignSelf: "flex-start", backgroundColor: colors.tint, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
   partnerTagText: { fontSize: 9.5, fontWeight: "700", color: colors.blueDark },

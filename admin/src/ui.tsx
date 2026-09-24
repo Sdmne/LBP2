@@ -12761,7 +12761,7 @@ function ClinicDetail() {
     await save({ services: next });
   };
   const updateClinicSetting = async (
-    key: "chatEnabled" | "isActive",
+    key: "chatEnabled" | "isActive" | "verified",
     value: boolean,
   ) => {
     try {
@@ -12771,7 +12771,9 @@ function ClinicDetail() {
       setNotice(
         key === "chatEnabled"
           ? `Chat ${value ? "enabled" : "disabled"}.`
-          : `Clinic ${value ? "activated" : "deactivated"}.`,
+          : key === "verified"
+            ? `Clinic ${value ? "marked as" : "unmarked as"} a verified partner.`
+            : `Clinic ${value ? "activated" : "deactivated"}.`,
       );
       load();
     } catch {
@@ -13046,6 +13048,32 @@ function ClinicDetail() {
               {settingBoolean(draft.chatEnabled)
                 ? "Disable Chat"
                 : "Enable Chat"}
+            </button>
+          </article>
+          {/* Alena, 2026-09-24: "пропало что вериф партнер" - the mobile
+              app's clinic list and detail screens both had a "verified
+              partner" badge sketched in (comment + styles) but nothing
+              anywhere ever set the flag they'd read - not a regression,
+              a feature that was never finished. This toggle plus the
+              backend's now-allowed "verified" field is that missing
+              wiring; the mobile badge itself renders off item.verified. */}
+          <article className="settings-row">
+            <div>
+              <h3>Verified Partner</h3>
+              <p>Shows a "Verified partner" badge on this clinic's public listing</p>
+            </div>
+            <button
+              className="secondary-button"
+              onClick={() =>
+                void updateClinicSetting(
+                  "verified",
+                  !settingBoolean(draft.verified),
+                )
+              }
+            >
+              {settingBoolean(draft.verified)
+                ? "Remove Verified Badge"
+                : "Mark as Verified Partner"}
             </button>
           </article>
           <article className="settings-row">
@@ -13518,6 +13546,24 @@ function LawyerDetail() {
                 </label>
               ))}
             </div>
+          </article>
+          {/* See the matching comment in ClinicDetail - same missing
+              "verified partner" wiring, same fix, lawyer side. */}
+          <article className="settings-row">
+            <div>
+              <h3>Verified Partner</h3>
+              <p>Shows a "Verified partner" badge on this lawyer's public listing</p>
+            </div>
+            <button
+              className="secondary-button"
+              onClick={() =>
+                void save({ verified: !settingBoolean(draft.verified) })
+              }
+            >
+              {settingBoolean(draft.verified)
+                ? "Remove Verified Badge"
+                : "Mark as Verified Partner"}
+            </button>
           </article>
           <article className="settings-row">
             <div>
