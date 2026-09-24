@@ -47,6 +47,27 @@ function resolveCover(item: ArticleSummary): string | null {
   return item.cover_url || REFERENCE_ARTICLE_COVERS[item.slug] || null;
 }
 
+// Alena, 2026-09-24: "на сайте почти все есть" (the website shows almost
+// every cover photo) confirmed the DB rows/files are fine - this app was
+// the only place they were broken. Root cause: the website's own cover
+// logic (normalizeArticle() in frontend/src/articles.ts) uses cover_url
+// completely as-is as an <img src>, no prefixing at all - which only
+// works because a browser resolves a root-relative path ("/uploads/...")
+// against the page's own origin automatically. This screen was blindly
+// prepending SITE_BASE_URL to every coverPath regardless of whether it
+// was already a full "https://..." URL - harmless for a relative path,
+// but for any cover_url that's already absolute (a plausible production
+// setup: media served from its own host/CDN, or the older
+// REFERENCE_ARTICLE_COVERS entries, which are already full paths) it
+// produced a malformed, doubled-up URL that silently fails to load in
+// RN's <Image>, with no visible error beyond the onError placeholder.
+// A website <img> never had this problem because it never prefixes
+// anything - so this only ever showed up on mobile.
+function coverUri(coverPath: string | null): string {
+  if (!coverPath) return "";
+  return /^https?:\/\//i.test(coverPath) ? coverPath : `${SITE_BASE_URL}${coverPath}`;
+}
+
 // UPDATE (Sept 2026): rebuilt as category-sectioned horizontal-scroll rows
 // per Alena's explicit reference (a Flo-app screen recording: "по темами и
 // вправо листает как у фло") - replaces the earlier filter-chip + 2-column
@@ -56,13 +77,15 @@ function resolveCover(item: ArticleSummary): string | null {
 // a category with zero published articles just doesn't render a section at
 // all instead of leaving an empty one.
 //
-// NOTE: separately confirmed the website's OWN Knowledge Hub grid doesn't
-// even read this live endpoint - ui.tsx renders from a hardcoded
-// `referenceKnowledgeArticles` array (reference-article-meta.ts), fetching
-// the real API result but never using it. So this screen may be showing
-// real DB content nothing else in the product actually exercises - if
-// article covers still don't load after this, the likely cause is the DB
-// rows themselves (empty/placeholder cover_url), not this client code.
+// NOTE (corrected 2026-09-24): earlier session claimed the website's own
+// Knowledge Hub grid never reads this live endpoint and just renders a
+// hardcoded `referenceKnowledgeArticles` array (reference-article-meta.ts)
+// - that's stale. `referenceKnowledgeArticles` isn't imported anywhere in
+// frontend/src/ui.tsx any more (grepped, zero hits outside its own file);
+// the live KnowledgeHub() component there calls loadKnowledgeArticles(),
+// same /api/public/articles this screen hits. So this screen and the
+// website are reading the same real DB rows - see coverUri() above for
+// the actual cause of covers not showing here while they show on web.
 type Section = { category: string; items: ArticleSummary[] };
 
 export default function KnowledgeHubScreen() {
@@ -257,7 +280,7 @@ function ArticleCoverCard({
     <Pressable style={styles.card} onPress={onPress}>
       {hasCover ? (
         <Image
-          source={{ uri: `${SITE_BASE_URL}${coverPath}` }}
+          source={{ uri: coverUri(coverPath) }}
           style={styles.cover}
           onError={() => setPhotoFailed(true)}
         />
@@ -299,7 +322,7 @@ function SearchResultRow({
     <Pressable style={styles.searchRow} onPress={onPress}>
       {hasCover ? (
         <Image
-          source={{ uri: `${SITE_BASE_URL}${coverPath}` }}
+          source={{ uri: coverUri(coverPath) }}
           style={styles.searchThumb}
           onError={() => setPhotoFailed(true)}
         />
