@@ -52,11 +52,23 @@ import { colors } from "../theme";
 // "rainbow is the one special image variant" handling below into
 // WALLPAPER_IMAGES so adding a real-image variant is just one map entry,
 // not a second special case.
+//
+// UPDATE (2026-09-24): Alena, after seeing all 10 real photo backgrounds
+// in the picker - "фоны есть но те 2 надо убрать 3 и 4й" (the backgrounds
+// are there, but remove those 2 - the 3rd and 4th), i.e. "Hearts" and
+// "Stars" (positions 3/4 in the picker, right after Pattern/Rainbow).
+// Those were the icon-grid placeholders kept from the original 4-option
+// set precisely because real artwork didn't exist yet for the rest - now
+// that it does, and there's no icon-grid "Hearts"/"Stars" artwork of
+// their own, she wants them gone rather than left as odd ones out among
+// 10 real photos. "Pattern" stays (it's a deliberate style, not a
+// placeholder - the grey icon-grid IS the intended look for that option).
+// A previously-saved "hearts"/"stars" choice degrades safely: ChatScreen's
+// AsyncStorage load only accepts a value still in CHAT_WALLPAPER_VARIANTS,
+// so it silently falls back to the "rainbow" default instead of erroring.
 export type ChatWallpaperVariant =
   | "pattern"
   | "rainbow"
-  | "hearts"
-  | "stars"
   | "babyBears"
   | "heartsBlush"
   | "babyBlue"
@@ -71,8 +83,6 @@ export type ChatWallpaperVariant =
 export const CHAT_WALLPAPER_VARIANTS: ChatWallpaperVariant[] = [
   "pattern",
   "rainbow",
-  "hearts",
-  "stars",
   "babyBears",
   "heartsBlush",
   "babyBlue",
@@ -119,10 +129,10 @@ export function wallpaperImageSource(variant: ChatWallpaperVariant): ReturnType<
 // variant added since (Sept 23), same reasoning.
 const WALLPAPER_IMAGE_OPACITY = 0.32;
 
-// Only "pattern"/"hearts"/"stars" are still icon-grid themes now (the
-// eight others that used to fill this out were removed, see the Sept 23
-// update above) - every other variant is a real image in WALLPAPER_IMAGES.
-type IconThemeKey = "pattern" | "hearts" | "stars";
+// Only "pattern" is still an icon-grid theme now (hearts/stars removed
+// 2026-09-24 - see the update above; every other variant is a real image
+// in WALLPAPER_IMAGES).
+type IconThemeKey = "pattern";
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
 
 type IconTheme = {
@@ -132,12 +142,10 @@ type IconTheme = {
 
 const ICON_THEMES: Record<IconThemeKey, IconTheme> = {
   pattern: { icons: ["teddy-bear", "baby-carriage", "balloon", "ribbon"], color: colors.line },
-  hearts: { icons: ["heart-outline", "heart-multiple-outline"], color: colors.pink },
-  stars: { icons: ["star-outline", "star-four-points-outline", "creation"], color: colors.premium },
 };
 
 function isIconThemeKey(variant: ChatWallpaperVariant): variant is IconThemeKey {
-  return variant === "pattern" || variant === "hearts" || variant === "stars";
+  return variant === "pattern";
 }
 
 // Used by the wallpaper picker sheet (ChatScreen.tsx) to render each

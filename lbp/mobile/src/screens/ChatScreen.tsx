@@ -652,13 +652,13 @@ export default function ChatScreen({ route, navigation }: Props) {
         </Pressable>
       </Modal>
 
-      {/* Item 11/12, updated Sept 23 - wallpaper picker. Most options are
-          now real bundled images (wallpaperImageSource); only "pattern",
-          "hearts" and "stars" are still ChatWallpaper's icon-grid themes -
-          see wallpaperThemeIcon() there for the icon+color those three
-          render with. Wrapped in a ScrollView with a maxHeight since 14
-          options in a wrapping grid can run taller than a short device's
-          screen. */}
+      {/* Item 11/12, updated 2026-09-24 - wallpaper picker. Most options
+          are now real bundled images (wallpaperImageSource); only
+          "pattern" is still ChatWallpaper's icon-grid theme (hearts/stars
+          removed per Alena - see the comment on ChatWallpaperVariant) -
+          see wallpaperThemeIcon() there for the icon+color it renders
+          with. Wrapped in a ScrollView with a maxHeight since a wrapping
+          grid can run taller than a short device's screen. */}
       <Modal visible={wallpaperPickerVisible} transparent animationType="fade" onRequestClose={() => setWallpaperPickerVisible(false)}>
         <Pressable style={styles.menuOverlay} onPress={() => setWallpaperPickerVisible(false)}>
           <View style={[styles.menuSheet, { paddingBottom: spacing.lg + insets.bottom }]}>
