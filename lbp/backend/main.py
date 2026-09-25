@@ -12227,7 +12227,12 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
         if not profile_is_verified(profile):
             raise HTTPException(status_code=403, detail="Profile verification is required before Premium")
         if SUBSCRIPTION_TIER_RANK[profile_tier(profile)] >= SUBSCRIPTION_TIER_RANK[tier]:
-            return {"ok": True, "status": "ACTIVE", "message": "Premium is already active."}
+            return {
+                "ok": True,
+                "status": "ACTIVE",
+                "messageCode": "SUBSCRIPTION_ALREADY_ACTIVE",
+                "message": "Premium is already active.",
+            }
         cursor.execute(
             """
             SELECT id, data, created_at, updated_at
@@ -12247,6 +12252,7 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
                 "ok": True,
                 "status": "PENDING",
                 "requestId": pending["id"],
+                "messageCode": "SUBSCRIPTION_REQUEST_ALREADY_PENDING",
                 "message": "Your subscription request is already under review.",
             }
         requested_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -12287,6 +12293,7 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
         "ok": True,
         "status": "PENDING",
         "requestId": request_id,
+        "messageCode": "SUBSCRIPTION_REQUEST_PENDING",
         "message": "Your subscription request was saved for manual review.",
     }
 
