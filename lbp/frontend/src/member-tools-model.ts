@@ -47,7 +47,7 @@ export function flowDraft(a:Matching):Flow {return {...a,lookingFor:[...a.lookin
 export type Photo = {id:string;publicUrl:string;avatarUrl:string;position:number;status:string;moderationStatus:string;moderationReason:string};
 export function photosOf(value:unknown): Photo[] {
  const source=Array.isArray(value)?value:[];
- return source.map(v=>{const p=row(v);return {id:text(p.id),publicUrl:text(p.publicUrl||p.publicurl||p.url),avatarUrl:text(p.avatarUrl||p.avatarurl),position:Number(p.position)||0,status:text(p.status||'ACTIVE').toUpperCase(),moderationStatus:text(p.moderationStatus||p.moderationstatus||'APPROVED').toUpperCase(),moderationReason:text(p.moderationReason||p.moderationreason)};}).filter(p=>p.id&&['ACTIVE','PENDING','REJECTED'].includes(p.status));
+return source.map(v=>{const p=row(v);return {id:text(p.id),publicUrl:text(p.publicUrl||p.publicurl||p.public_url||p.url),avatarUrl:text(p.avatarUrl||p.avatarurl||p.avatar_url),position:Number(p.position)||0,status:text(p.status||'ACTIVE').toUpperCase(),moderationStatus:text(p.moderationStatus||p.moderationstatus||p.moderation_status||'APPROVED').toUpperCase(),moderationReason:text(p.moderationReason||p.moderationreason||p.moderation_reason)};}).filter(p=>p.id&&['ACTIVE','PENDING','REJECTED'].includes(p.status));
 }
 export function managedPhotos(photos:Photo[]) {
  const rank:Record<string,number>={ACTIVE:0,PENDING:1,REJECTED:2};const map=new Map<number,Photo>();

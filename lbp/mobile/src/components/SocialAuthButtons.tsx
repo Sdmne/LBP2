@@ -5,6 +5,7 @@ import * as Google from "expo-auth-session/providers/google";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import { GoogleAuthProvider, OAuthProvider, signInWithCredential } from "@firebase/auth";
+import { GoogleSignin, isSuccessResponse } from "@react-native-google-signin/google-signin";
 import { firebaseAuth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
@@ -62,7 +63,9 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   // Whether Google sign-in is actually usable - computed from the REAL
   // config values, before the placeholder fallback below. Drives the
   // button's disabled state; the placeholder is never reachable through it.
-  const googleConfigured = Boolean(googleClientId);
+  const googleConfigured = Platform.OS === "web"
+    ? Boolean(googleClientId)
+    : Boolean(GOOGLE_OAUTH_CLIENT_IDS.web && googleClientId);
 
   // Confirmed on a real device run: contrary to this file's original
   // assumption, Google.useAuthRequest() doesn't quietly return a null
@@ -133,6 +136,15 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   });
 
   useEffect(() => {
+    if (Platform.OS === "web" || !GOOGLE_OAUTH_CLIENT_IDS.web) return;
+    GoogleSignin.configure({
+      webClientId: GOOGLE_OAUTH_CLIENT_IDS.web,
+      iosClientId: GOOGLE_OAUTH_CLIENT_IDS.ios || undefined,
+      offlineAccess: false,
+    });
+  }, []);
+
+  useEffect(() => {
     if (Platform.OS !== "ios") return;
     AppleAuthentication.isAvailableAsync()
       .then(setAppleAvailable)
@@ -175,19 +187,26 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
       setError(t("auth.socialErrorDefault"));
       return;
     }
-    if (!request) {
+    if (Platform.OS === "web" && !request) {
       setError(t("auth.socialErrorDefault"));
       return;
     }
     setError(null);
     setGoogleBusy(true);
     try {
-      const result = await promptAsync();
-      if (result.type !== "success") {
-        // "cancel"/"dismiss" - the person just closed the sheet, not an error.
-        return;
+      let idToken: string | null | undefined;
+      if (Platform.OS === "web") {
+        const result = await promptAsync();
+        if (result.type !== "success") return;
+        idToken = result.authentication?.idToken ?? result.params?.id_token;
+      } else {
+        if (Platform.OS === "android") {
+          await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+        }
+        const result = await GoogleSignin.signIn();
+        if (!isSuccessResponse(result)) return;
+        idToken = result.data.idToken;
       }
-      const idToken = result.authentication?.idToken ?? result.params?.id_token;
       if (!idToken) {
         setError(t("auth.socialErrorDefault"));
         return;

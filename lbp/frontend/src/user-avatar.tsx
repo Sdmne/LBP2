@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export function firstAvatarText(...values: unknown[]): string {
   for (const value of values) {
@@ -7,6 +7,28 @@ export function firstAvatarText(...values: unknown[]): string {
     if (text && !["null", "undefined", "none", "—", "about:blank"].includes(text.toLowerCase())) return text;
   }
   return "";
+}
+
+export function avatarSources(...values: unknown[]): string[] {
+  const result: string[] = [];
+  const add = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(add);
+      return;
+    }
+    const source = firstAvatarText(value);
+    if (!source) return;
+    const normalized = /^(?:https?:)?\/\//i.test(source)
+      || /^(?:data|blob):/i.test(source)
+      || source.startsWith("/")
+      ? source
+      : /^(?:api|uploads|media)\//i.test(source)
+        ? `/${source}`
+        : source;
+    if (!result.includes(normalized)) result.push(normalized);
+  };
+  values.forEach(add);
+  return result;
 }
 
 export function userInitials(name: unknown): string {
@@ -26,15 +48,18 @@ function UserAvatarContent({
   src,
   fallbackClassName = "avatar-placeholder user-avatar-initials",
   initials,
-}: UserAvatarProps & { src: string }) {
-  const [failed, setFailed] = useState(false);
-  if (src && !failed) {
-    return <img src={src} alt="" onError={() => setFailed(true)} />;
+}: UserAvatarProps) {
+  const sources = useMemo(() => avatarSources(src), [src]);
+  const signature = sources.join("\n");
+  const [sourceIndex, setSourceIndex] = useState(0);
+  useEffect(() => setSourceIndex(0), [signature]);
+  const source = sources[sourceIndex];
+  if (source) {
+    return <img src={source} alt="" onError={() => setSourceIndex((index) => index + 1)} />;
   }
   return <span className={fallbackClassName} aria-hidden="true">{initials ?? userInitials(name)}</span>;
 }
 
 export function UserAvatar(props: UserAvatarProps) {
-  const src = firstAvatarText(props.src);
-  return <UserAvatarContent key={src} {...props} src={src} />;
+  return <UserAvatarContent {...props} />;
 }

@@ -3,7 +3,7 @@
     "name": "LetsBeParents",
     "slug": "letsbeparents-mobile",
     "scheme": "letsbeparents",
-    "version": "4.2.40",
+    "version": "4.2.42",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
@@ -36,6 +36,7 @@
     },
     "android": {
       "package": "com.letsBeParents.letsBeParents",
+      "versionCode": 42,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -74,7 +75,13 @@
     },
     "plugins": [
       "@config-plugins/react-native-webrtc",
-      "expo-video"
+      "expo-video",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.955790669399-g9m3liu8ag3alhkm9fmghd56q6dm826f"
+        }
+      ]
     ],
     "extra": {
       "eas": {

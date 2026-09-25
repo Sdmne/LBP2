@@ -1990,7 +1990,9 @@ class VerificationPayload(BaseModel):
 
 
 class SubscriptionIntentPayload(BaseModel):
-    plan: str = Field(default="monthly", pattern="^(monthly|quarterly)$")
+    # normalize_subscription_plan() below is the single validator and accepts
+    # both web-style MONTHLY/QUARTERLY and mobile-style lowercase values.
+    plan: str = Field(default="monthly", max_length=32)
     tier: str = Field(default="BUILDER", pattern="^(BUILDER|PRO)$")
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -3151,10 +3153,22 @@ def profile_has_verified_badge(profile: dict[str, Any] | None) -> bool:
     if not profile:
         return False
     data = profile_data(profile)
-    provider = str(data.get("verificationProvider") or "").strip().lower()
-    provider_verified = provider in {"didit", "manual_test", "test", "admin"}
-    approved_verification = json_bool(profile, "approvedVerification") or json_bool(data, "approvedVerification")
-    return approved_verification or (provider_verified and (json_bool(data, "isVerified") or bool(data.get("verifiedAt"))))
+    verified_at = data.get("verifiedAt") or profile.get("verifiedAt")
+    has_verified_at = str(verified_at or "").strip().lower() not in {"", "null", "none"}
+
+    # `isVerified` and `verifiedAt` are server-managed fields: they are not
+    # accepted by ProfileUpdatePayload. Older approved profiles predate the
+    # verificationProvider field, so requiring a provider here made the
+    # verification page say "approved" while Premium and the profile badge
+    # treated the same member as unverified. Keep one compatibility-safe
+    # predicate for old approvals, Didit approvals and admin approvals.
+    return (
+        json_bool(profile, "approvedVerification")
+        or json_bool(data, "approvedVerification")
+        or json_bool(profile, "isVerified")
+        or json_bool(data, "isVerified")
+        or has_verified_at
+    )
 
 
 def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:

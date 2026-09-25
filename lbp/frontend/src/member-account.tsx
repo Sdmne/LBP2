@@ -1076,7 +1076,7 @@ function Blocked({ locale }: { locale: MemberLocale }) {
             return (
               <article className="account-blocked-row" key={id}>
                 <UserAvatar
-                  src={text(item.avatarUrl, memberRow(item.data).avatarUrl)}
+                  src={[item.avatarUrl, memberRow(item.data).avatarUrl]}
                   name={name}
                 />
                 <div>
