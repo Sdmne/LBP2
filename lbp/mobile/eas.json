@@ -11,6 +11,9 @@
     },
     "preview": {
       "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://test.letsbeparents.com",
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBdlNeoWhdVQ-UAvjJEABsQeQ0Xo9XC-T0",
