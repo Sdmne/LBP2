@@ -10455,9 +10455,9 @@ function SettingsList({ view }: { view: string }) {
               key: "ranking.v2.enabled",
               title: "Ranking v2 enabled",
               description:
-                "Feature flag for the new ranking formula. Keep OFF on production until the new formula has been A/B tested.",
+                "Feature flag for the weighted ranking formula below. This is what makes Completeness/Premium/Verified/Boost/etc. actually affect catalog order - OFF falls back to a simple premium-then-newest sort, and every weight below (including Boost) has no effect at all.",
               type: "toggle",
-              fallback: false,
+              fallback: true,
             },
             {
               key: "ranking.weights.completeness",
@@ -10473,7 +10473,7 @@ function SettingsList({ view }: { view: string }) {
               description:
                 "Temporary boost applied to newly registered users so they get their first matches faster.",
               type: "number",
-              fallback: 5,
+              fallback: 35,
             },
             {
               key: "ranking.weights.premium",
@@ -10498,6 +10498,30 @@ function SettingsList({ view }: { view: string }) {
                 "Boost applied to verified profiles (passed identity check via Didit).",
               type: "number",
               fallback: 100,
+            },
+            {
+              key: "ranking.weights.boost",
+              title: "Profile Boost weight",
+              description:
+                "Points added while a member's paid profile Boost is active (Boost Requests tab). Weighted below Verified on purpose, so an unverified boosted profile still doesn't outrank verified ones - but well above Premium/Recency/Honeymoon alone, so a Boost is a clearly noticeable jump, not a rounding error.",
+              type: "number",
+              fallback: 65,
+            },
+            {
+              key: "ranking.weights.geography",
+              title: "Same-country match weight",
+              description:
+                "Points added when a candidate is in the same country as the viewer. Only applies to the signed-in member catalog (Browse) - the public, logged-out catalog has no viewer to compare against.",
+              type: "number",
+              fallback: 20,
+            },
+            {
+              key: "ranking.weights.lookingForMatch",
+              title: '"Looking for" match weight',
+              description:
+                "Points added when a candidate's own profile offers what the viewer is looking for (e.g. the viewer wants a donor and the candidate lists themselves as one). Same member-catalog-only scope as the geography weight above.",
+              type: "number",
+              fallback: 30,
             },
           ],
         )}
