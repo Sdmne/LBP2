@@ -1,11 +1,12 @@
 import { api } from "./client";
 
 // GET/POST /api/member/boost - member_boost_status()/member_request_boost()
-// in main.py. Premium roadmap step 3: a one-off paid profile Boost, same
-// "member request, human review approves/declines" shape as Premium
-// subscriptions (requestSubscription() in subscription.ts) - there's no
-// real in-app billing/IAP in this app yet, so this is honestly a reviewed
-// request, not instant activation.
+// in main.py. Premium roadmap step 3: a one-off paid profile Boost.
+// Activates instantly on request now (2026-09-25 - see the comment on
+// member_request_boost() in main.py for why the old "human review"
+// step was dropped). `pendingRequestId` is kept on the type only for
+// any pre-existing PENDING boost rows from before that change - a new
+// request from this build never comes back PENDING.
 export type BoostStatus = {
   active: boolean;
   activeUntil: string | null;

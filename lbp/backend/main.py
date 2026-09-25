@@ -12386,6 +12386,20 @@ def member_boost_status(user: dict[str, Any] = Depends(require_user)):
 
 @app.post("/api/member/boost")
 def member_request_boost(user: dict[str, Any] = Depends(require_user)):
+    """Instant activation (Alena, 2026-09-25: "надо исправить, чтобы бусты
+    активировались автоматически, потому что вряд ли кто-то будет сидеть и
+    мониторить их 24/7, а люди которые их покупают ожидают мгновенной
+    активации") - this used to insert a PENDING request and wait for
+    admin_review_boost() (see git history), same shape as a Premium
+    subscription request. That review step sat un-reviewed for 11 days on
+    a real request during testing - nobody watches the queue in real time,
+    so it's the wrong default for something framed to members as a
+    purchase. Mirrors revenuecat_grant_boost()/reward_referral_if_pending()
+    below, which already activate a Boost immediately with no human in the
+    loop. Note: there's still no real in-app billing gate on this endpoint
+    (see boost.ts on the mobile side) - anyone verified can call this for a
+    free, repeatable 24h Boost. Fine for now (soft-launch state, same as
+    before this change), but worth a rate limit once real IAP lands here."""
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         cursor.execute(
@@ -12399,33 +12413,26 @@ def member_request_boost(user: dict[str, Any] = Depends(require_user)):
             raise HTTPException(status_code=403, detail="Profile verification is required before Boost")
         data = profile_data(profile)
         active_until_raw = str(data.get("boostActiveUntil") or "").strip()
-        if active_until_raw and active_until_raw > now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"):
+        now_stamp = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        if active_until_raw and active_until_raw > now_stamp:
             return {"ok": True, "status": "ACTIVE", "activeUntil": active_until_raw, "message": "Your Boost is already active."}
-        cursor.execute(
-            """
-            SELECT id FROM app_entities
-            WHERE entity_type = 'boost' AND status = 'PENDING'
-              AND CAST(data->>'profileId' AS TEXT) = CAST(%s AS TEXT)
-            ORDER BY id DESC LIMIT 1
-            FOR UPDATE
-            """,
-            (profile_id,),
-        )
-        pending = cursor.fetchone()
-        if pending:
-            return {"ok": True, "status": "PENDING", "requestId": pending["id"], "message": "Your Boost request is already under review."}
-        requested_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        requested_at = now_stamp
+        expires_at = (now_utc() + timedelta(hours=BOOST_DEFAULT_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
         boost_data = {
             "profileId": profile_id,
             "profileName": profile.get("display_name") or "No profile",
             "email": profile.get("email") or "",
             "source": "MEMBER_REQUEST",
             "requestedAt": requested_at,
+            "activeAt": requested_at,
+            "expiresAt": expires_at,
+            "hours": BOOST_DEFAULT_HOURS,
+            "reviewStatus": "AUTO_APPROVED",
         }
         cursor.execute(
             """
             INSERT INTO app_entities (entity_type, source_key, title, status, data)
-            VALUES ('boost', %s, %s, 'PENDING', %s)
+            VALUES ('boost', %s, %s, 'ACTIVE', %s)
             """,
             (
                 f"member-boost-{profile_id}-{secrets.token_hex(6)}",
@@ -12438,17 +12445,20 @@ def member_request_boost(user: dict[str, Any] = Depends(require_user)):
             "INSERT INTO api_events (event_type, payload) VALUES ('payment.boost_intent', %s)",
             (json.dumps({"profileId": profile_id, "requestId": request_id, "source": "MEMBER_REQUEST"}, ensure_ascii=False),),
         )
+        update_profile_data(cursor, profile_id, {"boostActiveUntil": expires_at})
         send_support_status_message(
             cursor,
             profile_id,
-            "Your profile Boost request has been received and is pending review.",
+            f"Your profile Boost is now active for {BOOST_DEFAULT_HOURS} hours.",
         )
+        audit(conn, profile.get("email") or f"profile:{profile_id}", "auto_approve_boost", "boost", request_id, {"profileId": profile_id, "hours": BOOST_DEFAULT_HOURS})
         conn.commit()
     return {
         "ok": True,
-        "status": "PENDING",
+        "status": "ACTIVE",
         "requestId": request_id,
-        "message": "Your Boost request was saved for manual review.",
+        "activeUntil": expires_at,
+        "message": f"Your Boost is now active for {BOOST_DEFAULT_HOURS} hours.",
     }
 
 
