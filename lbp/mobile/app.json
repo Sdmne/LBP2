@@ -3,7 +3,7 @@
     "name": "LetsBeParents",
     "slug": "letsbeparents-mobile",
     "scheme": "letsbeparents",
-    "version": "4.2.40",
+    "version": "4.2.41",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
