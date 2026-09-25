@@ -6791,6 +6791,17 @@ const SUBSCRIPTION_TEXT: Record<CookieLocale, {
   },
 };
 
+const SUBSCRIPTION_REQUEST_FAILED: Record<CookieLocale, string> = {
+  en: "Could not submit the Premium request. Please try again.",
+  ru: "Не удалось отправить заявку на Premium. Попробуйте ещё раз.",
+  es: "No se pudo enviar la solicitud de Premium. Inténtalo de nuevo.",
+  pt: "Não foi possível enviar a solicitação do Premium. Tente novamente.",
+  fr: "Impossible d'envoyer la demande Premium. Veuillez réessayer.",
+  de: "Die Premium-Anfrage konnte nicht gesendet werden. Bitte versuchen Sie es erneut.",
+  it: "Non è stato possibile inviare la richiesta Premium. Riprova.",
+  pl: "Nie udało się wysłać zgłoszenia Premium. Spróbuj ponownie.",
+};
+
 const BOOST_TEXT: Record<CookieLocale, {
   title: string;
   intro: string;
@@ -7129,14 +7140,18 @@ function Subscription({ session }: { session: Session }) {
     setRequesting(true);
     try {
       const response = await api.post<Row>("/member/subscription-intent", {
-        plan,
+        plan: plan.toLowerCase(),
         tier,
         payload: {},
       });
       setNotice(asText(response.message ?? response.status));
       load();
-    } catch {
-      setNotice(text.requestError);
+    } catch (error) {
+      setNotice(
+        error instanceof ApiError && error.status === 403
+          ? text.requestError
+          : SUBSCRIPTION_REQUEST_FAILED[locale],
+      );
     } finally {
       setRequesting(false);
     }

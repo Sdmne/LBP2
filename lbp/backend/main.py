@@ -1990,7 +1990,9 @@ class VerificationPayload(BaseModel):
 
 
 class SubscriptionIntentPayload(BaseModel):
-    plan: str = Field(default="monthly", pattern="^(monthly|quarterly)$")
+    # normalize_subscription_plan() below is the single validator and accepts
+    # both web-style MONTHLY/QUARTERLY and mobile-style lowercase values.
+    plan: str = Field(default="monthly", max_length=32)
     tier: str = Field(default="BUILDER", pattern="^(BUILDER|PRO)$")
     payload: dict[str, Any] = Field(default_factory=dict)
 
