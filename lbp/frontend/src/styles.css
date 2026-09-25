@@ -523,6 +523,9 @@ body {
 .member-tabs,
 .member-links {
   display: flex;
+  box-sizing: border-box;
+  width: min(1080px, 100%);
+  min-width: 0;
   gap: 4px;
   background: #f4f6fa;
   border: 1px solid #eaeef5;
@@ -531,6 +534,8 @@ body {
   margin: 20px auto 28px;
   max-width: 1080px;
   overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-behavior: smooth;
   scrollbar-width: none;
   -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
