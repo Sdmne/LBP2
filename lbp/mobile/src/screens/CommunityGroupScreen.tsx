@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,7 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { createCommunityPost, deleteCommunityPost, fetchCommunityPosts, type CommunityPost } from "../api/community";
+import { favouriteGroup, unfavouriteGroup } from "../api/favourites";
 import { ApiError } from "../api/client";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
@@ -30,8 +31,16 @@ type Props = NativeStackScreenProps<RootStackParamList, "CommunityGroup">;
 // params rather than fetched again, since the list response already has
 // everything that screen needs).
 export default function CommunityGroupScreen({ route, navigation }: Props) {
-  const { groupId } = route.params;
+  const { groupId, isFavourited: initialFavourited } = route.params;
   const { t } = useI18n();
+  // Alena: "как подписаться на группу?" - a follow/unsubscribe toggle in
+  // the header, mirroring the same bookmark button on the groups list
+  // (CommunityScreen.tsx) and feeding the same Favourites screen "Groups"
+  // tab. `initialFavourited` comes through navigation params so this
+  // screen doesn't need its own extra fetch just to know the starting
+  // state; it defaults to false when the screen is reached some other way.
+  const [favourited, setFavourited] = useState(Boolean(initialFavourited));
+  const [followBusy, setFollowBusy] = useState(false);
   const insets = useSafeAreaInsets();
   // BUG FIX (Sep 2026): Alena reported the composer's input row
   // (text field + send button) going fully invisible while typing on
@@ -63,6 +72,30 @@ export default function CommunityGroupScreen({ route, navigation }: Props) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function toggleFollow() {
+    if (followBusy) return;
+    const next = !favourited;
+    setFollowBusy(true);
+    setFavourited(next);
+    try {
+      await (next ? favouriteGroup(groupId) : unfavouriteGroup(groupId));
+    } catch {
+      setFavourited(!next);
+    } finally {
+      setFollowBusy(false);
+    }
+  }
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <Pressable hitSlop={8} onPress={() => void toggleFollow()} style={{ paddingHorizontal: spacing.xs }}>
+          <Feather name="bookmark" size={20} color={favourited ? colors.pink : colors.muted} />
+        </Pressable>
+      ),
+    });
+  }, [navigation, favourited]);
 
   async function handlePost() {
     const body = draft.trim();

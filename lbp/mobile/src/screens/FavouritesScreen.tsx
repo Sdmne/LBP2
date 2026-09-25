@@ -3,15 +3,17 @@ import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View }
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { fetchFavourites, unfavouriteClinic, unfavouriteLawyer } from "../api/favourites";
+import { fetchFavourites, unfavouriteClinic, unfavouriteLawyer, unfavouriteGroup } from "../api/favourites";
 import { ApiError } from "../api/client";
-import type { FavouriteItem } from "../api/types";
+import type { FavouriteItem, FavouriteGroupItem } from "../api/types";
+import { Feather } from "@expo/vector-icons";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Row = FavouriteItem & { kind: "clinics" | "lawyers" };
+type GroupRow = FavouriteGroupItem & { kind: "groups" };
 
 // GET /api/member/favourites - same endpoint that backs the site's "Saved"
 // page (MemberLinks -> /favourites); combines clinics and lawyers into one
@@ -30,7 +32,8 @@ export default function FavouritesScreen() {
   // scrolling past every saved lawyer first. Switched to the same
   // top segmented-tab pattern DirectoryScreen already uses for this exact
   // clinics/lawyers choice, so only one kind renders at a time.
-  const [kind, setKind] = useState<"clinics" | "lawyers">("clinics");
+  const [kind, setKind] = useState<"clinics" | "lawyers" | "groups">("clinics");
+  const [groups, setGroups] = useState<GroupRow[]>([]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -42,6 +45,9 @@ export default function FavouritesScreen() {
       ];
       combined.sort((a, b) => (a.favouritedAt < b.favouritedAt ? 1 : -1));
       setItems(combined);
+      const groupRows: GroupRow[] = (res.groups || []).map((item) => ({ ...item, kind: "groups" as const }));
+      groupRows.sort((a, b) => (a.favouritedAt < b.favouritedAt ? 1 : -1));
+      setGroups(groupRows);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t("favourites.loadError"));
     }
@@ -55,6 +61,15 @@ export default function FavouritesScreen() {
     setItems((prev) => prev.filter((i) => i.favouriteId !== item.favouriteId));
     try {
       await (item.kind === "clinics" ? unfavouriteClinic(item.id) : unfavouriteLawyer(item.id));
+    } catch {
+      load();
+    }
+  }
+
+  async function removeGroup(item: GroupRow) {
+    setGroups((prev) => prev.filter((g) => g.favouriteId !== item.favouriteId));
+    try {
+      await unfavouriteGroup(item.id);
     } catch {
       load();
     }
@@ -96,7 +111,54 @@ export default function FavouritesScreen() {
             {t("directory.lawyers")}{lawyerItems.length ? ` (${lawyerItems.length})` : ""}
           </Text>
         </Pressable>
+        {/* Alena: "в разделе где мои лайки добавить и избранное группы" -
+            a third tab here for groups subscribed to from Community
+            (favourite_group, same shape as favourite_clinic/lawyer). Kept
+            as its own FlatList below rather than merged into `items`
+            since a group row has no city/country/logo - forcing it
+            through the DirectoryItem-shaped card above would mean padding
+            out fields that don't apply to it. */}
+        <Pressable style={[styles.tab, kind === "groups" && styles.tabActive]} onPress={() => setKind("groups")}>
+          <Text style={[styles.tabText, kind === "groups" && styles.tabTextActive]}>
+            {t("community.title")}{groups.length ? ` (${groups.length})` : ""}
+          </Text>
+        </Pressable>
       </View>
+    {kind === "groups" ? (
+      <FlatList
+        data={groups}
+        keyExtractor={(item) => `group-${item.favouriteId}`}
+        contentContainerStyle={[styles.list, { paddingBottom: spacing.md + insets.bottom }]}
+        ListEmptyComponent={
+          <View style={styles.center}>
+            <Text style={styles.emptyText}>{t("favourites.emptyGroups")}</Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <Pressable
+            style={styles.card}
+            onPress={() => navigation.navigate("CommunityGroup", { groupId: item.id, groupName: item.name || t("community.title"), isFavourited: true })}
+          >
+            <View style={[styles.avatar, styles.avatarPlaceholder]}>
+              <Feather name={(item.icon as keyof typeof Feather.glyphMap) || "message-circle"} size={18} color={colors.pink} />
+            </View>
+            <View style={styles.cardBody}>
+              <Text style={styles.name} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {item.description ? (
+                <Text style={styles.subtitle} numberOfLines={1}>
+                  {item.description}
+                </Text>
+              ) : null}
+            </View>
+            <Pressable hitSlop={8} onPress={() => void removeGroup(item)}>
+              <Text style={styles.remove}>{t("favourites.remove")}</Text>
+            </Pressable>
+          </Pressable>
+        )}
+      />
+    ) : (
     <FlatList
       data={visibleItems}
       keyExtractor={(item) => `${item.kind}-${item.favouriteId}`}
@@ -149,6 +211,7 @@ export default function FavouritesScreen() {
         );
       }}
     />
+    )}
     </View>
   );
 }

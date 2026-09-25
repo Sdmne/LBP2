@@ -311,7 +311,15 @@ export type DirectoryListResponse = {
 // member_favourites() in main.py. Each entry is a clinic/lawyer row plus
 // favouriteId/favouritedAt.
 export type FavouriteItem = DirectoryItem & { favouriteId: number; favouritedAt: string };
-export type FavouritesResponse = { clinics: FavouriteItem[]; lawyers: FavouriteItem[]; total: number };
+export type FavouriteGroupItem = {
+  favouriteId: number;
+  favouritedAt: string;
+  id: number;
+  name: string | null;
+  description: string | null;
+  icon: string | null;
+};
+export type FavouritesResponse = { clinics: FavouriteItem[]; lawyers: FavouriteItem[]; groups: FavouriteGroupItem[]; total: number };
 
 // The real backend's Pydantic model only accepts "VOICE" | "VIDEO"
 // (CallCreatePayload in main.py) - note the *web* frontend actually sends

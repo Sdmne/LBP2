@@ -8139,7 +8139,36 @@ def member_favourites(user: dict[str, Any] = Depends(require_user)):
             item = normalize_row(row)
             item["data"] = public_safe_data(item.get("data"))
             lawyers.append(item)
-    return {"clinics": clinics, "lawyers": lawyers, "total": len(clinics) + len(lawyers)}
+        cursor.execute(
+            f"""
+            SELECT e.id AS favouriteId, e.created_at AS favouritedAt,
+                   g.id, g.title AS name, g.data
+            FROM app_entities e
+            JOIN app_entities g
+              ON g.id = NULLIF(NULLIF(e.data->>'groupId', ''), 'null')::INTEGER
+             AND g.entity_type = 'community_group'
+            WHERE e.entity_type = 'favourite_group'
+              AND LOWER(COALESCE(e.status, 'active')) = 'active'
+              AND {profile_filter}
+              AND g.status = 'ACTIVE'
+            ORDER BY e.updated_at DESC, e.id DESC
+            LIMIT 200
+            """,
+            (profile_id,),
+        )
+        groups = []
+        for row in cursor.fetchall():
+            item = normalize_row(row)
+            group_data = as_dict(item.get("data"))
+            groups.append({
+                "favouriteId": item.get("favouriteId"),
+                "favouritedAt": item.get("favouritedAt"),
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "description": group_data.get("description"),
+                "icon": group_data.get("icon") or default_community_group_icon(item.get("name")),
+            })
+    return {"clinics": clinics, "lawyers": lawyers, "groups": groups, "total": len(clinics) + len(lawyers) + len(groups)}
 
 
 @app.post("/api/member/favourites/clinics/{clinic_identifier}")
@@ -8224,6 +8253,62 @@ def member_unfavourite_lawyer(lawyer_identifier: str, user: dict[str, Any] = Dep
         )
         conn.commit()
     return {"ok": True, "favourited": False, "lawyerId": int(lawyer["id"])}
+
+
+def _fetch_community_group_row(cursor, group_id: int) -> dict[str, Any]:
+    cursor.execute(
+        "SELECT id, title AS \"name\" FROM app_entities WHERE id = %s AND entity_type = 'community_group' AND status = 'ACTIVE' LIMIT 1",
+        (group_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return row
+
+
+# Alena, on the mobile Community screens (2026-09-25): "надо сделать
+# подписаться на группу и в разделе где мои лайки добавить и избранное
+# группы" (need a subscribe-to-group action, and add favourite groups to
+# the Favourites/"My likes" section). Reuses the exact same
+# favourite_clinic/favourite_lawyer shape - one more app_entities type,
+# source_key scoped per (profile, group) the same way - so it shows up in
+# GET /api/member/favourites next to Clinics/Lawyers for free, and the
+# member_favourites() response below just grew a third list.
+@app.post("/api/member/favourites/groups/{group_id}")
+@app.post("/api/member/favorites/groups/{group_id}")
+def member_favourite_group(group_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        group = _fetch_community_group_row(cursor, group_id)
+        payload = {"profileLocalId": profile_id, "groupId": int(group["id"])}
+        cursor.execute(
+            """
+            INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at)
+            VALUES ('favourite_group', %s, %s, 'active', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE status = 'active', data = VALUES(data), updated_at = UTC_TIMESTAMP()
+            """,
+            (f"local-{profile_id}-group-{group['id']}", group.get("name") or "Group", json.dumps(payload, ensure_ascii=False)),
+        )
+        conn.commit()
+    return {"ok": True, "favourited": True, "groupId": int(group["id"])}
+
+
+@app.delete("/api/member/favourites/groups/{group_id}")
+@app.delete("/api/member/favorites/groups/{group_id}")
+def member_unfavourite_group(group_id: int, user: dict[str, Any] = Depends(require_user)):
+    profile_id = require_profile_id(user)
+    with db_cursor() as (conn, cursor):
+        group = _fetch_community_group_row(cursor, group_id)
+        cursor.execute(
+            """
+            UPDATE app_entities
+            SET status = 'archived', updated_at = UTC_TIMESTAMP()
+            WHERE entity_type = 'favourite_group' AND source_key = %s
+            """,
+            (f"local-{profile_id}-group-{group['id']}",),
+        )
+        conn.commit()
+    return {"ok": True, "favourited": False, "groupId": int(group["id"])}
 
 
 @app.get("/api/member/blocks")
@@ -10640,6 +10725,48 @@ def member_ai_advisor_weekly_insight(
 # found in this codebase to reuse, so this is a small dedicated one -
 # mirrors the plain boolean-toggle shape of everything else here).
 
+# Admin creates groups through the generic Data(JSON) editor, which has no
+# icon picker, so an admin-curated group almost always ships with no
+# `icon` in its data - every group then fell back to the same
+# "message-circle" glyph on mobile (Alena: "поставь везде разные иконки").
+# Picks a distinct Feather icon by keyword match on the group's title so
+# groups look different out of the box; an admin can still override by
+# adding an explicit "icon" key (any Feather glyph name, e.g. "heart",
+# "shield") to that same Data(JSON) field.
+_COMMUNITY_GROUP_ICON_KEYWORDS: list[tuple[str, str]] = [
+    ("donor", "droplet"),
+    ("lgbt", "heart"),
+    ("legal", "file-text"),
+    ("agreement", "file-text"),
+    ("new parent", "smile"),
+    ("check-in", "smile"),
+    ("co-parent", "users"),
+    ("coparent", "users"),
+    ("surrog", "gift"),
+    ("adopt", "gift"),
+    ("finance", "dollar-sign"),
+    ("money", "dollar-sign"),
+    ("ask", "help-circle"),
+    ("question", "help-circle"),
+    ("support", "life-buoy"),
+]
+_COMMUNITY_GROUP_ICON_FALLBACKS = [
+    "message-circle", "users", "heart", "compass", "sun", "star", "coffee",
+]
+
+
+def default_community_group_icon(name: Any) -> str:
+    label = str(name or "").strip().lower()
+    for keyword, icon in _COMMUNITY_GROUP_ICON_KEYWORDS:
+        if keyword in label:
+            return icon
+    # No keyword match (e.g. a custom group name) - still vary the icon
+    # deterministically by name so a fresh set of ungated groups don't all
+    # collapse back onto one identical glyph.
+    idx = sum(ord(ch) for ch in label) % len(_COMMUNITY_GROUP_ICON_FALLBACKS) if label else 0
+    return _COMMUNITY_GROUP_ICON_FALLBACKS[idx]
+
+
 def require_community_pro(cursor, profile_id: int) -> dict[str, Any]:
     # Was Pro-only ("Premium roadmap step 11"); Alena asked to open Community
     # groups up to every member, including the free Explore tier, on both
@@ -10667,6 +10794,17 @@ def member_community_groups(user: dict[str, Any] = Depends(require_user)):
             """
         )
         rows = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT NULLIF(NULLIF(data->>'groupId', ''), 'null')::INTEGER AS group_id
+            FROM app_entities
+            WHERE entity_type = 'favourite_group'
+              AND LOWER(COALESCE(status, 'active')) = 'active'
+              AND NULLIF(NULLIF(data->>'profileLocalId', ''), 'null')::INTEGER = %s
+            """,
+            (profile_id,),
+        )
+        favourited_group_ids = {row["group_id"] for row in cursor.fetchall() if row.get("group_id") is not None}
         groups = []
         for row in rows:
             group_data = as_dict(row.get("data"))
@@ -10679,8 +10817,9 @@ def member_community_groups(user: dict[str, Any] = Depends(require_user)):
                 "id": row["id"],
                 "name": row.get("name"),
                 "description": group_data.get("description"),
-                "icon": group_data.get("icon"),
+                "icon": group_data.get("icon") or default_community_group_icon(row.get("name")),
                 "postCount": post_count,
+                "isFavourited": row["id"] in favourited_group_ids,
             })
     return {"ok": True, "groups": groups}
 
@@ -10753,7 +10892,7 @@ def member_create_community_post(
         post_data = {
             "groupId": group_id,
             "authorProfileId": profile_id,
-            "authorName": profile.get("display_name") or "Member",
+            "authorName": profile.get("displayName") or "Member",
             "isExpert": bool(profile_info.get("isCommunityExpert")),
             "body": payload.body.strip(),
             "createdAt": created_at,
@@ -10832,7 +10971,7 @@ def member_create_community_reply(
             "postId": post_id,
             "groupId": int_or_none(as_dict(post_row.get("data")).get("groupId")),
             "authorProfileId": profile_id,
-            "authorName": profile.get("display_name") or "Member",
+            "authorName": profile.get("displayName") or "Member",
             "isExpert": bool(profile_info.get("isCommunityExpert")),
             "body": payload.body.strip(),
             "createdAt": created_at,

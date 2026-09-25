@@ -418,10 +418,29 @@ export default function LikesScreen({ navigation }: Props) {
             // the rest blurred), with a dedicated upgrade banner at the
             // bottom - matching the reference mockup's layout (banner
             // below the row list, not above it).
+            //
+            // UPDATE (Sept 2026): Alena, on the Visitors tab specifically -
+            // "надо чтобы было показано что еще есть и другие просмотры"
+            // (needs to show there are other visitors too) and "надо
+            // написать чтобы просмотреть кто тебя смотрел, а не увидеть
+            // только лайки" (say "see who viewed you", not reused "likes"
+            // copy). This banner used to be one hardcoded pair of strings
+            // for every tab it appears on (only likesYou/visitors ever hit
+            // previewMode) - visitors got the "See everyone who likes
+            // you"/"every admirer" copy verbatim, and neither tab's banner
+            // ever said how many more there were even though the real
+            // total (visitorsTotal / data.likesYouCount) was already being
+            // fetched. Both fixed together: a tab-specific title/body key,
+            // and the body interpolates {{count}} = total minus the real
+            // rows already shown above it.
             previewMode && profileItems.length > 0 ? (
               <View style={styles.premiumBanner}>
-                <Text style={styles.premiumTitle}>{t("likes.previewLockedTitle")}</Text>
-                <Text style={styles.premiumBody}>{t("likes.previewLockedBody")}</Text>
+                <Text style={styles.premiumTitle}>{t(tab === "visitors" ? "likes.previewLockedTitleVisitors" : "likes.previewLockedTitle")}</Text>
+                <Text style={styles.premiumBody}>
+                  {t(tab === "visitors" ? "likes.previewLockedBodyVisitors" : "likes.previewLockedBody", {
+                    count: Math.max(0, (tab === "visitors" ? visitorsTotal : data?.likesYouCount || 0) - profileItems.length),
+                  })}
+                </Text>
                 <Pressable style={styles.premiumButton} onPress={() => rootNav.navigate("LikesPaywall")}>
                   <Text style={styles.premiumButtonText}>{t("likes.previewUpgradeButton")}</Text>
                 </Pressable>

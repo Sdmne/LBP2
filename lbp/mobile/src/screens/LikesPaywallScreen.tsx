@@ -41,7 +41,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 //   screen reuses that exact copy instead of implying real subscription
 //   billing that isn't there.
 const SLIDES = [
-  { icon: "heart" as const, titleKey: "likes.previewLockedTitle", bodyKey: "likes.previewLockedBody" },
+  { icon: "heart" as const, titleKey: "paywall.likesTitle", bodyKey: "paywall.likesBody" },
   { icon: "eye" as const, titleKey: "paywall.visitorsTitle", bodyKey: "paywall.visitorsBody" },
   { icon: "activity" as const, titleKey: "paywall.compatibilityTitle", bodyKey: "paywall.compatibilityBody" },
 ] as const;

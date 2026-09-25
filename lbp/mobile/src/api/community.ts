@@ -12,6 +12,7 @@ export type CommunityGroup = {
   description: string | null;
   icon: string | null;
   postCount: number;
+  isFavourited: boolean;
 };
 
 export type CommunityPost = {

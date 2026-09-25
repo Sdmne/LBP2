@@ -20,6 +20,18 @@ export function unfavouriteClinic(clinicIdentifier: string | number) {
   );
 }
 
+export function favouriteGroup(groupId: number) {
+  return api.post<{ ok: true; favourited: true; groupId: number }>(
+    `/api/member/favourites/groups/${encodeURIComponent(String(groupId))}`
+  );
+}
+
+export function unfavouriteGroup(groupId: number) {
+  return api.delete<{ ok: true; favourited: false; groupId: number }>(
+    `/api/member/favourites/groups/${encodeURIComponent(String(groupId))}`
+  );
+}
+
 export function favouriteLawyer(lawyerIdentifier: string | number) {
   return api.post<{ ok: true; favourited: true; lawyerId: number }>(
     `/api/member/favourites/lawyers/${encodeURIComponent(String(lawyerIdentifier))}`

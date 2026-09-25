@@ -4,6 +4,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { Feather } from "@expo/vector-icons";
 import { fetchCommunityGroups, type CommunityGroup } from "../api/community";
+import { favouriteGroup, unfavouriteGroup } from "../api/favourites";
 import { ApiError } from "../api/client";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
@@ -21,6 +22,15 @@ export default function CommunityScreen() {
   const [loading, setLoading] = useState(true);
   const [needsPro, setNeedsPro] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Alena: "надо сделать подписаться на группу" - a follow/subscribe
+  // toggle right on each group row (not just inside the group itself), so
+  // it's one tap from this list. Reuses the same favourite_group entity
+  // the Favourites screen's new "Groups" tab reads, so subscribing here
+  // and unsubscribing there stay in sync. Seeded from each group's own
+  // isFavourited (member_community_groups() in main.py), then tracked
+  // locally per id so a tap updates instantly without waiting on a reload.
+  const [favouritedIds, setFavouritedIds] = useState<Record<number, boolean>>({});
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -28,6 +38,7 @@ export default function CommunityScreen() {
     try {
       const res = await fetchCommunityGroups();
       setGroups(res.groups);
+      setFavouritedIds(Object.fromEntries(res.groups.map((group) => [group.id, group.isFavourited])));
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         setNeedsPro(true);
@@ -42,6 +53,20 @@ export default function CommunityScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function toggleFollow(group: CommunityGroup) {
+    if (togglingId) return;
+    const next = !favouritedIds[group.id];
+    setTogglingId(group.id);
+    setFavouritedIds((prev) => ({ ...prev, [group.id]: next }));
+    try {
+      await (next ? favouriteGroup(group.id) : unfavouriteGroup(group.id));
+    } catch {
+      setFavouritedIds((prev) => ({ ...prev, [group.id]: !next }));
+    } finally {
+      setTogglingId(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -86,7 +111,7 @@ export default function CommunityScreen() {
         renderItem={({ item }) => (
           <Pressable
             style={styles.groupCard}
-            onPress={() => navigation.navigate("CommunityGroup", { groupId: item.id, groupName: item.name || t("community.title") })}
+            onPress={() => navigation.navigate("CommunityGroup", { groupId: item.id, groupName: item.name || t("community.title"), isFavourited: favouritedIds[item.id] })}
           >
             <View style={styles.groupIconWrap}>
               <Feather name={(item.icon as keyof typeof Feather.glyphMap) || "message-circle"} size={20} color={colors.pink} />
@@ -100,6 +125,9 @@ export default function CommunityScreen() {
               ) : null}
               <Text style={styles.groupMeta}>{t("community.postCount", { count: item.postCount })}</Text>
             </View>
+            <Pressable hitSlop={8} style={styles.followButton} onPress={() => void toggleFollow(item)}>
+              <Feather name="bookmark" size={18} color={favouritedIds[item.id] ? colors.pink : colors.muted} />
+            </Pressable>
             <Feather name="chevron-right" size={18} color={colors.muted} />
           </Pressable>
         )}
@@ -144,4 +172,5 @@ const styles = StyleSheet.create({
   groupName: { fontSize: 15, fontWeight: "700", color: colors.ink },
   groupDescription: { fontSize: 13, color: colors.mutedOnGradient, lineHeight: 18, marginTop: 2 },
   groupMeta: { fontSize: 11.5, color: colors.muted, marginTop: 4 },
+  followButton: { padding: spacing.xs },
 });

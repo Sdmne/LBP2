@@ -83,7 +83,7 @@ export type RootStackParamList = {
   Verification: undefined;
   VideoVerification: undefined;
   Community: undefined;
-  CommunityGroup: { groupId: number; groupName: string };
+  CommunityGroup: { groupId: number; groupName: string; isFavourited?: boolean };
   CommunityPost: { post: CommunityPost; groupId: number };
   Subscription: undefined;
   Purchases: undefined;
