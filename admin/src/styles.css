@@ -627,7 +627,7 @@ body {
   background: rgba(248, 250, 252, 0.96);
 }
 .content-loading-overlay-section {
-  border-top: 1px solid #e6ebf3;
+  border-top: 0;
 }
 @keyframes content-spinner {
   to {
@@ -3818,11 +3818,13 @@ body {
   text-decoration: underline;
 }
 .moderation-report-table {
-  overflow-x: auto;
+  width: 100%;
+  overflow-x: hidden;
   border-radius: 8px;
 }
 .moderation-report-table table {
-  min-width: 1040px;
+  width: 100%;
+  min-width: 0;
   table-layout: fixed;
 }
 .moderation-report-table th,
@@ -4029,6 +4031,27 @@ body {
   flex-wrap: nowrap;
   gap: 6px;
   white-space: nowrap;
+}
+.moderation-report-table td.row-actions {
+  display: table-cell;
+  white-space: normal;
+}
+.moderation-report-table td.row-actions button {
+  margin: 2px 6px 2px 0;
+  padding-right: 10px;
+  padding-left: 10px;
+}
+.moderation-report-table td.row-actions button:last-child {
+  margin-right: 0;
+}
+.moderation-report-table th,
+.moderation-report-table td,
+.moderation-report-table td a,
+.moderation-report-table td span,
+.moderation-report-table td b,
+.moderation-report-table td small,
+.moderation-report-table td button {
+  font-size: 14px;
 }
 .moderation-report-table .row-actions button {
   min-height: 32px;

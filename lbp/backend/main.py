@@ -13702,6 +13702,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "mau": "SELECT COUNT(DISTINCT user_id) AS cnt FROM auth_sessions WHERE last_seen_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
             "deletion_feedback_30d": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'deletion_feedback' AND created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
             "partner_accounts": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'PARTNER'",
+            "pending_subscriptions": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND status = 'PENDING'",
             "pending_verifications": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND status = 'PENDING'",
             "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE c.status = 'ACTIVE' AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')",
             "pending_photo_moderation": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_photo' AND status = 'PENDING'",
