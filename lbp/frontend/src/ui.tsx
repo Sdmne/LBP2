@@ -835,7 +835,7 @@ function MemberCounters({
   const data = profile.data && typeof profile.data === "object" ? profile.data as Row : {};
   const photos = Array.isArray(member.photos) ? member.photos : [];
   const firstPhoto = photos[0] && typeof photos[0] === "object" ? photos[0] as Row : {};
-  const avatar = firstAvatarText(profile.avatarUrl, profile.avatar_url, data.avatarUrl, data.avatar_url, firstPhoto.publicUrl, firstPhoto.url);
+  const avatar = [profile.avatarUrl, profile.avatar_url, data.avatarUrl, data.avatar_url, firstPhoto.avatarUrl, firstPhoto.avatar_url, firstPhoto.publicUrl, firstPhoto.url, firstPhoto.id ? `/api/member/photos/${firstPhoto.id}/avatar-content` : "", firstPhoto.id ? `/api/member/photos/${firstPhoto.id}/content` : ""];
   const displayName = firstAvatarText(profile.displayName, profile.display_name, data.displayName, data.display_name, session.user.displayName, session.user.display_name, "Member");
   return (
     <div className={menu ? "member-menu-counters" : "member-header-actions"} aria-label={text.notifications}>
@@ -5506,8 +5506,15 @@ function MemberLinks({ locale }: { locale: string }) {
   // way to show which tab you were on at all.
   const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined);
   const text = MEMBER_LINKS_TEXT[locale as CookieLocale] ?? MEMBER_LINKS_TEXT.en;
+  const location = useLocation();
+  const navigation = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    navigation.current
+      ?.querySelector<HTMLAnchorElement>("a.active")
+      ?.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
+  }, [location.pathname]);
   return (
-    <nav className="member-links">
+    <nav className="member-links" ref={navigation}>
       <NavLink to={`/${locale}/profile`} className={navClass}>{text.profile}</NavLink>
       <NavLink to={`/${locale}/compatibility`} className={navClass}>{text.compatibility}</NavLink>
       <NavLink to={`/${locale}/ai-advisor`} className={navClass}>{text.aiAdvisor}</NavLink>
@@ -17188,7 +17195,7 @@ function CommunityGroupPosts({ session }: { session: Session }) {
     }
   };
   return (
-    <section>
+    <section className="member-community-page">
       <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
       <Link to={`/${locale}/community`}>{text.backLink}</Link>
@@ -17297,7 +17304,7 @@ function CommunityPostDetail({ session }: { session: Session }) {
     }
   };
   return (
-    <section>
+    <section className="member-community-page">
       <h1>{text.heading}</h1>
       <MemberLinks locale={locale} />
       {status === "loading" && <p className="notice">{text.loading}</p>}

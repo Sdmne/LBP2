@@ -460,13 +460,16 @@ body {
    ("оформить в стиле главной страницы"). */
 .community-group-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  width: 100%;
+  min-width: 0;
 }
 .community-group-card {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  min-width: 0;
   gap: 10px;
   padding: 24px;
   border: 1px solid #ececec;
@@ -494,12 +497,14 @@ body {
   margin: 0;
   font-size: 17px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .community-group-card p {
   margin: 0;
   color: #63758e !important;
   font-size: 14px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 .community-group-card-count {
   margin-top: auto;
@@ -557,6 +562,84 @@ body {
 .member-links a:hover:not(.active) {
   color: #f51161;
   background: #fff;
+}
+
+/* Member tool pages use a wide card, while their long section list remains
+   a contained horizontal scroller. Grid items need an explicit zero minimum
+   width or the tab strip expands the card and the entire page viewport. */
+.member-form.tool-page {
+  box-sizing: border-box;
+  width: min(1080px, 100%);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.member-form.tool-page > .member-links {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: stretch;
+  overscroll-behavior-inline: contain;
+  scroll-behavior: smooth;
+}
+
+.member-form.tool-page > .member-links a {
+  flex: 0 0 auto;
+}
+
+/* Safety Check-In has several full-width controls and a nested results card.
+   Keep every child inside the tool card even with long translated copy or
+   check-in details. */
+.tool-page-safety > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool-page-safety input,
+.tool-page-safety textarea,
+.tool-page-safety select,
+.tool-page-safety > .primary,
+.tool-page-safety > .list-card {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool-page-safety textarea {
+  resize: vertical;
+}
+
+.tool-page-safety .family-room-documents li > span {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.member-community-page {
+  width: 100%;
+  min-width: 0;
+}
+
+.member-community-page > .member-links {
+  box-sizing: border-box;
+  width: min(1080px, 100%);
+  min-width: 0;
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
+}
+
+.member-community-page > .member-form,
+.member-community-page > .list-card {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+@media (max-width: 700px) {
+  .community-group-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .auth-page {
   display: grid;
@@ -1294,14 +1377,25 @@ body {
 .referral-code-card {
   display: grid;
   gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .referral-link-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
+  width: 100%;
+  min-width: 0;
 }
 .referral-link-field {
-  flex: 1;
+  width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font: inherit;
   border: 1px solid #dbe3ed;
   border-radius: 10px;
@@ -1312,6 +1406,16 @@ body {
 .referral-code-fallback {
   font-size: 14px;
   color: #63758e;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .referral-link-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .referral-link-row button {
+    width: 100%;
+  }
 }
 .pregnancy-upload-row {
   display: flex;
