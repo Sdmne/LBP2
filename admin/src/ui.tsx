@@ -167,6 +167,7 @@ const nav: ReadonlyArray<{
     title: "Subscriptions",
     view: "subscriptions",
     icon: "crown",
+    badge: "pending_subscriptions",
   },
   {
     path: "/verifications",
@@ -190,6 +191,7 @@ const nav: ReadonlyArray<{
     title: "Photo Moderation",
     view: "moderation-photos",
     icon: "image",
+    badge: "pending_photo_moderation",
   },
   {
     path: "/moderation/reports",

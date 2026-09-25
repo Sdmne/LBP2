@@ -6802,6 +6802,28 @@ const SUBSCRIPTION_REQUEST_FAILED: Record<CookieLocale, string> = {
   pl: "Nie udało się wysłać zgłoszenia Premium. Spróbuj ponownie.",
 };
 
+const SUBSCRIPTION_STATUS_LABELS: Record<CookieLocale, Record<string, string>> = {
+  en: { NOT_STARTED: "Not started", VERIFICATION_REQUIRED: "Verification required", PENDING: "Under review", ACTIVE: "Active", APPROVED: "Approved", DECLINED: "Declined", REJECTED: "Declined", CANCELLED: "Cancelled", CANCELED: "Cancelled", EXPIRED: "Expired", PAUSED: "Paused", PAST_DUE: "Payment overdue", INACTIVE: "Inactive" },
+  ru: { NOT_STARTED: "Не начата", VERIFICATION_REQUIRED: "Требуется верификация", PENDING: "На рассмотрении", ACTIVE: "Активна", APPROVED: "Одобрена", DECLINED: "Отклонена", REJECTED: "Отклонена", CANCELLED: "Отменена", CANCELED: "Отменена", EXPIRED: "Истекла", PAUSED: "Приостановлена", PAST_DUE: "Платёж просрочен", INACTIVE: "Неактивна" },
+  es: { NOT_STARTED: "No iniciada", VERIFICATION_REQUIRED: "Verificación requerida", PENDING: "En revisión", ACTIVE: "Activa", APPROVED: "Aprobada", DECLINED: "Rechazada", REJECTED: "Rechazada", CANCELLED: "Cancelada", CANCELED: "Cancelada", EXPIRED: "Caducada", PAUSED: "Pausada", PAST_DUE: "Pago vencido", INACTIVE: "Inactiva" },
+  pt: { NOT_STARTED: "Não iniciada", VERIFICATION_REQUIRED: "Verificação necessária", PENDING: "Em análise", ACTIVE: "Ativa", APPROVED: "Aprovada", DECLINED: "Recusada", REJECTED: "Recusada", CANCELLED: "Cancelada", CANCELED: "Cancelada", EXPIRED: "Expirada", PAUSED: "Pausada", PAST_DUE: "Pagamento em atraso", INACTIVE: "Inativa" },
+  fr: { NOT_STARTED: "Non commencé", VERIFICATION_REQUIRED: "Vérification requise", PENDING: "En cours d'examen", ACTIVE: "Actif", APPROVED: "Approuvé", DECLINED: "Refusé", REJECTED: "Refusé", CANCELLED: "Annulé", CANCELED: "Annulé", EXPIRED: "Expiré", PAUSED: "En pause", PAST_DUE: "Paiement en retard", INACTIVE: "Inactif" },
+  de: { NOT_STARTED: "Nicht begonnen", VERIFICATION_REQUIRED: "Verifizierung erforderlich", PENDING: "In Prüfung", ACTIVE: "Aktiv", APPROVED: "Genehmigt", DECLINED: "Abgelehnt", REJECTED: "Abgelehnt", CANCELLED: "Storniert", CANCELED: "Storniert", EXPIRED: "Abgelaufen", PAUSED: "Pausiert", PAST_DUE: "Zahlung überfällig", INACTIVE: "Inaktiv" },
+  it: { NOT_STARTED: "Non iniziato", VERIFICATION_REQUIRED: "Verifica richiesta", PENDING: "In revisione", ACTIVE: "Attivo", APPROVED: "Approvato", DECLINED: "Rifiutato", REJECTED: "Rifiutato", CANCELLED: "Annullato", CANCELED: "Annullato", EXPIRED: "Scaduto", PAUSED: "In pausa", PAST_DUE: "Pagamento scaduto", INACTIVE: "Inattivo" },
+  pl: { NOT_STARTED: "Nierozpoczęta", VERIFICATION_REQUIRED: "Wymagana weryfikacja", PENDING: "W trakcie weryfikacji", ACTIVE: "Aktywna", APPROVED: "Zatwierdzona", DECLINED: "Odrzucona", REJECTED: "Odrzucona", CANCELLED: "Anulowana", CANCELED: "Anulowana", EXPIRED: "Wygasła", PAUSED: "Wstrzymana", PAST_DUE: "Płatność zaległa", INACTIVE: "Nieaktywna" },
+};
+
+const SUBSCRIPTION_RESPONSE_MESSAGES: Record<CookieLocale, Record<string, string>> = {
+  en: { SUBSCRIPTION_ALREADY_ACTIVE: "Your Premium subscription is already active.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "Your subscription request is already under review.", SUBSCRIPTION_REQUEST_PENDING: "Your subscription request was submitted for review." },
+  ru: { SUBSCRIPTION_ALREADY_ACTIVE: "Ваша подписка Premium уже активна.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "Ваша заявка на подписку уже находится на рассмотрении.", SUBSCRIPTION_REQUEST_PENDING: "Ваша заявка на подписку отправлена на рассмотрение." },
+  es: { SUBSCRIPTION_ALREADY_ACTIVE: "Tu suscripción Premium ya está activa.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "Tu solicitud de suscripción ya está en revisión.", SUBSCRIPTION_REQUEST_PENDING: "Tu solicitud de suscripción se envió para revisión." },
+  pt: { SUBSCRIPTION_ALREADY_ACTIVE: "Sua assinatura Premium já está ativa.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "Sua solicitação de assinatura já está em análise.", SUBSCRIPTION_REQUEST_PENDING: "Sua solicitação de assinatura foi enviada para análise." },
+  fr: { SUBSCRIPTION_ALREADY_ACTIVE: "Votre abonnement Premium est déjà actif.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "Votre demande d'abonnement est déjà en cours d'examen.", SUBSCRIPTION_REQUEST_PENDING: "Votre demande d'abonnement a été envoyée pour examen." },
+  de: { SUBSCRIPTION_ALREADY_ACTIVE: "Ihr Premium-Abo ist bereits aktiv.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "Ihre Abo-Anfrage wird bereits geprüft.", SUBSCRIPTION_REQUEST_PENDING: "Ihre Abo-Anfrage wurde zur Prüfung eingereicht." },
+  it: { SUBSCRIPTION_ALREADY_ACTIVE: "Il tuo abbonamento Premium è già attivo.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "La tua richiesta di abbonamento è già in revisione.", SUBSCRIPTION_REQUEST_PENDING: "La tua richiesta di abbonamento è stata inviata per la revisione." },
+  pl: { SUBSCRIPTION_ALREADY_ACTIVE: "Twoja subskrypcja Premium jest już aktywna.", SUBSCRIPTION_REQUEST_ALREADY_PENDING: "Twoje zgłoszenie subskrypcji jest już w trakcie weryfikacji.", SUBSCRIPTION_REQUEST_PENDING: "Twoje zgłoszenie subskrypcji zostało wysłane do weryfikacji." },
+};
+
 const BOOST_TEXT: Record<CookieLocale, {
   title: string;
   intro: string;
@@ -7144,7 +7166,15 @@ function Subscription({ session }: { session: Session }) {
         tier,
         payload: {},
       });
-      setNotice(asText(response.message ?? response.status));
+      const messageCode = asText(response.messageCode).toUpperCase();
+      const responseStatus = asText(response.status).toUpperCase();
+      setNotice(
+        SUBSCRIPTION_RESPONSE_MESSAGES[locale][messageCode]
+          ?? (responseStatus === "PENDING"
+            ? SUBSCRIPTION_RESPONSE_MESSAGES[locale].SUBSCRIPTION_REQUEST_PENDING
+            : SUBSCRIPTION_STATUS_LABELS[locale][responseStatus])
+          ?? SUBSCRIPTION_REQUEST_FAILED[locale],
+      );
       load();
     } catch (error) {
       setNotice(
@@ -7157,6 +7187,7 @@ function Subscription({ session }: { session: Session }) {
     }
   };
   const verified = data?.isVerified === true;
+  const currentStatus = asText(data?.status || "NOT_STARTED").toUpperCase();
   const currentTier = asText(data?.tier || "EXPLORE").toUpperCase();
   const canUpgradeToPro = data?.isPremium && SUBSCRIPTION_TIER_RANK[currentTier] < SUBSCRIPTION_TIER_RANK.PRO;
   return (
@@ -7171,7 +7202,7 @@ function Subscription({ session }: { session: Session }) {
         </>
       ) : (
         <>
-          <p>{text.currentStatusPrefix} {asText(data?.status)}</p>
+          <p>{text.currentStatusPrefix} {SUBSCRIPTION_STATUS_LABELS[locale][currentStatus] ?? currentStatus}</p>
           {data?.isPremium ? (
             <>
               <p className="premium-current-tier">

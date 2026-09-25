@@ -12227,7 +12227,12 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
         if not profile_is_verified(profile):
             raise HTTPException(status_code=403, detail="Profile verification is required before Premium")
         if SUBSCRIPTION_TIER_RANK[profile_tier(profile)] >= SUBSCRIPTION_TIER_RANK[tier]:
-            return {"ok": True, "status": "ACTIVE", "message": "Premium is already active."}
+            return {
+                "ok": True,
+                "status": "ACTIVE",
+                "messageCode": "SUBSCRIPTION_ALREADY_ACTIVE",
+                "message": "Premium is already active.",
+            }
         cursor.execute(
             """
             SELECT id, data, created_at, updated_at
@@ -12247,6 +12252,7 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
                 "ok": True,
                 "status": "PENDING",
                 "requestId": pending["id"],
+                "messageCode": "SUBSCRIPTION_REQUEST_ALREADY_PENDING",
                 "message": "Your subscription request is already under review.",
             }
         requested_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -12287,6 +12293,7 @@ def member_subscription_intent(payload: SubscriptionIntentPayload, user: dict[st
         "ok": True,
         "status": "PENDING",
         "requestId": request_id,
+        "messageCode": "SUBSCRIPTION_REQUEST_PENDING",
         "message": "Your subscription request was saved for manual review.",
     }
 
@@ -13705,6 +13712,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "mau": "SELECT COUNT(DISTINCT user_id) AS cnt FROM auth_sessions WHERE last_seen_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
             "deletion_feedback_30d": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'deletion_feedback' AND created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
             "partner_accounts": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'PARTNER'",
+            "pending_subscriptions": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND status = 'PENDING'",
             "pending_verifications": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND status = 'PENDING'",
             "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE c.status = 'ACTIVE' AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')",
             "pending_photo_moderation": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_photo' AND status = 'PENDING'",
