@@ -4090,10 +4090,71 @@ button.landing-gradient-button:disabled {
   line-height: 1.6;
 }
 
+.fyp-stats {
+  width: 100%;
+  padding: 0 0 80px;
+}
+
+.fyp-stats .landing-section-intro {
+  padding: 0 24px;
+}
+
 .fyp-next-action {
   display: flex;
   justify-content: center;
   padding: 0 24px 64px;
+}
+
+.fyp-faq {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 0 24px 80px;
+}
+
+.fyp-faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fyp-faq-item {
+  padding: 20px 24px;
+  border: 1px solid rgba(7, 19, 44, 0.1);
+  border-radius: 16px;
+  background: #fafafa;
+}
+
+.fyp-faq-item summary {
+  cursor: pointer;
+  color: #171717;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+  list-style: none;
+}
+
+.fyp-faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.fyp-faq-item summary::before {
+  content: "+";
+  display: inline-block;
+  width: 18px;
+  margin-right: 10px;
+  color: #4e9bff;
+  font-weight: 600;
+}
+
+.fyp-faq-item[open] summary::before {
+  content: "\2212";
+}
+
+.fyp-faq-item p {
+  margin: 14px 0 0 28px;
+  color: #525252;
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 @media (max-width: 1023px) {
@@ -4194,6 +4255,14 @@ button.landing-gradient-button:disabled {
   .fyp-resources-all {
     width: calc(100% - 32px);
     padding: 40px 24px;
+  }
+
+  .fyp-stats {
+    padding-bottom: 56px;
+  }
+
+  .fyp-faq {
+    padding: 0 24px 56px;
   }
 }
 

@@ -32,7 +32,31 @@ export function createApiClient(basePath = "/api"): ApiClient {
       headers,
     });
     if (!response.ok) {
-      const message = await response.text();
+      // FIX (Sept 2026): this used to throw the RAW response body as the
+      // error message - for a FastAPI error that's a JSON string like
+      // {"detail":"Verify the profile before approving a Boost"}, not
+      // readable text. Every call site's error/success-styling check
+      // (see the repeated notice.includes("Could not") pattern in
+      // ui.tsx) was written assuming a plain sentence, so a real backend
+      // error read as an unmatched string and rendered with the SUCCESS
+      // ("notice") style instead of the error one - Alena's Boost
+      // Requests screenshot, a green banner showing raw
+      // {"detail":"..."} JSON. Parse the body and prefer its .detail
+      // (FastAPI's standard shape); fall back to the raw text for a
+      // non-JSON or differently-shaped error body.
+      const rawBody = await response.text();
+      let message = rawBody;
+      if (rawBody) {
+        try {
+          const parsed = JSON.parse(rawBody) as unknown;
+          if (parsed && typeof parsed === "object" && "detail" in parsed) {
+            const detail = (parsed as { detail: unknown }).detail;
+            if (typeof detail === "string" && detail) message = detail;
+          }
+        } catch {
+          // Not JSON - keep the raw text as-is.
+        }
+      }
       if (
         response.status === 401 &&
         typeof window !== "undefined" &&

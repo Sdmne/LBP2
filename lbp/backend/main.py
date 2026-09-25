@@ -15273,6 +15273,38 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
             (profile_ref,),
         )
 
+        # Added Sept 2026 - Alena, looking at her own admin user page:
+        # "тут наверное надо показывать и покупки человека и бусты) и про
+        # комьюнити может его записи" (should probably show the person's
+        # purchases/boosts here, and maybe their Community posts too).
+        # Subscriptions (above) already covers the recurring-purchase
+        # side; these two cover the other "purchase"-shaped thing
+        # (one-off Boosts, reviewed the same way subscriptions/
+        # verifications are) and Community activity, so there's finally a
+        # way to check what's actually stored for one profile - e.g. the
+        # Boost start/expiry Alena was trying to verify against the
+        # "Active until 14:01" badge - without needing DB access.
+        boosts = admin_detail_rows(
+            cursor,
+            """
+            SELECT id, entity_type, title, status, source_key, data, created_at, updated_at
+            FROM app_entities
+            WHERE entity_type = 'boost' AND data->>'profileId' = %s
+            ORDER BY created_at DESC, id DESC
+            """,
+            (profile_ref,),
+        )
+        community_posts = admin_detail_rows(
+            cursor,
+            """
+            SELECT id, entity_type, title, status, source_key, data, created_at, updated_at
+            FROM app_entities
+            WHERE entity_type = 'community_post' AND data->>'authorProfileId' = %s
+            ORDER BY created_at DESC, id DESC
+            """,
+            (profile_ref,),
+        )
+
         cursor.execute(
             """
             SELECT MAX(s.created_at) AS last_login_at,
@@ -15307,6 +15339,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         "likedClinics": len(liked_clinics), "visitors": len(visitors), "blocked": len(blocked),
         "blockedBy": len(blocked_by), "messages": len(messages), "supportMessages": len(support_messages),
         "conversations": len(conversations), "reports": reports,
+        "boosts": len(boosts), "communityPosts": len(community_posts),
     }
     return {
         "profile": normalize_row(profile), "counts": counts, "photos": photos,
@@ -15319,6 +15352,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         "sentLikes": sent_likes, "receivedLikes": received_likes, "matches": matches,
         "subscriptions": subscriptions, "likedClinics": liked_clinics, "visitors": visitors,
         "blocked": blocked, "blockedBy": blocked_by,
+        "boosts": boosts, "communityPosts": community_posts,
     }
 
 
@@ -15368,7 +15402,7 @@ def admin_user_tab(profile_id: str, tab_name: str, _admin: str = Depends(require
         "messages": "messages", "photos": "photos", "sent-likes": "sentLikes",
         "received-likes": "receivedLikes", "matches": "matches", "subscriptions": "subscriptions",
         "clinics": "likedClinics", "visitors": "visitors", "blocked": "blocked",
-        "blocked-by": "blockedBy",
+        "blocked-by": "blockedBy", "boosts": "boosts", "community": "communityPosts",
     }
     data_key = tab_keys.get(tab_name)
     if not data_key:

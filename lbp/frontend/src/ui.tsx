@@ -12187,6 +12187,14 @@ type FypPath = {
   resources: FypResourceRef[] | "all";
   ctaLabel: string;
   ctaType: "register" | "quiz";
+  // Alena asked (repeatedly - "я просила на кжадой из этихстраниц
+  // добавить фак и статситика") for an FAQ + statistics section on each
+  // of these pages. FAQ is per path (a couple-searching-for-a-donor page
+  // needs different questions than a co-parenting page); "statistics"
+  // reuses the same homepage community numbers (LANDING_TEXT[locale].
+  // stats - 16K members, 8K donors, etc.) rather than inventing
+  // path-specific figures nobody can verify - see the render function.
+  faq: Array<[string, string]>;
 };
 
 const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
@@ -12196,6 +12204,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
   resourcesAllTitle: string;
   resourcesAllCopy: string;
   resourcesAllCta: string;
+  statsTitle: string;
+  statsSubtitle: string;
+  faqTitle: string;
   paths: FypPath[];
 }> = {
   en: {
@@ -12205,6 +12216,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "Not sure yet? Browse everything",
     resourcesAllCopy: "Explore the full set of checklists, worksheets and templates across every path - co-parenting, fertility, donor conception and planning ahead.",
     resourcesAllCta: "Browse all resources & tools",
+    statsTitle: "You're not doing this alone",
+    statsSubtitle: "Join a community already building families on LetsBeParents.",
+    faqTitle: "Frequently asked questions",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12221,6 +12235,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Create your profile", ctaType: "register",
+        faq: [
+          ["How does matching work for co-parenting?", "You start with a values-based quiz, and we show you a Compatibility Score based on parenting style, involvement, timeline and boundaries - so you can compare what actually matters before you ever message someone."],
+          ["Is legal guidance included?", "No - LetsBeParents helps you find and connect with a compatible co-parent, but any parenting agreement should be reviewed by an independent family lawyer in your jurisdiction before you rely on it."],
+          ["Can I set my own boundaries and expectations upfront?", "Yes. Your profile lets you specify what you're looking for - involvement level, timeline, location - and the Compatibility Score reflects how closely a potential co-parent matches those, not just a photo."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12237,6 +12256,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Browse donor profiles", ctaType: "register",
+        faq: [
+          ["Are donors identity-verified?", "Yes - every donor completes identity verification before you can connect, so you're not evaluating an anonymous profile."],
+          ["Can I choose a known or anonymous donor?", "Both. You set your own filters - openness to future contact, medical history, location - and browse accordingly; LetsBeParents doesn't limit you to one model."],
+          ["Do I need a fertility clinic to use this?", "Not to browse and connect, but before proceeding with any donor arrangement, working through the medical and legal details with a fertility clinic (and a lawyer, where relevant) is strongly recommended."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12250,6 +12274,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Take the compatibility quiz", ctaType: "quiz",
+        faq: [
+          ["How is this different from regular dating?", "There's no swiping. It starts with a short compatibility quiz focused on parenting values, commitment and day-to-day life, so conversations start from real alignment rather than a photo."],
+          ["What if we want to be parents but not a romantic couple?", "That's closer to co-parenting - see the Co-Parenting path instead, which is built around exactly that setup."],
+          ["Is there a cost to take the compatibility quiz?", "No, the quiz is free; some matching and messaging features are part of a paid plan - see Pricing for details."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12264,6 +12293,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Create your profile", ctaType: "register",
+        faq: [
+          ["Can both of us manage the search together?", "Yes - you can both browse and filter the same identity-verified donor pool together, using the same filters either of you would use alone."],
+          ["How does legal parentage work when searching as a couple?", "It depends on your jurisdiction and the type of donor arrangement you choose - this is exactly the kind of question worth taking to a family lawyer before you finalize anything."],
+          ["Do we need to agree on everything before we start looking?", "Not everything, but getting aligned on how involved you want the donor to be saves a lot of friction later - it's worth a conversation before you start browsing."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12275,6 +12309,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Take the Co-Parenting Compatibility Quiz", ctaType: "quiz",
+        faq: [
+          ["Do I need to know which path I want before I register?", "No - you can register, browse and take the Compatibility Quiz without committing to a path; most members start out exploring."],
+          ["What does the Compatibility Quiz actually do?", "It asks about your values, timeline and what you're looking for, then gives you a clearer sense of which path - and which people - might fit, before you commit to anything."],
+          ["Is there any pressure to decide quickly?", "No. There's no requirement to register or commit while you're still exploring - read through the paths and resources at your own pace."],
+        ],
       },
     ],
   },
@@ -12285,6 +12324,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "Ещё не уверены? Посмотрите всё",
     resourcesAllCopy: "Изучите полный набор чек-листов, воркшитов и шаблонов по всем путям - co-parenting, донорское зачатие, фертильность и планирование будущего.",
     resourcesAllCta: "Все ресурсы и инструменты",
+    statsTitle: "Вы не одни в этом",
+    statsSubtitle: "Присоединяйтесь к сообществу, которое уже строит семьи на LetsBeParents.",
+    faqTitle: "Часто задаваемые вопросы",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12301,6 +12343,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Создать профиль", ctaType: "register",
+        faq: [
+          ["Как работает подбор для co-parenting?", "Всё начинается с квиза на основе ценностей, и мы показываем Compatibility Score, основанный на стиле воспитания, вовлечённости, сроках и границах - так вы сравниваете действительно важное, ещё до того как написать первому человеку."],
+          ["Юридическая консультация входит в услугу?", "Нет - LetsBeParents помогает найти подходящего со-родителя и связаться с ним, но любое соглашение о воспитании должно быть проверено независимым семейным юристом в вашей юрисдикции, прежде чем на него полагаться."],
+          ["Могу ли я заранее обозначить свои границы и ожидания?", "Да. В профиле можно указать, что вы ищете - уровень вовлечённости, сроки, местоположение - и Compatibility Score отражает, насколько потенциальный со-родитель этому соответствует, а не просто фото."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12317,6 +12364,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Смотреть профили доноров", ctaType: "register",
+        faq: [
+          ["Личность доноров проверяется?", "Да - каждый донор проходит верификацию личности, прежде чем вы сможете связаться, так что вы не оцениваете анонимный профиль."],
+          ["Могу ли я выбрать известного или анонимного донора?", "Оба варианта доступны. Вы сами настраиваете фильтры - открытость к контакту в будущем, медицинская история, местоположение - и просматриваете профили соответственно; LetsBeParents не ограничивает вас одной моделью."],
+          ["Нужна ли клиника фертильности для использования сервиса?", "Для просмотра и связи - нет, но прежде чем продвигаться с любой донорской договорённостью, настоятельно рекомендуется проработать медицинские и юридические детали с клиникой фертильности (и юристом, где это уместно)."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12330,6 +12382,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Пройти квиз на совместимость", ctaType: "quiz",
+        faq: [
+          ["Чем это отличается от обычных знакомств?", "Здесь нет свайпов. Всё начинается с короткого квиза на совместимость, посвящённого ценностям в воспитании, готовности к обязательствам и повседневной жизни, так что разговоры начинаются с реального совпадения, а не с фото."],
+          ["А если мы хотим быть родителями, но не романтической парой?", "Это ближе к co-parenting - посмотрите путь Co-Parenting, он построен именно под такой формат."],
+          ["Квиз на совместимость платный?", "Нет, квиз бесплатный; некоторые функции подбора и переписки входят в платный тариф - подробности на странице Pricing."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12344,6 +12401,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Создать профиль", ctaType: "register",
+        faq: [
+          ["Можем ли мы оба управлять поиском вместе?", "Да - вы оба можете просматривать и фильтровать один и тот же пул верифицированных доноров вместе, используя те же фильтры, что и при поиске в одиночку."],
+          ["Как работает юридическое родительство при поиске парой?", "Это зависит от вашей юрисдикции и типа донорской договорённости - именно такой вопрос стоит обсудить с семейным юристом, прежде чем что-либо финализировать."],
+          ["Нужно ли договориться обо всём до начала поиска?", "Не обо всём, но согласовать, насколько вовлечённым должен быть донор, стоит заранее - это сильно снижает трения в дальнейшем."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12355,6 +12417,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Пройти Co-Parenting Compatibility Quiz", ctaType: "quiz",
+        faq: [
+          ["Нужно ли заранее знать, какой путь я выбираю, перед регистрацией?", "Нет - вы можете зарегистрироваться, смотреть профили и пройти Quiz на совместимость, не выбирая путь заранее; большинство участников начинают именно с изучения вариантов."],
+          ["Что на самом деле даёт Quiz на совместимость?", "Он спрашивает о ваших ценностях, сроках и том, что вы ищете, и затем даёт более ясное представление, какой путь - и какие люди - могут подойти, ещё до того как вы что-либо решите."],
+          ["Есть ли давление, чтобы решить побыстрее?", "Нет. Нет никакой необходимости регистрироваться или что-то решать, пока вы ещё изучаете варианты - читайте про пути и ресурсы в своём темпе."],
+        ],
       },
     ],
   },
@@ -12365,6 +12432,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "¿Aún no lo tienes claro? Explóralo todo",
     resourcesAllCopy: "Explora el conjunto completo de listas de verificación, plantillas y guías para cada camino - coparentalidad, fertilidad, donación y planificación.",
     resourcesAllCta: "Ver todos los recursos y herramientas",
+    statsTitle: "No estás solo/a en esto",
+    statsSubtitle: "Únete a una comunidad que ya está formando familias en LetsBeParents.",
+    faqTitle: "Preguntas frecuentes",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12381,6 +12451,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Crear tu perfil", ctaType: "register",
+        faq: [
+          ["¿Cómo funciona el emparejamiento para co-parenting?", "Empiezas con un cuestionario basado en valores, y te mostramos una Puntuación de Compatibilidad según el estilo de crianza, la implicación, el calendario y los límites - así comparas lo que realmente importa antes de escribir a nadie."],
+          ["¿Incluye asesoría legal?", "No - LetsBeParents te ayuda a encontrar y conectar con un co-padre/co-madre compatible, pero cualquier acuerdo de crianza debe ser revisado por un abogado de familia independiente en tu jurisdicción antes de basarte en él."],
+          ["¿Puedo establecer mis límites y expectativas desde el principio?", "Sí. Tu perfil te permite especificar lo que buscas - nivel de implicación, calendario, ubicación - y la Puntuación de Compatibilidad refleja cuánto coincide contigo un posible co-padre/co-madre, no solo una foto."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12397,6 +12472,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Ver perfiles de donantes", ctaType: "register",
+        faq: [
+          ["¿Se verifica la identidad de los donantes?", "Sí - cada donante completa una verificación de identidad antes de que puedas conectar, así que no evalúas un perfil anónimo."],
+          ["¿Puedo elegir un donante conocido o anónimo?", "Ambos. Tú defines tus propios filtros - apertura a contacto futuro, historial médico, ubicación - y navegas en consecuencia; LetsBeParents no te limita a un solo modelo."],
+          ["¿Necesito una clínica de fertilidad para usar esto?", "No para explorar y conectar, pero antes de avanzar con cualquier acuerdo de donación, es muy recomendable trabajar los detalles médicos y legales con una clínica de fertilidad (y un abogado, cuando corresponda)."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12410,6 +12490,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Hacer el cuestionario de compatibilidad", ctaType: "quiz",
+        faq: [
+          ["¿En qué se diferencia de una cita normal?", "Aquí no hay swipe. Empieza con un breve cuestionario de compatibilidad centrado en valores de crianza, compromiso y vida cotidiana, para que las conversaciones partan de una alineación real y no de una foto."],
+          ["¿Y si queremos ser padres/madres pero no una pareja romántica?", "Eso se acerca más al co-parenting - consulta el camino de Co-Parenting, diseñado justo para ese formato."],
+          ["¿El cuestionario de compatibilidad tiene coste?", "No, el cuestionario es gratuito; algunas funciones de emparejamiento y mensajería forman parte de un plan de pago - consulta Precios para más detalles."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12424,6 +12509,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Crear tu perfil", ctaType: "register",
+        faq: [
+          ["¿Podemos gestionar la búsqueda juntos?", "Sí - ambos podéis explorar y filtrar el mismo grupo de donantes verificados juntos, con los mismos filtros que usaríais por separado."],
+          ["¿Cómo funciona la filiación legal al buscar en pareja?", "Depende de vuestra jurisdicción y del tipo de acuerdo de donación que elijáis - es exactamente el tipo de pregunta que vale la pena llevar a un abogado de familia antes de finalizar nada."],
+          ["¿Tenemos que estar de acuerdo en todo antes de empezar a buscar?", "No en todo, pero alinearos sobre cuán implicado queréis que esté el donante ahorra mucha fricción después - merece la pena hablarlo antes de empezar a explorar."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12435,6 +12525,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Hacer el Cuestionario de Compatibilidad de Coparentalidad", ctaType: "quiz",
+        faq: [
+          ["¿Necesito saber qué camino quiero antes de registrarme?", "No - puedes registrarte, explorar perfiles y hacer el Cuestionario de Compatibilidad sin comprometerte con un camino; la mayoría de los miembros empiezan explorando."],
+          ["¿Qué hace exactamente el Cuestionario de Compatibilidad?", "Pregunta sobre tus valores, tu calendario y lo que buscas, y te da una idea más clara de qué camino - y qué personas - pueden encajar, antes de comprometerte a nada."],
+          ["¿Hay presión para decidir rápido?", "No. No hay ninguna obligación de registrarte ni de decidir nada mientras sigues explorando - lee los caminos y recursos a tu propio ritmo."],
+        ],
       },
     ],
   },
@@ -12445,6 +12540,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "Ainda não tem certeza? Veja tudo",
     resourcesAllCopy: "Explore o conjunto completo de checklists, planilhas e modelos para cada caminho - coparentalidade, fertilidade, concepção com doador e planejamento futuro.",
     resourcesAllCta: "Ver todos os recursos e ferramentas",
+    statsTitle: "Você não está sozinho/a nessa jornada",
+    statsSubtitle: "Junte-se a uma comunidade que já está construindo famílias no LetsBeParents.",
+    faqTitle: "Perguntas frequentes",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12461,6 +12559,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Criar o seu perfil", ctaType: "register",
+        faq: [
+          ["Como funciona o emparelhamento para coparentalidade?", "Começa com um questionário baseado em valores, e mostramos uma Pontuação de Compatibilidade com base no estilo de criação, envolvimento, cronograma e limites - assim você compara o que realmente importa antes de escrever para alguém."],
+          ["A orientação jurídica está incluída?", "Não - o LetsBeParents ajuda você a encontrar e se conectar com um coparceiro compatível, mas qualquer acordo de parentalidade deve ser revisado por um advogado de família independente na sua jurisdição antes de você confiar nele."],
+          ["Posso definir meus limites e expectativas desde o início?", "Sim. Seu perfil permite especificar o que você procura - nível de envolvimento, cronograma, localização - e a Pontuação de Compatibilidade reflete o quanto um possível coparceiro corresponde a isso, não apenas uma foto."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12477,6 +12580,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Ver perfis de doadores", ctaType: "register",
+        faq: [
+          ["A identidade dos doadores é verificada?", "Sim - todo doador passa por verificação de identidade antes de você poder se conectar, então você não está avaliando um perfil anônimo."],
+          ["Posso escolher um doador conhecido ou anônimo?", "Ambos. Você define seus próprios filtros - abertura a contato futuro, histórico médico, localização - e navega de acordo; o LetsBeParents não limita você a um único modelo."],
+          ["Preciso de uma clínica de fertilidade para usar isso?", "Não para navegar e se conectar, mas antes de avançar com qualquer arranjo de doação, é altamente recomendável tratar os detalhes médicos e jurídicos com uma clínica de fertilidade (e um advogado, quando relevante)."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12490,6 +12598,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Fazer o questionário de compatibilidade", ctaType: "quiz",
+        faq: [
+          ["Em que isso difere de um encontro comum?", "Não há swipe aqui. Começa com um breve questionário de compatibilidade focado em valores de criação, compromisso e vida cotidiana, para que as conversas comecem a partir de um alinhamento real, não de uma foto."],
+          ["E se quisermos ser pais, mas não um casal romântico?", "Isso se aproxima mais da coparentalidade - veja o caminho de Coparentalidade, construído exatamente para esse formato."],
+          ["O questionário de compatibilidade tem custo?", "Não, o questionário é gratuito; alguns recursos de emparelhamento e mensagens fazem parte de um plano pago - veja Preços para mais detalhes."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12504,6 +12617,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Criar o seu perfil", ctaType: "register",
+        faq: [
+          ["Nós dois podemos gerenciar a busca juntos?", "Sim - vocês dois podem navegar e filtrar o mesmo grupo de doadores verificados juntos, usando os mesmos filtros que usariam sozinhos."],
+          ["Como funciona a filiação legal ao buscar como casal?", "Depende da sua jurisdição e do tipo de arranjo de doação escolhido - é exatamente o tipo de pergunta que vale a pena levar a um advogado de família antes de finalizar algo."],
+          ["Precisamos concordar em tudo antes de começar a procurar?", "Não em tudo, mas se alinhar sobre o quanto o doador deve estar envolvido economiza muito atrito depois - vale a pena conversar antes de começar a navegar."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12515,6 +12633,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Fazer o Questionário de Compatibilidade de Coparentalidade", ctaType: "quiz",
+        faq: [
+          ["Preciso saber qual caminho quero antes de me registrar?", "Não - você pode se registrar, navegar e fazer o Questionário de Compatibilidade sem se comprometer com um caminho; a maioria dos membros começa explorando."],
+          ["O que o Questionário de Compatibilidade realmente faz?", "Ele pergunta sobre seus valores, cronograma e o que você procura, e depois dá uma ideia mais clara de qual caminho - e quais pessoas - podem combinar, antes de você se comprometer com algo."],
+          ["Há alguma pressão para decidir rápido?", "Não. Não há nenhuma exigência de se registrar ou se comprometer enquanto você ainda está explorando - leia sobre os caminhos e recursos no seu próprio ritmo."],
+        ],
       },
     ],
   },
@@ -12525,6 +12648,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "Pas encore sûr(e) ? Explorez tout",
     resourcesAllCopy: "Découvrez l'ensemble des checklists, fiches pratiques et modèles pour chaque parcours - coparentalité, fertilité, conception avec donneur et planification.",
     resourcesAllCta: "Voir toutes les ressources et tous les outils",
+    statsTitle: "Vous n'êtes pas seul(e) dans cette démarche",
+    statsSubtitle: "Rejoignez une communauté qui construit déjà des familles sur LetsBeParents.",
+    faqTitle: "Questions fréquentes",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12541,6 +12667,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Créer votre profil", ctaType: "register",
+        faq: [
+          ["Comment fonctionne la mise en relation pour le co-parenting ?", "Vous commencez par un quiz basé sur vos valeurs, et nous vous montrons un Score de Compatibilité basé sur le style parental, l'implication, le calendrier et les limites - pour comparer ce qui compte vraiment avant même d'écrire à quelqu'un."],
+          ["L'accompagnement juridique est-il inclus ?", "Non - LetsBeParents vous aide à trouver un co-parent compatible et à entrer en contact avec lui, mais tout accord parental doit être révisé par un avocat de famille indépendant dans votre juridiction avant que vous vous y fiiez."],
+          ["Puis-je fixer mes limites et attentes dès le départ ?", "Oui. Votre profil vous permet de préciser ce que vous recherchez - niveau d'implication, calendrier, localisation - et le Score de Compatibilité reflète à quel point un co-parent potentiel y correspond, pas seulement une photo."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12557,6 +12688,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Parcourir les profils de donneurs", ctaType: "register",
+        faq: [
+          ["L'identité des donneurs est-elle vérifiée ?", "Oui - chaque donneur complète une vérification d'identité avant que vous puissiez entrer en contact, vous n'évaluez donc pas un profil anonyme."],
+          ["Puis-je choisir un donneur connu ou anonyme ?", "Les deux sont possibles. Vous définissez vos propres filtres - ouverture à un contact futur, antécédents médicaux, localisation - et parcourez les profils en conséquence ; LetsBeParents ne vous limite pas à un seul modèle."],
+          ["Ai-je besoin d'une clinique de fertilité pour utiliser ce service ?", "Pas pour parcourir et entrer en contact, mais avant de vous engager dans un arrangement de don, il est vivement recommandé de discuter des détails médicaux et juridiques avec une clinique de fertilité (et un avocat, le cas échéant)."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12570,6 +12706,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Faire le questionnaire de compatibilité", ctaType: "quiz",
+        faq: [
+          ["En quoi est-ce différent d'un rendez-vous classique ?", "Il n'y a pas de swipe ici. Tout commence par un court quiz de compatibilité centré sur les valeurs parentales, l'engagement et la vie quotidienne, afin que les conversations partent d'un véritable alignement plutôt que d'une photo."],
+          ["Et si nous voulons être parents sans former un couple romantique ?", "Cela se rapproche plutôt du co-parenting - consultez ce parcours, conçu exactement pour ce type de configuration."],
+          ["Le quiz de compatibilité est-il payant ?", "Non, le quiz est gratuit ; certaines fonctionnalités de mise en relation et de messagerie font partie d'un abonnement payant - voir Tarifs pour plus de détails."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12584,6 +12725,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Créer votre profil", ctaType: "register",
+        faq: [
+          ["Pouvons-nous gérer la recherche ensemble ?", "Oui - vous pouvez tous les deux parcourir et filtrer le même vivier de donneurs vérifiés ensemble, avec les mêmes filtres que vous utiliseriez seul(e)."],
+          ["Comment fonctionne la filiation légale lors d'une recherche en couple ?", "Cela dépend de votre juridiction et du type d'arrangement de don choisi - c'est exactement le genre de question à poser à un avocat de famille avant de finaliser quoi que ce soit."],
+          ["Devons-nous être d'accord sur tout avant de commencer à chercher ?", "Pas sur tout, mais vous aligner sur le degré d'implication souhaité du donneur évite beaucoup de frictions par la suite - cela vaut la peine d'en discuter avant de commencer."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12595,6 +12741,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Faire le Questionnaire de Compatibilité de Coparentalité", ctaType: "quiz",
+        faq: [
+          ["Dois-je savoir quel parcours je veux avant de m'inscrire ?", "Non - vous pouvez vous inscrire, parcourir les profils et faire le Quiz de Compatibilité sans vous engager sur un parcours ; la plupart des membres commencent par explorer."],
+          ["Que fait exactement le Quiz de Compatibilité ?", "Il vous interroge sur vos valeurs, votre calendrier et ce que vous recherchez, puis vous donne une idée plus claire du parcours - et des personnes - qui pourraient vous correspondre, avant de vous engager."],
+          ["Y a-t-il une pression pour décider rapidement ?", "Non. Rien ne vous oblige à vous inscrire ou à vous engager tant que vous explorez encore - parcourez les parcours et les ressources à votre rythme."],
+        ],
       },
     ],
   },
@@ -12605,6 +12756,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "Noch nicht sicher? Alles durchstöbern",
     resourcesAllCopy: "Entdecken Sie die vollständige Sammlung an Checklisten, Arbeitsblättern und Vorlagen für jeden Weg - Co-Parenting, Kinderwunschbehandlung, Samenspende und Zukunftsplanung.",
     resourcesAllCta: "Alle Ressourcen und Tools durchstöbern",
+    statsTitle: "Sie sind damit nicht allein",
+    statsSubtitle: "Werden Sie Teil einer Community, die auf LetsBeParents bereits Familien aufbaut.",
+    faqTitle: "Häufig gestellte Fragen",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12621,6 +12775,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Profil erstellen", ctaType: "register",
+        faq: [
+          ["Wie funktioniert das Matching für Co-Parenting?", "Sie beginnen mit einem wertebasierten Quiz, und wir zeigen Ihnen einen Compatibility Score basierend auf Erziehungsstil, Engagement, Zeitplan und Grenzen - so vergleichen Sie, was wirklich zählt, bevor Sie überhaupt jemandem schreiben."],
+          ["Ist Rechtsberatung inbegriffen?", "Nein - LetsBeParents hilft Ihnen, einen passenden Co-Elternteil zu finden und Kontakt aufzunehmen, aber jede Erziehungsvereinbarung sollte von einem unabhängigen Familienanwalt in Ihrer Jurisdiktion geprüft werden, bevor Sie sich darauf verlassen."],
+          ["Kann ich meine Grenzen und Erwartungen von Anfang an festlegen?", "Ja. In Ihrem Profil können Sie angeben, was Sie suchen - Engagement-Level, Zeitplan, Standort - und der Compatibility Score zeigt, wie gut ein potenzieller Co-Elternteil dazu passt, nicht nur ein Foto."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12637,6 +12796,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Spenderprofile durchstöbern", ctaType: "register",
+        faq: [
+          ["Wird die Identität der Spender verifiziert?", "Ja - jeder Spender durchläuft eine Identitätsprüfung, bevor Sie Kontakt aufnehmen können, sodass Sie kein anonymes Profil bewerten."],
+          ["Kann ich einen bekannten oder anonymen Spender wählen?", "Beides ist möglich. Sie legen Ihre eigenen Filter fest - Offenheit für künftigen Kontakt, medizinische Vorgeschichte, Standort - und durchsuchen entsprechend; LetsBeParents schränkt Sie nicht auf ein Modell ein."],
+          ["Brauche ich eine Kinderwunschklinik, um dies zu nutzen?", "Zum Durchsuchen und Kontaktaufnehmen nicht, aber bevor Sie eine Spendervereinbarung eingehen, wird dringend empfohlen, die medizinischen und rechtlichen Details mit einer Kinderwunschklinik (und ggf. einem Anwalt) zu klären."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12650,6 +12814,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Kompatibilitätsquiz machen", ctaType: "quiz",
+        faq: [
+          ["Was unterscheidet das von normalem Dating?", "Hier gibt es kein Swipen. Es beginnt mit einem kurzen Kompatibilitäts-Quiz zu Erziehungswerten, Verbindlichkeit und Alltag, sodass Gespräche auf echter Übereinstimmung basieren, nicht auf einem Foto."],
+          ["Was, wenn wir Eltern werden wollen, aber kein romantisches Paar sind?", "Das kommt dem Co-Parenting näher - siehe den Co-Parenting-Weg, der genau für dieses Modell konzipiert ist."],
+          ["Kostet das Kompatibilitäts-Quiz etwas?", "Nein, das Quiz ist kostenlos; einige Matching- und Nachrichtenfunktionen sind Teil eines kostenpflichtigen Plans - Details finden Sie unter Preise."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12664,6 +12833,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Profil erstellen", ctaType: "register",
+        faq: [
+          ["Können wir die Suche gemeinsam verwalten?", "Ja - Sie können beide gemeinsam denselben identitätsgeprüften Spenderpool durchsuchen und filtern, mit denselben Filtern, die Sie auch allein nutzen würden."],
+          ["Wie funktioniert die rechtliche Elternschaft bei einer Suche als Paar?", "Das hängt von Ihrer Jurisdiktion und der Art der gewählten Spendervereinbarung ab - genau die Art von Frage, die sich lohnt, vorab mit einem Familienanwalt zu klären."],
+          ["Müssen wir uns vor der Suche über alles einig sein?", "Nicht über alles, aber sich darüber abzustimmen, wie involviert der Spender sein soll, erspart später viel Reibung - ein Gespräch darüber lohnt sich vor dem Durchsuchen."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12675,6 +12849,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Co-Parenting-Kompatibilitätsquiz machen", ctaType: "quiz",
+        faq: [
+          ["Muss ich vor der Registrierung wissen, welchen Weg ich will?", "Nein - Sie können sich registrieren, Profile durchsuchen und das Kompatibilitäts-Quiz machen, ohne sich auf einen Weg festzulegen; die meisten Mitglieder beginnen mit dem Erkunden."],
+          ["Was genau macht das Kompatibilitäts-Quiz?", "Es fragt nach Ihren Werten, Ihrem Zeitplan und dem, wonach Sie suchen, und gibt Ihnen dann ein klareres Bild davon, welcher Weg - und welche Menschen - passen könnten, bevor Sie sich festlegen."],
+          ["Gibt es Druck, sich schnell zu entscheiden?", "Nein. Es besteht keine Verpflichtung, sich zu registrieren oder festzulegen, während Sie noch erkunden - lesen Sie sich die Wege und Ressourcen in Ihrem eigenen Tempo durch."],
+        ],
       },
     ],
   },
@@ -12685,6 +12864,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "Non sei ancora sicuro/a? Esplora tutto",
     resourcesAllCopy: "Scopri l'intera raccolta di checklist, schede pratiche e modelli per ogni percorso - co-parenting, fertilità, concepimento con donatore e pianificazione futura.",
     resourcesAllCta: "Sfoglia tutte le risorse e gli strumenti",
+    statsTitle: "Non è sola/o in questo percorso",
+    statsSubtitle: "Si unisca a una community che sta già costruendo famiglie su LetsBeParents.",
+    faqTitle: "Domande frequenti",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12701,6 +12883,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Crea il tuo profilo", ctaType: "register",
+        faq: [
+          ["Come funziona l'abbinamento per il co-parenting?", "Si inizia con un quiz basato sui valori, e mostriamo un Punteggio di Compatibilità basato su stile genitoriale, coinvolgimento, tempistiche e limiti - così confronta ciò che conta davvero prima ancora di scrivere a qualcuno."],
+          ["È inclusa una consulenza legale?", "No - LetsBeParents L'aiuta a trovare e contattare un co-genitore compatibile, ma qualsiasi accordo genitoriale dovrebbe essere rivisto da un avvocato di famiglia indipendente nella Sua giurisdizione prima di farvi affidamento."],
+          ["Posso stabilire i miei limiti e aspettative fin dall'inizio?", "Sì. Il Suo profilo Le permette di specificare cosa cerca - livello di coinvolgimento, tempistiche, posizione - e il Punteggio di Compatibilità riflette quanto un potenziale co-genitore corrisponde a questo, non solo una foto."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12717,6 +12904,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Sfoglia i profili dei donatori", ctaType: "register",
+        faq: [
+          ["L'identità dei donatori è verificata?", "Sì - ogni donatore completa una verifica dell'identità prima che possiate mettervi in contatto, quindi non sta valutando un profilo anonimo."],
+          ["Posso scegliere un donatore conosciuto o anonimo?", "Entrambi sono possibili. Lei imposta i propri filtri - apertura a un contatto futuro, anamnesi medica, posizione - e naviga di conseguenza; LetsBeParents non La limita a un solo modello."],
+          ["Ho bisogno di una clinica della fertilità per usare questo servizio?", "Non per navigare e mettersi in contatto, ma prima di procedere con qualsiasi accordo di donazione, è vivamente consigliato affrontare i dettagli medici e legali con una clinica della fertilità (e un avvocato, se pertinente)."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12730,6 +12922,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Fai il quiz di compatibilità", ctaType: "quiz",
+        faq: [
+          ["In cosa differisce da un appuntamento normale?", "Qui non c'è lo swipe. Si inizia con un breve quiz di compatibilità incentrato su valori genitoriali, impegno e vita quotidiana, così le conversazioni partono da un allineamento reale, non da una foto."],
+          ["E se vogliamo diventare genitori ma non essere una coppia romantica?", "Questo si avvicina di più al co-parenting - veda il percorso Co-Parenting, costruito esattamente per questo tipo di configurazione."],
+          ["Il quiz di compatibilità ha un costo?", "No, il quiz è gratuito; alcune funzioni di abbinamento e messaggistica fanno parte di un piano a pagamento - veda Prezzi per i dettagli."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12744,6 +12941,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Crea il tuo profilo", ctaType: "register",
+        faq: [
+          ["Possiamo gestire insieme la ricerca?", "Sì - potete entrambi sfogliare e filtrare insieme lo stesso pool di donatori verificati, usando gli stessi filtri che usereste singolarmente."],
+          ["Come funziona la genitorialità legale quando si cerca come coppia?", "Dipende dalla vostra giurisdizione e dal tipo di accordo di donazione scelto - è esattamente il tipo di domanda che vale la pena portare a un avvocato di famiglia prima di finalizzare qualsiasi cosa."],
+          ["Dobbiamo essere d'accordo su tutto prima di iniziare a cercare?", "Non su tutto, ma allinearvi su quanto coinvolto debba essere il donatore fa risparmiare molto attrito in seguito - vale la pena parlarne prima di iniziare a sfogliare."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12755,6 +12957,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Fai il Quiz di Compatibilità per il Co-Parenting", ctaType: "quiz",
+        faq: [
+          ["Devo sapere quale percorso voglio prima di registrarmi?", "No - può registrarsi, sfogliare i profili e fare il Quiz di Compatibilità senza impegnarsi in un percorso; la maggior parte dei membri inizia esplorando."],
+          ["Cosa fa esattamente il Quiz di Compatibilità?", "Chiede dei Suoi valori, delle tempistiche e di cosa sta cercando, e poi Le dà un'idea più chiara di quale percorso - e quali persone - potrebbero essere adatti, prima di impegnarsi in qualcosa."],
+          ["C'è pressione per decidere in fretta?", "No. Non c'è alcun obbligo di registrarsi o impegnarsi mentre sta ancora esplorando - legga i percorsi e le risorse con i Suoi tempi."],
+        ],
       },
     ],
   },
@@ -12765,6 +12972,9 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
     resourcesAllTitle: "Jeszcze nie masz pewności? Zobacz wszystko",
     resourcesAllCopy: "Poznaj pełny zestaw list kontrolnych, arkuszy i szablonów dla każdej drogi - co-parenting, płodność, poczęcie z dawcą i planowanie na przyszłość.",
     resourcesAllCta: "Zobacz wszystkie zasoby i narzędzia",
+    statsTitle: "Nie jesteś w tym sam(a)",
+    statsSubtitle: "Dołącz do społeczności, która już buduje rodziny na LetsBeParents.",
+    faqTitle: "Najczęściej zadawane pytania",
     paths: [
       {
         slug: "co-parenting", registerKey: "coparent",
@@ -12781,6 +12991,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "planning-template" },
         ],
         ctaLabel: "Utwórz swój profil", ctaType: "register",
+        faq: [
+          ["Jak działa dopasowanie w przypadku co-parentingu?", "Zaczynasz od quizu opartego na wartościach, a my pokazujemy Ci Wynik Kompatybilności oparty na stylu wychowania, zaangażowaniu, harmonogramie i granicach - dzięki temu porównujesz to, co naprawdę ważne, zanim jeszcze do kogoś napiszesz."],
+          ["Czy pomoc prawna jest wliczona?", "Nie - LetsBeParents pomaga znaleźć kompatybilnego co-rodzica i się z nim skontaktować, ale każdą umowę rodzicielską powinien zweryfikować niezależny prawnik rodzinny w Twojej jurysdykcji, zanim na niej polegniesz."],
+          ["Czy mogę od razu określić swoje granice i oczekiwania?", "Tak. W profilu możesz określić, czego szukasz - poziom zaangażowania, harmonogram, lokalizację - a Wynik Kompatybilności pokazuje, jak dobrze potencjalny co-rodzic to spełnia, a nie tylko zdjęcie."],
+        ],
       },
       {
         slug: "donor", registerKey: "donor",
@@ -12797,6 +13012,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "fertility-donor", tool: "fertility-clinic-checklist" },
         ],
         ctaLabel: "Przeglądaj profile dawców", ctaType: "register",
+        faq: [
+          ["Czy tożsamość dawców jest weryfikowana?", "Tak - każdy dawca przechodzi weryfikację tożsamości, zanim będziesz mógł/mogła się skontaktować, więc nie oceniasz anonimowego profilu."],
+          ["Czy mogę wybrać znanego lub anonimowego dawcę?", "Oba warianty są dostępne. Sam(a) ustawiasz filtry - otwartość na przyszły kontakt, historia medyczna, lokalizacja - i przeglądasz odpowiednio; LetsBeParents nie ogranicza Cię do jednego modelu."],
+          ["Czy potrzebuję kliniki leczenia niepłodności, żeby z tego korzystać?", "Do przeglądania i kontaktu - nie, ale przed podjęciem jakiejkolwiek umowy z dawcą zdecydowanie zalecamy omówienie szczegółów medycznych i prawnych z kliniką leczenia niepłodności (i prawnikiem, jeśli to istotne)."],
+        ],
       },
       {
         slug: "partner", registerKey: "partner",
@@ -12810,6 +13030,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "co-parenting", tool: "parenting-values-worksheet" },
         ],
         ctaLabel: "Wypełnij quiz kompatybilności", ctaType: "quiz",
+        faq: [
+          ["Czym to się różni od zwykłego randkowania?", "Nie ma tu swipe'owania. Zaczyna się od krótkiego quizu kompatybilności skupionego na wartościach rodzicielskich, zaangażowaniu i codziennym życiu, dzięki czemu rozmowy zaczynają się od realnego dopasowania, a nie od zdjęcia."],
+          ["A jeśli chcemy być rodzicami, ale nie parą romantyczną?", "To bliżej co-parentingu - zobacz ścieżkę Co-Parenting, stworzoną dokładnie pod taki układ."],
+          ["Czy quiz kompatybilności jest płatny?", "Nie, quiz jest bezpłatny; niektóre funkcje dopasowywania i wiadomości są częścią płatnego planu - szczegóły znajdziesz na stronie Cennik."],
+        ],
       },
       {
         slug: "couple-donor", registerKey: "couple-donor",
@@ -12824,6 +13049,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
           { category: "parenthood-planning", tool: "financial-planning" },
         ],
         ctaLabel: "Utwórz swój profil", ctaType: "register",
+        faq: [
+          ["Czy oboje możemy zarządzać wyszukiwaniem razem?", "Tak - oboje możecie razem przeglądać i filtrować tę samą, zweryfikowaną pod względem tożsamości pulę dawców, korzystając z tych samych filtrów, co przy szukaniu osobno."],
+          ["Jak wygląda rodzicielstwo prawne przy szukaniu jako para?", "Zależy to od Waszej jurysdykcji i typu wybranej umowy z dawcą - to dokładnie ten rodzaj pytania, który warto zadać prawnikowi rodzinnemu, zanim cokolwiek sfinalizujecie."],
+          ["Czy musimy się zgadzać co do wszystkiego, zanim zaczniemy szukać?", "Nie co do wszystkiego, ale ustalenie, jak zaangażowany ma być dawca, oszczędza sporo tarć później - warto to omówić, zanim zaczniecie przeglądać."],
+        ],
       },
       {
         slug: "exploring", registerKey: "exploring",
@@ -12835,6 +13065,11 @@ const FIND_YOUR_PATH_TEXT: Record<CookieLocale, {
         ],
         resources: "all",
         ctaLabel: "Wypełnij Quiz Kompatybilności Co-Parentingu", ctaType: "quiz",
+        faq: [
+          ["Czy muszę wiedzieć, którą ścieżkę wybieram, zanim się zarejestruję?", "Nie - możesz się zarejestrować, przeglądać profile i zrobić Quiz Kompatybilności bez wybierania ścieżki; większość członków zaczyna od eksplorowania."],
+          ["Co dokładnie robi Quiz Kompatybilności?", "Pyta o Twoje wartości, harmonogram i to, czego szukasz, a następnie daje jaśniejszy obraz tego, która ścieżka - i którzy ludzie - mogą pasować, zanim się na cokolwiek zdecydujesz."],
+          ["Czy jest presja, żeby szybko się zdecydować?", "Nie. Nie ma żadnego wymogu rejestracji ani decyzji, dopóki wciąż eksplorujesz - czytaj o ścieżkach i zasobach we własnym tempie."],
+        ],
       },
     ],
   },
@@ -12876,6 +13111,18 @@ function FindYourPath() {
         <h2>{text.whatThisLooksLike}</h2>
         {path.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
       </section>
+      <section className="fyp-stats">
+        <div className="landing-section-intro">
+          <span>{text.eyebrow}</span>
+          <h2>{text.statsTitle}</h2>
+          <p className="resources-section-sub">{text.statsSubtitle}</p>
+        </div>
+        <div className="landing-stats">
+          {LANDING_TEXT[locale].stats.map(([value, label]) => (
+            <div key={label}><strong>{value}</strong><span>{label}</span></div>
+          ))}
+        </div>
+      </section>
       {path.resources === "all" ? (
         <section className="fyp-resources-all">
           <h2>{text.resourcesAllTitle}</h2>
@@ -12903,6 +13150,20 @@ function FindYourPath() {
       )}
       <section className="fyp-next-action">
         <Link className="landing-gradient-button" to={ctaHref}>{path.ctaLabel} {resourceArrow()}</Link>
+      </section>
+      <section className="fyp-faq">
+        <div className="landing-section-intro">
+          <span>{text.eyebrow}</span>
+          <h2>{text.faqTitle}</h2>
+        </div>
+        <div className="fyp-faq-list">
+          {path.faq.map(([question, answer]) => (
+            <details key={question} className="fyp-faq-item">
+              <summary>{question}</summary>
+              <p>{answer}</p>
+            </details>
+          ))}
+        </div>
       </section>
       <section className="resources-pro">
         <span className="resources-pro-icon">{resourceChatIcon()}</span>

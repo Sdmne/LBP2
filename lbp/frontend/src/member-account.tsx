@@ -833,6 +833,22 @@ function Overview({
               c.notifications,
               `/${locale}/profile/notifications`,
             )}
+            {/* Alena: "на сайте нету половины меню как в приложении... и
+                про буст и комьюнити и комнаты разные" - this page
+                (MemberAccount, a separate component tree from ui.tsx's
+                MemberLinks sub-nav every OTHER member page has) never
+                linked to Boost/Community/Referral/Safety Check-In/Saved
+                at all, so from here they were simply unreachable. Family
+                Room/Pregnancy Room are per-match routes
+                (/family-room/:profileId), not a standalone destination,
+                so they're deliberately not added as a flat tile here -
+                they're reached from an active match the same way the
+                mobile app's "openFamilyPlan" helper does it. */}
+            {setting("boostIcon", c.boostLink, `/${locale}/boost`)}
+            {setting("communityIcon", c.communityLink, `/${locale}/community`)}
+            {setting("referralIcon", c.referralLink, `/${locale}/referral`)}
+            {setting("savedFavouriteIcon", c.savedLink, `/${locale}/favourites`)}
+            {setting("safetyIcon", c.safetyLink, `/${locale}/safety-checkin`)}
             {setting(
               "language",
               c.language,

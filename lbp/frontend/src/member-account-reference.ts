@@ -58,6 +58,11 @@ const ACCOUNT_COPY_BASE = {
     notifications: "Notification settings",
     language: "Interface language",
     blocked: "Blocked users",
+    boostLink: "Profile Boost",
+    communityLink: "Community",
+    referralLink: "Invite & earn a Boost",
+    savedLink: "Saved",
+    safetyLink: "Safety Check-In",
     delete: "Delete account",
     signOut: "Sign out",
     editHeading: "Edit profile",
@@ -226,6 +231,11 @@ const ACCOUNT_COPY_BASE = {
     notifications: "Настройки уведомлений",
     language: "Язык интерфейса",
     blocked: "Заблокированные пользователи",
+    boostLink: "Boost профиля",
+    communityLink: "Community",
+    referralLink: "Приглашай и получай Boost",
+    savedLink: "Избранное",
+    safetyLink: "Safety Check-In",
     delete: "Удалить аккаунт",
     signOut: "Выйти",
     editHeading: "Редактирование профиля",
@@ -394,6 +404,11 @@ const ACCOUNT_COPY_BASE = {
     notifications: "Notificaciones",
     language: "Idioma",
     blocked: "Usuarios bloqueados",
+    boostLink: "Boost de perfil",
+    communityLink: "Community",
+    referralLink: "Invita y gana un Boost",
+    savedLink: "Guardados",
+    safetyLink: "Safety Check-In",
     delete: "Eliminar cuenta",
     signOut: "Cerrar sesión",
     editHeading: "Editar perfil",
@@ -917,6 +932,25 @@ export const ACCOUNT_ICONS = {
     '<svg class="language-selected-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>',
   savedFavouriteIcon:
     '<svg class="saved-directory-button-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"></path><path d="M7 10v12"></path></svg>',
+  // Added Sept 2026 for the account-page nav-parity tiles (Boost,
+  // Community, Invite/Referral) - Alena: "на сайте нету половины меню
+  // как в приложении" (the site's own /profile page never got the same
+  // MemberLinks sub-nav every other member page has, so Boost/Community/
+  // Referral/Safety Check-In/Saved were unreachable from here).
+  boostIcon:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 3 14h7l-1 8 10-12h-7z"></path></svg>',
+  communityIcon:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>',
+  referralIcon:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="4"></rect><path d="M12 8v13"></path><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"></path><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8"></path><path d="M16.5 8a2.5 2.5 0 0 0 0-5C13 3 12 8 12 8"></path></svg>',
+  // A separate icon (not a reuse of "verification") specifically so the
+  // Safety Check-In tile below never accidentally picks up the
+  // setting()-helper's verification-only green styling
+  // (action === "verification" && verified ? " account-setting-verified"
+  // : "" in Overview() - a real profile-verification-specific class, not
+  // a generic "looks fine" indicator).
+  safetyIcon:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>',
 } as const;
 
 const ACCOUNT_DELETION_REASONS_BASE = {

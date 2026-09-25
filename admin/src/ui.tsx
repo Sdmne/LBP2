@@ -275,6 +275,8 @@ const detailTabs: Array<[string, string, string, AdminIconName, boolean]> = [
   ["visitors", "Visitors", "visitors", "eye", true],
   ["blocked", "Blocked", "blocked", "ban", true],
   ["blocked-by", "Blocked By", "blockedBy", "ban", true],
+  ["boosts", "Boosts", "boosts", "trendingUp", true],
+  ["community", "Community", "communityPosts", "messageSquare", true],
 ];
 
 function label(value: string) {
@@ -5158,6 +5160,13 @@ function ModerationPhotos() {
   const [status, setStatus] = useState("PENDING");
   const [result, setResult] = useState<ListResponse | null>(null);
   const [notice, setNotice] = useState("");
+  // FIX (Sept 2026): notice used to be classified error-vs-success by
+  // sniffing its own text for the literal substring "Could not" - broke
+  // the moment a real backend error message didn't happen to contain
+  // that phrase (see api.ts's request() fix, same root cause: a raw
+  // backend detail string has no reason to match a hardcoded English
+  // phrase). Tracked explicitly instead, set at each call site.
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const limit = 100;
   const load = () => {
     setResult(null);
@@ -5166,7 +5175,10 @@ function ModerationPhotos() {
         `/admin/list/moderation-photos?limit=${limit}&offset=0&status=${encodeURIComponent(status)}`,
       )
       .then(setResult)
-      .catch(() => setNotice("Could not load photo moderation."));
+      .catch(() => {
+        setNotice("Could not load photo moderation.");
+        setNoticeIsError(true);
+      });
   };
   useEffect(load, [status]);
   const review = async (row: RecordValue, next: "APPROVED" | "REJECTED") => {
@@ -5179,9 +5191,11 @@ function ModerationPhotos() {
         { values: { status: next, reason } },
       );
       setNotice(next === "APPROVED" ? "Photo approved." : "Photo rejected.");
+      setNoticeIsError(false);
       load();
-    } catch {
-      setNotice("Could not update this photo.");
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not update this photo.");
+      setNoticeIsError(true);
     }
   };
   const items = (result?.items ?? []).filter((row) =>
@@ -5219,7 +5233,7 @@ function ModerationPhotos() {
         ))}
       </nav>
       {notice && (
-        <p className={notice.includes("Could not") ? "error" : "notice"}>
+        <p className={noticeIsError ? "error" : "notice"}>
           {notice}
         </p>
       )}
@@ -5331,6 +5345,7 @@ function AdminBoosts() {
   const [status, setStatus] = useState("PENDING");
   const [result, setResult] = useState<ListResponse | null>(null);
   const [notice, setNotice] = useState("");
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const [hoursByRow, setHoursByRow] = useState<Record<string, string>>({});
   const limit = 100;
   const load = () => {
@@ -5338,7 +5353,10 @@ function AdminBoosts() {
     api
       .get<ListResponse>(`/admin/list/boosts?limit=${limit}&offset=0&status=${encodeURIComponent(status)}`)
       .then(setResult)
-      .catch(() => setNotice("Could not load Boost requests."));
+      .catch(() => {
+        setNotice("Could not load Boost requests.");
+        setNoticeIsError(true);
+      });
   };
   useEffect(load, [status]);
   const review = async (row: RecordValue, next: "APPROVED" | "DECLINED") => {
@@ -5350,9 +5368,11 @@ function AdminBoosts() {
       if (next === "APPROVED" && hoursRaw) body.hours = Number(hoursRaw);
       await api.post(`/admin/boosts/${encodeURIComponent(rowId)}/review`, body);
       setNotice(next === "APPROVED" ? `Boost approved for ${valueOf(data.profileName)}.` : "Boost request declined.");
+      setNoticeIsError(false);
       load();
     } catch (err) {
       setNotice(err instanceof ApiError ? err.message : "Could not update this Boost request.");
+      setNoticeIsError(true);
     }
   };
   const items = result?.items ?? [];
@@ -5378,7 +5398,7 @@ function AdminBoosts() {
           </button>
         ))}
       </nav>
-      {notice && <p className={notice.includes("Could not") ? "error" : "notice"}>{notice}</p>}
+      {notice && <p className={noticeIsError ? "error" : "notice"}>{notice}</p>}
       {!result ? (
         <p className="loading-inline">Loading Boost requests…</p>
       ) : !items.length ? (
@@ -5443,22 +5463,28 @@ function AdminVideoVerifications() {
   const [status, setStatus] = useState("PENDING");
   const [result, setResult] = useState<ListResponse | null>(null);
   const [notice, setNotice] = useState("");
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const limit = 100;
   const load = () => {
     setResult(null);
     api
       .get<ListResponse>(`/admin/list/video-verifications?limit=${limit}&offset=0&status=${encodeURIComponent(status)}`)
       .then(setResult)
-      .catch(() => setNotice("Could not load video verification requests."));
+      .catch(() => {
+        setNotice("Could not load video verification requests.");
+        setNoticeIsError(true);
+      });
   };
   useEffect(load, [status]);
   const review = async (row: RecordValue, next: "APPROVED" | "DECLINED") => {
     try {
       await api.post(`/admin/video-verifications/${encodeURIComponent(String(row.id))}/review`, { status: next });
       setNotice(next === "APPROVED" ? "Video verification approved." : "Video verification declined.");
+      setNoticeIsError(false);
       load();
     } catch (err) {
       setNotice(err instanceof ApiError ? err.message : "Could not update this request.");
+      setNoticeIsError(true);
     }
   };
   const items = result?.items ?? [];
@@ -5484,7 +5510,7 @@ function AdminVideoVerifications() {
           </button>
         ))}
       </nav>
-      {notice && <p className={notice.includes("Could not") ? "error" : "notice"}>{notice}</p>}
+      {notice && <p className={noticeIsError ? "error" : "notice"}>{notice}</p>}
       {!result ? (
         <p className="loading-inline">Loading video verification requests…</p>
       ) : !items.length ? (
@@ -5660,6 +5686,7 @@ function ModerationReports() {
     DISMISSED: 0,
   });
   const [notice, setNotice] = useState("");
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [reviewingId, setReviewingId] = useState("");
   const loadCounts = () =>
@@ -5677,7 +5704,10 @@ function ModerationReports() {
       ),
     )
       .then((items) => setCounts(Object.fromEntries(items)))
-      .catch(() => setNotice("Could not load report counts."));
+      .catch(() => {
+        setNotice("Could not load report counts.");
+        setNoticeIsError(true);
+      });
   const load = () => {
     setResult(null);
     setLoadError("");
@@ -5701,10 +5731,12 @@ function ModerationReports() {
         { values: { status: next } },
       );
       setNotice(next === "RESOLVED" ? "Report resolved." : "Report dismissed.");
+      setNoticeIsError(false);
       load();
       void loadCounts();
-    } catch {
-      setNotice("Could not update this report.");
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not update this report.");
+      setNoticeIsError(true);
     } finally {
       setReviewingId("");
     }
@@ -5745,7 +5777,7 @@ function ModerationReports() {
         ))}
       </nav>
       {notice && (
-        <p className={notice.includes("Could not") ? "error" : "notice"}>
+        <p className={noticeIsError ? "error" : "notice"}>
           {notice}
         </p>
       )}
@@ -12096,6 +12128,80 @@ function UserTabContent({
         <div>
           <h3>No Visitors</h3>
           <p>No one has viewed this user's profile yet.</p>
+        </div>
+      </div>
+    );
+  // Added Sept 2026 - Alena, on her own admin user page: "тут наверное
+  // надо показывать и покупки человека и бусты) и про комьюнити может
+  // его записи". Subscriptions (above) already covers the recurring-
+  // purchase side; this is the one-off-Boost equivalent plus the
+  // person's own Community posts, both backed by the new "boosts"/
+  // "community" cases in GET /admin/users/{id}/tabs/{tab_name}.
+  if (tab === "boosts")
+    return rows.length ? (
+      <div className="table">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Hours</th>
+              <th>Requested</th>
+              <th>Active window</th>
+              <th>Reviewed by</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => {
+              const data = nested(row);
+              return (
+                <tr key={String(row.id ?? index)}>
+                  <td>{statusLabel(String(row.status ?? ""))}</td>
+                  <td>{valueOf(data.hours) || "—"}</td>
+                  <td>{compactDate(row.created_at)}</td>
+                  <td>
+                    {data.activeAt || data.expiresAt
+                      ? `${compactDate(data.activeAt)} — ${compactDate(data.expiresAt)}`
+                      : "—"}
+                  </td>
+                  <td>{valueOf(data.reviewedBy) || "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <div className="user-empty-state user-relations-empty">
+        <AdminIcon name="trendingUp" />
+        <div>
+          <h3>No Boosts</h3>
+          <p>This user hasn't requested a Boost yet.</p>
+        </div>
+      </div>
+    );
+  if (tab === "community")
+    return rows.length ? (
+      <section className="profile-visitors">
+        {rows.map((row, index) => {
+          const data = nested(row);
+          return (
+            <article key={String(row.id ?? index)}>
+              <p>{valueOf(data.body) || "—"}</p>
+              <small>
+                Group #{valueOf(data.groupId) || "—"} ·{" "}
+                {compactDate(data.createdAt ?? row.created_at)}
+                {settingBoolean(data.isExpert) ? " · Expert" : ""}
+              </small>
+            </article>
+          );
+        })}
+      </section>
+    ) : (
+      <div className="user-empty-state user-relations-empty">
+        <AdminIcon name="messageSquare" />
+        <div>
+          <h3>No Community Posts</h3>
+          <p>This user hasn't posted in Community yet.</p>
         </div>
       </div>
     );
