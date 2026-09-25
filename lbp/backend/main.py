@@ -10641,11 +10641,15 @@ def member_ai_advisor_weekly_insight(
 # mirrors the plain boolean-toggle shape of everything else here).
 
 def require_community_pro(cursor, profile_id: int) -> dict[str, Any]:
+    # Was Pro-only ("Premium roadmap step 11"); Alena asked to open Community
+    # groups up to every member, including the free Explore tier, on both
+    # the site and the app (2026-09-25) - so this now just requires an
+    # active profile, same bar as liking/messaging. Name kept as-is to
+    # avoid touching every call site; it's a plain access check now, not a
+    # Pro check.
     profile = fetch_profile(cursor, profile_id)
     if not profile or profile.get("status") != "ACTIVE":
         raise HTTPException(status_code=404, detail="Profile not found")
-    if not profile_is_pro(profile):
-        raise HTTPException(status_code=402, detail="Family Builder Pro is required for Community groups")
     return profile
 
 

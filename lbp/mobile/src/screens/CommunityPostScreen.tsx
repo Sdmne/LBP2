@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { createCommunityReply, deleteCommunityReply, fetchCommunityReplies, type CommunityReply } from "../api/community";
@@ -30,6 +31,15 @@ export default function CommunityPostScreen({ route }: Props) {
   const { post } = route.params;
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
+  // BUG FIX (Sep 2026): Alena reported the composer's input row
+  // (text field + send button) going fully invisible while typing on
+  // Android - the keyboard's predictive-text bar reacted, so the
+  // TextInput WAS receiving keystrokes, it just wasn't rendered
+  // on-screen. This screen sits under a native stack header (unlike
+  // Chat, which hides its header and uses keyboardVerticalOffset=0),
+  // and KeyboardAvoidingView needs that header's height counted in its
+  // offset or its resize math can push the input row out of view.
+  const headerHeight = useHeaderHeight();
   const [replies, setReplies] = useState<CommunityReply[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +96,11 @@ export default function CommunityPostScreen({ route }: Props) {
   }
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={headerHeight}
+    >
       <GradientBackground variant="soft" style={styles.flex}>
         {error ? (
           <View style={styles.notice}>
