@@ -394,7 +394,11 @@ function TierComparison({
             <TableRow label={t("subscription.proFeature6")} builder pro />
             <TableRow label={t("subscription.weeklyInsightFeature")} builder pro />
             <TableRow label={t("subscription.coParentingAgreementFeature")} pro />
-            <TableRow label={t("subscription.communityFeature")} pro />
+            {/* Alena: "и вот же комьюнити у всех должна быть галочка" -
+                Community was opened to every tier (2026-09-25), same fix
+                already made on the website's matching row/What's New badge;
+                this mobile copy was still marking it Pro-only. */}
+            <TableRow label={t("subscription.communityFeature")} free builder pro />
           </TableGroup>
         </View>
 

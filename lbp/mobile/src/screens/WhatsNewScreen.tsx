@@ -67,7 +67,7 @@ const ITEMS: { key: ItemKey; tier: Tier; titleKey: string; bodyKey: string }[] =
   { key: "messages", tier: "builder", titleKey: "whatsnew.messagesTitle", bodyKey: "whatsnew.messagesBody" },
   { key: "insight", tier: "builder", titleKey: "whatsnew.insightTitle", bodyKey: "whatsnew.insightBody" },
   { key: "agreement", tier: "pro", titleKey: "whatsnew.agreementTitle", bodyKey: "whatsnew.agreementBody" },
-  { key: "community", tier: "pro", titleKey: "whatsnew.communityTitle", bodyKey: "whatsnew.communityBody" },
+  { key: "community", tier: "free", titleKey: "whatsnew.communityTitle", bodyKey: "whatsnew.communityBody" },
   { key: "quizAi", tier: "free", titleKey: "whatsnew.quizAiTitle", bodyKey: "whatsnew.quizAiBody" },
   { key: "askAi", tier: "free", titleKey: "whatsnew.askAiTitle", bodyKey: "whatsnew.askAiBody" },
   { key: "agreementDraft", tier: "free", titleKey: "whatsnew.agreementDraftTitle", bodyKey: "whatsnew.agreementDraftBody" },
