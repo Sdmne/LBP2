@@ -35,7 +35,7 @@ export const PRICING_TEXT = {
         { label: "Advanced family filters", values: ["", "check", "check"] },
         { label: "Priority in catalog", values: ["", "check", "check"] },
         { label: "See who liked you", values: ["1", "check", "check"] },
-        { label: "See profile visitors", values: ["1", "check", "check"] },
+        { label: "See profile visitors", values: ["2", "check", "check"] },
       ] },
       { name: "Understand compatibility", rows: [
         { label: "Compatibility Score", values: ["", "check", "check"] },
@@ -93,7 +93,7 @@ export const PRICING_TEXT = {
         { label: "Расширенные семейные фильтры", values: ["", "check", "check"] },
         { label: "Приоритет в каталоге", values: ["", "check", "check"] },
         { label: "Кто лайкнул вас", values: ["1", "check", "check"] },
-        { label: "Кто смотрел профиль", values: ["1", "check", "check"] },
+        { label: "Кто смотрел профиль", values: ["2", "check", "check"] },
       ] },
       { name: "Понимание совместимости", rows: [
         { label: "Оценка совместимости", values: ["", "check", "check"] },
@@ -151,7 +151,7 @@ export const PRICING_TEXT = {
         { label: "Filtros familiares avanzados", values: ["", "check", "check"] },
         { label: "Prioridad en el catálogo", values: ["", "check", "check"] },
         { label: "Ver quién te dio like", values: ["1", "check", "check"] },
-        { label: "Ver visitantes del perfil", values: ["1", "check", "check"] },
+        { label: "Ver visitantes del perfil", values: ["2", "check", "check"] },
       ] },
       { name: "Entender la compatibilidad", rows: [
         { label: "Puntuación de compatibilidad", values: ["", "check", "check"] },

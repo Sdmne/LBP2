@@ -374,6 +374,15 @@ body {
   align-items: flex-start;
   gap: 8px;
 }
+a.profile-card-linked {
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 150ms, transform 150ms;
+}
+a.profile-card-linked:hover {
+  border-color: #4e9bff;
+  transform: translateY(-2px);
+}
 .profile-card .primary {
   margin-top: auto;
 }

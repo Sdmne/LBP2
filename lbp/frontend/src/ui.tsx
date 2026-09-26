@@ -6485,26 +6485,48 @@ function SimpleMemberList({
       <MemberLinks locale={locale} />
       {notice && <p className="error">{notice}</p>}
       <div className="profile-grid">
-        {items.map((item, index) => (
-          <article
-            className="profile-card"
-            key={asText(item.profileId ?? item.id ?? index)}
-          >
-            <UserAvatar src={item.avatarUrl} name={firstAvatarText(item.displayName, item.display_name, item.name)} />
-            <h2>{asText(item.displayName ?? item.name)}</h2>
-            <p>
-              {[item.city, item.country].filter(Boolean).map(asText).join(", ")}
-            </p>
-            {kind === "blocked" && (
-              <button
-                className="secondary"
-                onClick={() => unblock(item.profileId)}
-              >
-                Unblock
-              </button>
-            )}
-          </article>
-        ))}
+        {items.map((item, index) => {
+          const targetId = asText(item.profileId ?? item.id ?? "");
+          // Alena: "почему нельзя перейти?" - these cards had a name and an
+          // avatar but never linked anywhere, unlike every other profile
+          // card in the app (see catalogProfileCard's detailPath Link).
+          // Blocked entries stay non-clickable on purpose - not much use
+          // opening a profile you've already blocked, and it avoids an
+          // extra step before Unblock.
+          const card = (
+            <>
+              <UserAvatar src={item.avatarUrl} name={firstAvatarText(item.displayName, item.display_name, item.name)} />
+              <h2>{asText(item.displayName ?? item.name)}</h2>
+              <p>
+                {[item.city, item.country].filter(Boolean).map(asText).join(", ")}
+              </p>
+              {kind === "blocked" && (
+                <button
+                  className="secondary"
+                  onClick={() => unblock(item.profileId)}
+                >
+                  Unblock
+                </button>
+              )}
+            </>
+          );
+          return kind === "visitors" && targetId ? (
+            <Link
+              className="profile-card profile-card-linked"
+              key={targetId || index}
+              to={`/${locale}/profile/${encodeURIComponent(targetId)}`}
+            >
+              {card}
+            </Link>
+          ) : (
+            <article
+              className="profile-card"
+              key={targetId || index}
+            >
+              {card}
+            </article>
+          );
+        })}
       </div>
       {!items.length && (
         <p className="notice">There are no entries to display.</p>
@@ -15221,6 +15243,11 @@ type SafetyCheckinLocaleText = {
   withPrefix: string;
   imSafeButton: string;
   cancelButton: string;
+  sharePlanButton: string;
+  shareWith: string;
+  shareWithSomeone: string;
+  shareMessage: string;
+  shareCopiedNotice: string;
 };
 
 const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
@@ -15256,6 +15283,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - with ",
     imSafeButton: "I'm safe",
     cancelButton: "Cancel",
+    sharePlanButton: "Share plan",
+    shareWith: "with {who}",
+    shareWithSomeone: "with someone",
+    shareMessage: "I'm meeting {who}: {plan}. If you don't hear from me by {when}, please check on me. (Sent via LetsBeParents Safety Check-In)",
+    shareCopiedNotice: "Copied to clipboard - paste it to whoever you want to send it to.",
   },
   ru: {
     heading: "Safety Check-In",
@@ -15289,6 +15321,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - с ",
     imSafeButton: "Я в порядке",
     cancelButton: "Отменить",
+    sharePlanButton: "Поделиться планом",
+    shareWith: "с {who}",
+    shareWithSomeone: "с кем-то",
+    shareMessage: "Я встречаюсь с {who}: {plan}. Если не свяжусь с вами до {when}, пожалуйста, проверьте, всё ли со мной в порядке. (Отправлено через LetsBeParents, проверка безопасности)",
+    shareCopiedNotice: "Скопировано в буфер обмена - вставьте текст тому, кому хотите его отправить.",
   },
   es: {
     heading: "Safety Check-In",
@@ -15322,6 +15359,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - con ",
     imSafeButton: "Estoy bien",
     cancelButton: "Cancelar",
+    sharePlanButton: "Compartir plan",
+    shareWith: "con {who}",
+    shareWithSomeone: "con alguien",
+    shareMessage: "Me reúno con {who}: {plan}. Si no sabes de mí antes de {when}, por favor verifica que estoy bien. (Enviado vía LetsBeParents, chequeo de seguridad)",
+    shareCopiedNotice: "Copiado al portapapeles - pégalo a quien quieras enviárselo.",
   },
   pt: {
     heading: "Safety Check-In",
@@ -15355,6 +15397,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - com ",
     imSafeButton: "Estou bem",
     cancelButton: "Cancelar",
+    sharePlanButton: "Partilhar plano",
+    shareWith: "com {who}",
+    shareWithSomeone: "com alguém",
+    shareMessage: "Vou encontrar-me com {who}: {plan}. Se não tiver notícias minhas até {when}, por favor verifica se estou bem. (Enviado através do Check-In de Segurança da LetsBeParents)",
+    shareCopiedNotice: "Copiado para a área de transferência - cole para quem quiser enviar.",
   },
   fr: {
     heading: "Safety Check-In",
@@ -15388,6 +15435,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - avec ",
     imSafeButton: "Je vais bien",
     cancelButton: "Annuler",
+    sharePlanButton: "Partager le plan",
+    shareWith: "avec {who}",
+    shareWithSomeone: "avec quelqu'un",
+    shareMessage: "Je retrouve {who} : {plan}. Si tu n'as pas de nouvelles de moi d'ici {when}, merci de vérifier que tout va bien. (Envoyé via Safety Check-In de LetsBeParents)",
+    shareCopiedNotice: "Copié dans le presse-papiers - colle-le à qui tu veux l'envoyer.",
   },
   de: {
     heading: "Safety Check-In",
@@ -15421,6 +15473,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - mit ",
     imSafeButton: "Mir geht's gut",
     cancelButton: "Stornieren",
+    sharePlanButton: "Plan teilen",
+    shareWith: "mit {who}",
+    shareWithSomeone: "mit jemandem",
+    shareMessage: "Ich treffe {who}: {plan}. Wenn du bis {when} nichts von mir hörst, sieh bitte nach mir. (Gesendet über LetsBeParents Safety Check-In)",
+    shareCopiedNotice: "In die Zwischenablage kopiert - füge es ein, um es zu verschicken.",
   },
   it: {
     heading: "Safety Check-In",
@@ -15454,6 +15511,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - con ",
     imSafeButton: "Sto bene",
     cancelButton: "Annulla",
+    sharePlanButton: "Condividi piano",
+    shareWith: "con {who}",
+    shareWithSomeone: "con qualcuno",
+    shareMessage: "Sto per incontrare {who}: {plan}. Se non hai mie notizie entro {when}, per favore controlla che stia bene. (Inviato tramite Safety Check-In di LetsBeParents)",
+    shareCopiedNotice: "Copiato negli appunti - incollalo a chi vuoi inviarlo.",
   },
   pl: {
     heading: "Safety Check-In",
@@ -15487,6 +15549,11 @@ const SAFETY_CHECKIN_TEXT: Record<CookieLocale, SafetyCheckinLocaleText> = {
     withPrefix: " - z ",
     imSafeButton: "Nic mi nie jest",
     cancelButton: "Anuluj",
+    sharePlanButton: "Udostępnij plan",
+    shareWith: "z {who}",
+    shareWithSomeone: "z kimś",
+    shareMessage: "Spotykam się z {who}: {plan}. Jeśli nie odezwę się do {when}, sprawdź, czy wszystko w porządku. (Wysłano przez Bezpieczne zgłoszenie spotkania LetsBeParents)",
+    shareCopiedNotice: "Skopiowano do schowka - wklej to osobie, której chcesz to wysłać.",
   },
 };
 
@@ -16340,6 +16407,42 @@ function SafetyCheckIn({ session }: { session: Session }) {
     }
   };
 
+  // Alena: "а почему нет возможности поделиться с этим как в приложении" -
+  // mobile's SafetyCheckInScreen hands the plan to the native Share sheet
+  // (see handleShare there); the web has no share sheet, so this uses the
+  // Web Share API where available and falls back to copying the message to
+  // the clipboard so it can still be pasted to whoever should get it.
+  const shareCheckin = (item: Row) => {
+    const who = item.withWhom
+      ? text.shareWith.replace("{who}", asText(item.withWhom))
+      : text.shareWithSomeone;
+    const when = (() => {
+      const raw = asText(item.checkInByAt);
+      const date = raw ? new Date(raw) : null;
+      if (!date || Number.isNaN(date.getTime())) return raw;
+      return date.toLocaleString(locale, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    })();
+    const message = text.shareMessage
+      .replace("{who}", who)
+      .replace("{plan}", asText(item.plan))
+      .replace("{when}", when);
+    if (navigator.share) {
+      navigator.share({ text: message }).catch(() => {});
+      return;
+    }
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(message)
+        .then(() => setNotice(text.shareCopiedNotice))
+        .catch(() => {});
+    }
+  };
+
   return (
     <section className="member-form tool-page tool-page-safety">
       <h1>{text.heading}</h1>
@@ -16410,6 +16513,13 @@ function SafetyCheckIn({ session }: { session: Session }) {
                       onClick={() => void markSafe(item)}
                     >
                       {text.imSafeButton}
+                    </button>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => shareCheckin(item)}
+                    >
+                      {text.sharePlanButton}
                     </button>
                     <button
                       type="button"
@@ -17142,6 +17252,33 @@ const COMMUNITY_POST_DETAIL_TEXT: Record<
   },
 };
 
+// Feather-icon inner shapes for the Community group cards - mirrors the
+// glyph names the backend already picks per group (default_community_group_icon
+// in main.py) via a CSS mask, same trick the previous hardcoded "users"-only
+// mask used. Alena: "и здесь же ты ставил разные иконки" - every card was
+// rendering that same fixed "users" glyph regardless of which group it was.
+const COMMUNITY_ICON_SHAPES: Record<string, string> = {
+  "users": '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  "heart": '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>',
+  "file-text": '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>',
+  "smile": '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>',
+  "droplet": '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
+  "gift": '<polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>',
+  "dollar-sign": '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
+  "help-circle": '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  "life-buoy": '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="18.36" y2="5.64"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/>',
+  "message-circle": '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+  "compass": '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
+  "sun": '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+  "star": '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  "coffee": '<path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>',
+};
+function communityGroupIconMask(name: unknown): string {
+  const inner = COMMUNITY_ICON_SHAPES[asText(name)] || COMMUNITY_ICON_SHAPES.users;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>${inner}</svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") center / 22px no-repeat`;
+}
+
 function CommunityGroups({ session }: { session: Session }) {
   const locale = localeOf();
   const text = COMMUNITY_GROUPS_TEXT[locale] ?? COMMUNITY_GROUPS_TEXT.en;
@@ -17175,7 +17312,13 @@ function CommunityGroups({ session }: { session: Session }) {
               className="community-group-card"
               to={`/${locale}/community/${encodeURIComponent(asText(group.id))}`}
             >
-              <span className="community-group-card-icon" />
+              <span
+                className="community-group-card-icon"
+                style={{
+                  WebkitMask: communityGroupIconMask(group.icon),
+                  mask: communityGroupIconMask(group.icon),
+                }}
+              />
               <h3>{asText(group.name)}</h3>
               <p>{asText(group.description)}</p>
               <span className="community-group-card-count">
