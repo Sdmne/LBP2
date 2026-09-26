@@ -5162,6 +5162,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
   videoVerification: string;
   community: string;
   settings: string;
+  scrollLeft: string;
+  scrollRight: string;
 }> = {
   en: {
     profile: "Profile",
@@ -5180,6 +5182,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Video Verification",
     community: "Community",
     settings: "Settings",
+    scrollLeft: "Scroll left",
+    scrollRight: "Scroll right",
   },
   ru: {
     profile: "Профиль",
@@ -5198,6 +5202,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Video Verification",
     community: "Community",
     settings: "Настройки",
+    scrollLeft: "Прокрутить влево",
+    scrollRight: "Прокрутить вправо",
   },
   es: {
     profile: "Perfil",
@@ -5216,6 +5222,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Video Verification",
     community: "Community",
     settings: "Ajustes",
+    scrollLeft: "Desplazar a la izquierda",
+    scrollRight: "Desplazar a la derecha",
   },
   pt: {
     profile: "Perfil",
@@ -5234,6 +5242,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Verificação em Vídeo",
     community: "Community",
     settings: "Configurações",
+    scrollLeft: "Rolar para a esquerda",
+    scrollRight: "Rolar para a direita",
   },
   fr: {
     profile: "Profil",
@@ -5252,6 +5262,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Vérification vidéo",
     community: "Community",
     settings: "Paramètres",
+    scrollLeft: "Défiler vers la gauche",
+    scrollRight: "Défiler vers la droite",
   },
   de: {
     profile: "Profil",
@@ -5270,6 +5282,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Video-Verifizierung",
     community: "Community",
     settings: "Einstellungen",
+    scrollLeft: "Nach links scrollen",
+    scrollRight: "Nach rechts scrollen",
   },
   it: {
     profile: "Profilo",
@@ -5288,6 +5302,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Verifica Video",
     community: "Community",
     settings: "Impostazioni",
+    scrollLeft: "Scorri a sinistra",
+    scrollRight: "Scorri a destra",
   },
   pl: {
     profile: "Profil",
@@ -5306,6 +5322,8 @@ const MEMBER_LINKS_TEXT: Record<CookieLocale, {
     videoVerification: "Weryfikacja wideo",
     community: "Community",
     settings: "Ustawienia",
+    scrollLeft: "Przewiń w lewo",
+    scrollRight: "Przewiń w prawo",
   },
 };
 
@@ -5508,13 +5526,58 @@ function MemberLinks({ locale }: { locale: string }) {
   const text = MEMBER_LINKS_TEXT[locale as CookieLocale] ?? MEMBER_LINKS_TEXT.en;
   const location = useLocation();
   const navigation = useRef<HTMLElement>(null);
+  // Alena: "и здесь нет комьюнити" - Community was never actually missing,
+  // it was just scrolled off the right edge of this pill strip (15 tabs,
+  // most don't fit). The strip already had a fade-out mask at the edge
+  // (styles.css .member-links), but that alone wasn't enough of a hint
+  // that there was more to scroll to - so this adds explicit arrow
+  // buttons that only show up on the side(s) that actually have more
+  // content, and click to scroll by roughly one screenful.
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const updateScrollState = () => {
+    const el = navigation.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
   useLayoutEffect(() => {
     navigation.current
       ?.querySelector<HTMLAnchorElement>("a.active")
       ?.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
+    updateScrollState();
   }, [location.pathname]);
+  useEffect(() => {
+    updateScrollState();
+    const el = navigation.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateScrollState);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const scrollBy = (direction: 1 | -1) => {
+    navigation.current?.scrollBy({
+      left: direction * Math.round((navigation.current?.clientWidth || 300) * 0.7),
+      behavior: "smooth",
+    });
+  };
   return (
-    <nav className="member-links" ref={navigation}>
+    <div className="member-links-wrap">
+      {canScrollLeft && (
+        <button
+          type="button"
+          className="member-links-scroll-btn member-links-scroll-left"
+          aria-label={text.scrollLeft}
+          onClick={() => scrollBy(-1)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+        </button>
+      )}
+      <nav
+        className="member-links"
+        ref={navigation}
+        onScroll={updateScrollState}
+      >
       <NavLink to={`/${locale}/profile`} className={navClass}>{text.profile}</NavLink>
       <NavLink to={`/${locale}/compatibility`} className={navClass}>{text.compatibility}</NavLink>
       <NavLink to={`/${locale}/ai-advisor`} className={navClass}>{text.aiAdvisor}</NavLink>
@@ -5531,7 +5594,18 @@ function MemberLinks({ locale }: { locale: string }) {
       <NavLink to={`/${locale}/video-verification`} className={navClass}>{text.videoVerification}</NavLink>
       <NavLink to={`/${locale}/community`} className={navClass}>{text.community}</NavLink>
       <NavLink to={`/${locale}/settings`} className={navClass}>{text.settings}</NavLink>
-    </nav>
+      </nav>
+      {canScrollRight && (
+        <button
+          type="button"
+          className="member-links-scroll-btn member-links-scroll-right"
+          aria-label={text.scrollRight}
+          onClick={() => scrollBy(1)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+        </button>
+      )}
+    </div>
   );
 }
 function MemberGate({

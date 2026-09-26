@@ -549,6 +549,59 @@ a.profile-card-linked:hover {
   -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
 }
+/* Wraps .member-links so the left/right scroll-arrow buttons can sit on
+   top of it without disturbing the nav's own scroll box. The nav keeps
+   all its sizing/scroll behaviour; the wrap just takes over the outer
+   width/centering it used to do for itself. */
+.member-links-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(1080px, 100%);
+  max-width: 1080px;
+  min-width: 0;
+  margin: 20px auto 28px;
+}
+.member-links-wrap .member-links {
+  margin: 0;
+  flex: 1 1 auto;
+}
+.member-links-scroll-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid #eaeef5;
+  background: #fff;
+  color: #63758e;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+  padding: 0;
+}
+.member-links-scroll-btn:hover {
+  color: #f51161;
+}
+.member-links-scroll-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.member-links-scroll-left {
+  left: -8px;
+}
+.member-links-scroll-right {
+  right: -8px;
+}
 .member-tabs::-webkit-scrollbar,
 .member-links::-webkit-scrollbar {
   display: none;
@@ -588,17 +641,20 @@ a.profile-card-linked:hover {
   overflow: hidden;
 }
 
-.member-form.tool-page > .member-links {
+.member-form.tool-page > .member-links-wrap {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   justify-self: stretch;
+}
+
+.member-form.tool-page > .member-links-wrap > .member-links {
   overscroll-behavior-inline: contain;
   scroll-behavior: smooth;
 }
 
-.member-form.tool-page > .member-links a {
+.member-form.tool-page > .member-links-wrap > .member-links a {
   flex: 0 0 auto;
 }
 
@@ -636,11 +692,14 @@ a.profile-card-linked:hover {
   min-width: 0;
 }
 
-.member-community-page > .member-links {
+.member-community-page > .member-links-wrap {
   box-sizing: border-box;
   width: min(1080px, 100%);
   min-width: 0;
   max-width: 100%;
+}
+
+.member-community-page > .member-links-wrap > .member-links {
   overscroll-behavior-inline: contain;
 }
 
