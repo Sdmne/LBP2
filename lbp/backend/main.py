@@ -17850,6 +17850,26 @@ def admin_list(
     with db_cursor() as (conn, cursor):
         if entity_type == "category":
             ensure_admin_article_categories(conn, cursor)
+        if entity_type == "boost":
+            # Alena: "почему в активных если закончился уже срок" - boosts
+            # never had anything that flipped their app_entities status once
+            # expiresAt passed (the profile's own boostActiveUntil is
+            # correctly time-gated in catalog_ranking_sql, but this admin
+            # list just showed whatever status the row was last written
+            # with). Lazily expire on read here, same "check on the way in"
+            # pattern member_request_boost already uses for reactivation.
+            cursor.execute(
+                """
+                UPDATE app_entities
+                SET status = 'EXPIRED', updated_at = UTC_TIMESTAMP()
+                WHERE entity_type = 'boost' AND status = 'ACTIVE'
+                  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.expiresAt')) <> ''
+                  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.expiresAt')) < %s
+                """,
+                (now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),),
+            )
+            if cursor.rowcount:
+                conn.commit()
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM app_entities {where}", params)
         total = int(cursor.fetchone()["cnt"])
         cursor.execute(
