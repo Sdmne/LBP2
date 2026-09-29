@@ -17861,10 +17861,10 @@ def admin_list(
             cursor.execute(
                 """
                 UPDATE app_entities
-                SET status = 'EXPIRED', updated_at = UTC_TIMESTAMP()
+                SET status = 'EXPIRED', updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'UTC'
                 WHERE entity_type = 'boost' AND status = 'ACTIVE'
-                  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.expiresAt')) <> ''
-                  AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.expiresAt')) < %s
+                  AND COALESCE(data->>'expiresAt', '') <> ''
+                  AND data->>'expiresAt' < %s
                 """,
                 (now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),),
             )
