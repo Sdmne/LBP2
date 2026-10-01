@@ -3015,6 +3015,63 @@ def create_session(cursor, user_id: int) -> tuple[str, str]:
     return token, expires.isoformat()
 
 
+def ensure_auth_profile(cursor, user: dict[str, Any]) -> tuple[int, bool]:
+    """Return a usable profile id, repairing legacy active accounts when needed."""
+    cursor.execute(
+        """
+        SELECT profile_id, email, display_name, role, status
+        FROM local_users
+        WHERE id = %s
+        FOR UPDATE
+        """,
+        (user["id"],),
+    )
+    account = cursor.fetchone()
+    if not account or str(account.get("status") or "").upper() != "ACTIVE":
+        raise HTTPException(status_code=403, detail="ACCOUNT_INACTIVE")
+
+    profile_id = int_or_none(account.get("profile_id"))
+    if profile_id:
+        cursor.execute("SELECT id, status FROM profiles WHERE id = %s LIMIT 1", (profile_id,))
+        profile = cursor.fetchone()
+        if profile:
+            if str(profile.get("status") or "").upper() != "ACTIVE":
+                raise HTTPException(status_code=403, detail="ACCOUNT_INACTIVE")
+            user["profile_id"] = profile_id
+            return profile_id, False
+
+    email = normalize_email(str(account.get("email") or user.get("email") or ""))
+    display_name = str(account.get("display_name") or user.get("display_name") or "").strip()
+    if not display_name:
+        display_name = email.split("@", 1)[0] if "@" in email else "Member"
+    display_name = display_name[:255]
+    role = str(account.get("role") or user.get("role") or "USER").upper()
+    if role not in {"USER", "ADMIN", "SUPPORT"}:
+        role = "USER"
+    profile_data = json.dumps(
+        {
+            "source": "auth_profile_recovery",
+            "email": email,
+            "displayName": display_name,
+        },
+        ensure_ascii=False,
+    )
+    cursor.execute(
+        """
+        INSERT INTO profiles (role, display_name, email, status, data, created_at, updated_at)
+        VALUES (%s, %s, %s, 'ACTIVE', CAST(%s AS JSONB), UTC_TIMESTAMP(), UTC_TIMESTAMP())
+        """,
+        (role, display_name, email, profile_data),
+    )
+    profile_id = int(cursor.lastrowid)
+    cursor.execute(
+        "UPDATE local_users SET profile_id = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+        (profile_id, user["id"]),
+    )
+    user["profile_id"] = profile_id
+    return profile_id, True
+
+
 def require_profile_id(user: dict[str, Any]) -> int:
     profile_id = int_or_none(user.get("profile_id"))
     if not profile_id:
@@ -5067,8 +5124,10 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
             )
             user = cursor.fetchone()
 
-        ensure_support_welcome(cursor, int(user["profile_id"]))
-        record_device_session(cursor, int(user["profile_id"]), request, f"social:{provider}", payload.deviceInfo, is_registration=is_new_user)
+        profile_id, profile_recovered = ensure_auth_profile(cursor, user)
+        is_new_user = is_new_user or profile_recovered
+        ensure_support_welcome(cursor, profile_id)
+        record_device_session(cursor, profile_id, request, f"social:{provider}", payload.deviceInfo, is_registration=is_new_user)
         token, expires_at = create_session(cursor, user["id"])
         user_payload = auth_user_payload(cursor, user)
         conn.commit()
@@ -5106,8 +5165,9 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
                 (upgraded_hash, user["id"]),
             )
             user["password_hash"] = upgraded_hash
-        ensure_support_welcome(cursor, int(user["profile_id"]))
-        record_device_session(cursor, int(user["profile_id"]), request, "password", payload.deviceInfo)
+        profile_id, _ = ensure_auth_profile(cursor, user)
+        ensure_support_welcome(cursor, profile_id)
+        record_device_session(cursor, profile_id, request, "password", payload.deviceInfo)
         token, expires_at = create_session(cursor, user["id"])
         user_payload = auth_user_payload(cursor, user)
         conn.commit()
