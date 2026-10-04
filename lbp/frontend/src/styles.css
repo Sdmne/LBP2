@@ -1297,6 +1297,10 @@ a.profile-card-linked:hover {
   display: grid;
   gap: 20px;
 }
+.advisor-back {
+  width: fit-content;
+  margin: 0 0 12px;
+}
 .advisor-card .message-title h1 {
   display: flex;
   align-items: center;

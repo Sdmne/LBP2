@@ -1344,7 +1344,7 @@ function ProfileScreen({
                 <button
                   className={`soft-button detail-like${bool(profile.likedByViewer) ? " active" : ""}`}
                   type="button"
-                  disabled={pending}
+                  disabled={pending || bool(profile.likedByViewer)}
                   aria-pressed={bool(profile.likedByViewer)}
                   onClick={() => void action("like")}
                 >

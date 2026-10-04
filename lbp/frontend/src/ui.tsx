@@ -3799,11 +3799,15 @@ function CatalogFilterModal({
   const [cityQuery, setCityQuery] = useState(catalogText(value.city));
   const [cityActiveIndex, setCityActiveIndex] = useState(-1);
   const [dropdownActiveIndex, setDropdownActiveIndex] = useState(-1);
-  const set = <K extends keyof CatalogFilters>(key: K, next: CatalogFilters[K]) => onChange({ ...value, [key]: next });
+  const set = <K extends keyof CatalogFilters>(
+    key: K,
+    next: CatalogFilters[K],
+  ) => onChange({ ...value, [key]: next });
   useEffect(() => {
     document.body.classList.add("catalog-filter-open");
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented || premiumPromptOpen) return;
+      if (event.key !== "Escape" || event.defaultPrevented || premiumPromptOpen)
+        return;
       if (openField) setOpenField("");
       else onClose();
     };
@@ -3818,7 +3822,9 @@ function CatalogFilterModal({
     const closeOutside = (event: globalThis.PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      const activeWrap = document.querySelector(`[data-catalog-filter-field="${openField}"]`);
+      const activeWrap = document.querySelector(
+        `[data-catalog-filter-field="${openField}"]`,
+      );
       if (activeWrap?.contains(target)) return;
       setOpenField("");
       setQuery("");
@@ -3834,23 +3840,52 @@ function CatalogFilterModal({
   useEffect(() => {
     if (!openField) return;
     const index = openField === "city" ? cityActiveIndex : dropdownActiveIndex;
-    document.getElementById(`catalog-filter-${openField}-option-${index}`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    document
+      .getElementById(`catalog-filter-${openField}-option-${index}`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [openField, cityActiveIndex, dropdownActiveIndex, query, cityQuery]);
-  const fieldOptions = (field: string) => field === "country" ? countries : field === "city" ? cities : CATALOG_ENUM_OPTIONS[field] || [];
+  const fieldOptions = (field: string) =>
+    field === "country"
+      ? countries
+      : field === "city"
+        ? cities
+        : CATALOG_ENUM_OPTIONS[field] || [];
   const selectedValues = (field: string) => {
-    if (["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)) return value[field as keyof CatalogFilters] as string[];
+    if (["country", "profileTypes", "donorTypes", "lookingFor"].includes(field))
+      return value[field as keyof CatalogFilters] as string[];
     const selected = value[field as keyof CatalogFilters];
     return selected ? [String(selected)] : [];
   };
   const choose = (field: string, optionValue: string) => {
-    if (["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)) {
-      const key = field as "country" | "profileTypes" | "donorTypes" | "lookingFor";
+    if (
+      ["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)
+    ) {
+      const key = field as
+        | "country"
+        | "profileTypes"
+        | "donorTypes"
+        | "lookingFor";
       const current = value[key];
-      const next = current.includes(optionValue) ? current.filter((item) => item !== optionValue) : [...current, optionValue];
-      onChange({ ...value, [key]: next, ...(key === "country" ? { city: "" } : {}) });
-      if (key === "country") { setCityQuery(""); setCityActiveIndex(-1); }
+      const next = current.includes(optionValue)
+        ? current.filter((item) => item !== optionValue)
+        : [...current, optionValue];
+      onChange({
+        ...value,
+        [key]: next,
+        ...(key === "country" ? { city: "" } : {}),
+      });
+      if (key === "country") {
+        setCityQuery("");
+        setCityActiveIndex(-1);
+      }
     } else {
-      const key = field as "city" | "ethnicity" | "hairColor" | "eyeColor" | "education" | "religion";
+      const key = field as
+        | "city"
+        | "ethnicity"
+        | "hairColor"
+        | "eyeColor"
+        | "education"
+        | "religion";
       set(key, value[key] === optionValue ? "" : optionValue);
       setOpenField("");
       setDropdownActiveIndex(-1);
@@ -3861,11 +3896,24 @@ function CatalogFilterModal({
     const controlId = "catalog-filter-city";
     const labelId = `${controlId}-label`;
     const selectedCountry = value.country[0] || "";
- const countryLabel = countries.find((option) => option.value === selectedCountry)?.label || profileCountry(selectedCountry, legacyLocaleOf(locale));
+    const countryLabel =
+      countries.find((option) => option.value === selectedCountry)?.label ||
+      profileCountry(selectedCountry, legacyLocaleOf(locale));
     const term = cityQuery.trim().toLowerCase();
-    const filtered = term ? cities.filter((option) => option.label.toLowerCase().includes(term) || option.value.toLowerCase().includes(term)).slice(0, 24) : [];
-    const dropdownOpen = openField === "city" && !disabled && filtered.length > 0;
-    const activeIndex = filtered.length ? Math.min(cityActiveIndex, filtered.length - 1) : -1;
+    const filtered = term
+      ? cities
+          .filter(
+            (option) =>
+              option.label.toLowerCase().includes(term) ||
+              option.value.toLowerCase().includes(term),
+          )
+          .slice(0, 24)
+      : [];
+    const dropdownOpen =
+      openField === "city" && !disabled && filtered.length > 0;
+    const activeIndex = filtered.length
+      ? Math.min(cityActiveIndex, filtered.length - 1)
+      : -1;
     const chooseCity = (option: CatalogOption) => {
       set("city", option.value);
       setCityQuery(option.label);
@@ -3873,9 +3921,17 @@ function CatalogFilterModal({
       setOpenField("");
     };
     return (
-      <div className={`catalog-filter-field catalog-city-field${disabled ? " disabled" : ""}`} key="city">
-        <label id={labelId} htmlFor={controlId}>{copy.city}</label>
-        <div className="catalog-filter-select-wrap" data-catalog-filter-field="city">
+      <div
+        className={`catalog-filter-field catalog-city-field${disabled ? " disabled" : ""}`}
+        key="city"
+      >
+        <label id={labelId} htmlFor={controlId}>
+          {copy.city}
+        </label>
+        <div
+          className="catalog-filter-select-wrap"
+          data-catalog-filter-field="city"
+        >
           <input
             id={controlId}
             className="catalog-city-autocomplete"
@@ -3888,20 +3944,35 @@ function CatalogFilterModal({
             aria-autocomplete="list"
             aria-expanded={dropdownOpen}
             aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
-            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
-
+            aria-activedescendant={
+              dropdownOpen && activeIndex >= 0
+                ? `${controlId}-option-${activeIndex}`
+                : undefined
+            }
             autoComplete="off"
-            onFocus={() => { if (!disabled) setOpenField("city"); }}
+            onFocus={() => {
+              if (!disabled) setOpenField("city");
+            }}
             onKeyDown={(event) => {
               if (disabled) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setOpenField("city");
-                setCityActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+                setCityActiveIndex((current) =>
+                  filtered.length
+                    ? Math.min(current + 1, filtered.length - 1)
+                    : -1,
+                );
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
-                setCityActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
-              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
+                setCityActiveIndex((current) =>
+                  current < 0 ? filtered.length - 1 : Math.max(current - 1, 0),
+                );
+              } else if (
+                event.key === "Enter" &&
+                dropdownOpen &&
+                filtered[activeIndex]
+              ) {
                 event.preventDefault();
                 chooseCity(filtered[activeIndex]);
               } else if (event.key === "Escape" && openField === "city") {
@@ -3919,12 +3990,35 @@ function CatalogFilterModal({
             }}
           />
           {dropdownOpen && (
-            <div id={`${controlId}-options`} className="catalog-filter-dropdown catalog-city-dropdown" role="listbox" aria-labelledby={labelId}>
+            <div
+              id={`${controlId}-options`}
+              className="catalog-filter-dropdown catalog-city-dropdown"
+              role="listbox"
+              aria-labelledby={labelId}
+            >
               <section>
                 {filtered.map((option, index) => {
                   const [name, rest] = option.label.split(/,\s*/, 2);
                   const active = index === activeIndex;
-                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={option.value === value.city} className={`${option.value === value.city ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setCityActiveIndex(index)} onClick={() => chooseCity(option)}><span className="catalog-city-option-name">{name}</span>{countryLabel || rest ? <span className="catalog-city-option-country">, {countryLabel || rest}</span> : null}</button>;
+                  return (
+                    <button
+                      id={`${controlId}-option-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={option.value === value.city}
+                      className={`${option.value === value.city ? "selected" : ""}${active ? " active" : ""}`.trim()}
+                      key={option.value}
+                      onMouseEnter={() => setCityActiveIndex(index)}
+                      onClick={() => chooseCity(option)}
+                    >
+                      <span className="catalog-city-option-name">{name}</span>
+                      {countryLabel || rest ? (
+                        <span className="catalog-city-option-country">
+                          , {countryLabel || rest}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
                 })}
               </section>
             </div>
@@ -3933,22 +4027,50 @@ function CatalogFilterModal({
       </div>
     );
   };
-  const filterField = (field: string, label: string, placeholder: string, options: { premium?: boolean; disabled?: boolean; description?: string } = {}) => {
+  const filterField = (
+    field: string,
+    label: string,
+    placeholder: string,
+    options: {
+      premium?: boolean;
+      disabled?: boolean;
+      description?: string;
+    } = {},
+  ) => {
     const locked = Boolean(options.premium && !premium);
     const selected = selectedValues(field);
     const allOptions = fieldOptions(field);
-    const selectedLabels = selected.map((token) => allOptions.find((option) => option.value === token)?.label || catalogOptionLabel(field, token));
-    const filtered = allOptions.filter((option) => option.label.toLowerCase().startsWith(query.trim().toLowerCase()) || option.value.toLowerCase().startsWith(query.trim().toLowerCase()));
+    const selectedLabels = selected.map((token) => ({
+      token,
+      label:
+        allOptions.find((option) => option.value === token)?.label ||
+        catalogOptionLabel(field, token),
+    }));
+    const filtered = allOptions.filter(
+      (option) =>
+        option.label.toLowerCase().includes(query.trim().toLowerCase()) ||
+        option.value.toLowerCase().includes(query.trim().toLowerCase()),
+    );
     const controlId = `catalog-filter-${field}`;
     const labelId = `${controlId}-label`;
     const valueId = `${controlId}-value`;
     const premiumId = `${controlId}-premium`;
     const dropdownOpen = openField === field && !locked && !options.disabled;
-    const activeIndex = filtered.length ? Math.min(dropdownActiveIndex, filtered.length - 1) : -1;
+    const activeIndex = filtered.length
+      ? Math.min(dropdownActiveIndex, filtered.length - 1)
+      : -1;
     return (
-      <div className={`catalog-filter-field${options.disabled ? " disabled" : ""}${field === "lookingFor" ? " looking-field" : ""}`} key={field}>
-        <label id={labelId} htmlFor={controlId}>{label}</label>
-        <div className="catalog-filter-select-wrap" data-catalog-filter-field={field}>
+      <div
+        className={`catalog-filter-field${options.disabled ? " disabled" : ""}${field === "lookingFor" ? " looking-field" : ""}`}
+        key={field}
+      >
+        <label id={labelId} htmlFor={controlId}>
+          {label}
+        </label>
+        <div
+          className="catalog-filter-select-wrap"
+          data-catalog-filter-field={field}
+        >
           <button
             id={controlId}
             className={`catalog-filter-select${locked ? " premium" : ""}`}
@@ -3956,12 +4078,21 @@ function CatalogFilterModal({
             disabled={options.disabled}
             aria-labelledby={`${labelId} ${valueId}${locked ? ` ${premiumId}` : ""}`}
             aria-haspopup={locked || options.disabled ? undefined : "listbox"}
-            aria-expanded={locked || options.disabled ? undefined : dropdownOpen}
+            aria-expanded={
+              locked || options.disabled ? undefined : dropdownOpen
+            }
             aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
-            aria-activedescendant={dropdownOpen && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined}
+            aria-activedescendant={
+              dropdownOpen && activeIndex >= 0
+                ? `${controlId}-option-${activeIndex}`
+                : undefined
+            }
             onClick={() => {
-              if (locked) { onPremium(); return; }
-              setOpenField((current) => current === field ? "" : field);
+              if (locked) {
+                onPremium();
+                return;
+              }
+              setOpenField((current) => (current === field ? "" : field));
               setQuery("");
               setDropdownActiveIndex(-1);
             }}
@@ -3970,12 +4101,22 @@ function CatalogFilterModal({
               if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setOpenField(field);
-                setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
+                setDropdownActiveIndex((current) =>
+                  filtered.length
+                    ? Math.min(current + 1, filtered.length - 1)
+                    : -1,
+                );
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
                 setOpenField(field);
-                setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
-              } else if (event.key === "Enter" && dropdownOpen && filtered[activeIndex]) {
+                setDropdownActiveIndex((current) =>
+                  current < 0 ? filtered.length - 1 : Math.max(current - 1, 0),
+                );
+              } else if (
+                event.key === "Enter" &&
+                dropdownOpen &&
+                filtered[activeIndex]
+              ) {
                 event.preventDefault();
                 choose(field, filtered[activeIndex].value);
               } else if (event.key === "Escape" && dropdownOpen) {
@@ -3987,36 +4128,146 @@ function CatalogFilterModal({
               }
             }}
           >
-            <span id={valueId} className={`catalog-filter-value${selectedLabels.length ? "" : " placeholder"}`}>{selectedLabels.length ? <span className="catalog-filter-chip-list">{selectedLabels.map((item) => <b key={item}>{item}</b>)}</span> : placeholder}</span>
-            {locked ? <span id={premiumId} className="catalog-filter-premium-badge"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg><span>{copy.premium}</span></span> : null}
-            {!options.disabled ? <svg className="catalog-filter-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg> : null}
+            <span
+              id={valueId}
+              className={`catalog-filter-value${selectedLabels.length ? "" : " placeholder"}`}
+            >
+              {selectedLabels.length ? (
+                <span className="catalog-filter-chip-list">
+                  {selectedLabels.map((item) => (
+                    <b key={item.token}>
+                      {item.label}
+                      {selected.length > 1 && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`${copy.clear}: ${item.label}`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            choose(field, item.token);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") return;
+                            event.preventDefault();
+                            event.stopPropagation();
+                            choose(field, item.token);
+                          }}
+                        >
+                          ×
+                        </span>
+                      )}
+                    </b>
+                  ))}
+                </span>
+              ) : (
+                placeholder
+              )}
+            </span>
+            {locked ? (
+              <span id={premiumId} className="catalog-filter-premium-badge">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="5" y="10" width="14" height="11" rx="2" />
+                  <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                </svg>
+                <span>{copy.premium}</span>
+              </span>
+            ) : null}
+            {!options.disabled ? (
+              <svg
+                className="catalog-filter-chevron"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            ) : null}
           </button>
           {dropdownOpen && (
-            <div id={`${controlId}-options`} className="catalog-filter-dropdown" role="listbox" aria-labelledby={labelId} aria-multiselectable={["country", "profileTypes", "donorTypes", "lookingFor"].includes(field)}>
-              <div><input autoFocus value={query} role="combobox" aria-expanded={dropdownOpen} aria-controls={`${controlId}-options`} aria-activedescendant={filtered.length && activeIndex >= 0 ? `${controlId}-option-${activeIndex}` : undefined} aria-autocomplete="list" onKeyDown={(event) => {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setDropdownActiveIndex((current) => filtered.length ? Math.min(current + 1, filtered.length - 1) : -1);
-                } else if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setDropdownActiveIndex((current) => current < 0 ? filtered.length - 1 : Math.max(current - 1, 0));
-                } else if (event.key === "Enter" && filtered[activeIndex]) {
-                  event.preventDefault();
-                  choose(field, filtered[activeIndex].value);
-                } else if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setOpenField("");
-                  setQuery("");
-                  setDropdownActiveIndex(-1);
-                }
-              }} onChange={(event) => { setQuery(event.target.value); setDropdownActiveIndex(-1); }} placeholder={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} aria-label={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`} /></div>
+            <div
+              id={`${controlId}-options`}
+              className="catalog-filter-dropdown"
+              role="listbox"
+              aria-labelledby={labelId}
+              aria-multiselectable={[
+                "country",
+                "profileTypes",
+                "donorTypes",
+                "lookingFor",
+              ].includes(field)}
+            >
+              <div>
+                <input
+                  autoFocus
+                  value={query}
+                  role="combobox"
+                  aria-expanded={dropdownOpen}
+                  aria-controls={`${controlId}-options`}
+                  aria-activedescendant={
+                    filtered.length && activeIndex >= 0
+                      ? `${controlId}-option-${activeIndex}`
+                      : undefined
+                  }
+                  aria-autocomplete="list"
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setDropdownActiveIndex((current) =>
+                        filtered.length
+                          ? Math.min(current + 1, filtered.length - 1)
+                          : -1,
+                      );
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setDropdownActiveIndex((current) =>
+                        current < 0
+                          ? filtered.length - 1
+                          : Math.max(current - 1, 0),
+                      );
+                    } else if (event.key === "Enter" && filtered[activeIndex]) {
+                      event.preventDefault();
+                      choose(field, filtered[activeIndex].value);
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setOpenField("");
+                      setQuery("");
+                      setDropdownActiveIndex(-1);
+                    }
+                  }}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setDropdownActiveIndex(-1);
+                  }}
+                  placeholder={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`}
+                  aria-label={`${copy.search.replace(/\.\.\.$/, "")} ${label.toLowerCase()}`}
+                />
+              </div>
               <section>
-                {filtered.length ? filtered.map((option, index) => {
-                  const isSelected = selected.includes(option.value);
-                  const active = index === activeIndex;
-                  return <button id={`${controlId}-option-${index}`} type="button" role="option" aria-selected={isSelected} className={`${isSelected ? "selected" : ""}${active ? " active" : ""}`.trim()} key={option.value} onMouseEnter={() => setDropdownActiveIndex(index)} onClick={() => choose(field, option.value)}><i aria-hidden="true" />{option.icon ? <span>{option.icon}</span> : null}<span>{option.label}</span></button>;
-                }) : <p>{copy.none}</p>}
+                {filtered.length ? (
+                  filtered.map((option, index) => {
+                    const isSelected = selected.includes(option.value);
+                    const active = index === activeIndex;
+                    return (
+                      <button
+                        id={`${controlId}-option-${index}`}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        className={`${isSelected ? "selected" : ""}${active ? " active" : ""}`.trim()}
+                        key={option.value}
+                        onMouseEnter={() => setDropdownActiveIndex(index)}
+                        onClick={() => choose(field, option.value)}
+                      >
+                        <i aria-hidden="true" />
+                        {option.icon ? <span>{option.icon}</span> : null}
+                        <span>{option.label}</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p>{copy.none}</p>
+                )}
               </section>
             </div>
           )}
@@ -4026,35 +4277,120 @@ function CatalogFilterModal({
     );
   };
   return (
-    <div className="catalog-filter-overlay" data-open="true" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-      <section className="catalog-filter-sheet" role="dialog" aria-modal="true" aria-labelledby="catalog-filter-title">
+    <div
+      className="catalog-filter-overlay"
+      data-open="true"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) onClose();
+      }}
+    >
+      <section
+        className="catalog-filter-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="catalog-filter-title"
+      >
         <div className="catalog-filter-drag" aria-hidden="true" />
-        <header><h2 id="catalog-filter-title">{copy.allFilters}</h2><button type="button" aria-label={copy.closeFilters} onClick={onClose}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg></button></header>
-        <div className="catalog-filter-scroll"><div className="catalog-filter-content">
-          {filterField("country", copy.country, copy.anyCountry)}
-          {cityField()}
-          {filterField("profileTypes", copy.profileType, copy.allTypes)}
-          {filterField("donorTypes", copy.donor, copy.allTypes)}
-          {filterField("lookingFor", copy.lookingFor, copy.allTypes, { description: copy.matches })}
-          <div className="catalog-filter-switch-row"><span>{copy.verified}</span><button type="button" role="switch" aria-checked={value.verifiedOnly} className={value.verifiedOnly ? "active" : ""} onClick={() => set("verifiedOnly", !value.verifiedOnly)}><span /></button></div>
-          <div className="catalog-filter-field catalog-age-field"><label>{copy.age}</label><div className="catalog-age-range"><input type="number" min="18" max="100" value={value.ageMin} placeholder={copy.from} aria-label={copy.from} onChange={(event) => set("ageMin", event.target.value)} /><span>–</span><input type="number" min="18" max="100" value={value.ageMax} placeholder={copy.to} aria-label={copy.to} onChange={(event) => set("ageMax", event.target.value)} /></div></div>
-          {filterField("ethnicity", copy.ethnicity, "—", { premium: true })}
-          {filterField("hairColor", copy.hair, "—", { premium: true })}
-          {filterField("eyeColor", copy.eye, "—", { premium: true })}
-          {filterField("education", copy.education, "—", { premium: true })}
-          {filterField("religion", copy.religion, "—", { premium: true })}
-        </div></div>
+        <header>
+          <h2 id="catalog-filter-title">{copy.allFilters}</h2>
+          <button
+            type="button"
+            aria-label={copy.closeFilters}
+            onClick={onClose}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </header>
+        <div className="catalog-filter-scroll">
+          <div className="catalog-filter-content">
+            {filterField("country", copy.country, copy.anyCountry)}
+            {cityField()}
+            {filterField("profileTypes", copy.profileType, copy.allTypes)}
+            {filterField("donorTypes", copy.donor, copy.allTypes)}
+            {filterField("lookingFor", copy.lookingFor, copy.allTypes, {
+              description: copy.matches,
+            })}
+            <div className="catalog-filter-switch-row">
+              <span>{copy.verified}</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={value.verifiedOnly}
+                className={value.verifiedOnly ? "active" : ""}
+                onClick={() => set("verifiedOnly", !value.verifiedOnly)}
+              >
+                <span />
+              </button>
+            </div>
+            <div className="catalog-filter-field catalog-age-field">
+              <label>{copy.age}</label>
+              <div className="catalog-age-range">
+                <input
+                  type="number"
+                  min="18"
+                  max="100"
+                  value={value.ageMin}
+                  placeholder={copy.from}
+                  aria-label={copy.from}
+                  onChange={(event) => set("ageMin", event.target.value)}
+                />
+                <span>–</span>
+                <input
+                  type="number"
+                  min="18"
+                  max="100"
+                  value={value.ageMax}
+                  placeholder={copy.to}
+                  aria-label={copy.to}
+                  onChange={(event) => set("ageMax", event.target.value)}
+                />
+              </div>
+            </div>
+            {filterField("ethnicity", copy.ethnicity, "—", { premium: true })}
+            {filterField("hairColor", copy.hair, "—", { premium: true })}
+            {filterField("eyeColor", copy.eye, "—", { premium: true })}
+            {filterField("education", copy.education, "—", { premium: true })}
+            {filterField("religion", copy.religion, "—", { premium: true })}
+          </div>
+        </div>
         <footer>
-          <button type="button" className="catalog-filter-clear" onClick={() => { onChange(emptyCatalogFilters()); setOpenField(""); setQuery(""); setDropdownActiveIndex(-1); setCityActiveIndex(-1); }}>{copy.clear}</button>
-          <button type="button" className="catalog-filter-apply" onClick={onApply}>{copy.apply}</button>
+          <button
+            type="button"
+            className="catalog-filter-clear"
+            onClick={() => {
+              onChange(emptyCatalogFilters());
+              setOpenField("");
+              setQuery("");
+              setDropdownActiveIndex(-1);
+              setCityActiveIndex(-1);
+            }}
+          >
+            {copy.clear}
+          </button>
+          <button
+            type="button"
+            className="catalog-filter-apply"
+            onClick={onApply}
+          >
+            {copy.apply}
+          </button>
         </footer>
       </section>
     </div>
   );
 }
 
-function useCatalogCities(country: string, query: string, enabled: boolean): CatalogOption[] {
-  const [result, setResult] = useState<{ key: string; cities: CatalogOption[] }>({ key: "", cities: [] });
+function useCatalogCities(
+  country: string,
+  query: string,
+  enabled: boolean,
+): CatalogOption[] {
+  const [result, setResult] = useState<{
+    key: string;
+    cities: CatalogOption[];
+  }>({ key: "", cities: [] });
   const term = query.trim();
   const key = enabled && country && term ? JSON.stringify([country, term]) : "";
   useEffect(() => {
@@ -4062,13 +4398,26 @@ function useCatalogCities(country: string, query: string, enabled: boolean): Cat
     let alive = true;
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams({ country, q: term, limit: "200" });
-      api.get<{ cities?: Row[] }>(`/member/catalog/filter-options?${params}`)
+      api
+        .get<{ cities?: Row[] }>(`/member/catalog/filter-options?${params}`)
         .then((data) => {
-          if (alive) setResult({ key, cities: (data.cities || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })) });
+          if (alive)
+            setResult({
+              key,
+              cities: (data.cities || []).map((item) => ({
+                value: catalogText(item.value),
+                label: catalogText(item.label ?? item.value),
+              })),
+            });
         })
-        .catch(() => { if (alive) setResult({ key, cities: [] }); });
+        .catch(() => {
+          if (alive) setResult({ key, cities: [] });
+        });
     }, 200);
-    return () => { alive = false; window.clearTimeout(timer); };
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
   }, [country, key, term]);
   return key && result.key === key ? result.cities : [];
 }
@@ -4077,14 +4426,34 @@ function Catalog({ session }: { session: Session }) {
   const locale = localeOf();
   const copy = CATALOG_COPY[locale];
   const navigate = useNavigate();
-  const storageKey = `lbpCatalogFilters:${locale}`;
+  const storageOwner = catalogText(
+    session?.user.id ??
+      session?.user.profileId ??
+      session?.user.email ??
+      "anonymous",
+  );
+  const storageKey = `lbpCatalogFilters:${storageOwner}:${locale}`;
   const stored = (() => {
-    try { return JSON.parse(sessionStorage.getItem(storageKey) || "null") as { period?: number; filters?: CatalogFilters } | null; }
-    catch { return null; }
+    try {
+      return JSON.parse(sessionStorage.getItem(storageKey) || "null") as {
+        period?: number;
+        filters?: CatalogFilters;
+      } | null;
+    } catch {
+      return null;
+    }
   })();
-  const [filters, setFilters] = useState<CatalogFilters>(() => stored?.filters ? { ...emptyCatalogFilters(), ...stored.filters } : emptyCatalogFilters());
-  const [draftFilters, setDraftFilters] = useState<CatalogFilters>(() => ({ ...filters }));
-  const [period, setPeriod] = useState(() => [0, 1, 7, 30].includes(Number(stored?.period)) ? Number(stored?.period) : 0);
+  const [filters, setFilters] = useState<CatalogFilters>(() =>
+    stored?.filters
+      ? { ...emptyCatalogFilters(), ...stored.filters }
+      : emptyCatalogFilters(),
+  );
+  const [draftFilters, setDraftFilters] = useState<CatalogFilters>(() => ({
+    ...filters,
+  }));
+  const [period, setPeriod] = useState(() =>
+    [0, 1, 7, 30].includes(Number(stored?.period)) ? Number(stored?.period) : 0,
+  );
   const [items, setItems] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -4093,8 +4462,35 @@ function Catalog({ session }: { session: Session }) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [premiumPromptOpen, setPremiumPromptOpen] = useState(false);
   const loadMoreSentinel = useRef<HTMLDivElement | null>(null);
-  const [catalogOptions, setCatalogOptions] = useState<{ countries: CatalogOption[]; premium: boolean }>({ countries: [], premium: catalogBoolean(session?.user.isPremium) });
-  const cities = useCatalogCities(draftFilters.country.length === 1 ? draftFilters.country[0] : "", draftFilters.city, filterOpen);
+  useEffect(() => {
+    let nextStored: { period?: number; filters?: CatalogFilters } | null = null;
+    try {
+      nextStored = JSON.parse(sessionStorage.getItem(storageKey) || "null");
+    } catch {
+      nextStored = null;
+    }
+    const nextFilters = nextStored?.filters
+      ? { ...emptyCatalogFilters(), ...nextStored.filters }
+      : emptyCatalogFilters();
+    setFilters(nextFilters);
+    setDraftFilters(nextFilters);
+    setPeriod(
+      [0, 1, 7, 30].includes(Number(nextStored?.period))
+        ? Number(nextStored?.period)
+        : 0,
+    );
+    setItems([]);
+    setOffset(0);
+  }, [storageKey]);
+  const [catalogOptions, setCatalogOptions] = useState<{
+    countries: CatalogOption[];
+    premium: boolean;
+  }>({ countries: [], premium: catalogBoolean(session?.user.isPremium) });
+  const cities = useCatalogCities(
+    draftFilters.country.length === 1 ? draftFilters.country[0] : "",
+    draftFilters.city,
+    filterOpen,
+  );
   const querySignature = JSON.stringify([period, filters]);
   useEffect(() => {
     let alive = true;
@@ -4104,20 +4500,27 @@ function Catalog({ session }: { session: Session }) {
     if (period) params.set("days", String(period));
     filters.country.forEach((value) => params.append("country", value));
     if (filters.city) params.set("city", filters.city);
-    filters.profileTypes.forEach((value) => params.append("profileType", value));
+    filters.profileTypes.forEach((value) =>
+      params.append("profileType", value),
+    );
     filters.donorTypes.forEach((value) => params.append("donorType", value));
     filters.lookingFor.forEach((value) => params.append("lookingFor", value));
     if (filters.verifiedOnly) params.set("verifiedOnly", "true");
     if (filters.ageMin) params.set("ageMin", filters.ageMin);
     if (filters.ageMax) params.set("ageMax", filters.ageMax);
-    ["ethnicity", "hairColor", "eyeColor", "education", "religion"].forEach((key) => {
-      const value = filters[key as keyof CatalogFilters];
-      if (typeof value === "string" && value) params.set(key, value);
-    });
-    api.get<Page<Row>>(`/member/catalog?${params}`)
+    ["ethnicity", "hairColor", "eyeColor", "education", "religion"].forEach(
+      (key) => {
+        const value = filters[key as keyof CatalogFilters];
+        if (typeof value === "string" && value) params.set(key, value);
+      },
+    );
+    api
+      .get<Page<Row>>(`/member/catalog?${params}`)
       .then((data) => {
         if (!alive) return;
-        setItems((current) => offset === 0 ? data.items : [...current, ...data.items]);
+        setItems((current) =>
+          offset === 0 ? data.items : [...current, ...data.items],
+        );
         setTotal(Number(data.total || 0));
       })
       .catch(() => alive && setError(copy.failed))
@@ -4125,57 +4528,135 @@ function Catalog({ session }: { session: Session }) {
         if (!alive) return;
         setLoading(false);
       });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [copy.failed, offset, querySignature]);
   useEffect(() => {
     if (!filterOpen) return;
     let alive = true;
-    api.get<{ countries?: Row[]; isPremium?: unknown }>("/member/catalog/filter-options?limit=200")
+    api
+      .get<{ countries?: Row[]; isPremium?: unknown }>(
+        "/member/catalog/filter-options?limit=200",
+      )
       .then((data) => {
         if (!alive) return;
         setCatalogOptions((current) => ({
           ...current,
-          countries: (data.countries || []).map((item) => ({ value: catalogText(item.value), label: catalogText(item.label ?? item.value) })),
-          premium: data.isPremium === undefined ? current.premium : catalogBoolean(data.isPremium),
+          countries: Array.from(
+            new Map(
+              (data.countries || [])
+                .map((item) => {
+                  const value = catalogText(item.value).toUpperCase();
+                  return {
+                    value,
+                    label:
+                      profileCountry(value, legacyLocaleOf(locale)) ||
+                      catalogText(item.label ?? item.value),
+                  };
+                })
+                .filter((item) => /^[A-Z]{2}$/.test(item.value) && item.value !== "CS")
+                .map((item) => [item.value, item] as const),
+            ).values(),
+          ).sort((left, right) => left.label.localeCompare(right.label, locale)),
+          premium:
+            data.isPremium === undefined
+              ? current.premium
+              : catalogBoolean(data.isPremium),
         }));
       })
       .catch(() => undefined);
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [filterOpen]);
   const persist = (nextFilters: CatalogFilters, nextPeriod = period) => {
-    try { sessionStorage.setItem(storageKey, JSON.stringify({ period: nextPeriod, filters: nextFilters })); } catch { /* optional */ }
+    try {
+      sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({ period: nextPeriod, filters: nextFilters }),
+      );
+    } catch {
+      /* optional */
+    }
   };
   const like = async (item: Row) => {
     const id = catalogText(item.id);
-    if (catalogBoolean(item.likedByViewer ?? catalogData(item).likedByViewer)) return;
+    if (catalogBoolean(item.likedByViewer ?? catalogData(item).likedByViewer))
+      return;
     setError("");
-    setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: true } : profile));
+    setItems((current) =>
+      current.map((profile) =>
+        catalogText(profile.id) === id
+          ? { ...profile, likedByViewer: true }
+          : profile,
+      ),
+    );
     try {
-      const result = await api.post<Row>(`/member/likes/${encodeURIComponent(id)}`);
+      const result = await api.post<Row>(
+        `/member/likes/${encodeURIComponent(id)}`,
+      );
       if (catalogBoolean(result.matched) && result.conversationId)
-        navigate(`/${locale}/chat/${encodeURIComponent(String(result.conversationId))}`);
+        navigate(
+          `/${locale}/chat/${encodeURIComponent(String(result.conversationId))}`,
+        );
     } catch (failure) {
-      setItems((current) => current.map((profile) => catalogText(profile.id) === id ? { ...profile, likedByViewer: false } : profile));
-      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
-      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
-      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
-      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyLikeLimit);
-      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.profileUnavailable);
+      setItems((current) =>
+        current.map((profile) =>
+          catalogText(profile.id) === id
+            ? { ...profile, likedByViewer: false }
+            : profile,
+        ),
+      );
+      if (failure instanceof ApiError && failure.status === 401)
+        navigate(`/${locale}/auth/login`);
+      else if (failure instanceof ApiError && failure.status === 402)
+        setPremiumPromptOpen(true);
+      else if (
+        failure instanceof ApiError &&
+        failure.status === 403 &&
+        /verif/i.test(failure.message)
+      )
+        navigate(`/${locale}/verification`);
+      else if (failure instanceof ApiError && failure.status === 429)
+        setError(copy.dailyLikeLimit);
+      else if (
+        failure instanceof ApiError &&
+        [403, 404, 409, 422].includes(failure.status)
+      )
+        setError(copy.profileUnavailable);
       else setError(copy.actionFailed);
     }
   };
   const message = async (item: Row) => {
     setError("");
     try {
-      const conversation = await api.post<Row>("/member/conversations", { targetProfileId: catalogText(item.id) });
-      if (!conversation.conversationId) throw new Error("Conversation was not created");
-      navigate(`/${locale}/chat/${encodeURIComponent(String(conversation.conversationId))}`);
+      const conversation = await api.post<Row>("/member/conversations", {
+        targetProfileId: catalogText(item.id),
+      });
+      if (!conversation.conversationId)
+        throw new Error("Conversation was not created");
+      navigate(
+        `/${locale}/chat/${encodeURIComponent(String(conversation.conversationId))}`,
+      );
     } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 401) navigate(`/${locale}/auth/login`);
-      else if (failure instanceof ApiError && failure.status === 402) setPremiumPromptOpen(true);
-      else if (failure instanceof ApiError && failure.status === 403 && /verif/i.test(failure.message)) navigate(`/${locale}/verification`);
-      else if (failure instanceof ApiError && failure.status === 429) setError(copy.dailyChatLimit);
-      else if (failure instanceof ApiError && [403, 404, 409, 422].includes(failure.status)) setError(copy.chatUnavailable);
+      if (failure instanceof ApiError && failure.status === 401)
+        navigate(`/${locale}/auth/login`);
+      else if (failure instanceof ApiError && failure.status === 402)
+        setPremiumPromptOpen(true);
+      else if (
+        failure instanceof ApiError &&
+        failure.status === 403 &&
+        /verif/i.test(failure.message)
+      )
+        navigate(`/${locale}/verification`);
+      else if (failure instanceof ApiError && failure.status === 429)
+        setError(copy.dailyChatLimit);
+      else if (
+        failure instanceof ApiError &&
+        [403, 404, 409, 422].includes(failure.status)
+      )
+        setError(copy.chatUnavailable);
       else setError(copy.actionFailed);
     }
   };
@@ -4185,7 +4666,10 @@ function Catalog({ session }: { session: Session }) {
   const applyFilters = () => {
     const min = Number(draftFilters.ageMin || 0);
     const max = Number(draftFilters.ageMax || 0);
-    if (min && max && min > max) { setError(copy.ageError); return; }
+    if (min && max && min > max) {
+      setError(copy.ageError);
+      return;
+    }
     const next = { ...draftFilters };
     setFilters(next);
     setOffset(0);
@@ -4200,12 +4684,21 @@ function Catalog({ session }: { session: Session }) {
   };
   useEffect(() => {
     const sentinel = loadMoreSentinel.current;
-    if (!sentinel || loading || items.length >= total || !("IntersectionObserver" in window)) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (!entries.some((entry) => entry.isIntersecting)) return;
-      observer.disconnect();
-      setOffset((current) => current + 20);
-    }, { rootMargin: "0px 0px 360px" });
+    if (
+      !sentinel ||
+      loading ||
+      items.length >= total ||
+      !("IntersectionObserver" in window)
+    )
+      return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        setOffset((current) => current + 20);
+      },
+      { rootMargin: "0px 0px 360px" },
+    );
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [items.length, loading, total]);
@@ -4227,7 +4720,15 @@ function Catalog({ session }: { session: Session }) {
             { value: 30, label: `1 ${copy.month}` },
           ]}
         />
-        <button className="catalog-reference-filter-button" type="button" aria-label={copy.allFilters} onClick={() => { setDraftFilters({ ...filters }); setFilterOpen(true); }}>
+        <button
+          className="catalog-reference-filter-button"
+          type="button"
+          aria-label={copy.allFilters}
+          onClick={() => {
+            setDraftFilters({ ...filters });
+            setFilterOpen(true);
+          }}
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M21 4h-7" />
             <path d="M10 4H3" />
@@ -4239,16 +4740,70 @@ function Catalog({ session }: { session: Session }) {
             <path d="M8 10v4" />
             <path d="M16 18v4" />
           </svg>
-          <span>{copy.filters}</span>{filterCount > 0 ? <b>{filterCount}</b> : null}
+          <span>{copy.filters}</span>
+          {filterCount > 0 ? <b>{filterCount}</b> : null}
         </button>
       </div>
       {error ? <p className="error catalog-reference-error">{error}</p> : null}
-      {loading && offset === 0 ? <div className="catalog-reference-loading" role="status" aria-label={copy.loading}><span /></div> : error && items.length === 0 ? null : items.length ? (
-        <div className="catalog-reference-grid">{items.map((item) => <CatalogCard key={catalogText(item.id)} item={item} locale={locale} onLike={(profile) => void like(profile)} onMessage={(profile) => void message(profile)} />)}</div>
-      ) : <div className="catalog-reference-empty"><strong>{copy.noProfiles}</strong><span>{copy.noProfilesHelp}</span></div>}
-      {!(loading && offset === 0) && items.length < total ? <div className={`catalog-reference-sentinel${loading ? " loading" : ""}`} ref={loadMoreSentinel} role={loading ? "status" : undefined} aria-label={loading ? copy.loading : undefined}>{loading ? <span /> : null}</div> : null}
-      {filterOpen ? <CatalogFilterModal locale={locale} value={draftFilters} onChange={setDraftFilters} onClose={() => { setFilterOpen(false); setPremiumPromptOpen(false); }} onApply={applyFilters} countries={catalogOptions.countries} cities={cities} premium={catalogOptions.premium} onPremium={openPremiumPrompt} premiumPromptOpen={premiumPromptOpen} /> : null}
-{premiumPromptOpen ? <AccountPremium locale={memberLocaleOf(locale)} close={() => setPremiumPromptOpen(false)} /> : null}
+      {loading && offset === 0 ? (
+        <div
+          className="catalog-reference-loading"
+          role="status"
+          aria-label={copy.loading}
+        >
+          <span />
+        </div>
+      ) : error && items.length === 0 ? null : items.length ? (
+        <div className="catalog-reference-grid">
+          {items.map((item) => (
+            <CatalogCard
+              key={catalogText(item.id)}
+              item={item}
+              locale={locale}
+              onLike={(profile) => void like(profile)}
+              onMessage={(profile) => void message(profile)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="catalog-reference-empty">
+          <strong>{copy.noProfiles}</strong>
+          <span>{copy.noProfilesHelp}</span>
+        </div>
+      )}
+      {!(loading && offset === 0) && items.length < total ? (
+        <div
+          className={`catalog-reference-sentinel${loading ? " loading" : ""}`}
+          ref={loadMoreSentinel}
+          role={loading ? "status" : undefined}
+          aria-label={loading ? copy.loading : undefined}
+        >
+          {loading ? <span /> : null}
+        </div>
+      ) : null}
+      {filterOpen ? (
+        <CatalogFilterModal
+          locale={locale}
+          value={draftFilters}
+          onChange={setDraftFilters}
+          onClose={() => {
+            setFilterOpen(false);
+            setPremiumPromptOpen(false);
+          }}
+          onApply={applyFilters}
+          countries={catalogOptions.countries}
+          cities={cities}
+          premium={catalogOptions.premium}
+          onPremium={openPremiumPrompt}
+          premiumPromptOpen={premiumPromptOpen}
+        />
+      ) : null}
+      {premiumPromptOpen ? (
+        <AccountPremium
+          locale={memberLocaleOf(locale)}
+          close={() => setPremiumPromptOpen(false)}
+        />
+      ) : null}
     </section>
   );
 }
@@ -4260,7 +4815,14 @@ function Catalog({ session }: { session: Session }) {
 // audit 2026-09-13 (site-vs-app-audit-2026-09-13.docx, item 3) originally
 // missed that a report flow existed here at all - corrected: it existed,
 // just without the reason list mobile has. This closes that gap.
-const REPORT_REASONS = ["Spam", "Harassment", "Inappropriate Content", "Fake Profile", "Scam", "Other"];
+const REPORT_REASONS = [
+  "Spam",
+  "Harassment",
+  "Inappropriate Content",
+  "Fake Profile",
+  "Scam",
+  "Other",
+];
 
 function CatalogProfile({ session }: { session: Session }) {
   return <MemberProfile session={session} locale={legacyLocaleOf(localeOf())} />;
@@ -8897,6 +9459,22 @@ const COMPATIBILITY_ANSWERS_TEXT: Record<CookieLocale, {
 function AiAdvisor({ session }: { session: Session }) {
   const locale = localeOf();
   const text = AI_ADVISOR_TEXT[locale] ?? AI_ADVISOR_TEXT.en;
+  const navigate = useNavigate();
+  const backLabel = ({
+    en: "Back",
+    ru: "Назад",
+    es: "Volver",
+    pt: "Voltar",
+    fr: "Retour",
+    de: "Zurück",
+    it: "Indietro",
+    pl: "Wstecz",
+  } as Record<string, string>)[locale] ?? "Back";
+  const backButton = (
+    <button className="back advisor-back" type="button" onClick={() => navigate(-1)}>
+      <span aria-hidden="true">←</span> {backLabel}
+    </button>
+  );
   const [status, setStatus] = useState<"loading" | "ok" | "needsPremium" | "error">("loading");
   const [configured, setConfigured] = useState(true);
   const [messages, setMessages] = useState<AiAdvisorMessage[]>([]);
@@ -8978,6 +9556,7 @@ function AiAdvisor({ session }: { session: Session }) {
   if (status === "loading") {
     return (
       <section className="access-card">
+        {backButton}
         <h1>{text.title}</h1>
         <p>{text.loading}</p>
       </section>
@@ -8987,6 +9566,7 @@ function AiAdvisor({ session }: { session: Session }) {
   if (status === "needsPremium") {
     return (
       <section className="access-card">
+        {backButton}
         <h1>{text.title}</h1>
         <p>
           {text.premiumBody}
@@ -9001,6 +9581,7 @@ function AiAdvisor({ session }: { session: Session }) {
   if (status === "error") {
     return (
       <section className="access-card">
+        {backButton}
         <h1>{text.title}</h1>
         <p className="error">{text.loadError}</p>
       </section>
@@ -9009,6 +9590,7 @@ function AiAdvisor({ session }: { session: Session }) {
 
   return (
     <section className="advisor-page">
+      {backButton}
       {weeklyInsightStatus !== "idle" && weeklyInsightStatus !== "needsPremium" && (
         <div className="list-card advisor-card weekly-insight-card">
           <h2>{text.weeklyTitle}</h2>

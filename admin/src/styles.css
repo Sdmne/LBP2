@@ -12,10 +12,9 @@
   font-weight: 100 900;
   font-display: swap;
   src: url("/fonts/inter-latin.woff2") format("woff2");
-  unicode-range:
-    U+0-FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308,
-    U+329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
-    U+FFFD;
+  unicode-range: U+0-FF, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304,
+    U+308, U+329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "Inter Fallback";
@@ -2774,8 +2773,7 @@ body {
   transform: rotate(-90deg) scaleX(-1);
   transform-box: fill-box;
   transform-origin: center;
-  animation: profile-donut-reveal 1430ms cubic-bezier(0.22, 1, 0.36, 1)
-    forwards;
+  animation: profile-donut-reveal 1430ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 .profile-donut-empty {
   fill: none;
@@ -8958,13 +8956,31 @@ body {
   font-size: 14px;
 }
 .user-conversations-empty,
-.user-relations-empty { gap: 16px; }
+.user-relations-empty {
+  gap: 16px;
+}
 .user-conversations-empty > svg,
-.user-relations-empty > svg { width: 48px; height: 48px; color: #d1d5db; stroke-width: 2; }
+.user-relations-empty > svg {
+  width: 48px;
+  height: 48px;
+  color: #d1d5db;
+  stroke-width: 2;
+}
 .user-conversations-empty h3,
-.user-relations-empty h3 { color: #64748b; font-size: 18px; font-weight: 500; line-height: 28px; margin: 0 0 4px; }
+.user-relations-empty h3 {
+  color: #64748b;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 28px;
+  margin: 0 0 4px;
+}
 .user-conversations-empty p,
-.user-relations-empty p { color: #64748b; font-size: 14px; font-weight: 400; line-height: 20px; }
+.user-relations-empty p {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
 .user-verification-empty {
   gap: 16px;
 }
@@ -9223,10 +9239,12 @@ body {
 }
 .profile-photo-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 24px 16px;
 }
-.profile-photo-card { min-width: 0; }
+.profile-photo-card {
+  min-width: 0;
+}
 .profile-photo-preview {
   position: relative;
   aspect-ratio: 1;
@@ -9234,15 +9252,30 @@ body {
   border-radius: 8px;
   background: #fff;
 }
-.profile-photo-image, .profile-photo-unavailable {
+.profile-photo-image,
+.profile-photo-unavailable {
   display: block;
   width: 100%;
   height: 100%;
 }
-.profile-photo-image img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.profile-photo-image.is-deleted img { opacity: .5; }
-.profile-photo-unavailable { display: grid; place-items: center; background: #f1f5f9; color: #64748b; font-size: 14px; }
-.profile-photo-primary, .profile-photo-deleted {
+.profile-photo-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profile-photo-image.is-deleted img {
+  opacity: 0.5;
+}
+.profile-photo-unavailable {
+  display: grid;
+  place-items: center;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 14px;
+}
+.profile-photo-primary,
+.profile-photo-deleted {
   position: absolute;
   left: 8px;
   padding: 2px 8px;
@@ -9253,9 +9286,21 @@ body {
   line-height: 16px;
   pointer-events: none;
 }
-.profile-photo-primary { top: 8px; background: #ff0a78; }
-.profile-photo-deleted { bottom: 8px; background: #f83e42; }
-.profile-photo-actions { position: absolute; display: flex; top: 8px; right: 8px; gap: 6px; }
+.profile-photo-primary {
+  top: 8px;
+  background: #ff0a78;
+}
+.profile-photo-deleted {
+  bottom: 8px;
+  background: #f83e42;
+}
+.profile-photo-actions {
+  position: absolute;
+  display: flex;
+  top: 8px;
+  right: 8px;
+  gap: 6px;
+}
 .profile-photo-actions button {
   display: inline-flex;
   align-items: center;
@@ -9270,17 +9315,72 @@ body {
   box-shadow: 0 1px 2px #0000000d;
   cursor: pointer;
 }
-.profile-photo-actions button:hover { background: #d1d5db; }
-.profile-photo-actions button.profile-photo-delete { background: #f83e42; color: #fff; }
-.profile-photo-actions button.profile-photo-delete:hover { background: #dc2626; }
-.profile-photo-actions button:disabled { opacity: .5; cursor: default; }
-.profile-photo-actions svg { width: 16px; height: 16px; }
-.profile-photo-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
-.profile-photo-meta time { color: #64748b; font-size: 12px; line-height: 16px; text-align: right; }
-.profile-photo-status { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 9999px; background: #f1f5f9; color: #64748b; font-size: 12px; font-weight: 600; line-height: 16px; }
-.profile-photo-status.status-approved { background: #00c950; color: #fff; }
-.profile-photo-status.status-rejected { background: #f83e42; color: #fff; }
-.profile-photo-status.status-pending { background: #fef3c7; color: #92400e; }
+.profile-photo-actions button:hover {
+  background: #d1d5db;
+}
+.profile-photo-actions button.profile-photo-delete {
+  background: #f83e42;
+  color: #fff;
+}
+.profile-photo-actions button.profile-photo-delete:hover {
+  background: #dc2626;
+}
+.profile-photo-actions button.profile-photo-primary-action {
+  background: #fff7ed;
+  color: #f59e0b;
+  font-size: 17px;
+  line-height: 1;
+}
+.profile-photo-actions button.profile-photo-primary-action:hover {
+  background: #ffedd5;
+}
+.user-detail-stat-value {
+  font-weight: 400;
+}
+.profile-photo-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.profile-photo-actions svg {
+  width: 16px;
+  height: 16px;
+}
+.profile-photo-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.profile-photo-meta time {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: right;
+}
+.profile-photo-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.profile-photo-status.status-approved {
+  background: #00c950;
+  color: #fff;
+}
+.profile-photo-status.status-rejected {
+  background: #f83e42;
+  color: #fff;
+}
+.profile-photo-status.status-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
 .admin-photo-crop {
   width: 448px;
   max-width: calc(100vw - 32px);
@@ -9293,20 +9393,100 @@ body {
   color: #020817;
   overflow: auto;
 }
-.admin-photo-crop::backdrop { background: rgb(0 0 0 / .5); }
-.admin-photo-crop header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
-.admin-photo-crop h2 { margin: 0; font-size: 18px; font-weight: 600; line-height: 24px; }
-.admin-photo-crop header button { display: grid; place-items: center; border: 0; padding: 4px; background: transparent; color: #64748b; cursor: pointer; }
-.admin-photo-crop header svg { width: 20px; height: 20px; }
-.admin-photo-crop-stage { position: relative; width: 288px; height: 288px; max-width: 100%; margin: 0 auto 16px; overflow: hidden; background: #898989; cursor: grab; touch-action: none; user-select: none; }
-.admin-photo-crop-stage:active { cursor: grabbing; }
-.admin-photo-crop-stage img { position: absolute; left: 50%; top: 50%; max-width: none; pointer-events: none; }
-.admin-photo-crop-mask { position: absolute; left: 50%; top: 50%; border: 1px solid #ffffffd9; border-radius: 50%; box-shadow: 0 0 0 9999px #0000007a; transform: translate(-50%, -50%); pointer-events: none; }
-.admin-photo-crop-zoom { display: flex; align-items: center; gap: 12px; color: #64748b; font-size: 14px; line-height: 20px; }
-.admin-photo-crop-zoom input { flex: 1; min-width: 0; accent-color: #ff0a78; cursor: pointer; }
-.admin-photo-crop footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.admin-photo-crop footer button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 16px; font-size: 14px; font-weight: 500; cursor: pointer; }
-.admin-photo-crop button:disabled { cursor: default; opacity: .5; }
+.admin-photo-crop::backdrop {
+  background: rgb(0 0 0 / 0.5);
+}
+.admin-photo-crop header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.admin-photo-crop h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+}
+.admin-photo-crop header button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 4px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+.admin-photo-crop header svg {
+  width: 20px;
+  height: 20px;
+}
+.admin-photo-crop-stage {
+  position: relative;
+  width: 288px;
+  height: 288px;
+  max-width: 100%;
+  margin: 0 auto 16px;
+  overflow: hidden;
+  background: #898989;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.admin-photo-crop-stage:active {
+  cursor: grabbing;
+}
+.admin-photo-crop-stage img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: none;
+  pointer-events: none;
+}
+.admin-photo-crop-mask {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border: 1px solid #ffffffd9;
+  border-radius: 50%;
+  box-shadow: 0 0 0 9999px #0000007a;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.admin-photo-crop-zoom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 20px;
+}
+.admin-photo-crop-zoom input {
+  flex: 1;
+  min-width: 0;
+  accent-color: #ff0a78;
+  cursor: pointer;
+}
+.admin-photo-crop footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.admin-photo-crop footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.admin-photo-crop button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
 .profile-subscriptions {
   display: grid;
   gap: 20px;
@@ -10416,7 +10596,7 @@ body,
   .verification-detail-card {
     padding: 18px;
   }
-.verification-detail-list > div {
+  .verification-detail-list > div {
     grid-template-columns: minmax(104px, 0.8fr) minmax(0, 1.2fr);
     gap: 10px;
   }

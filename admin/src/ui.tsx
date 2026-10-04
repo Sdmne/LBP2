@@ -4679,10 +4679,14 @@ function StoragePage() {
                     <span>{directoryDate(row.createdAt)}</span>
                   </small>
                   {Boolean(row.relatedUrl && row.relatedLabel) && (
-                    <Link to={String(row.relatedUrl)}>
+                    <a
+                      href={String(row.relatedUrl)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <AdminIcon name="externalLink" />
                       <span>{valueOf(row.relatedLabel)}</span>
-                    </Link>
+                    </a>
                   )}
                 </div>
               </article>
@@ -9089,6 +9093,7 @@ function CategoryManager({
   const [items, setItems] = useState<RecordValue[]>([]);
   const [nameEn, setNameEn] = useState("");
   const [nameRu, setNameRu] = useState("");
+  const [nameEs, setNameEs] = useState("");
   const [slug, setSlug] = useState("");
   const [editing, setEditing] = useState<RecordValue | null>(null);
   const [busy, setBusy] = useState(false);
@@ -9099,6 +9104,7 @@ function CategoryManager({
     setEditing(null);
     setNameEn("");
     setNameRu("");
+    setNameEs("");
     setSlug("");
   };
   const close = () => {
@@ -9157,12 +9163,15 @@ function CategoryManager({
       ru: valueOf(
         translations.find((item) => item.locale === "ru")?.name ?? "",
       ),
+      es: valueOf(
+        translations.find((item) => item.locale === "es")?.name ?? "",
+      ),
       slug: valueOf(data.slug ?? row.slug ?? row.title),
     };
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!nameEn.trim() || !nameRu.trim() || !slug.trim()) return;
+    if (!nameEn.trim() || !nameRu.trim() || !nameEs.trim() || !slug.trim()) return;
     setBusy(true);
     setError("");
     const original = editing ? fields(editing).data : {};
@@ -9183,10 +9192,16 @@ function CategoryManager({
         slug: slug.trim(),
         sortOrder: Number(preserved.sortOrder ?? 0),
         isActive: true,
-        translations: [
-          { locale: "en", name: nameEn.trim() },
-          ...(nameRu.trim() ? [{ locale: "ru", name: nameRu.trim() }] : []),
-        ],
+          translations: [
+            ...((Array.isArray(original.translations)
+              ? original.translations
+              : []) as RecordValue[]).filter(
+                (item) => !["en", "ru", "es"].includes(String(item.locale ?? "")),
+              ),
+            { locale: "en", name: nameEn.trim() },
+            { locale: "ru", name: nameRu.trim() },
+            { locale: "es", name: nameEs.trim() },
+          ],
       },
     };
     try {
@@ -9253,6 +9268,15 @@ function CategoryManager({
                 required
               />
             </label>
+            <label>
+              Name (ES)
+              <input
+                value={nameEs}
+                onChange={(event) => setNameEs(event.target.value)}
+                placeholder="Category name in Spanish"
+                required
+              />
+            </label>
           </div>
           <label>
             Slug
@@ -9267,7 +9291,11 @@ function CategoryManager({
             <button
               className="primary"
               disabled={
-                busy || !nameEn.trim() || !nameRu.trim() || !slug.trim()
+                busy ||
+                !nameEn.trim() ||
+                !nameRu.trim() ||
+                !nameEs.trim() ||
+                !slug.trim()
               }
             >
               {editing ? "Update" : "Add"}
@@ -9290,66 +9318,71 @@ function CategoryManager({
           </p>
         )}
         {loading ? (
-          <div className="category-list-loading" aria-label="Loading categories">
+          <div
+            className="category-list-loading"
+            aria-label="Loading categories"
+          >
             <span />
           </div>
         ) : (
           <div className="category-list">
-          {items.map((item) => {
-            const data = fields(item);
-            const selected = String(editing?.id ?? "") === String(item.id ?? "");
-            return (
-              <div
-                className={`category-row${selected ? " editing" : ""}`}
-                key={String(item.id ?? data.slug)}
-              >
-                <span>
-                  <b>{data.en}</b>
-                  <small>{data.slug}</small>
-                </span>
-                <div>
-                  <button
-                    type="button"
-                    className={selected ? "selected" : ""}
-                    aria-label={`Edit ${data.en}`}
-                    onClick={() => {
-                      setEditing(item);
-                      setNameEn(data.en === "—" ? "" : data.en);
-                      setNameRu(data.ru === "—" ? "" : data.ru);
-                      setSlug(data.slug === "—" ? "" : data.slug);
-                    }}
-                  >
-                    <AdminIcon name="pencil" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${data.en}`}
-                    onClick={async () => {
-                      if (!window.confirm(`Archive ${data.en}?`)) return;
-                      setBusy(true);
-                      setError("");
-                      try {
-                        await api.delete(
-                          `/admin/item/categories/${encodeURIComponent(String(item.id))}`,
-                        );
-                        if (selected) reset();
-                        await load();
-                      } catch {
-                        setError("Could not delete this category.");
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    <AdminIcon name="trash" />
-                  </button>
+            {items.map((item) => {
+              const data = fields(item);
+              const selected =
+                String(editing?.id ?? "") === String(item.id ?? "");
+              return (
+                <div
+                  className={`category-row${selected ? " editing" : ""}`}
+                  key={String(item.id ?? data.slug)}
+                >
+                  <span>
+                    <b>{data.en}</b>
+                    <small>{data.slug}</small>
+                  </span>
+                  <div>
+                    <button
+                      type="button"
+                      className={selected ? "selected" : ""}
+                      aria-label={`Edit ${data.en}`}
+                      onClick={() => {
+                        setEditing(item);
+                        setNameEn(data.en === "—" ? "" : data.en);
+                        setNameRu(data.ru === "—" ? "" : data.ru);
+                        setNameEs(data.es === "—" ? "" : data.es);
+                        setSlug(data.slug === "—" ? "" : data.slug);
+                      }}
+                    >
+                      <AdminIcon name="pencil" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${data.en}`}
+                      onClick={async () => {
+                        if (!window.confirm(`Archive ${data.en}?`)) return;
+                        setBusy(true);
+                        setError("");
+                        try {
+                          await api.delete(
+                            `/admin/item/categories/${encodeURIComponent(String(item.id))}`,
+                          );
+                          if (selected) reset();
+                          await load();
+                        } catch {
+                          setError("Could not delete this category.");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      <AdminIcon name="trash" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-          {!items.length && !error && (
-            <p className="category-empty">No categories yet.</p>
-          )}
+              );
+            })}
+            {!items.length && !error && (
+              <p className="category-empty">No categories yet.</p>
+            )}
           </div>
         )}
       </section>
@@ -11568,7 +11601,9 @@ function UserTabContent({
   const [messageMode, setMessageMode] = useState<"visible" | "hidden">(
     "visible",
   );
-  const [selectedConversation, setSelectedConversation] = useState<string>("");
+  const [selectedConversation, setSelectedConversation] = useState<string>(() =>
+    new URLSearchParams(window.location.search).get("chat") || "",
+  );
   const [revealedSubscriptionId, setRevealedSubscriptionId] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => setRevealedSubscriptionId(""), [tab]);
@@ -12238,7 +12273,9 @@ function UserDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<RecordValue | null>(null);
-  const [tab, setTab] = useState("profile");
+  const [tab, setTab] = useState(() =>
+    new URLSearchParams(window.location.search).get("tab") || "profile",
+  );
   const [tabRows, setTabRows] = useState<RecordValue[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
   const [error, setError] = useState("");
@@ -12483,12 +12520,12 @@ function UserDetail() {
                 </span>
               )}{" "}
               {premium && <span className="premium-mark" title="Premium" aria-label="Premium"><AdminIcon name="crown" /></span>}
-              <em>{online ? "Online" : "Offline"}</em>
+              {online && <em>Online</em>}
             </h1>
             <p>{valueOf(profile.email)}</p>
             <p>
-              Blocked by <b>{tabCount("blockedBy")}</b> users　{" "}
-              <b>{tabCount("reports")}</b> reports
+              Blocked by <span className="user-detail-stat-value">{tabCount("blockedBy")}</span> users　{" "}
+              <span className="user-detail-stat-value">{tabCount("reports")}</span> reports
             </p>
           </div>
         </div>

@@ -17739,10 +17739,13 @@ def build_list_where(
     where_parts: list[str] = []
     params: list[Any] = []
     if q:
-        search_parts = [f"{column} LIKE %s" for column in definition.get("search", [])]
+        search_parts = [
+            f"STRPOS(LOWER(COALESCE({column}, '')), LOWER(%s)) > 0"
+            for column in definition.get("search", [])
+        ]
         if search_parts:
             where_parts.append("(" + " OR ".join(search_parts) + ")")
-            params.extend([f"%{q}%"] * len(search_parts))
+            params.extend([q] * len(search_parts))
     filters = definition.get("filters", {})
     filter_values = {
         "status": status_filter,
@@ -17757,7 +17760,7 @@ def build_list_where(
             if key == "city":
                 where_parts.append(f"STRPOS(LOWER(COALESCE({filters[key]}, '')), LOWER(%s)) > 0")
             else:
-                where_parts.append(f"{filters[key]} = %s")
+                where_parts.append(f"LOWER(COALESCE({filters[key]}, '')) = LOWER(%s)")
             params.append(value)
     if group and definition.get("table") == "app_entities":
         where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.group')) = %s")
@@ -17780,8 +17783,20 @@ def build_list_where(
             where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) <> ''")
         if seeks_co_parent and str(seeks_co_parent).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER')) = 1")
-        if is_online and str(is_online).lower() in {"1", "true", "yes"}:
-            where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.isOnline')) IN ('true', '1')")
+    if is_online and str(is_online).lower() in {"1", "true", "yes"} and definition.get("table") == "profiles":
+        where_parts.append(
+            """
+            EXISTS (
+                SELECT 1
+                FROM local_users online_user
+                JOIN auth_sessions online_session ON online_session.user_id = online_user.id
+                WHERE online_user.profile_id = profiles.id
+                  AND online_user.status = 'ACTIVE'
+                  AND online_session.revoked_at IS NULL
+                  AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
+            )
+            """
+        )
     return ("WHERE " + " AND ".join(where_parts)) if where_parts else "", params
 
 
@@ -18477,7 +18492,10 @@ def admin_storage(
             related_label = f"{sender_name} → {recipient_name}"
             sender_route_id = str((sender or {}).get("sourceId") or (sender or {}).get("id") or local_profile_id or "")
             if sender_route_id:
-                related_url = f"/users/{urllib.parse.quote(sender_route_id, safe='')}?tab=messages"
+                related_url = (
+                    f"/users/{urllib.parse.quote(sender_route_id, safe='')}?tab=messages"
+                    + (f"&conversation={conversation_id}" if conversation_id else "")
+                )
                 if conversation_id:
                     related_url += f"&chat={conversation_id}"
                 route_profile_id = sender_route_id
@@ -18538,6 +18556,83 @@ async def admin_crop_user_photo(
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Photo not found")
     return await upload_profile_avatar(file, resolved_id, expected_photo_id=photo_id, actor=f"admin:{actor}")
+
+
+@app.post("/api/admin/users/{profile_id}/photos/{photo_id}/primary")
+def admin_set_primary_user_photo(
+    profile_id: str,
+    photo_id: int,
+    actor: str = Depends(require_admin),
+):
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute(
+            """
+            SELECT id, position, status, moderation_status, public_url, avatar_media_file_id
+            FROM profile_photos
+            WHERE id = %s AND profile_id = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (photo_id, resolved_id),
+        )
+        target = cursor.fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="Photo not found")
+        if str(target.get("status") or "").upper() != "ACTIVE" or str(target.get("moderation_status") or "").upper() != "APPROVED":
+            raise HTTPException(status_code=409, detail="Only an active approved photo can be set as primary")
+        if int(target.get("position") or 0) == 0:
+            return {"ok": True, "photoId": photo_id, "alreadyPrimary": True}
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM profile_photos
+            WHERE profile_id = %s AND position = 0 AND status = 'ACTIVE'
+            ORDER BY id DESC
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (resolved_id,),
+        )
+        current_primary = cursor.fetchone()
+        target_position = int(target.get("position") or 1)
+        cursor.execute(
+            "UPDATE profile_photos SET position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (_PRIMARY_SWAP_SENTINEL_POSITION, photo_id),
+        )
+        if current_primary:
+            cursor.execute(
+                "UPDATE profile_photos SET position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+                (target_position, current_primary["id"]),
+            )
+        cursor.execute(
+            "UPDATE profile_photos SET position = 0, updated_at = UTC_TIMESTAMP() WHERE id = %s",
+            (photo_id,),
+        )
+
+        avatar_url = None
+        if target.get("avatar_media_file_id"):
+            cursor.execute("SELECT public_url FROM media_files WHERE id = %s", (target["avatar_media_file_id"],))
+            avatar_media = cursor.fetchone()
+            avatar_url = (avatar_media or {}).get("public_url") or None
+        if not avatar_url:
+            avatar_url = target.get("public_url") or None
+        update_profile_data(
+            cursor,
+            resolved_id,
+            {
+                "avatarUrl": avatar_url,
+                "isWizardCompleted": bool(avatar_url),
+                "isVerified": False,
+                "verifiedAt": None,
+                "verificationProvider": None,
+            },
+        )
+        reset_verification_after_primary_photo_change(cursor, resolved_id)
+        audit(conn, actor, "set_primary_photo", "profile_photos", photo_id, {"profileId": resolved_id})
+        conn.commit()
+    return {"ok": True, "photoId": photo_id, "profileId": resolved_id, "avatarUrl": avatar_url}
 
 
 def permanently_delete_profile_photo(cursor, profile_id: int, photo_id: int) -> list[str]:
