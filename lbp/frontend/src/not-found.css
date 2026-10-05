@@ -2,7 +2,7 @@
   display: flex;
   width: 100%;
   max-width: none;
-  min-height: calc(100svh - 80px - 252px);
+  min-height: 0;
   padding: 0;
 }
 
@@ -13,48 +13,46 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  padding: 48px 24px;
+  padding: 16px 24px;
   text-align: center;
 }
 
 .not-found-code {
   margin: 0;
-  color: #526582;
-  font-size: 44px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -1.5px;
+  color: #64748b;
+  font-size: 60px;
+  font-weight: 700;
+  line-height: 60px;
 }
 
 .not-found-page h1 {
-  margin: 14px 0 0;
+  margin: 16px 0 0;
   color: #020817;
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 24px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
 }
 
 .not-found-page p {
-  margin: 12px 0 0;
+  margin: 16px 0 0;
   color: #64748b;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 400;
-  line-height: 20px;
+  line-height: 24px;
 }
 
 .not-found-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 96px;
-  min-height: 40px;
-  margin-top: 18px;
-  padding: 10px 18px;
-  border-radius: 6px;
-  background: #f51161;
+  min-height: 36px;
+  margin-top: 16px;
+  padding: 8px 24px;
+  border-radius: 8px;
+  background: #f31260;
   color: #fff;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 20px;
   text-decoration: none;
   transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -71,14 +69,10 @@
 
 @media (max-width: 767px) {
   .web-main:has(> .not-found-page) {
-    min-height: calc(100svh - 64px - 386px);
+    min-height: 0;
   }
 
   .not-found-page {
-    padding: 40px 20px;
-  }
-
-  .not-found-code {
-    font-size: 40px;
+    padding: 16px 20px;
   }
 }

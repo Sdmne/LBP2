@@ -874,6 +874,9 @@ function Shell({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const navigationRef = useRef<HTMLElement>(null);
+  const headerInnerRef = useRef<HTMLDivElement>(null);
+  const naturalNavigationWidth = useRef(0);
+  const [compactNavigation, setCompactNavigation] = useState(false);
   const focusMenuOnOpen = useRef<"first" | "last" | null>(null);
   const [headerScrolled, setHeaderScrolled] = useState(() => window.scrollY > 24);
   const isLanding = new RegExp(`^/${locale}/?$`).test(pathname);
@@ -931,6 +934,32 @@ function Shell({
       window.removeEventListener("resize", closeOnDesktop);
     };
   }, [hasMemberMenu, menuOpen]);
+  useEffect(() => {
+    if (menuOpen) return;
+    const inner = headerInnerRef.current, nav = navigationRef.current;
+    if (!inner || !nav) return;
+    const measure = () => {
+      const style = getComputedStyle(inner);
+      const navStyle = getComputedStyle(nav);
+      if (nav.getClientRects().length && navStyle.position !== "absolute") {
+        naturalNavigationWidth.current = nav.scrollWidth +
+          (parseFloat(navStyle.marginLeft) || 0) + (parseFloat(navStyle.marginRight) || 0);
+      }
+      const logo = inner.querySelector<HTMLElement>(".logo")?.getBoundingClientRect().width || 0;
+      const actions = inner.querySelector<HTMLElement>(".header-actions")?.getBoundingClientRect().width || 0;
+      const reserved = logo + actions + (parseFloat(style.columnGap) || 0) * 2 +
+        (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+      if (naturalNavigationWidth.current) {
+        setCompactNavigation(naturalNavigationWidth.current + reserved > inner.clientWidth + 1);
+      }
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(inner);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+  }, [locale, hasMemberMenu, menuOpen, compactNavigation]);
+  useEffect(() => { naturalNavigationWidth.current = 0; setCompactNavigation(false); }, [locale, hasMemberMenu]);
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
@@ -1030,7 +1059,7 @@ function Shell({
   return (
     <div className={`web-app${isChat ? " chat-app" : ""}${isProfileTool ? " profile-tools-app" : ""}`}>
       <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
-        <div className="web-header-inner">
+        <div ref={headerInnerRef} className={`web-header-inner${compactNavigation ? " compact-navigation" : ""}`}>
           <Link className="logo" to={`/${locale}`} aria-label="LetsBeParents">
             <img src="/web-static/logo-db535d28.svg" alt="LetsBeParents" />
           </Link>

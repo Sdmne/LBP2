@@ -4483,6 +4483,9 @@ button.landing-gradient-button:disabled {
   }
 }
 
+.web-main:has(> .contact-page) {
+  padding: 0;
+}
 .contact-page {
   display: grid;
   grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
@@ -9851,7 +9854,7 @@ a.detail-location:hover {
 }
 .web-main {
   flex: 1 0 auto;
-  min-height: calc(100svh - 80px - 252px);
+  min-height: 0;
 }
 .web-footer {
   flex: 0 0 auto;
@@ -9867,7 +9870,7 @@ a.detail-location:hover {
 .web-main .member-likes-empty,
 .web-main .empty-chat-list,
 .web-main .chat-search-empty {
-  min-height: clamp(360px, calc(100svh - 80px - 252px), 720px);
+  min-height: 240px;
 }
 .web-main > .loading,
 .web-main .catalog-reference-loading,
@@ -10362,11 +10365,19 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 28px 24px;
-  border: 1px solid #e4e7ec;
-  border-radius: 8px;
-  background: #fff;
+  padding: 32px 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #f8fafc;
   text-align: center;
+}
+
+.profile-city-field { display: contents; }
+.profile-field-invalid input,
+.profile-field-invalid .profile-picker-trigger,
+.profile-edit-form input[aria-invalid="true"] {
+  border-color: #d92d20;
+  box-shadow: 0 0 0 1px #d92d20;
 }
 
 .contact-form-panel .contact-success-card h1 {

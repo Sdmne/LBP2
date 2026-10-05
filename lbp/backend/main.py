@@ -2571,7 +2571,6 @@ def send_contact_request_email(recipient: str, body: dict[str, Any]) -> str:
     subject_value = re.sub(r"\s+", " ", str(body.get("subject") or "General question").strip()) or "General question"
     message_value = str(body.get("message") or "").strip()
     payload_value = body.get("payload") if isinstance(body.get("payload"), dict) else {}
-    submitted_at = now_utc().isoformat()
 
     email_message = EmailMessage()
     email_message["Subject"] = f"LetsBeParents contact: {subject_value}"
@@ -2585,7 +2584,6 @@ def send_contact_request_email(recipient: str, body: dict[str, Any]) -> str:
         f"Name: {sender_name}",
         f"Email: {sender_email or 'Not provided'}",
         f"Subject: {subject_value}",
-        f"Submitted at: {submitted_at}",
         "",
         "Message:",
         message_value or "Not provided",
@@ -2600,7 +2598,6 @@ def send_contact_request_email(recipient: str, body: dict[str, Any]) -> str:
         f"<p><strong>Name:</strong> {html.escape(sender_name)}</p>"
         f"<p><strong>Email:</strong> {html.escape(sender_email or 'Not provided')}</p>"
         f"<p><strong>Subject:</strong> {html.escape(subject_value)}</p>"
-        f"<p><strong>Submitted at:</strong> {html.escape(submitted_at)}</p>"
         f"<p style=\"white-space:pre-wrap\">{html.escape(message_value or 'Not provided')}</p>"
         "</body></html>",
         subtype="html",

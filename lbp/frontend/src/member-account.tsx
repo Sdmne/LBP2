@@ -645,8 +645,7 @@ function Overview({
     .map(memberRow)
     .filter(
       (photo) =>
-        !["REJECTED", "DELETED"].includes(String(photo.status).toUpperCase()) &&
-        String(photo.moderationStatus).toUpperCase() !== "REJECTED",
+        String(photo.status).toUpperCase() !== "DELETED",
     )
     .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
   const gallery: MemberRow = {
