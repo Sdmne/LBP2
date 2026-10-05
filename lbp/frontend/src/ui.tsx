@@ -7830,7 +7830,7 @@ const REFERRAL_TEXT: Record<CookieLocale, {
   },
 };
 
-function Subscription({ session }: { session: Session }) {
+function Subscription({ session, embedded = false }: { session: Session; embedded?: boolean }) {
   const locale = localeOf();
   const text = SUBSCRIPTION_TEXT[locale] ?? SUBSCRIPTION_TEXT.en;
   const [data, setData] = useState<Row | null>(null);
@@ -7878,8 +7878,8 @@ function Subscription({ session }: { session: Session }) {
   const currentTier = asText(data?.tier || "EXPLORE").toUpperCase();
   const canUpgradeToPro = data?.isPremium && SUBSCRIPTION_TIER_RANK[currentTier] < SUBSCRIPTION_TIER_RANK.PRO;
   return (
-    <section className="access-card premium-card">
-      <h1>{text.title}</h1>
+    <section className={embedded ? "advisor-subscription premium-card" : "access-card premium-card"}>
+      {embedded ? <h2>{text.title}</h2> : <h1>{text.title}</h1>}
       {data && !verified ? (
         <>
           <p>{text.verifyPrompt}</p>
@@ -9594,15 +9594,15 @@ function AiAdvisor({ session }: { session: Session }) {
 
   if (status === "needsPremium") {
     return (
-      <section className="access-card">
+      <section className="advisor-page advisor-access-page">
         {backButton}
+        <div className="access-card advisor-access-card">
         <h1>{text.title}</h1>
         <p>
           {text.premiumBody}
         </p>
-        <Link className="primary" to={`/${locale}/subscription`}>
-          {text.viewPremium}
-        </Link>
+        <Subscription session={session} embedded />
+        </div>
       </section>
     );
   }

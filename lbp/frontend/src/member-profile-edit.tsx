@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { profileLanguageCodes } from "./profile-language-values";
+import { profileConstraintMessage, profileValidationMessage } from "./profile-validation";
 import { createApiClient } from "./api";
 import {
   MemberError,
@@ -953,18 +954,7 @@ function ProfileEditor({
     );
     setInvalidFields(missing);
     if (missing.length) {
-      setError(
-        {
-          en: "Complete the highlighted required fields.",
-          ru: "Заполните выделенные обязательные поля.",
-          es: "Completa los campos obligatorios resaltados.",
-          pt: "Preencha os campos obrigatórios destacados.",
-          fr: "Remplissez les champs obligatoires surlignés.",
-          de: "Füllen Sie die hervorgehobenen Pflichtfelder aus.",
-          it: "Compila i campi obbligatori evidenziati.",
-          pl: "Uzupełnij zaznaczone wymagane pola.",
-        }[locale],
-      );
+      setError(profileValidationMessage(locale, "required"));
       form.current
         ?.querySelector<HTMLElement>(
           `[name="${missing[0]}"], [data-profile-picker="${missing[0]}"] button`,
@@ -986,13 +976,7 @@ function ProfileEditor({
       (height !== null && (height < 80 || height > 250)) ||
       (weight !== null && (weight < 25 || weight > 350))
     ) {
-      setError(
-        t(
-          "Укажите рост от 80 до 250 см и вес от 25 до 350 кг.",
-          "Enter a height from 80 to 250 cm and a weight from 25 to 350 kg.",
-          "Indica una altura de 80 a 250 cm y un peso de 25 a 350 kg.",
-        ),
-      );
+      setError(profileValidationMessage(locale, "measurements"));
       return;
     }
     saving.current = true;
@@ -1090,19 +1074,17 @@ function ProfileEditor({
           onSubmit={submit}
           aria-busy={busy}
           onInvalid={(event) => {
+            event.preventDefault();
             const control = event.target as HTMLInputElement;
             if (control.name)
               setInvalidFields((fields) => [
                 ...new Set([...fields, control.name]),
               ]);
-            setError(
-              control.validationMessage ||
-                t(
-                  "Проверьте обязательные поля.",
-                  "Check the required fields.",
-                  "Revisa los campos obligatorios.",
-                ),
-            );
+            const first = form.current?.querySelector<HTMLInputElement>("input:invalid");
+            if (!first || first === control) {
+              setError(profileConstraintMessage(locale, control.name, control.validity));
+              control.focus();
+            }
           }}
         >
           <section className="edit-section">
@@ -1246,7 +1228,8 @@ function ProfileEditor({
                 {c.heightPlain}
                 <span className="measurement-input" hidden={imperial}>
                   <input
-                    name="heightMetric"
+                  name="heightMetric"
+                  aria-invalid={invalidFields.includes("heightMetric") || undefined}
                     type="number"
                     min="80"
                     max="250"
@@ -1260,7 +1243,8 @@ function ProfileEditor({
                 <span className="height-imperial-inputs" hidden={!imperial}>
                   <span className="measurement-input">
                     <input
-                      name="heightFeet"
+                    name="heightFeet"
+                    aria-invalid={invalidFields.includes("heightFeet") || undefined}
                       aria-label={`${c.heightPlain} ${units.feet}`}
                       type="number"
                       min="2"
@@ -1274,7 +1258,8 @@ function ProfileEditor({
                   </span>
                   <span className="measurement-input">
                     <input
-                      name="heightInches"
+                    name="heightInches"
+                    aria-invalid={invalidFields.includes("heightInches") || undefined}
                       aria-label={`${c.heightPlain} ${units.inches}`}
                       type="number"
                       min="0"
@@ -1292,7 +1277,8 @@ function ProfileEditor({
                 {c.weightPlain}
                 <span className="measurement-input">
                   <input
-                    name="weightDisplay"
+                  name="weightDisplay"
+                  aria-invalid={invalidFields.includes("weightDisplay") || undefined}
                     type="number"
                     min={imperial ? "55" : "25"}
                     max={imperial ? "772" : "350"}

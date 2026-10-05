@@ -3539,11 +3539,7 @@ function DashboardSeries({
         rows={source}
         series={chartSeries}
         animationKey={period}
-        footnote={
-          isEngagement
-            ? "Последняя точка (полая, пунктирная) — «сегодня (неполный день)», значение ещё будет расти до конца суток."
-            : undefined
-        }
+        footnote="The last point (hollow, dashed) represents today, which is still in progress. Its value will keep rising until the end of the day."
       />
     </>
   );
@@ -9582,7 +9578,7 @@ function ArticleEditor({
         >
           <EditorIcon name="arrowLeft" />
         </button>
-        <h1>Edit Article</h1>
+        <h1>{row.id ? "Edit Article" : "New Article"}</h1>
       </header>
       <div className="article-editor-grid">
         <section className="article-editor-main">

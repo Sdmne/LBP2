@@ -1299,7 +1299,42 @@ a.profile-card-linked:hover {
 }
 .advisor-back {
   width: fit-content;
-  margin: 0 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.advisor-back:hover {
+  background: #f8fafc;
+}
+.advisor-back:focus-visible {
+  outline: 2px solid #0b68d8;
+  outline-offset: 2px;
+}
+.advisor-page .advisor-card,
+.advisor-page .advisor-access-card {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+.advisor-subscription {
+  margin-top: 24px;
+}
+.advisor-subscription .plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 .advisor-card .message-title h1 {
   display: flex;

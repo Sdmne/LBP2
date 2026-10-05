@@ -125,26 +125,19 @@ try {
   }
 }
 
-export function profilePhotos(item: Row): string[] {
+export function profilePhotos(item: Row, failedSources: string[] = []): string[] {
   const data = row(item.data);
-  const photos = [
-    ...profileList(item.photos),
-    ...profileList(data.photos),
-  ];
-  const source = photos.length
-    ? photos
-    : [item.avatarUrl, data.avatarUrl, item.photoUrl, data.photoUrl];
-  return [
-    ...new Set(
-      source
-        .map((value) =>
-          typeof value === "string"
-            ? text(value)
-            : text(row(value).publicUrl, row(value).url),
-        )
-        .filter((url) => /^(?:https?:\/\/|\/(?!\/)|blob:)/i.test(url)),
-    ),
-  ];
+  const photos = [...profileList(item.photos), ...profileList(data.photos)];
+  const avatar = text(item.avatarUrl, data.avatarUrl);
+  const source = photos.length ? photos : [avatar, item.photoUrl, data.photoUrl];
+  return [...new Set(source.map((value, index) => {
+    const photo = row(value);
+    const original = typeof value === "string" ? text(value) : text(photo.publicUrl, photo.url);
+    const primary = photo.position === undefined ? index === 0 : Number(photo.position) === 0;
+    // Use only the crop supplied by this profile response; keep additional photos unchanged.
+    const crop = text(photo.avatarUrl, avatar);
+    return primary && crop && !failedSources.includes(crop) ? crop : original;
+  }).filter((url) => /^(?:https?:\/\/|\/(?!\/)|blob:)/i.test(url)))];
 }
 
 export function profileLanguages(data: Row, locale: Locale): string[] {
@@ -619,7 +612,7 @@ export function ProfileGallery({
 }) {
   const c = PROFILE_COPY[locale];
   const [failed, setFailed] = useState<string[]>([]);
-  const photos = profilePhotos(profile).filter((url) => !failed.includes(url));
+  const photos = profilePhotos(profile, failed).filter((url) => !failed.includes(url));
   const [index, setIndex] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const thumbnails = useRef<HTMLDivElement>(null);

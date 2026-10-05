@@ -650,7 +650,7 @@ function Overview({
     .sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
   const gallery: MemberRow = {
     photos,
-    avatarUrl: photos.length ? undefined : data.avatarUrl,
+    avatarUrl: data.avatarUrl,
   };
   const visibility = memberBoolean(
     settings.data?.visibleInCatalog ?? data.visibleInCatalog ?? true,
