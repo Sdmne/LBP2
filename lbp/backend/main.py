@@ -233,6 +233,32 @@ REVENUECAT_ENVIRONMENT = os.getenv("REVENUECAT_ENVIRONMENT", "SANDBOX").strip().
 # is-it-configured pattern as the Didit block above. ANTHROPIC_API_KEY must
 # be set directly on the server as an environment variable - it must never
 # be committed to this file or any other tracked source.
+PROFILE_DONOR_TYPES = {"SPERM", "EGG", "SPERM_DONOR", "EGG_DONOR"}
+ADMIN_DONOR_SQL = """(
+    EXISTS (
+        SELECT 1 FROM jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(data->'donorType') = 'array'
+                THEN data->'donorType' ELSE '[]'::jsonb END
+        ) AS offered(kind)
+        WHERE UPPER(TRIM(kind)) IN ('SPERM', 'EGG', 'SPERM_DONOR', 'EGG_DONOR')
+    )
+    OR UPPER(TRIM(COALESCE(data->>'donorType', ''))) IN ('SPERM', 'EGG', 'SPERM_DONOR', 'EGG_DONOR')
+    OR UPPER(COALESCE(data->>'profileType', '')) IN ('DONOR', 'SPERM_DONOR', 'EGG_DONOR')
+)"""
+
+
+def profile_offers_donation(data: dict[str, Any]) -> bool:
+    donor_types = json_value(data.get("donorType"))
+    if isinstance(donor_types, str):
+        donor_types = donor_types.split(",")
+    if not isinstance(donor_types, list):
+        donor_types = []
+    return any(
+        isinstance(value, str) and value.strip().upper() in PROFILE_DONOR_TYPES
+        for value in donor_types
+    ) or str(data.get("profileType") or "").strip().upper() in {"DONOR", "SPERM_DONOR", "EGG_DONOR"}
+
+
 ANTHROPIC_API_BASE = os.getenv("ANTHROPIC_API_BASE", "https://api.anthropic.com/v1").rstrip("/")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 # Haiku by default - cheapest per-token model, plenty capable for
@@ -17777,7 +17803,7 @@ def build_list_where(
             where_parts.append(f"({ADMIN_LOCATION_MISMATCH_SQL}) IN ('hard', 'soft')")
     if definition.get("table") == "profiles":
         if is_donor and str(is_donor).lower() in {"1", "true", "yes"}:
-            where_parts.append("JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) IS NOT NULL AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.donorType')) <> ''")
+            where_parts.append(ADMIN_DONOR_SQL)
         if seeks_co_parent and str(seeks_co_parent).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER')) = 1")
     if is_online and str(is_online).lower() in {"1", "true", "yes"} and definition.get("table") == "profiles":
@@ -18015,11 +18041,7 @@ def admin_list(
                     profile_data_value = profile_data(profile)
                     profile_type = str(profile_data_value.get("profileType") or "")
                     donor_type = profile_data_value.get("donorType")
-                    is_donor = (
-                        (isinstance(donor_type, list) and bool(donor_type))
-                        or (isinstance(donor_type, str) and bool(donor_type.strip()))
-                        or "DONOR" in profile_type.upper()
-                    )
+                    is_donor = profile_offers_donation(profile_data_value)
                     item.update({
                         "profileName": profile.get("display_name"),
                         "profileEmail": profile.get("email"),

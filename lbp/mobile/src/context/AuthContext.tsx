@@ -3,6 +3,7 @@ import * as SecureStore from "expo-secure-store";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
 import { setSessionToken } from "../api/session";
+import { invalidateMyAvatarCache } from "../hooks/useMyAvatar";
 import type { PublicUser } from "../api/types";
 import { registerForPushNotifications, unregisterCurrentPushToken } from "../utils/pushNotifications";
 // TEMP DISABLED for OTA safety (2026-09-12, item 16): expo-notifications/
@@ -87,6 +88,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // screen ever needs to read it, and it must survive without triggering
   // re-renders.
   const pushTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    invalidateMyAvatarCache(Boolean(user));
+  }, [user?.id]);
   async function syncPushToken() {
     pushTokenRef.current = await registerForPushNotifications();
   }

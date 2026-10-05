@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -46,6 +46,7 @@ export default function AppHeader({ title, onAvatarPress, badgeCount, onBackPres
   // even when they have one. useMyAvatarUrl() is the shared fetch (see
   // hooks/useMyAvatar.ts) that every AppHeader instance now reads from.
   const avatarUrl = useMyAvatarUrl();
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
   return (
     // None of this component's 4 callers (Explore, Catalog, Messages,
     // Knowledge Hub) ever accounted for the status bar - there's no native
@@ -73,8 +74,8 @@ export default function AppHeader({ title, onAvatarPress, badgeCount, onBackPres
             работает". Pressable's onPress is the reliable, documented way
             to make an arbitrary view tappable in RN. */}
         <Pressable hitSlop={8} onPress={onAvatarPress}>
-          {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+          {avatarUrl && avatarUrl !== failedAvatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatar} onError={() => setFailedAvatarUrl(avatarUrl)} />
           ) : (
             <LinearGradient
               colors={["#4e9bff", "#f070a9"]}

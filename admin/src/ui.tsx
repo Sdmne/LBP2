@@ -1261,13 +1261,18 @@ function isDonorProfile(row: RecordValue) {
     row.data && typeof row.data === "object" ? row.data : {}
   ) as RecordValue;
   const donorType = row.donorType ?? data.donorType;
+  if (row.isDonor != null) return settingBoolean(row.isDonor);
+  let offered: unknown = donorType;
+  if (typeof offered === "string") {
+    try { offered = JSON.parse(offered); }
+    catch { /* Legacy comma-separated value is handled below. */ }
+  }
+  if (typeof offered === "string") offered = offered.split(",");
   return (
-    settingBoolean(row.isDonor) ||
-    (Array.isArray(donorType) && donorType.length > 0) ||
-    (typeof donorType === "string" && donorType.trim().length > 0) ||
-    String(row.profileType ?? "")
-      .toUpperCase()
-      .includes("DONOR")
+    (Array.isArray(offered) && offered.some((value) =>
+      ["SPERM", "EGG", "SPERM_DONOR", "EGG_DONOR"].includes(String(value).trim().toUpperCase()))) ||
+    ["DONOR", "SPERM_DONOR", "EGG_DONOR"].includes(
+      String(row.profileType ?? data.profileType ?? "").trim().toUpperCase())
   );
 }
 
@@ -7033,6 +7038,7 @@ function GenericList({ view }: { view: string }) {
   const isPartnerUsers =
     view === "users" && location.pathname.endsWith("/partners");
   const [result, setResult] = useState<ListResponse | null>(null);
+  const loadedView = useRef(view);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
@@ -7173,7 +7179,10 @@ function GenericList({ view }: { view: string }) {
   }, [view, grantOpen, grantUser, grantSelectedUser]);
   useEffect(() => {
     let live = true;
-    setResult(null);
+    if (loadedView.current !== view) {
+      loadedView.current = view;
+      setResult(null);
+    }
     setError("");
     const params = new URLSearchParams({
       limit: String(limit),
