@@ -1,0 +1,18 @@
+.admin-skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 10000;
+  padding: 12px 16px;
+  background: #fff;
+  color: #111827;
+  border: 2px solid #005fcc;
+  border-radius: 4px;
+  transform: translateY(calc(-100% - 16px));
+}
+
+.admin-skip-link:focus {
+  transform: translateY(0);
+  outline: 2px solid #005fcc;
+  outline-offset: 2px;
+}

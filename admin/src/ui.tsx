@@ -2280,6 +2280,8 @@ function Login({
           <label>
             Email
             <input
+              id="admin-login-email"
+              name="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="username"
@@ -2290,6 +2292,8 @@ function Login({
           <label>
             Password
             <input
+              id="admin-login-password"
+              name="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
@@ -7718,6 +7722,7 @@ function GenericList({ view }: { view: string }) {
               <>
                 {!isPartnerUsers && <>
                 <AdminSelect
+                  aria-label="Profile type"
                   value={filters.profileType ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -7764,6 +7769,7 @@ function GenericList({ view }: { view: string }) {
                 </label>
                 </>}
                 <AdminSelect
+                  aria-label="Country"
                   value={filters.country ?? ""}
                   menuMaxHeight={520}
                   onChange={(event) => {
@@ -13979,6 +13985,13 @@ export function AdminApp() {
         beginContentTransition();
       }}
     >
+      <a
+        className="admin-skip-link"
+        href="#admin-main-content"
+        onClick={() => document.getElementById("admin-main-content")?.focus()}
+      >
+        Skip to main content
+      </a>
       <aside>
         <Link className="brand" to="/dashboard">
           LetsBeParents
@@ -14019,6 +14032,8 @@ export function AdminApp() {
         </div>
       </aside>
       <main
+        id="admin-main-content"
+        tabIndex={-1}
         className={`content ${location.pathname.startsWith("/support") ? "support-content" : ""}`}
         aria-busy={contentTransitioning}
       >
