@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 import { MemberChatCalls } from "./member-chat-calls";
+import { flushSync } from "react-dom";
+import { SessionRequestGuard } from "./session-request-guard";
 import type { ChatLocale } from "./member-chat-model";
 import {
   Link,
@@ -18236,27 +18238,51 @@ export function WebApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | undefined>(undefined);
+  const sessionGuard = useRef(new SessionRequestGuard());
   useEffect(() => {
     let active = true;
     const load = () => {
+      const request = sessionGuard.current.begin();
       void api
         .get<{ user: Row }>("/auth/me")
         .then((response) => {
-          if (active) setSession({ user: response.user });
+          if (active && sessionGuard.current.isCurrent(request)) setSession({ user: response.user });
         })
         .catch(() => {
-          if (active) setSession(null);
+          if (active && sessionGuard.current.isCurrent(request)) setSession(null);
         });
+    };
+    const hide = () => {
+      sessionGuard.current.invalidate();
+      flushSync(() => setSession(undefined));
+    };
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        hide();
+        load();
+      }
+    };
+    const expire = () => {
+      sessionGuard.current.invalidate();
+      flushSync(() => setSession(null));
     };
     load();
     window.addEventListener("lbp-member-changed", load);
+    window.addEventListener("pagehide", hide);
+    window.addEventListener("pageshow", restore);
+    window.addEventListener("lbp-session-expired", expire);
     return () => {
       active = false;
       window.removeEventListener("lbp-member-changed", load);
+      window.removeEventListener("pagehide", hide);
+      window.removeEventListener("pageshow", restore);
+      window.removeEventListener("lbp-session-expired", expire);
     };
   }, [location.pathname]);
   const logout = async () => {
+    sessionGuard.current.invalidate();
     await api.post("/auth/logout");
+    sessionGuard.current.invalidate();
     setSession(null);
   };
   useEffect(() => {
@@ -18273,7 +18299,7 @@ export function WebApp() {
   }, [session, locale, location.pathname, navigate]);
   if (session === undefined) return <Shell session={null} onLogout={logout} pendingSession><LoadingIndicator fullPage /></Shell>;
   const content = (element: React.ReactNode) => (
-    <Shell session={session} onLogout={logout}>
+    <Shell key={asText(session?.user.id) || "guest"} session={session} onLogout={logout}>
       {element}
     </Shell>
   );

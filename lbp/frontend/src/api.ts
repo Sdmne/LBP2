@@ -26,10 +26,14 @@ export function createApiClient(basePath = "/api"): ApiClient {
     }
     const response = await fetch(`${basePath}${path}`, {
       ...init,
+      cache: path.startsWith("/member/") || path.startsWith("/auth/") ? "no-store" : init.cache,
       credentials: "same-origin",
       headers,
     });
     if (!response.ok) {
+      if (response.status === 401 && typeof window !== "undefined" && (path.startsWith("/member/") || path === "/auth/me")) {
+        window.dispatchEvent(new Event("lbp-session-expired"));
+      }
       const message = await response.text();
       throw new ApiError(response.status, message || `Request failed (${response.status})`);
     }

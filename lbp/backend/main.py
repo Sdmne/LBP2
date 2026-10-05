@@ -463,6 +463,15 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def private_member_cache_control(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(("/api/auth/", "/api/member/")):
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 @contextmanager
 def db_cursor(dictionary: bool = True):
     del dictionary
