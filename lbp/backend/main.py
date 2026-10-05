@@ -234,17 +234,32 @@ REVENUECAT_ENVIRONMENT = os.getenv("REVENUECAT_ENVIRONMENT", "SANDBOX").strip().
 # be set directly on the server as an environment variable - it must never
 # be committed to this file or any other tracked source.
 PROFILE_DONOR_TYPES = {"SPERM", "EGG", "SPERM_DONOR", "EGG_DONOR"}
-ADMIN_DONOR_SQL = """(
+ADMIN_DONOR_SQL = r"""COALESCE((
     EXISTS (
         SELECT 1 FROM jsonb_array_elements_text(
-            CASE WHEN jsonb_typeof(data->'donorType') = 'array'
-                THEN data->'donorType' ELSE '[]'::jsonb END
+            CASE
+                WHEN jsonb_typeof(data->'donorType') = 'array' THEN data->'donorType'
+                WHEN jsonb_typeof(data->'donorType') = 'string'
+                THEN to_jsonb(regexp_split_to_array(data->>'donorType', ','))
+                ELSE '[]'::jsonb
+            END
         ) AS offered(kind)
         WHERE UPPER(TRIM(kind)) IN ('SPERM', 'EGG', 'SPERM_DONOR', 'EGG_DONOR')
     )
-    OR UPPER(TRIM(COALESCE(data->>'donorType', ''))) IN ('SPERM', 'EGG', 'SPERM_DONOR', 'EGG_DONOR')
-    OR UPPER(COALESCE(data->>'profileType', '')) IN ('DONOR', 'SPERM_DONOR', 'EGG_DONOR')
-)"""
+    OR (
+        jsonb_typeof(data->'donorType') = 'string'
+        AND UPPER(data->>'donorType') ~ '^\s*"\s*(SPERM|EGG|SPERM_DONOR|EGG_DONOR)\s*"\s*$'
+    )
+    OR (
+        jsonb_typeof(data->'donorType') = 'string'
+        AND (data->>'donorType') ~ '^\s*\[\s*"(?:[^"\\]|\\.)*"\s*(?:,\s*"(?:[^"\\]|\\.)*"\s*)*\]\s*$'
+        AND EXISTS (
+            SELECT 1 FROM regexp_matches(data->>'donorType', '"((?:[^"\\]|\\.)*)"', 'g') AS offered(parts)
+            WHERE UPPER(TRIM(parts[1])) IN ('SPERM', 'EGG', 'SPERM_DONOR', 'EGG_DONOR')
+        )
+    )
+    OR UPPER(TRIM(COALESCE(data->>'profileType', ''))) IN ('DONOR', 'SPERM_DONOR', 'EGG_DONOR')
+), FALSE)"""
 
 
 def profile_offers_donation(data: dict[str, Any]) -> bool:
