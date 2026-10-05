@@ -9,7 +9,9 @@ const messages = {
   pl: { required: "Uzupełnij zaznaczone wymagane pola.", invalid: "Sprawdź zaznaczone pola.", adult: "Podaj prawidłową datę urodzenia. Musisz mieć co najmniej 18 lat.", range: "Podaj wartość w dozwolonym zakresie.", measurements: "Podaj wzrost od 80 do 250 cm i wagę od 25 do 350 kg." },
 };
 
-export function profileValidationMessage(locale: keyof typeof messages, reason: keyof typeof messages.en): string {
+export type ProfileValidationLocale = keyof typeof messages;
+
+export function profileValidationMessage(locale: ProfileValidationLocale, reason: keyof typeof messages.en): string {
   return messages[locale][reason];
 }
 

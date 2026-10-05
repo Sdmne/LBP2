@@ -8,7 +8,7 @@ import {
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { profileLanguageCodes } from "./profile-language-values";
-import { profileConstraintMessage, profileValidationMessage } from "./profile-validation";
+import { profileConstraintMessage, profileValidationMessage, type ProfileValidationLocale } from "./profile-validation";
 import { createApiClient } from "./api";
 import {
   MemberError,
@@ -820,7 +820,7 @@ const normalized = (d: Draft) =>
     donorType: [...d.donorType].sort(),
     lookingFor: [...d.lookingFor].sort(),
   });
-export function MemberProfileEdit({ locale }: Props) {
+export function MemberProfileEdit({ locale, routeLocale = locale }: Props & { routeLocale?: ProfileValidationLocale }) {
   const member = useMemberResource<Row>("/member/me", true),
     options = useMemberResource<Row>(
       "/member/catalog/filter-options?limit=60",
@@ -836,6 +836,7 @@ export function MemberProfileEdit({ locale }: Props) {
       key={locale}
       member={member.data}
       locale={locale}
+      routeLocale={routeLocale}
       countries={options.data}
       countryError={options.error !== undefined}
       retryCountries={options.retry}
@@ -845,12 +846,14 @@ export function MemberProfileEdit({ locale }: Props) {
 function ProfileEditor({
   member,
   locale,
+  routeLocale,
   countries,
   countryError,
   retryCountries,
 }: {
   member: Row;
   locale: Locale;
+  routeLocale: ProfileValidationLocale;
   countries?: Row;
   countryError: boolean;
   retryCountries: () => void;
@@ -954,7 +957,7 @@ function ProfileEditor({
     );
     setInvalidFields(missing);
     if (missing.length) {
-      setError(profileValidationMessage(locale, "required"));
+      setError(profileValidationMessage(routeLocale, "required"));
       form.current
         ?.querySelector<HTMLElement>(
           `[name="${missing[0]}"], [data-profile-picker="${missing[0]}"] button`,
@@ -976,7 +979,7 @@ function ProfileEditor({
       (height !== null && (height < 80 || height > 250)) ||
       (weight !== null && (weight < 25 || weight > 350))
     ) {
-      setError(profileValidationMessage(locale, "measurements"));
+      setError(profileValidationMessage(routeLocale, "measurements"));
       return;
     }
     saving.current = true;
@@ -996,7 +999,7 @@ function ProfileEditor({
         languages: draft.languages,
       });
       notifyMemberChanged();
-      navigate(`/${locale}/profile`);
+      navigate(`/${routeLocale}/profile`);
     } catch (err) {
       setError(
         toolsError(
@@ -1027,7 +1030,7 @@ function ProfileEditor({
       </button>
     ),
     cancel = (
-      <Link className="soft-button linklike" to={`/${locale}/profile`}>
+      <Link className="soft-button linklike" to={`/${routeLocale}/profile`}>
         {c.cancel}
       </Link>
     );
@@ -1042,6 +1045,7 @@ function ProfileEditor({
         name={key}
         aria-invalid={invalidFields.includes(key) || undefined}
         value={draft[key]}
+        aria-describedby={invalidFields.includes(key) ? "profile-edit-error" : undefined}
         onChange={(e) => set(key, e.target.value)}
         {...props}
       />
@@ -1082,11 +1086,12 @@ function ProfileEditor({
               ]);
             const first = form.current?.querySelector<HTMLInputElement>("input:invalid");
             if (!first || first === control) {
-              setError(profileConstraintMessage(locale, control.name, control.validity));
+              setError(profileConstraintMessage(routeLocale, control.name, control.validity));
               control.focus();
             }
           }}
         >
+          {error && <p id="profile-edit-error" className="tools-error" role="alert">{error}</p>}
           <section className="edit-section">
             <h2>{c.basicInfo}</h2>
             <div className="edit-grid">
@@ -1351,11 +1356,6 @@ function ProfileEditor({
               </label>
             </div>
           </section>
-          {error && (
-            <p className="tools-error" role="alert">
-              {error}
-            </p>
-          )}
           <div className="form-actions edit-bottom-actions">
             {cancel}
             {save}

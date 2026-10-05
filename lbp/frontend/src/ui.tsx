@@ -18412,7 +18412,7 @@ export function WebApp() {
         path="/:locale/profile"
         element={content(<MemberAccount session={session} locale={memberLocaleOf(locale)} onLogout={logout} />)}
       />
- <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={legacyLocaleOf(localeOf())} />)} />
+      <Route path="/:locale/profile/edit" element={content(<MemberProfileEdit locale={legacyLocaleOf(localeOf())} routeLocale={localeOf()} />)} />
  <Route path="/:locale/profile/photos" element={content(<MemberProfilePhotos locale={legacyLocaleOf(localeOf())} />)} />
       <Route
         path="/:locale/profile/verification"
