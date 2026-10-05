@@ -7,6 +7,7 @@ import { Feather } from "@expo/vector-icons";
 import { fetchVerificationStatus, startVerification } from "../api/verification";
 import { fetchPhotos } from "../api/photos";
 import { ApiError } from "../api/client";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 import type { VerificationStatus } from "../api/types";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
@@ -137,7 +138,7 @@ export default function VerificationScreen() {
         <>
           {primaryPhotoUrl ? (
             <View style={styles.photoWrap}>
-              <Image source={{ uri: primaryPhotoUrl }} style={styles.photo} />
+              <Image source={profilePhotoSource(primaryPhotoUrl)} style={styles.photo} />
               <Text style={styles.photoLabel}>{t("verification.yourMainPhoto")}</Text>
             </View>
           ) : null}

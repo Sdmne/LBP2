@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { useMyAvatarUrl } from "../hooks/useMyAvatar";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 
 // Prototype's .app-header (see lbp-prototype-source.html): a small brand
 // mark + optional title on the left, a gradient initial-letter avatar on
@@ -75,7 +76,7 @@ export default function AppHeader({ title, onAvatarPress, badgeCount, onBackPres
             to make an arbitrary view tappable in RN. */}
         <Pressable hitSlop={8} onPress={onAvatarPress}>
           {avatarUrl && avatarUrl !== failedAvatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={styles.avatar} onError={() => setFailedAvatarUrl(avatarUrl)} />
+            <Image source={profilePhotoSource(avatarUrl)} style={styles.avatar} onError={() => setFailedAvatarUrl(avatarUrl)} />
           ) : (
             <LinearGradient
               colors={["#4e9bff", "#f070a9"]}
