@@ -8560,6 +8560,8 @@ def release_account_identity_for_deletion(
     cursor,
     profile_id: int,
     local_user_ids: list[int] | None = None,
+    *,
+    require_pending: bool = False,
 ) -> list[int]:
     """Release all sign-in identifiers for a profile pending deletion.
 
@@ -8568,6 +8570,13 @@ def release_account_identity_for_deletion(
     window.  The retained profile is still later removed by the deletion
     worker, but it can no longer be found by either authentication path.
     """
+    if require_pending:
+        cursor.execute("SELECT status FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
+        profile = cursor.fetchone()
+        if not profile or profile.get("status") not in {
+            ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS,
+        }:
+            return []
     if local_user_ids is None:
         cursor.execute("SELECT id FROM local_users WHERE profile_id = %s", (profile_id,))
         local_user_ids = [int(row["id"]) for row in cursor.fetchall()]
@@ -8615,6 +8624,7 @@ def member_account_deletion(
         "profileId": profile_id,
         "userId": user["id"],
         "email": user["email"],
+        "emailVerified": user.get("email_verified_at") is not None,
         "reason": reason,
         "details": details,
         "requestedAt": now_utc().isoformat(),
@@ -19057,6 +19067,89 @@ def remove_deleted_profile_files(storage_keys: list[str]) -> None:
             logger.exception("Could not remove deleted profile file")
 
 
+def restore_retained_account(cursor, profile_id: int) -> bool:
+    cursor.execute(
+        "SELECT status, email FROM profiles WHERE id = %s FOR UPDATE",
+        (profile_id,),
+    )
+    profile = cursor.fetchone()
+    if not profile or str(profile.get("status") or "").upper() not in {
+        ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS, "DELETED",
+    }:
+        return False
+
+    cursor.execute(
+        """
+        SELECT id, status, data FROM app_entities
+        WHERE entity_type = 'account_deletion_request' AND source_key = %s
+        ORDER BY id DESC LIMIT 1 FOR UPDATE
+        """,
+        (f"local-{profile_id}",),
+    )
+    request = cursor.fetchone()
+    if not request or request.get("status") != "PENDING":
+        raise HTTPException(status_code=409, detail="No pending account deletion request is available for restoration")
+    data = as_dict(request.get("data"))
+    if int_or_none(data.get("profileId")) != profile_id:
+        raise HTTPException(status_code=409, detail="The deletion request does not belong to this profile")
+    try:
+        deadline = datetime.fromisoformat(str(data.get("deleteAfter") or "").replace("Z", "+00:00"))
+        if deadline.tzinfo is not None:
+            deadline = deadline.astimezone(timezone.utc).replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=409, detail="The account restoration deadline is unavailable") from None
+    current_time = now_utc()
+    if current_time.tzinfo is not None:
+        current_time = current_time.astimezone(timezone.utc).replace(tzinfo=None)
+    if deadline <= current_time:
+        raise HTTPException(status_code=409, detail="The account restoration window has expired")
+
+    cursor.execute(
+        "SELECT id, email FROM local_users WHERE profile_id = %s ORDER BY id FOR UPDATE",
+        (profile_id,),
+    )
+    users = cursor.fetchall()
+    if len(users) != 1 or int_or_none(data.get("userId")) != users[0]["id"]:
+        raise HTTPException(status_code=409, detail="The retained account identity cannot be restored safely")
+    email = normalize_email(str(data.get("email") or ""))
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or email.endswith(f"@{DELETED_ACCOUNT_EMAIL_DOMAIN}"):
+        raise HTTPException(status_code=409, detail="The original account email is unavailable")
+    user_id = users[0]["id"]
+    retained_email = normalize_email(str(users[0].get("email") or ""))
+    if retained_email not in {email, f"deleted-user-{user_id}@{DELETED_ACCOUNT_EMAIL_DOMAIN}"}:
+        raise HTTPException(status_code=409, detail="The retained sign-in identity does not match the deletion request")
+    cursor.execute(
+        "SELECT id FROM local_users WHERE LOWER(email) = %s AND id <> %s LIMIT 1 FOR UPDATE",
+        (email, user_id),
+    )
+    if cursor.fetchone():
+        raise HTTPException(status_code=409, detail="The original email is already used by another account")
+    cursor.execute(
+        "SELECT id FROM profiles WHERE LOWER(email) = %s AND id <> %s LIMIT 1 FOR UPDATE",
+        (email, profile_id),
+    )
+    if cursor.fetchone():
+        raise HTTPException(status_code=409, detail="The original email is already used by another profile")
+
+    try:
+        cursor.execute(
+            """
+            UPDATE local_users SET email = %s, status = 'ACTIVE',
+                email_verified_at = CASE WHEN %s THEN COALESCE(email_verified_at, UTC_TIMESTAMP()) ELSE email_verified_at END,
+                updated_at = UTC_TIMESTAMP() WHERE id = %s AND profile_id = %s
+            """,
+            (email, data.get("emailVerified") is True, user_id, profile_id),
+        )
+        cursor.execute("UPDATE profiles SET email = %s WHERE id = %s", (email, profile_id))
+        cursor.execute(
+            "UPDATE app_entities SET status = 'CANCELLED', updated_at = UTC_TIMESTAMP() WHERE id = %s AND status = 'PENDING'",
+            (request["id"],),
+        )
+    except psycopg.errors.UniqueViolation:
+        raise HTTPException(status_code=409, detail="The original email is already used by another account") from None
+    return True
+
+
 def purge_due_account_deletions() -> None:
     """Permanently remove self-service deletion requests after their retention window."""
     deleted_storage_keys: list[str] = []
@@ -19074,7 +19167,7 @@ def purge_due_account_deletions() -> None:
             (ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS),
         )
         for pending_profile in cursor.fetchall():
-            release_account_identity_for_deletion(cursor, int(pending_profile["id"]))
+            release_account_identity_for_deletion(cursor, int(pending_profile["id"]), require_pending=True)
         cursor.execute(
             """
             SELECT data
@@ -19098,11 +19191,12 @@ def purge_due_account_deletions() -> None:
             except ValueError:
                 continue
             if profile_id and due_at <= current_time:
-                cursor.execute("SELECT status FROM profiles WHERE id = %s LIMIT 1", (profile_id,))
+                cursor.execute("SELECT status FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE", (profile_id,))
                 profile = cursor.fetchone()
                 if str((profile or {}).get("status") or "").upper() in {
                     ACCOUNT_DELETION_PENDING_STATUS,
                     ACCOUNT_DELETION_LEGACY_PENDING_STATUS,
+                    "DELETED",
                 }:
                     due_profile_ids.append(profile_id)
         for profile_id in due_profile_ids:
@@ -19228,6 +19322,9 @@ def admin_update_item(
             resolved_item_id: int | str = item_id
             if view in {"users", "profiles"}:
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
+                if str(values.get("status") or "").upper() == "ACTIVE":
+                    values["status"] = "ACTIVE"
+                    restore_retained_account(cursor, int(resolved_item_id))
             elif not str(item_id).isdigit():
                 raise HTTPException(status_code=422, detail="Item id must be numeric")
             params = [*values.values(), resolved_item_id]
