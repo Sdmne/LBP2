@@ -180,8 +180,10 @@ export function MarketingFeature() {
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     let live = true;
+    const controller = new AbortController();
     setResult(null);
     setError("");
     const params = new URLSearchParams({ page: String(page), pageSize: "50" });
@@ -192,7 +194,7 @@ export function MarketingFeature() {
         total: number;
         page: number;
         totalPages: number;
-      }>(`/admin/marketing/campaigns?${params}`)
+      }>(`/admin/marketing/campaigns?${params}`, { signal: controller.signal })
       .then((value) => live && setResult(value))
       .catch(
         (reason: unknown) =>
@@ -201,8 +203,9 @@ export function MarketingFeature() {
       );
     return () => {
       live = false;
+      controller.abort();
     };
-  }, [status, page]);
+  }, [status, page, refresh]);
   const rows = result?.items ?? [];
   return (
     <>
@@ -295,7 +298,10 @@ export function MarketingFeature() {
           <div className="campaign-empty">Loading campaigns…</div>
         )}
         {error && (
-          <div className="campaign-empty campaign-load-error">{error}</div>
+          <div className="campaign-empty campaign-load-error" role="alert">
+            <p>{error}</p>
+            <button type="button" onClick={() => setRefresh(value => value + 1)}>Try again</button>
+          </div>
         )}
         {result && !rows.length && (
           <div className="campaign-empty">
@@ -330,12 +336,17 @@ export function MarketingCampaignPage({ isNew = false }: { isNew?: boolean }) {
   const { campaignId } = useParams();
   const [campaign, setCampaign] = useState<MarketingCampaign | null>(null);
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     if (isNew || !campaignId) return;
     let live = true;
+    const controller = new AbortController();
+    setCampaign(null);
+    setError("");
     api
       .get<MarketingCampaign>(
         `/admin/marketing/campaigns/${encodeURIComponent(campaignId)}`,
+        { signal: controller.signal },
       )
       .then((value) => live && setCampaign(value))
       .catch(
@@ -344,8 +355,9 @@ export function MarketingCampaignPage({ isNew = false }: { isNew?: boolean }) {
       );
     return () => {
       live = false;
+      controller.abort();
     };
-  }, [campaignId, isNew]);
+  }, [campaignId, isNew, refresh]);
   useEffect(() => {
     if (
       !campaignId ||
@@ -353,22 +365,32 @@ export function MarketingCampaignPage({ isNew = false }: { isNew?: boolean }) {
       !["SCHEDULED", "SENDING"].includes(campaign.status)
     )
       return;
+    const controller = new AbortController();
+    let pending = false;
     const timer = window.setInterval(() => {
+      if (pending) return;
+      pending = true;
       api
         .get<MarketingCampaign>(
           `/admin/marketing/campaigns/${encodeURIComponent(campaignId)}`,
+          { signal: controller.signal },
         )
-        .then(setCampaign)
-        .catch(() => undefined);
+        .then(value => { if (!controller.signal.aborted) setCampaign(value); })
+        .catch(() => undefined)
+        .finally(() => { pending = false; });
     }, 3000);
-    return () => window.clearInterval(timer);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
   }, [campaignId, campaign?.status]);
   if (isNew) return <CampaignEditor />;
   if (error)
     return (
-      <section className="campaign-state">
+      <section className="campaign-state" role="alert">
         <h1>Campaign unavailable</h1>
         <p>{error}</p>
+        <button type="button" onClick={() => setRefresh(value => value + 1)}>Try again</button>
         <Link to="/marketing">Back to Marketing</Link>
       </section>
     );

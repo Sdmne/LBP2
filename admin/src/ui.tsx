@@ -6888,20 +6888,28 @@ function StaticPageRoute({ create = false }: { create?: boolean }) {
       : null,
   );
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     if (create) return;
+    const controller = new AbortController();
+    setRows(null);
+    setError("");
     api
-      .get<ListResponse>("/admin/list/static-pages?limit=200&offset=0")
+      .get<ListResponse>("/admin/list/static-pages?limit=200&offset=0", { signal: controller.signal })
       .then((result) => {
+        if (controller.signal.aborted) return;
         const matches = result.items.filter(
           (item) => String(item.slug ?? "") === decodeURIComponent(slug),
         );
         if (!matches.length) setError("Page not found.");
         else setRows(matches);
       })
-      .catch(() => setError("Could not load this page."));
-  }, [create, slug]);
-  if (error) return <p className="error">{error}</p>;
+      .catch(() => {
+        if (!controller.signal.aborted) setError("Could not load this page.");
+      });
+    return () => controller.abort();
+  }, [create, slug, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   if (!rows) return <p className="loading-inline">Loading page…</p>;
   return (
     <StaticPageEditor
@@ -6916,12 +6924,21 @@ function StaticPageRoute({ create = false }: { create?: boolean }) {
 function DeletionFeedback() {
   const [result, setResult] = useState<ListResponse | null>(null);
   const [days, setDays] = useState("30");
+  const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
+    const controller = new AbortController();
+    setResult(null);
+    setError("");
     api
-      .get<ListResponse>("/admin/list/deletion-feedback?limit=200&offset=0")
-      .then(setResult)
-      .catch(() => setResult({ items: [], total: 0, limit: 200, offset: 0 }));
-  }, []);
+      .get<ListResponse>("/admin/list/deletion-feedback?limit=200&offset=0", { signal: controller.signal })
+      .then(value => { if (!controller.signal.aborted) setResult(value); })
+      .catch(() => {
+        if (!controller.signal.aborted) setError("Could not load deletion feedback.");
+      });
+    return () => controller.abort();
+  }, [refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   const profileTypes: Array<[string, string]> = [
     ["GayCouple", "Gay Couple"],
     ["HeteroCouple", "Hetero Couple"],
@@ -8686,7 +8703,7 @@ function VerificationDetail() {
           <AdminIcon name="arrowLeft" /> Back to Verifications
         </Link>
         {error ? (
-          <p className="error">{error}</p>
+          <LoadError message={error} onRetry={() => setReload(value => value + 1)} />
         ) : (
           <p className="loading-inline">Loading…</p>
         )}
@@ -11682,7 +11699,7 @@ function UserTabContent({
     const messages = supportMessagesRef.current;
     if (tab === "support" && messages) messages.scrollTop = messages.scrollHeight;
   }, [tab, rows]);
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <LoadError message={error} onRetry={onReload} />;
   const nested = (row: RecordValue, key = "data") =>
     row[key] && typeof row[key] === "object" ? (row[key] as RecordValue) : {};
   const detailDeviceDate = (value: unknown, utc = false) => {
@@ -12394,7 +12411,7 @@ function UserDetail() {
       cancelled = true;
     };
   }, [id, tab, reload]);
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <LoadError message={error} onRetry={() => setReload(value => value + 1)} />;
   if (!detail) return <p className="loading-inline">Loading user…</p>;
   const profile = (detail.profile ?? {}) as RecordValue;
   const counts = (detail.counts ?? {}) as RecordValue;
@@ -12945,18 +12962,25 @@ function ClinicDetail() {
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const load = () => {
+  const [refresh, setRefresh] = useState(0);
+  const load = (signal?: AbortSignal) => {
     setData(null);
-    api
-      .get<RecordValue>(`/admin/clinics/${encodeURIComponent(id)}/overview`)
+    setError("");
+    return api
+      .get<RecordValue>(`/admin/clinics/${encodeURIComponent(id)}/overview`, { signal })
       .then((result) => {
+        if (signal?.aborted) return;
         setData(result);
         setDraft((result.clinic ?? {}) as RecordValue);
       })
-      .catch(() => setError("Could not load clinic details."));
+      .catch(() => { if (!signal?.aborted) setError("Could not load clinic details."); });
   };
-  useEffect(load, [id]);
-  if (error) return <p className="error">{error}</p>;
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [id, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   if (!data) return <p className="loading-inline">Loading clinic…</p>;
   const clinic = (data.clinic ?? {}) as RecordValue;
   const serviceGroups = (data.serviceGroups ?? {}) as Record<
@@ -13553,18 +13577,25 @@ function LawyerDetail() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () =>
-    api
-      .get<RecordValue>(`/admin/lawyers/${encodeURIComponent(id)}/overview`)
+  const [refresh, setRefresh] = useState(0);
+  const load = (signal?: AbortSignal) => {
+    setError("");
+    return api
+      .get<RecordValue>(`/admin/lawyers/${encodeURIComponent(id)}/overview`, { signal })
       .then((result) => {
+        if (signal?.aborted) return;
         setData(result);
         setDraft((result.lawyer ?? {}) as RecordValue);
       })
-      .catch(() => setError("Could not load lawyer details."));
+      .catch(() => { if (!signal?.aborted) setError("Could not load lawyer details."); });
+  };
   useEffect(() => {
-    void load();
-  }, [id]);
-  if (error) return <p className="error">{error}</p>;
+    const controller = new AbortController();
+    setData(null);
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [id, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   if (!data) return <p className="loading-inline">Loading lawyer…</p>;
   const lawyer = (data.lawyer ?? {}) as RecordValue;
   const options = (data.practiceAreaOptions ?? []) as RecordValue[];
