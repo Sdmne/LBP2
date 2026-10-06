@@ -63,6 +63,7 @@ from firebase_admin import auth as firebase_auth
 from firebase_admin import credentials as firebase_credentials
 from auth_security import hash_password, password_needs_rehash, token_hash, verify_password
 from cookie_security import CookieCipher, decode_consent_level, encode_consent_level
+from content_security import sanitize_content_values
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -532,7 +533,10 @@ def fetch_count(cursor, table: str) -> int:
 
 
 def normalize_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in row.items()}
+    result = {key: value for key, value in row.items()}
+    if "body_html" in result or "bodyHtml" in result:
+        result = sanitize_content_values(result)
+    return result
 
 
 def json_value(value: Any) -> Any:
@@ -18905,6 +18909,8 @@ ADMIN_MUTATION_TABLES: dict[str, dict[str, Any]] = {
 
 
 def clean_mutation_values(view: str, values: dict[str, Any]) -> dict[str, Any]:
+    if view in {"articles", "static-pages"}:
+        values = sanitize_content_values(values)
     allowed = ADMIN_MUTATION_TABLES[view]["fields"]
     cleaned: dict[str, Any] = {}
     for key, value in values.items():
@@ -19428,7 +19434,7 @@ def admin_create_item(
 ):
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
-    values = payload.values
+    values = sanitize_content_values(payload.values) if view in {"articles", "static-pages"} else payload.values
     with db_cursor() as (conn, cursor):
         if view == "articles":
             cursor.execute(

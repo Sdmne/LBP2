@@ -27,6 +27,7 @@ import {
 } from "react-router-dom";
 import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
+import { sanitizeRichHtml } from "./rich-html";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
@@ -1375,9 +1376,9 @@ function RichTextEditor({
   const command = (name: string, commandValue?: string) => {
     editorRef.current?.focus();
     document.execCommand(name, false, commandValue);
-    if (editorRef.current) onChange(editorRef.current.innerHTML);
+    if (editorRef.current) onChange(sanitizeRichHtml(editorRef.current.innerHTML));
   };
-  const insertHtml = (html: string) => command("insertHTML", html);
+  const insertHtml = (html: string) => command("insertHTML", sanitizeRichHtml(html));
   const insertImage = (file?: File) => {
     if (!file) return;
     const reader = new FileReader();
@@ -1586,8 +1587,24 @@ function RichTextEditor({
           className="article-content-editor"
           contentEditable
           suppressContentEditableWarning
-          onInput={(event) => onChange(event.currentTarget.innerHTML)}
-          dangerouslySetInnerHTML={{ __html: value }}
+          onInput={(event) => onChange(sanitizeRichHtml(event.currentTarget.innerHTML))}
+          onPaste={(event) => {
+            event.preventDefault();
+            const html = event.clipboardData.getData("text/html");
+            if (html) insertHtml(html);
+            else command("insertText", event.clipboardData.getData("text/plain"));
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const image = Array.from(event.dataTransfer.files).find((file) => file.type.startsWith("image/"));
+            if (image && allowImages) insertImage(image);
+            else {
+              const html = event.dataTransfer.getData("text/html");
+              if (html) insertHtml(html);
+              else command("insertText", event.dataTransfer.getData("text/plain"));
+            }
+          }}
+          dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(value) }}
           data-placeholder={placeholder}
         />
       )}

@@ -38,6 +38,7 @@ import {
   type SocialProvider,
 } from "./firebase-auth";
 import { NotFoundPage } from "./not-found";
+import { sanitizeRichHtml } from "./rich-html";
 
 const api = createApiClient("/api");
 type Row = Record<string, unknown>;
@@ -11180,7 +11181,7 @@ function Article() {
       {Boolean(coverUrl) && <img className="article-page-cover" src={asText(coverUrl)} alt={asText(article.title)} />}
       <div
         className="article-body"
-        dangerouslySetInnerHTML={{ __html: referenceBodyHtml }}
+        dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(referenceBodyHtml) }}
       />
       {(previous || next) && (
         <nav className="article-navigation" aria-label={copy.navigationLabel}>
@@ -11598,7 +11599,7 @@ function ContentPage({ forcedSlug }: { forcedSlug?: string } = {}) {
       <h1>{asText(page.title)}</h1>
       <div
         className="article-body"
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(html) }}
       />
     </article>
   );
