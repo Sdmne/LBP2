@@ -11,7 +11,25 @@ const messages = {
 
 export type ProfileValidationLocale = keyof typeof messages;
 
-export function profileValidationMessage(locale: ProfileValidationLocale, reason: keyof typeof messages.en): string {
+const citySelectionMessages: Record<ProfileValidationLocale, string> = {
+  en: "Select a city from the list.",
+  ru: "Выберите город из списка.",
+  es: "Selecciona una ciudad de la lista.",
+  pt: "Selecione uma cidade da lista.",
+  fr: "Sélectionnez une ville dans la liste.",
+  de: "Wählen Sie eine Stadt aus der Liste aus.",
+  it: "Seleziona una città dall’elenco.",
+  pl: "Wybierz miasto z listy.",
+};
+type ProfileLocation = { country: string; city: string; cityPlaceId?: string };
+export function profileCitySelectionValid(location: ProfileLocation, original: ProfileLocation): boolean {
+  if (!location.city.trim() || !location.country.trim()) return false;
+  if (location.cityPlaceId?.trim()) return true;
+  return location.city.trim() === original.city.trim()
+    && location.country.trim().toUpperCase() === original.country.trim().toUpperCase();
+}
+export function profileValidationMessage(locale: ProfileValidationLocale, reason: keyof typeof messages.en | "citySelection"): string {
+  if (reason === "citySelection") return citySelectionMessages[locale];
   return messages[locale][reason];
 }
 

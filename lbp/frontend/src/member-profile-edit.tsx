@@ -8,7 +8,7 @@ import {
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { profileLanguageCodes } from "./profile-language-values";
-import { profileConstraintMessage, profileValidationMessage, type ProfileValidationLocale } from "./profile-validation";
+import { profileCitySelectionValid, profileConstraintMessage, profileValidationMessage, type ProfileValidationLocale } from "./profile-validation";
 import { createApiClient } from "./api";
 import {
   MemberError,
@@ -963,6 +963,12 @@ function ProfileEditor({
           `[name="${missing[0]}"], [data-profile-picker="${missing[0]}"] button`,
         )
         ?.focus();
+      return;
+    }
+    if (!profileCitySelectionValid(draft, JSON.parse(initial.current) as Draft)) {
+      setInvalidFields(["city"]);
+      setError(profileValidationMessage(routeLocale, "citySelection"));
+      form.current?.querySelector<HTMLInputElement>('[name="city"]')?.focus();
       return;
     }
     const height = imperial
