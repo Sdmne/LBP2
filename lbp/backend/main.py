@@ -3284,6 +3284,15 @@ def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     data = public_safe_data(row.get("data"))
     data = data if isinstance(data, dict) else {}
+    verified = profile_has_verified_badge({**row, "data": data})
+    recorded_status = row.get("verificationState") if "verificationState" in row else data.get("verificationStatus")
+    verification_status = str(recorded_status or "NOT_STARTED").strip().upper()
+    if verified:
+        verification_status = "APPROVED"
+    elif verification_status in {"APPROVED", "VERIFIED"}:
+        verification_status = "NOT_STARTED"
+    data["isVerified"] = verified
+    data["verificationStatus"] = verification_status
     return {
         "id": row.get("id"),
         "displayName": row.get("displayName") or row.get("display_name"),
@@ -3293,7 +3302,7 @@ def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
         "city": row.get("city") or data.get("city"),
         "avatarUrl": row.get("avatarUrl") or data.get("avatarUrl"),
         "profileType": data.get("profileType") or row.get("role"),
-        "isVerified": profile_has_verified_badge({**row, "data": data}),
+        "isVerified": verified,
         "isVideoVerified": data.get("isVideoVerified"),
         "isPremium": data.get("isPremium"),
         "likedByViewer": row.get("likedByViewer"),
@@ -3429,7 +3438,16 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
  OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')
  )
  )
- ) AS approvedVerification,
+            ) AS approvedVerification,
+            (
+              SELECT verification.status FROM app_entities verification
+              WHERE verification.entity_type = 'verification'
+                AND (
+                  CAST(JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.profileId')) AS CHAR) = CAST(profiles.id AS CHAR)
+                  OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id'))
+                )
+              ORDER BY verification.created_at DESC, verification.id DESC LIMIT 1
+            ) AS verificationState,
  data,
                created_at,
                updated_at
