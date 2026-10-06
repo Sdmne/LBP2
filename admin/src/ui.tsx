@@ -2619,20 +2619,43 @@ function ProfileDonutPanel({
   );
 }
 
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div role="alert">
+      <p className="error">{message}</p>
+      <button type="button" onClick={onRetry}>Try again</button>
+    </div>
+  );
+}
+
 function Dashboard({ onStatsLoaded }: { onStatsLoaded?: (stats: RecordValue) => void }) {
   const [stats, setStats] = useState<RecordValue | null>(null);
   const [tab, setTab] = useState("users");
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
+    let live = true;
+    const controller = new AbortController();
+    setError("");
     api
-      .get<RecordValue>("/admin/stats")
+      .get<RecordValue>("/admin/stats", { signal: controller.signal })
       .then((payload) => {
+        if (!live) return;
         setStats(payload);
         onStatsLoaded?.(payload);
       })
-      .catch(() => setError("Could not load dashboard metrics."));
-  }, [onStatsLoaded]);
-  if (error) return <p className="error">{error}</p>;
+      .catch(() => {
+        if (live && !controller.signal.aborted) setError("Could not load dashboard metrics.");
+      });
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [onStatsLoaded, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => {
+    setError("");
+    setRefresh(value => value + 1);
+  }} />;
   if (!stats) return <p className="loading-inline">Loading dashboard…</p>;
   const counts = (stats.counts ?? {}) as RecordValue;
   const dashboard = (stats.dashboard ?? {}) as RecordValue;
@@ -7058,6 +7081,7 @@ function GenericList({ view }: { view: string }) {
   const loadedView = useRef(view);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const lastRequestedSearch = useRef({ view, isPartnerUsers, query: "" });
   const [offset, setOffset] = useState(0);
   const [filters, setFilters] = useState<Record<string, string>>(() =>
     isPartnerUsers
@@ -7201,22 +7225,37 @@ function GenericList({ view }: { view: string }) {
       setResult(null);
     }
     setError("");
+    const controller = new AbortController();
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
     });
-    if (query.trim()) params.set("q", query.trim());
+    const search = query.trim();
+    if (search) params.set("q", search);
     Object.entries(filters).forEach(([key, value]) => {
       if (value) params.set(key, value);
     });
-    api
-      .get<ListResponse>(`/admin/list/${view}?${params}`)
-      .then((data) => live && setResult(data))
-      .catch(() => live && setError("Could not load this section."));
+    const previous = lastRequestedSearch.current;
+    const delay = search && previous.view === view &&
+      previous.isPartnerUsers === isPartnerUsers && previous.query !== search
+      ? 300 : 0;
+    const load = () => {
+      lastRequestedSearch.current = { view, isPartnerUsers, query: search };
+      api
+        .get<ListResponse>(`/admin/list/${view}?${params}`, { signal: controller.signal })
+        .then((data) => live && setResult(data))
+        .catch(() => {
+          if (live && !controller.signal.aborted) setError("Could not load this section.");
+        });
+    };
+    const timer = delay ? window.setTimeout(load, delay) : undefined;
+    if (!delay) load();
     return () => {
       live = false;
+      window.clearTimeout(timer);
+      controller.abort();
     };
-  }, [view, query, offset, filters, refresh]);
+  }, [view, isPartnerUsers, query, offset, filters, refresh]);
   const columns = useMemo(() => columnsByView[view] ?? [], [view]);
   const items = result?.items ?? [];
   const total = result?.total ?? 0;
@@ -7484,7 +7523,7 @@ function GenericList({ view }: { view: string }) {
     }
   };
   if (view === "subscriptions" && (error || summaryError)) {
-    return <div role="alert"><p className="error">{error || summaryError}</p><button type="button" onClick={() => setRefresh(value => value + 1)}>Try again</button></div>;
+    return <LoadError message={error || summaryError} onRetry={() => setRefresh(value => value + 1)} />;
   }
   if (view === "subscriptions" && (summaryLoading || result === null)) {
     return <p className="loading-inline" role="status" aria-label="Loading subscriptions">Loading subscriptions…</p>;
@@ -7942,7 +7981,7 @@ function GenericList({ view }: { view: string }) {
         </section>
       )}
       {error ? (
-        <p className="error">{error}</p>
+        <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />
       ) : (
         <>
           {total > limit &&
