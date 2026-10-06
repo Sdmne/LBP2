@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { BlurView } from "expo-blur";
 import { Feather } from "@expo/vector-icons";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -109,10 +109,7 @@ export default function FiltersScreen({ navigation, route }: Props) {
       setPicker(field);
       return;
     }
-    Alert.alert(t("filters.premiumLockedTitle"), t("filters.premiumLockedBody"), [
-      { text: t("filters.premiumLockedCancel"), style: "cancel" },
-      { text: t("filters.premiumLockedUpgrade"), onPress: () => navigation.navigate("Subscription") },
-    ]);
+    navigation.navigate("Subscription");
   }
 
   function applyAndClose() {
