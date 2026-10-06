@@ -1,5 +1,7 @@
 import {
   FormEvent,
+  lazy,
+  Suspense,
   type CSSProperties,
   type ReactNode,
   useEffect,
@@ -39,6 +41,11 @@ import {
 } from "./firebase-auth";
 import { NotFoundPage } from "./not-found";
 import { sanitizeRichHtml } from "./rich-html";
+
+const MarkdownContent = lazy(() => import("./ai-markdown"));
+function AiMarkdown({ text }: { text: string }) {
+  return <Suspense fallback={<div style={{ whiteSpace: "pre-wrap" }}>{text}</div>}><MarkdownContent text={text} /></Suspense>;
+}
 
 const api = createApiClient("/api");
 type Row = Record<string, unknown>;
@@ -9630,7 +9637,7 @@ function AiAdvisor({ session }: { session: Session }) {
           {weeklyInsightStatus === "error" && (
             <p className="error">{text.weeklyError}</p>
           )}
-          {weeklyInsightStatus === "ok" && <p>{weeklyInsight}</p>}
+          {weeklyInsightStatus === "ok" && <AiMarkdown text={weeklyInsight} />}
         </div>
       )}
       <div className="list-card advisor-card">
@@ -9656,7 +9663,7 @@ function AiAdvisor({ session }: { session: Session }) {
                 key={`${message.role}-${message.at}-${index}`}
                 className={`message-bubble ${message.role === "user" ? "advisor-bubble-user" : "advisor-bubble-assistant"}`}
               >
-                <span>{message.text}</span>
+                {message.role === "user" ? <span>{message.text}</span> : <AiMarkdown text={message.text} />}
               </div>
             ))
           )}
@@ -11473,7 +11480,7 @@ function AskAiTool() {
             exchanges.map((exchange, index) => (
               <div key={index} className="ask-ai-exchange">
                 <div className="message-bubble advisor-bubble-user"><span>{exchange.question}</span></div>
-                {exchange.answer && <div className="message-bubble advisor-bubble-assistant"><span>{exchange.answer}</span></div>}
+                {exchange.answer && <div className="message-bubble advisor-bubble-assistant"><AiMarkdown text={exchange.answer} /></div>}
                 {exchange.error && <p className="error">{exchange.error}</p>}
               </div>
             ))
@@ -11565,7 +11572,7 @@ function AgreementDraftTool() {
             <h2>{text.yourDraftHeading}</h2>
             <button type="button" className="secondary" onClick={copyDraft}>{text.copyButton}</button>
           </div>
-          <div className="article-body" style={{ whiteSpace: "pre-wrap" }}>{draft}</div>
+          <div className="article-body"><AiMarkdown text={draft} /></div>
           <p className="resources-category-note">
             {text.saveNotePrefix} <Link to={`/${locale}/auth/register`}>{text.createAccountLink}</Link>.
           </p>
@@ -12745,7 +12752,7 @@ function CompatibilityQuiz() {
           {aiInsightStatus === "ok" && (
             <div className="quiz-result-card ai-reflection">
               <strong>{qt.results.aiInsightTitle}</strong>
-              <p>{aiInsight}</p>
+              <AiMarkdown text={aiInsight} />
             </div>
           )}
           {aiInsightStatus === "limited" && (
