@@ -3,7 +3,7 @@
     "name": "LetsBeParents",
     "slug": "letsbeparents-mobile",
     "scheme": "letsbeparents",
-    "version": "4.2.45",
+    "version": "4.2.46",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
@@ -36,7 +36,7 @@
     },
     "android": {
       "package": "com.letsBeParents.letsBeParents",
-      "versionCode": 45,
+      "versionCode": 46,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

@@ -261,6 +261,7 @@ export default function FiltersScreen({ navigation, route }: Props) {
       </ScrollView>
 
       <View style={[styles.applyBar, { paddingBottom: spacing.lg + insets.bottom }]}>
+        <BlurView pointerEvents="none" intensity={60} tint="light" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(250,250,250,0.55)" }]} />
         <Pressable style={styles.applyButton} onPress={applyAndClose}>
           <Text style={styles.applyButtonText}>{t("filters.apply")}</Text>
         </Pressable>
@@ -397,9 +398,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    backgroundColor: colors.bg,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
+    backgroundColor: "transparent",
   },
   applyButton: {
     height: 52,
