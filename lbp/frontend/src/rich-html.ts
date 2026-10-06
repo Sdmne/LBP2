@@ -12,7 +12,7 @@ const styleProperties = new Set([
   "padding-top", "text-align", "text-decoration", "vertical-align", "white-space", "width",
 ]);
 
-function safeUrl(value: string, kind: "link" | "image" | "frame"): boolean {
+function safeUrl(value: string, kind: "link" | "image" | "frame" | "media"): boolean {
   if (kind === "image" && rasterImage.test(value.trim())) return true;
   try {
     const url = new URL(value, document.baseURI);
@@ -21,7 +21,7 @@ function safeUrl(value: string, kind: "link" | "image" | "frame"): boolean {
         !url.username && !url.password && (!url.port || url.port === "443") &&
         /^\/embed\/[A-Za-z0-9_-]+$/.test(url.pathname);
     }
-    return (kind === "image" ? ["https:", "http:", "blob:"] : ["https:", "http:", "mailto:", "tel:"]).includes(url.protocol);
+    return (kind === "image" || kind === "media" ? ["https:", "http:", "blob:"] : ["https:", "http:", "mailto:", "tel:"]).includes(url.protocol);
   } catch {
     return false;
   }
@@ -36,8 +36,10 @@ purifier.addHook("uponSanitizeAttribute", (node, data) => {
   if (data.attrName === "href") data.keepAttr = tag === "a" && safeUrl(data.attrValue, "link");
   if (data.attrName === "src") {
     data.keepAttr = (tag === "img" && safeUrl(data.attrValue, "image")) ||
-      (tag === "iframe" && safeUrl(data.attrValue, "frame"));
+      (tag === "iframe" && safeUrl(data.attrValue, "frame")) ||
+      (["video", "audio", "source"].includes(tag) && safeUrl(data.attrValue, "media"));
   }
+  if (data.attrName === "poster") data.keepAttr = tag === "video" && safeUrl(data.attrValue, "image");
   if (data.attrName === "style") {
     const style = document.createElement("span").style;
     style.cssText = data.attrValue;
@@ -58,7 +60,7 @@ export function sanitizeRichHtml(value: string): string {
   return purifier.sanitize(value, {
     ADD_TAGS: ["iframe"],
     ADD_ATTR: ["allowfullscreen"],
-    FORBID_TAGS: ["svg", "math", "form", "input", "button", "textarea", "select", "object", "embed", "audio", "video", "source"],
+    FORBID_TAGS: ["svg", "math", "form", "input", "button", "textarea", "select", "object", "embed"],
     FORBID_ATTR: ["id", "name", "srcdoc", "srcset", "target"],
     ALLOW_DATA_ATTR: false,
   });

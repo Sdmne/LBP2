@@ -2,6 +2,7 @@
 
 import json
 import re
+from html import unescape
 from urllib.parse import urlsplit
 
 import bleach
@@ -14,6 +15,7 @@ CONTENT_TAGS = {
     "h2", "h3", "h4", "h5", "h6", "hr", "i", "iframe", "img", "li",
     "ol", "p", "pre", "s", "small", "span", "strike", "strong", "sub",
     "sup", "table", "tbody", "td", "th", "thead", "tfoot", "tr", "u", "ul",
+    "audio", "video", "source", "picture",
 }
 CONTENT_STYLES = {
     "background-color", "border", "border-color", "border-style", "border-width",
@@ -51,7 +53,7 @@ class ContentCSSSanitizer(CSSSanitizer):
         return tinycss2.serialize([token for token in tokens if token.type == "declaration" and safe_style_tokens(token.value)])
 
 
-def safe_content_url(value: str, *, image: bool = False, frame: bool = False) -> bool:
+def safe_content_url(value: str, *, image: bool = False, frame: bool = False, media: bool = False) -> bool:
     value = value.strip()
     if image and RASTER_DATA_IMAGE.fullmatch(value):
         return True
@@ -65,7 +67,7 @@ def safe_content_url(value: str, *, image: bool = False, frame: bool = False) ->
                 and parsed.port in {None, 443}
                 and re.fullmatch(r"/embed/[A-Za-z0-9_-]+", parsed.path) is not None
             )
-        return parsed.scheme.lower() in ({"", "http", "https"} if image else {"", "http", "https", "mailto", "tel"})
+        return parsed.scheme.lower() in ({"", "http", "https"} if image or media else {"", "http", "https", "mailto", "tel"})
     except ValueError:
         return False
 
@@ -85,6 +87,12 @@ def content_attribute(tag: str, name: str, value: str) -> bool:
         if name == "src":
             return safe_content_url(value, frame=True)
         return name in {"width", "height", "allowfullscreen", "loading"}
+    if tag in {"audio", "video", "source"}:
+        if name == "src":
+            return safe_content_url(value, media=True)
+        if tag == "video" and name == "poster":
+            return safe_content_url(value, image=True)
+        return name in {"controls", "preload", "loop", "muted", "playsinline", "width", "height", "type"}
     if tag in {"td", "th", "col", "colgroup"}:
         return name in {"colspan", "rowspan", "span", "scope", "width", "height"}
     if tag in {"ul", "ol", "li"}:
@@ -112,7 +120,7 @@ def sanitize_content_metadata(value):
         if isinstance(item, str) and key in HTML_FIELDS:
             result[key] = sanitize_content_html(item)
         elif isinstance(item, str) and key in TEXT_FIELDS:
-            result[key] = bleach.clean(item, tags=set(), attributes={}, strip=True, strip_comments=True)
+            result[key] = unescape(bleach.clean(unescape(item), tags=set(), attributes={}, strip=True, strip_comments=True))
         else:
             result[key] = sanitize_content_metadata(item)
     return result
