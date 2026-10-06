@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import * as Application from "expo-application";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useHeaderHeight } from "@react-navigation/elements";
 import * as WebBrowser from "expo-web-browser";
 import { fetchSettings, updateSettings } from "../api/settings";
 import { ApiError } from "../api/client";
@@ -38,6 +39,7 @@ const NOTIFICATION_KEYS: Record<string, string> = {
 export default function SettingsScreen({ navigation }: Props) {
   const { t, locale, setLocale } = useI18n();
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const [settings, setSettings] = useState<MemberSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,17 +127,21 @@ export default function SettingsScreen({ navigation }: Props) {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={colors.pink} />
-      </View>
+      <GradientBackground variant="soft">
+        <View style={[styles.center, { paddingTop: headerHeight }]}>
+          <ActivityIndicator size="large" color={colors.pink} />
+        </View>
+      </GradientBackground>
     );
   }
 
   if (error || !settings) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorText}>{error || t("settings.loadError")}</Text>
-      </View>
+      <GradientBackground variant="soft">
+        <View style={[styles.center, { paddingTop: headerHeight }]}>
+          <Text style={styles.errorText}>{error || t("settings.loadError")}</Text>
+        </View>
+      </GradientBackground>
     );
   }
 
@@ -171,7 +177,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
   return (
     <GradientBackground variant="soft">
-    <ScrollView contentContainerStyle={[styles.container, { paddingBottom: spacing.xl + insets.bottom }]}>
+    <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + spacing.md, paddingBottom: spacing.md + insets.bottom }]}>
       <Text style={styles.sectionTitle}>{t("settings.discovery")}</Text>
       <View style={styles.card}>
         <View style={styles.row}>
