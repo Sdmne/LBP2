@@ -6975,6 +6975,8 @@ def apply_profile_photo_moderation(photo_id: int, result: dict[str, Any], actor:
         if not photo:
             raise HTTPException(status_code=404, detail="Photo not found")
         profile_id = int(photo["profile_id"])
+        if str(photo.get("status") or "").upper() in {"DELETED", "REPLACED"}:
+            raise HTTPException(status_code=409, detail="Photo is no longer available for moderation")
         position = int(photo.get("position") or 0)
         public_url = str(photo.get("public_url") or "")
         avatar_url = None
@@ -6992,6 +6994,7 @@ def apply_profile_photo_moderation(photo_id: int, result: dict[str, Any], actor:
             )
             lifecycle_status = "ACTIVE"
             upload_status = "COMMITTED"
+            close_deleted_photo_moderation(cursor, profile_id=profile_id)
             if position == 0:
                 # The gallery photo and its avatar crop are separate assets. The
                 # original is committed first; a supplied crop is promoted only
@@ -7368,6 +7371,7 @@ async def member_upload_photo(
             """,
             (profile_id, position),
         )
+        close_deleted_photo_moderation(cursor, profile_id=profile_id)
         cursor.execute(
             """
             INSERT INTO profile_photos (
@@ -7560,6 +7564,7 @@ def member_delete_photo(photo_id: int, user: dict[str, Any] = Depends(require_us
             """,
             (photo_id, profile_id),
         )
+        close_deleted_photo_moderation(cursor, profile_id=profile_id)
         if deleted_position == 0 and str(photo.get("status") or "") == "ACTIVE":
             cursor.execute(
                 """
@@ -17644,6 +17649,45 @@ def admin_enrich_moderation_photo_items(cursor, items: list[dict[str, Any]]) -> 
     return items
 
 
+def close_deleted_photo_moderation(cursor, *, profile_id: int | None = None) -> int:
+    """Cancel obsolete queue entries without deleting photos, media, or review history."""
+    closed = 0
+    last_id = 0
+    while True:
+        where = "entity_type = 'moderation_photo' AND status = 'PENDING' AND id > %s"
+        params: list[Any] = [last_id]
+        if profile_id is not None:
+            where += " AND data->>'profileId' = %s"
+            params.append(str(profile_id))
+        cursor.execute(f"SELECT * FROM app_entities WHERE {where} ORDER BY id ASC LIMIT 200", params)
+        items = cursor.fetchall()
+        if not items:
+            return closed
+        last_id = int(items[-1]["id"])
+        for item in admin_enrich_moderation_photo_items(cursor, items):
+            # Missing files alone may be a temporary storage outage. Only an
+            # explicitly deleted/replaced or missing photo closes its queue entry.
+            if not item.get("isDeleted"):
+                continue
+            data = as_dict(item.get("data")).copy()
+            data.update({"decision": "CANCELLED", "reason": "PHOTO_NO_LONGER_AVAILABLE", "cancelledAt": now_utc().isoformat()})
+            cursor.execute(
+                "UPDATE app_entities SET status = 'CANCELLED', data = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND entity_type = 'moderation_photo' AND status = 'PENDING'",
+                (json.dumps(data, ensure_ascii=False), item["id"]),
+            )
+            closed += cursor.rowcount
+
+
+@app.on_event("startup")
+def reconcile_deleted_photo_moderation() -> None:
+    try:
+        with db_cursor() as (conn, cursor):
+            close_deleted_photo_moderation(cursor)
+            conn.commit()
+    except Exception:
+        logger.exception("Could not reconcile obsolete photo moderation entries")
+
+
 def admin_enrich_moderation_report_items(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     profile_ids: set[int] = set()
     parsed: list[tuple[dict[str, Any], dict[str, Any], int | None, int | None]] = []
@@ -19296,12 +19340,14 @@ def admin_update_item(
             raise HTTPException(status_code=422, detail="A rejection reason is required")
         with db_cursor() as (_, cursor):
             cursor.execute(
-                "SELECT data FROM app_entities WHERE id = %s AND entity_type = 'moderation_photo' LIMIT 1",
+                "SELECT status, data FROM app_entities WHERE id = %s AND entity_type = 'moderation_photo' LIMIT 1",
                 (numeric_item_id,),
             )
             entity = cursor.fetchone()
-        if not entity:
-            raise HTTPException(status_code=404, detail="Photo moderation item not found")
+            if not entity:
+                raise HTTPException(status_code=404, detail="Photo moderation item not found")
+            if str(entity.get("status") or "").upper() == "CANCELLED":
+                raise HTTPException(status_code=409, detail="Photo is no longer available for moderation")
         moderation_data = as_dict(entity.get("data"))
         photo_id = int_or_none(moderation_data.get("photoId"))
         if str(moderation_data.get("kind") or "") == "avatar_crop":
