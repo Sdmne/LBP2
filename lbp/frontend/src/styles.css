@@ -3327,6 +3327,7 @@ body {
 .resources-routes-grid {
   display: grid;
   flex: none;
+  min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   width: min(560px, 100%);
@@ -3344,6 +3345,8 @@ body {
   font-size: 14.5px;
   font-weight: 600;
   text-decoration: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
   transition: border-color 150ms ease;
 }
 
@@ -4410,6 +4413,20 @@ button.landing-gradient-button:disabled {
 }
 
 @media (max-width: 1023px) {
+  .resources-routes {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .resources-routes-icon {
+    margin: 0 auto;
+  }
+
+  .resources-routes-grid {
+    width: 100%;
+  }
+
   .resources-tool-layout {
     grid-template-columns: 1fr;
     padding: 40px 24px 80px;
