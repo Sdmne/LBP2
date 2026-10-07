@@ -16,6 +16,7 @@ import smtplib
 import ssl
 import subprocess
 import time
+import unicodedata
 import uuid
 import urllib.error
 import urllib.parse
@@ -1708,7 +1709,8 @@ def normalize_email(email: str) -> str:
 
 
 def slugify(value: str, fallback: str = "item") -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_value.lower()).strip("-")
     return slug or fallback
 
 
@@ -1725,6 +1727,21 @@ def unique_clinic_slug(cursor, name: str) -> str:
             return slug
         slug = f"{base}-{suffix}"
         suffix += 1
+
+
+def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
+    counters: dict[str, int] = {}
+    result: dict[str, str] = {}
+    ordered_rows = sorted(
+        rows,
+        key=lambda row: (str(row.get("name") or "").casefold(), str(row.get("id") or "")),
+    )
+    for row in ordered_rows:
+        base = slugify(str(row.get("name") or ""), "clinic")
+        counters[base] = counters.get(base, 0) + 1
+        suffix = counters[base]
+        result[str(row.get("id"))] = base if suffix == 1 else f"{base}-{suffix}"
+    return result
 
 
 def public_user(row: dict[str, Any]) -> dict[str, Any]:
@@ -3345,6 +3362,12 @@ def directory_public_record(row: dict[str, Any], kind: str, include_contact: boo
         if key not in item or item.get(key) is None:
             item[key] = safe.get(key)
     item["verified"] = bool(item.get("verified"))
+    if kind == "clinics":
+        item["slug"] = str(
+            item.pop("canonicalSlug", "")
+            or item.get("slug")
+            or slugify(str(item.get("name") or ""), "clinic")
+        )
     if include_contact:
         contact = {
             "website": raw.get("website"),
@@ -19724,13 +19747,50 @@ def public_clinics(
             """,
             [*params, limit, offset],
         )
-        items = [directory_public_record(row, "clinics") for row in cursor.fetchall()]
+        page_rows = cursor.fetchall()
+        cursor.execute("SELECT id, name FROM clinics WHERE status = 'active'")
+        slug_map = canonical_clinic_slug_map(cursor.fetchall())
+        for row in page_rows:
+            row["canonicalSlug"] = slug_map.get(str(row.get("id")))
+        items = [directory_public_record(row, "clinics") for row in page_rows]
     return {"items": items, "limit": limit, "offset": offset, "total": total, "hasMore": offset + len(items) < total}
 
 
 @app.get("/api/public/clinics/{slug}")
 def public_clinic_detail(slug: str):
     with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT id, name,
+                   JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug
+            FROM clinics
+            WHERE status = 'active'
+            ORDER BY name ASC, id ASC
+            """
+        )
+        slug_rows = cursor.fetchall()
+        slug_map = canonical_clinic_slug_map(slug_rows)
+        for candidate in slug_rows:
+            candidate["canonicalSlug"] = slug_map.get(str(candidate.get("id")))
+        target = next(
+            (
+                candidate
+                for candidate in slug_rows
+                if candidate.get("canonicalSlug") == slug
+            ),
+            None,
+        )
+        if target is None:
+            target = next(
+                (
+                    candidate
+                    for candidate in slug_rows
+                    if str(candidate.get("slug") or "").strip() == slug
+                ),
+                None,
+            )
+        if not target:
+            raise HTTPException(status_code=404, detail="Clinic not found")
         cursor.execute(
             """
             SELECT id, name, country, city, status, created_at, updated_at,
@@ -19740,15 +19800,15 @@ def public_clinic_detail(slug: str):
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.partner.name')) AS partnerName,
                    data
             FROM clinics
-            WHERE status = 'active'
-              AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) = %s
+            WHERE id = %s AND status = 'active'
             LIMIT 1
             """,
-            (slug,),
+            (target["id"],),
         )
         row = cursor.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Clinic not found")
+        if not row:
+            raise HTTPException(status_code=404, detail="Clinic not found")
+        row["canonicalSlug"] = target["canonicalSlug"]
     return directory_public_record(row, "clinics", include_contact=True)
 
 
