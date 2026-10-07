@@ -67,7 +67,7 @@ from cookie_security import CookieCipher, decode_consent_level, encode_consent_l
 from content_security import sanitize_content_values
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator
 from postgres_database import postgres_cursor
@@ -1714,23 +1714,35 @@ def slugify(value: str, fallback: str = "item") -> str:
     return slug or fallback
 
 
-def unique_clinic_slug(cursor, name: str) -> str:
+def unique_clinic_slug(cursor, name: str, city: str = "", country: str = "") -> str:
     base = slugify(name, "clinic")
-    slug = base
-    suffix = 2
-    while True:
+    location = slugify(city, "")
+    country_slug = slugify(country, "")
+    candidates = [
+        base,
+        f"{base}-{location}" if location else "",
+        f"{base}-{location}-{country_slug}" if location and country_slug else "",
+        f"{base}-{country_slug}" if country_slug else "",
+    ]
+    for slug in dict.fromkeys(value for value in candidates if value):
         cursor.execute(
             "SELECT id FROM clinics WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) = %s LIMIT 1",
             (slug,),
         )
         if not cursor.fetchone():
             return slug
-        slug = f"{base}-{suffix}"
-        suffix += 1
+    while True:
+        slug = f"{base}-{location or country_slug or 'location'}-clinic-{secrets.token_hex(3)}"
+        cursor.execute(
+            "SELECT id FROM clinics WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) = %s LIMIT 1",
+            (slug,),
+        )
+        if not cursor.fetchone():
+            return slug
 
 
 def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
-    counters: dict[str, int] = {}
+    groups: dict[str, list[dict[str, Any]]] = {}
     result: dict[str, str] = {}
     ordered_rows = sorted(
         rows,
@@ -1738,9 +1750,24 @@ def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
     )
     for row in ordered_rows:
         base = slugify(str(row.get("name") or ""), "clinic")
-        counters[base] = counters.get(base, 0) + 1
-        suffix = counters[base]
-        result[str(row.get("id"))] = base if suffix == 1 else f"{base}-{suffix}"
+        groups.setdefault(base, []).append(row)
+    for base, group in groups.items():
+        if len(group) == 1:
+            result[str(group[0].get("id"))] = base
+            continue
+        used: set[str] = set()
+        for row in group:
+            city = slugify(str(row.get("city") or ""), "")
+            country = slugify(str(row.get("country") or ""), "")
+            candidates = [
+                f"{base}-{city}" if city else "",
+                f"{base}-{city}-{country}" if city and country else "",
+                f"{base}-{country}" if country else "",
+                f"{base}-{city or country or 'location'}-clinic-{slugify(str(row.get('id') or ''), 'record')}",
+            ]
+            canonical = next(value for value in candidates if value and value not in used)
+            used.add(canonical)
+            result[str(row.get("id"))] = canonical
     return result
 
 
@@ -6151,7 +6178,12 @@ def partner_create_clinic(payload: PartnerClinicCreatePayload, partner: dict[str
     data["languagesCount"] = len(data["languages"])
     data["servicesCount"] = len(data["services"])
     with db_cursor() as (conn, cursor):
-        data["slug"] = unique_clinic_slug(cursor, str(values.get("slug") or name))
+        data["slug"] = unique_clinic_slug(
+            cursor,
+            str(values.get("slug") or name),
+            str(values.get("city") or ""),
+            str(values.get("country") or ""),
+        )
         cursor.execute(
             """
             INSERT INTO clinics (name, country, city, status, data, created_at, updated_at)
@@ -19748,7 +19780,7 @@ def public_clinics(
             [*params, limit, offset],
         )
         page_rows = cursor.fetchall()
-        cursor.execute("SELECT id, name FROM clinics WHERE status = 'active'")
+        cursor.execute("SELECT id, name, city, country FROM clinics WHERE status = 'active'")
         slug_map = canonical_clinic_slug_map(cursor.fetchall())
         for row in page_rows:
             row["canonicalSlug"] = slug_map.get(str(row.get("id")))
@@ -19761,7 +19793,7 @@ def public_clinic_detail(slug: str):
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
-            SELECT id, name,
+            SELECT id, name, city, country,
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug
             FROM clinics
             WHERE status = 'active'
@@ -19791,6 +19823,9 @@ def public_clinic_detail(slug: str):
             )
         if not target:
             raise HTTPException(status_code=404, detail="Clinic not found")
+        if target.get("canonicalSlug") != slug:
+            canonical = urllib.parse.quote(str(target["canonicalSlug"]), safe="")
+            return RedirectResponse(url=f"/api/public/clinics/{canonical}", status_code=301)
         cursor.execute(
             """
             SELECT id, name, country, city, status, created_at, updated_at,

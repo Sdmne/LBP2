@@ -3257,8 +3257,9 @@ function DirectoryDetailIcon({ name }: { name: DirectoryDetailIconName }) {
 }
 
 function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
- const { slug = "" } = useParams();
- const locale = localeOf();
+  const { slug = "" } = useParams();
+  const navigate = useNavigate();
+  const locale = localeOf();
  const directoryCopyLocale = legacyLocaleOf(locale);
  const [item, setItem] = useState<Row | null>(null);
   const [error, setError] = useState("");
@@ -3320,11 +3321,16 @@ function DirectoryDetail({ kind }: { kind: "clinics" | "lawyers" }) {
       .get<Row>(`/public/${kind}/${encodeURIComponent(slug)}`)
       .then((result) => {
         if (!active) return;
-        setItem(typeof result === "string" ? JSON.parse(result) as Row : result);
+        const nextItem = typeof result === "string" ? JSON.parse(result) as Row : result;
+        setItem(nextItem);
+        const canonicalSlug = asText(nextItem.slug).trim();
+        if (canonicalSlug && canonicalSlug !== slug) {
+          navigate(`/${locale}/${kind}/${encodeURIComponent(canonicalSlug)}`, { replace: true });
+        }
       })
       .catch(() => { if (active) setError(copy.error); });
     return () => { active = false; };
-  }, [copy.error, kind, slug]);
+  }, [copy.error, kind, locale, navigate, slug]);
 
   const backLabel = kind === "lawyers" ? copy.backLawyers : copy.backClinics;
   if (error) return <section className="reference-directory-detail"><Link className="detail-back" to={`/${locale}/${kind}`}><DirectoryDetailIcon name="arrow" />{backLabel}</Link><p>{error}</p></section>;
