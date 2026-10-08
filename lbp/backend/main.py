@@ -6954,6 +6954,9 @@ def profile_photo_content_response(photo: dict[str, Any], *, image_only: bool = 
             content_type = (remote.headers.get_content_type() or "").lower()
             body = remote.read(MAX_UPLOAD_BYTES + 1)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError) as exc:
+        if isinstance(exc, urllib.error.HTTPError) and exc.code in (404, 410):
+            message = "Profile photo not found" if image_only else "Media file not found"
+            raise HTTPException(status_code=404, detail=message) from exc
         message = "Could not load the profile photo" if image_only else "Could not load the media file"
         raise HTTPException(status_code=502, detail=message) from exc
     if len(body) > MAX_UPLOAD_BYTES:
