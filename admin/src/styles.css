@@ -1362,7 +1362,14 @@ body {
     padding: 0;
   }
   .app > aside nav {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .app > aside nav a {
+    min-width: 0;
+  }
+  .app > aside nav a span {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .content {
     flex: 0 0 1192px;
@@ -1372,8 +1379,13 @@ body {
   }
   .content-loading-overlay {
     left: var(--admin-sidebar-width);
+}
+@media (max-width: 520px) {
+  .app > aside nav {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .cards {
+}
+.cards {
     grid-template-columns: 1fr;
   }
   .detail-grid,
