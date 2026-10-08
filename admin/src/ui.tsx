@@ -9166,6 +9166,8 @@ function CategoryManager({
   const [nameEn, setNameEn] = useState("");
   const [nameRu, setNameRu] = useState("");
   const [nameEs, setNameEs] = useState("");
+  const [additionalNames, setAdditionalNames] = useState<Record<string, string>>({});
+  const additionalLocales = ["pt", "fr", "de", "it", "pl"];
   const [slug, setSlug] = useState("");
   const [editing, setEditing] = useState<RecordValue | null>(null);
   const [busy, setBusy] = useState(false);
@@ -9177,6 +9179,7 @@ function CategoryManager({
     setNameEn("");
     setNameRu("");
     setNameEs("");
+    setAdditionalNames({});
     setSlug("");
   };
   const close = () => {
@@ -9268,11 +9271,14 @@ function CategoryManager({
             ...((Array.isArray(original.translations)
               ? original.translations
               : []) as RecordValue[]).filter(
-                (item) => !["en", "ru", "es"].includes(String(item.locale ?? "")),
+                (item) => !["en", "ru", "es", ...additionalLocales].includes(String(item.locale ?? "").toLowerCase()),
               ),
             { locale: "en", name: nameEn.trim() },
             { locale: "ru", name: nameRu.trim() },
             { locale: "es", name: nameEs.trim() },
+            ...additionalLocales
+              .filter((locale) => additionalNames[locale]?.trim())
+              .map((locale) => ({ locale, name: additionalNames[locale].trim() })),
           ],
       },
     };
@@ -9349,6 +9355,16 @@ function CategoryManager({
                 required
               />
             </label>
+            {additionalLocales.map((locale) => (
+              <label key={locale}>
+                Name ({locale.toUpperCase()})
+                <input
+                  value={additionalNames[locale] ?? ""}
+                  onChange={(event) => setAdditionalNames((names) => ({ ...names, [locale]: event.target.value }))}
+                  placeholder={`Category name (${locale.toUpperCase()})`}
+                />
+              </label>
+            ))}
           </div>
           <label>
             Slug
@@ -9421,6 +9437,11 @@ function CategoryManager({
                         setNameEn(data.en === "—" ? "" : data.en);
                         setNameRu(data.ru === "—" ? "" : data.ru);
                         setNameEs(data.es === "—" ? "" : data.es);
+                        setAdditionalNames(Object.fromEntries(additionalLocales.map((locale) => {
+                          const translations = Array.isArray(data.data.translations) ? data.data.translations as RecordValue[] : [];
+                          const translation = translations.find((entry) => String(entry.locale ?? "").toLowerCase() === locale);
+                          return [locale, String(translation?.name ?? "")];
+                        })));
                         setSlug(data.slug === "—" ? "" : data.slug);
                       }}
                     >
