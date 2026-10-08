@@ -67,7 +67,8 @@ from cookie_security import CookieCipher, decode_consent_level, encode_consent_l
 from content_security import sanitize_content_values
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from public_seo import page_metadata, parse_public_path, render_page_html, render_sitemap
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator
 from postgres_database import postgres_cursor
@@ -1754,11 +1755,13 @@ def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
     for row in ordered_rows:
         base = slugify(str(row.get("name") or ""), "clinic")
         groups.setdefault(base, []).append(row)
+    reserved = set(groups)
+    used: set[str] = set()
     for base, group in groups.items():
         if len(group) == 1:
             result[str(group[0].get("id"))] = base
+            used.add(base)
             continue
-        used: set[str] = set()
         for row in group:
             city = slugify(str(row.get("city") or ""), "")
             country = slugify(str(row.get("country") or ""), "")
@@ -1768,7 +1771,9 @@ def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
                 f"{base}-{country}" if country else "",
                 f"{base}-{city or country or 'location'}-clinic-{slugify(str(row.get('id') or ''), 'record')}",
             ]
-            canonical = next(value for value in candidates if value and value not in used)
+            canonical = next((value for value in candidates if value and value not in used and value not in reserved), candidates[-1])
+            while canonical in used or canonical in reserved:
+                canonical += "-location"
             used.add(canonical)
             result[str(row.get("id"))] = canonical
     return result
@@ -3421,6 +3426,7 @@ def directory_public_record(row: dict[str, Any], kind: str, include_contact: boo
             or item.get("slug")
             or slugify(str(item.get("name") or ""), "clinic")
         )
+        item["data"]["slug"] = item["slug"]
     if include_contact:
         contact = {
             "website": raw.get("website"),
@@ -20432,6 +20438,48 @@ def public_catalog_detail(
         )
     row["data"] = public_safe_data(row.get("data"))
     return row
+
+
+@app.get("/api/public/page-html", include_in_schema=False)
+def public_page_html(path: str = Query(..., min_length=3, max_length=512), preview: bool = Query(False)):
+    try:
+        locale, route, is_article = parse_public_path(path)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Public page not found")
+    article = None
+    status_code = 200
+    if route.startswith("clinics/"):
+        detail = public_clinic_detail(urllib.parse.unquote(route.split("/")[1]))
+        if isinstance(detail, RedirectResponse):
+            canonical_slug = detail.headers["location"].rsplit("/", 1)[-1]
+            return RedirectResponse(url=f"/{locale}/clinics/{canonical_slug}", status_code=301)
+    if is_article:
+        try:
+            article = public_article(locale, urllib.parse.unquote(route.split("/")[1]), preview=False)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            status_code = 200 if preview else 404
+    shell_path = Path(os.getenv("FRONTEND_SHELL_PATH", "/app/frontend-index.html"))
+    try:
+        shell = shell_path.read_text(encoding="utf-8")
+        rendered = render_page_html(shell, page_metadata(path, PUBLIC_APP_URL, article))
+    except (OSError, ValueError):
+        logger.error("Public frontend shell unavailable")
+        raise HTTPException(status_code=503, detail="Public page temporarily unavailable")
+    return HTMLResponse(rendered, status_code=status_code, headers={"Cache-Control": "no-cache, must-revalidate"})
+
+
+@app.get("/api/public/sitemap.xml", include_in_schema=False)
+def public_sitemap():
+    with db_cursor() as (_, cursor):
+        cursor.execute("SELECT locale, slug FROM articles WHERE status = 'PUBLISHED'")
+        articles = cursor.fetchall()
+    try:
+        xml = render_sitemap(PUBLIC_APP_URL, articles)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Public sitemap temporarily unavailable")
+    return Response(xml, media_type="application/xml", headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 @app.get("/api/public/articles")
