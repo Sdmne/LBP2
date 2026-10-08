@@ -11044,3 +11044,41 @@ body,
     padding: 10px 12px;
   }
 }
+@media (min-width: 1000px) and (max-width: 1100px) {
+  .generic-list-table.articles-table table {
+    display: table;
+  }
+  .generic-list-table.articles-table thead {
+    display: table-header-group;
+  }
+  .generic-list-table.articles-table tbody {
+    display: table-row-group;
+  }
+  .generic-list-table.articles-table tr {
+    display: table-row;
+    border: 0;
+    border-radius: 0;
+  }
+  .generic-list-table.articles-table th,
+  .generic-list-table.articles-table td {
+    display: table-cell;
+    grid-column: auto;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+  }
+  .generic-list-table.articles-table td::before {
+    display: none;
+  }
+  .generic-list-table.articles-table .table-column-title {
+    width: 40%;
+  }
+  .generic-list-table.articles-table .table-column-category {
+    width: 25%;
+  }
+  .generic-list-table.articles-table .table-column-status {
+    width: 16%;
+  }
+  .generic-list-table.articles-table .table-column-updated_at {
+    width: 19%;
+  }
+}
