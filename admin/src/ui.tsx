@@ -30,6 +30,7 @@ import { UserPhotos } from "./user-photos";
 import { sanitizeRichHtml } from "./rich-html";
 import { supportMessageIsSupport } from "./support-message";
 import { integrationStatus } from "./integration-status";
+import { personName, personSecondaryText } from "./person-name";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
@@ -565,14 +566,7 @@ function auditActionLabel(value: unknown, source: unknown) {
   return source === "native" ? label(action) : action;
 }
 function rowName(row: RecordValue) {
-  return valueOf(
-    row.displayName ??
-      row.profileName ??
-      row.name ??
-      row.title ??
-      row.email ??
-      row.id,
-  );
+  return personName(row);
 }
 
 function recordValue(value: unknown): RecordValue | null {
@@ -8230,11 +8224,9 @@ function GenericList({ view }: { view: string }) {
                                     {view === "users" && ["DELETED", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
                                     {view === "users" && <UserLocationMismatchFlag row={row} />}
                                   </span>
-                                  <small>
-                                    {valueOf(
-                                      row.email ?? row.profileEmail ?? row.slug,
-                                    )}
-                                  </small>
+                                  {personSecondaryText(row) && (
+                                    <small>{personSecondaryText(row)}</small>
+                                  )}
                                 </span>
                               </div>
                             ) : (
