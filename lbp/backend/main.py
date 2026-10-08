@@ -13930,8 +13930,8 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "registrations_30d": "SELECT COUNT(*) AS cnt FROM profiles WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
             "registrations_1d": "SELECT COUNT(*) AS cnt FROM profiles WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY",
             "registrations_7d": "SELECT COUNT(*) AS cnt FROM profiles WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY",
-            "active_users": "SELECT COUNT(*) AS cnt FROM profiles WHERE LOWER(status) NOT IN ('banned', 'deleted', 'archived', 'inactive')",
-            "banned_users": "SELECT COUNT(*) AS cnt FROM profiles WHERE LOWER(status) = 'banned'",
+            "active_users": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'USER' AND LOWER(status) NOT IN ('banned', 'deleted', 'archived', 'inactive')",
+            "banned_users": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'USER' AND LOWER(status) = 'banned'",
             "dau": "SELECT COUNT(DISTINCT user_id) AS cnt FROM auth_sessions WHERE last_seen_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY",
             "wau": "SELECT COUNT(DISTINCT user_id) AS cnt FROM auth_sessions WHERE last_seen_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY",
             "mau": "SELECT COUNT(DISTINCT user_id) AS cnt FROM auth_sessions WHERE last_seen_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
@@ -14342,28 +14342,21 @@ def admin_stats(_admin: str = Depends(require_admin)):
                         NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.browserName')), ''),
                         'Unknown'
                     ) AS browser,
-                    (
-                        SELECT JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.userAgent'))
-                        FROM app_entities e
-                        WHERE e.entity_type = 'device_session'
-                          AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.profileId'))) = CAST(p.id AS CHAR)
-                        ORDER BY e.created_at DESC, e.id DESC
-                        LIMIT 1
-                    ) AS session_user_agent,
-                    (
-                        SELECT JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.deviceType'))
-                        FROM app_entities e
-                        WHERE e.entity_type = 'device_session'
-                          AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(e.data, '$.profileId'))) = CAST(p.id AS CHAR)
-                        ORDER BY e.created_at DESC, e.id DESC
-                        LIMIT 1
-                    ) AS session_device_type,
+                    latest_device.data->>'userAgent' AS session_user_agent,
+                    latest_device.data->>'deviceType' AS session_device_type,
                     COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isPremium')), 'false') = 'true' AS is_premium,
                     (
                         COALESCE(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.isVerified')), 'false') = 'true'
                         OR NULLIF(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.verifiedAt')), ''), 'null') IS NOT NULL
                     ) AS is_verified
                 FROM profiles p
+                LEFT JOIN (
+                    SELECT DISTINCT ON (BTRIM(data->>'profileId'))
+                        BTRIM(data->>'profileId') AS profile_id, data
+                    FROM app_entities
+                    WHERE entity_type = 'device_session'
+                    ORDER BY BTRIM(data->>'profileId'), created_at DESC, id DESC
+                ) latest_device ON latest_device.profile_id = CAST(p.id AS TEXT)
                 WHERE p.role = 'USER'
                 """
             )
@@ -15073,9 +15066,13 @@ def admin_operations(_admin: str = Depends(require_admin)):
         },
         "integrations": {
             "firebaseProject": FIREBASE_PROJECT_ID or None,
+            "cityAutocompleteConfigured": bool(CATALOG_COUNTRY_LABELS and CATALOG_CITIES_BY_COUNTRY),
+            "cityAutocompleteProvider": CATALOG_LOCATIONS["source"],
+            "googlePlacesConfigured": False,
+            "placesConfigured": False,
             "visionConfigured": vision_is_configured(),
             "diditConfigured": didit_is_configured(),
-            "emailConfigured": bool(SMTP_HOST and SMTP_FROM_EMAIL),
+            "emailConfigured": email_notifications_configured(),
         },
     }
 
@@ -18453,7 +18450,8 @@ def admin_storage(
     with db_cursor() as (_, cursor):
         cursor.execute(
             f"""
-            SELECT category, COUNT(*) AS files, COALESCE(SUM(bytes), 0) AS bytes
+            SELECT category, COUNT(*) AS files, COALESCE(SUM(bytes), 0) AS bytes,
+                   COUNT(*) FILTER (WHERE bytes <= 0) AS unknown_sizes
             FROM (
               SELECT {category_sql} AS category, COALESCE(mf.bytes, 0) AS bytes
               FROM media_files mf
@@ -18468,6 +18466,7 @@ def admin_storage(
                 summary[key] = {
                     "files": int(item.get("files") or 0),
                     "bytes": int(item.get("bytes") or 0),
+                    "unknownSizes": int(item.get("unknown_sizes") or 0),
                 }
 
         predicates = [f"({category_sql}) IS NOT NULL"]
@@ -18740,6 +18739,7 @@ def admin_storage(
         "offset": offset,
         "totalFiles": sum(int(item["files"]) for item in summary.values()),
         "totalBytes": sum(int(item["bytes"]) for item in summary.values()),
+        "unknownSizes": sum(int(item.get("unknownSizes", 0)) for item in summary.values()),
         "summary": summary,
         "filterActive": bool(normalized_user_id),
     }

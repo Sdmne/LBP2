@@ -29,6 +29,7 @@ import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
 import { sanitizeRichHtml } from "./rich-html";
 import { supportMessageIsSupport } from "./support-message";
+import { integrationStatus } from "./integration-status";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
@@ -240,7 +241,7 @@ const nav: ReadonlyArray<{
   { path: "/settings", title: "Settings", view: "settings", icon: "settings" },
 ];
 const columnsByView: Record<string, string[]> = {
-  articles: ["title", "category", "status", "views", "updated_at"],
+  articles: ["title", "category", "status", "updated_at"],
   users: [
     "displayName",
     "status",
@@ -2748,7 +2749,7 @@ function Dashboard({ onStatsLoaded }: { onStatsLoaded?: (stats: RecordValue) => 
           <section className="metric-grid">
             <MetricCard
               title="Total Users"
-              value={counts.profiles}
+              value={profiles.totalProfiles ?? counts.profiles}
               icon="users"
             />
             <MetricCard
@@ -4616,7 +4617,7 @@ function StoragePage() {
           <h1>Storage</h1>
           <span className="storage-total-badge">
             {data
-              ? `${formatBytes(data.totalBytes)} / ${Number(data.totalFiles ?? 0).toLocaleString()} files`
+              ? `${formatBytes(data.totalBytes)}${Number(data.unknownSizes ?? 0) > 0 ? " known" : ""} / ${Number(data.totalFiles ?? 0).toLocaleString()} files`
               : "Loading…"}
           </span>
         </div>
@@ -4636,7 +4637,7 @@ function StoragePage() {
               </header>
               <div>
                 <strong>{Number(item.files ?? 0).toLocaleString()}</strong>
-                <small>{formatBytes(item.bytes)}</small>
+                <small>{formatBytes(item.bytes)}{Number(item.unknownSizes ?? 0) > 0 ? ` known · ${Number(item.unknownSizes).toLocaleString()} sizes unknown` : ""}</small>
               </div>
             </article>
           );
@@ -8084,11 +8085,6 @@ function GenericList({ view }: { view: string }) {
                               <span className="category-badge">
                                 {articleCategory(row)}
                               </span>
-                            ) : view === "articles" && column === "views" ? (
-                              valueOf(
-                                (row.data as RecordValue | undefined)?.views ??
-                                  0,
-                              )
                             ) : column === "location" ? (
                               (view === "users"
                                 ? [userCountryName(row.country), row.city]
@@ -10350,18 +10346,15 @@ function SettingsList({ view }: { view: string }) {
             <article>
               <AdminIcon name="map" />
               <div>
-                <h3>Google Places API</h3>
+                <h3>City autocomplete</h3>
                 <p>
-                  City autocomplete in profile editing and clinic management
+                  Local location directory for profile editing and clinic management
                 </p>
               </div>
               <span
-                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).googlePlacesConfigured ? "configured" : ""}`}
+                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).cityAutocompleteConfigured === true ? "configured" : ""}`}
               >
-                {((operations.integrations ?? {}) as RecordValue)
-                  .googlePlacesConfigured
-                  ? "Configured"
-                  : "Not Configured"}
+                {integrationStatus(((operations.integrations ?? {}) as RecordValue).cityAutocompleteConfigured)}
               </span>
             </article>
             <article>
@@ -10369,15 +10362,12 @@ function SettingsList({ view }: { view: string }) {
               <div>
                 <h3>Google Vision API</h3>
                 <p>Automatic photo moderation (SafeSearch detection)</p>
-                <small>Shares the same API key as Google Places</small>
+                <small>Uses a separate server-side service account</small>
               </div>
               <span
-                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).visionConfigured ? "configured" : ""}`}
+                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).visionConfigured === true ? "configured" : ""}`}
               >
-                {((operations.integrations ?? {}) as RecordValue)
-                  .visionConfigured
-                  ? "Configured"
-                  : "Not Configured"}
+                {integrationStatus(((operations.integrations ?? {}) as RecordValue).visionConfigured)}
               </span>
             </article>
           </div>
