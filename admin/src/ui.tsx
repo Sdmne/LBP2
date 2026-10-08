@@ -12711,7 +12711,7 @@ function UserDetail() {
           </button>
         ))}
       </nav>
-      <div className="user-detail-tab-region" aria-busy={tabLoading}>
+      <div className={`user-detail-tab-region${tab === "profile" ? "" : " user-detail-tab-card"}`} aria-busy={tabLoading}>
         {tabLoading && (
           <div
             className="user-detail-tab-loading-overlay"

@@ -884,6 +884,7 @@ body {
   align-items: center;
   justify-content: flex-start;
   gap: 4px;
+  border-bottom: 0;
 }
 .user-detail-tabs button {
   flex: 0 0 auto;
@@ -898,6 +899,12 @@ body {
   position: relative;
   min-height: 320px;
   min-height: max(320px, calc(100vh - 320px));
+}
+.user-detail-tab-card {
+  padding: 24px;
+  background: #fff;
+  border: 1px solid #e6ebf3;
+  border-radius: 8px;
 }
 .user-detail-tab-loading-overlay {
   position: absolute;
