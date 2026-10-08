@@ -13974,19 +13974,19 @@ export function AdminApp() {
     if (!session) return;
     if (location.pathname === "/dashboard" || location.pathname === "/") return;
     let live = true;
+    const controller = new AbortController();
     const loadNavCounts = () =>
       api
-        .get<RecordValue>("/admin/stats")
+        .get<RecordValue>("/admin/navigation-counts", { signal: controller.signal })
         .then((payload) => {
           if (live) setNavCounts((payload.counts ?? {}) as RecordValue);
         })
-        .catch(() => {
-          if (live) setNavCounts({});
-        });
+        .catch(() => undefined);
     void loadNavCounts();
     const timer = window.setInterval(loadNavCounts, 30000);
     return () => {
       live = false;
+      controller.abort();
       window.clearInterval(timer);
     };
   }, [session, location.pathname]);

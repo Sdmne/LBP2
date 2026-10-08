@@ -13842,6 +13842,46 @@ def admin_subscription_summary(_admin: str = Depends(require_admin)):
     return {"counts": {key: int(value or 0) for key, value in counts.items()}}
 
 
+@app.get("/api/admin/navigation-counts")
+def admin_navigation_counts(_admin: str = Depends(require_admin)):
+    # Menu polling must not calculate the complete dashboard and chart history.
+    with db_cursor() as (_, cursor):
+        cursor.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE entity_type = 'subscription') AS pending_subscriptions,
+                COUNT(*) FILTER (WHERE entity_type = 'verification') AS pending_verifications,
+                COUNT(*) FILTER (WHERE entity_type = 'moderation_photo') AS pending_photo_moderation,
+                COUNT(*) FILTER (WHERE entity_type = 'moderation_report') AS pending_reports,
+                COUNT(*) FILTER (WHERE entity_type = 'boost') AS pending_boosts,
+                COUNT(*) FILTER (WHERE entity_type = 'video_verification') AS pending_video_verifications
+            FROM app_entities
+            WHERE status = 'PENDING'
+              AND entity_type IN ('subscription', 'verification', 'moderation_photo',
+                                  'moderation_report', 'boost', 'video_verification')
+            """
+        )
+        counts = {key: int(value or 0) for key, value in cursor.fetchone().items()}
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS unanswered_support
+            FROM conversations c
+            JOIN profiles a ON a.id = c.profile_a_id
+            JOIN profiles b ON b.id = c.profile_b_id
+            WHERE c.status = 'ACTIVE'
+              AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT')
+              AND EXISTS (
+                  SELECT 1 FROM conversation_messages um
+                  WHERE um.conversation_id = c.id
+                    AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END
+                    AND um.read_at IS NULL AND um.status = 'ACTIVE'
+              )
+            """
+        )
+        counts["unanswered_support"] = int(cursor.fetchone()["unanswered_support"] or 0)
+    return {"counts": counts}
+
+
 @app.get("/api/admin/stats")
 def admin_stats(_admin: str = Depends(require_admin)):
     profile_dashboard: dict[str, Any] = {
