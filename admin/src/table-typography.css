@@ -116,7 +116,7 @@
 
 /* Status chips stay compact in every admin table. */
 .app :is(table, [role="table"]) :is(.table-badge, .moderation-report-status) {
-  font-size: 12px !important;
+  font-size: var(--admin-table-font-size) !important;
   line-height: 16px !important;
   overflow-wrap: normal !important;
   word-break: normal !important;
@@ -128,23 +128,23 @@
     .admin-status-badge,
     .permission-badges small
   ) {
-  font-size: 12px !important;
+  font-size: var(--admin-table-font-size) !important;
 }
 
 .app .settings-audit-table tbody td,
 .app .settings-audit-table tbody td :not(svg, svg *) {
-  font-size: 12px !important;
+  font-size: var(--admin-table-font-size) !important;
 }
 
 .app .like-flow-table table,
 .app .like-flow-table table :not(svg, svg *) {
-  font-size: 12px !important;
+  font-size: var(--admin-table-font-size) !important;
   line-height: 16px !important;
 }
 
 .app .funnel-table table,
 .app .funnel-table table :not(svg, svg *) {
-  font-size: 12px !important;
+  font-size: var(--admin-table-font-size) !important;
   line-height: 16px !important;
 }
 
@@ -163,16 +163,16 @@
     .subscription-plan-badge,
     .subscription-status-badge
   ) {
-  font-size: 12px !important;
+  font-size: var(--admin-table-font-size) !important;
   line-height: 16px !important;
 }
 
 .app .subscriptions-table .subscription-donor-badge {
-  font-size: 9px !important;
+  font-size: var(--admin-table-font-size) !important;
   line-height: 1 !important;
 }
 
-/* Article metadata is intentionally denser than the title column. */
+/* Article metadata follows the shared 14px table typography. */
 .app .articles-table tbody :is(
     .table-column-category,
     .table-column-status,
@@ -185,7 +185,7 @@
     .table-column-views,
     .table-column-updated_at
   ) :not(svg, svg *) {
-  font-size: 12px !important;
+  font-size: var(--admin-table-font-size) !important;
   line-height: 16px !important;
 }
 
