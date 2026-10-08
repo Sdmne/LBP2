@@ -1815,6 +1815,8 @@ body {
   color: #fff;
 }
 .rich-editor {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   min-height: 330px;
   border: 1px solid #e2e8f0;
@@ -1822,6 +1824,7 @@ body {
   background: #fff;
 }
 .editor-toolbar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1851,6 +1854,7 @@ body {
   background: #f1f5f9;
 }
 .article-content-editor {
+  flex: 1;
   min-height: 260px;
   padding: 16px;
   outline: none;
@@ -8727,6 +8731,12 @@ body {
     SFMono-Regular,
     Consolas,
     monospace;
+}
+.article-editor-main textarea.article-source-editor {
+  flex: 1;
+  min-height: 260px;
+  border: 0;
+  border-radius: 0;
 }
 .article-content-editor table {
   width: 100%;
