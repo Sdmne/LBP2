@@ -10977,6 +10977,16 @@ const articlePreviewCopy: Record<CookieLocale, string> = {
   it: "Modalità anteprima — Questo articolo non è ancora stato pubblicato",
   pl: "Tryb podglądu — Ten artykuł nie został jeszcze opublikowany",
 };
+const articlePreviewModeCopy: Record<CookieLocale, string> = {
+  en: "Preview Mode",
+  ru: "Режим предпросмотра",
+  es: "Modo de vista previa",
+  pt: "Modo de pré-visualização",
+  fr: "Mode aperçu",
+  de: "Vorschaumodus",
+  it: "Modalità anteprima",
+  pl: "Tryb podglądu",
+};
 
 const knowledgeDate = (value: unknown) => {
   const date = new Date(String(value));
@@ -11171,7 +11181,9 @@ function Article() {
   }, [article, locale, slug]);
   const previewBanner = previewMode ? (
     <div className="article-preview-banner" role="status">
-      {articlePreviewCopy[activeLocale]}
+      {article && ["DRAFT", "UNPUBLISHED", "ARCHIVED"].includes(asText(article.status).toUpperCase())
+        ? articlePreviewCopy[activeLocale]
+        : articlePreviewModeCopy[activeLocale]}
     </div>
   ) : null;
   if (error)
