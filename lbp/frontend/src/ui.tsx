@@ -11028,7 +11028,7 @@ function KnowledgeHub() {
       <div className="knowledge-filters" aria-label={copy.categoriesLabel}>
         <button className={category === "" ? "active" : ""} onClick={() => { setCategory(""); setVisibleCount(12); }}>{copy.all}</button>
         {knowledgeCategories.map((item) => (
-          <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{locale === "es" ? item.name : knowledgeCategoryName(item.slug, locale)}</button>
+            <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{knowledgeCategoryName(item.slug, locale)}</button>
         ))}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
