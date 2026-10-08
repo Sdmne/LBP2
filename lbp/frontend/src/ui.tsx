@@ -6,6 +6,7 @@ import {
   type ReactNode,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -41,6 +42,8 @@ import {
 } from "./firebase-auth";
 import { NotFoundPage } from "./not-found";
 import { sanitizeRichHtml } from "./rich-html";
+import { ACCOUNT_COPY } from "./member-account-reference";
+import { RouteSeo } from "./route-seo";
 
 const MarkdownContent = lazy(() => import("./ai-markdown"));
 function AiMarkdown({ text }: { text: string }) {
@@ -1068,6 +1071,10 @@ function Shell({
   );
   return (
     <div className={`web-app${isChat ? " chat-app" : ""}${isProfileTool ? " profile-tools-app" : ""}`}>
+      <RouteSeo />
+      <a className="skip-link" href="#main-content">
+        {{ en: "Skip to content", ru: "Перейти к содержимому", es: "Saltar al contenido", pt: "Saltar para o conteúdo", fr: "Aller au contenu", de: "Zum Inhalt springen", it: "Vai al contenuto", pl: "Przejdź do treści" }[locale]}
+      </a>
       <header className={`web-header${headerScrolled ? " is-scrolled" : ""}`}>
         <div ref={headerInnerRef} className={`web-header-inner${compactNavigation ? " compact-navigation" : ""}`}>
           <Link className="logo" to={`/${locale}`} aria-label="LetsBeParents">
@@ -1112,7 +1119,7 @@ function Shell({
           )}
         </div>
       </header>
-      <main className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isMemberDetail ? " member-profile-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isProfessionals ? " professionals-main" : ""}${isStaticPage ? " static-main" : ""}${isAccount ? " account-main" : ""}`}>{children}</main>
+      <main id="main-content" tabIndex={-1} className={`web-main${isLanding ? " landing-main" : ""}${isAuth ? " auth-main" : ""}${isStandaloneAuth ? " standalone-auth-main" : ""}${isKnowledge ? " knowledge-main" : ""}${isCatalog ? " catalog-main" : ""}${isMemberDetail ? " member-profile-main" : ""}${isDirectory && !isDirectoryDetail ? " directory-main" : ""}${isDirectoryDetail ? " directory-detail-main" : ""}${isArticle ? " article-main" : ""}${isContact ? " contact-main" : ""}${isTrustSafety ? " trust-main" : ""}${isPricing ? " pricing-main" : ""}${isResources ? " resources-main" : ""}${isFindYourPath ? " resources-main" : ""}${isProfessionals ? " professionals-main" : ""}${isStaticPage ? " static-main" : ""}${isAccount ? " account-main" : ""}`}>{children}</main>
       <footer className="web-footer">
         <div className="web-footer-inner">
           <div className="footer-brand">
@@ -1702,6 +1709,17 @@ function Home() {
   const locale = localeOf();
   const text = LANDING_TEXT[locale];
   const steps = text.steps;
+  const [playHeroVideo, setPlayHeroVideo] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 769px) and (prefers-reduced-motion: no-preference)");
+    const update = () => {
+      const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+      setPlayHeroVideo(media.matches && !connection?.saveData);
+    };
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   const stepIcon = (icon: string) => {
     if (icon === "profile") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>;
     if (icon === "match") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.414 14.414C21 12.828 22 11.5 22 9.5a5.5 5.5 0 0 0-9.591-3.676.6.6 0 0 1-.818.001A5.5 5.5 0 0 0 2 9.5c0 2.3 1.5 4 3 5.5l5.535 5.362a2 2 0 0 0 2.879.052 2.12 2.12 0 0 0-.004-3 2.124 2.124 0 1 0 3-3 2.124 2.124 0 0 0 3.004 0 2 2 0 0 0 0-2.828l-1.881-1.882a2.41 2.41 0 0 0-3.409 0l-1.71 1.71a2 2 0 0 1-2.828 0 2 2 0 0 1 0-2.828l2.823-2.762"/></svg>;
@@ -1733,17 +1751,19 @@ function Home() {
   return (
     <div className="landing-page">
       <section className="landing-hero">
+      {playHeroVideo && (
         <video
           autoPlay
           loop
           muted
           playsInline
-          preload="auto"
+          preload="metadata"
           poster="/web-static/images/landing/hero-bg-280fbbea.jpg"
           aria-hidden="true"
         >
           <source src="/web-static/images/landing/hero-bg-4dd68bec.mp4" type="video/mp4" />
         </video>
+      )}
         <div className="landing-hero-shade" />
         <div className="landing-hero-content">
           <div className="landing-pill"><i /><span>{text.pill}</span></div>
@@ -2082,6 +2102,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
           <label>
             <span>{copy.email}</span>
             <input
+              id="login-email"
+              name="email"
+              aria-describedby={error ? "login-error" : undefined}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               type="email"
@@ -2094,6 +2117,9 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
             <span>{copy.password}</span>
             <div className="password-input">
               <input
+                id="login-password"
+                name="password"
+                aria-describedby={error ? "login-error" : undefined}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 type={showPassword ? "text" : "password"}
@@ -2107,7 +2133,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
             </div>
           </label>
           <Link className="forgot-link" to={`/${locale}/auth/forgot-password`}>{copy.forgot}</Link>
-          {error && <p className="error">{error}</p>}
+          {error && <p id="login-error" className="error" role="alert">{error}</p>}
           <button className="auth-submit" disabled={busy}>{busy ? copy.signingIn : copy.signIn}</button>
         </form>
         <p className="auth-divider">{copy.loginDivider}</p>
@@ -2204,6 +2230,9 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
             <span>{copy.email}</span>
             <input
               value={email}
+              id="register-email"
+              name="email"
+              aria-describedby={error ? "register-error" : undefined}
               onChange={(event) => setEmail(event.target.value)}
               type="email"
               placeholder={copy.emailPlaceholder}
@@ -2216,6 +2245,9 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
             <div className="password-input">
               <input
                 value={password}
+                id="register-password"
+                name="password"
+                aria-describedby={error ? "register-error" : undefined}
                 onChange={(event) => setPassword(event.target.value)}
                 type={showPassword ? "text" : "password"}
                 placeholder={copy.passwordPlaceholder}
@@ -2233,6 +2265,9 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
             <div className="password-input">
               <input
                 value={confirmPassword}
+                id="register-confirm-password"
+                name="confirmPassword"
+                aria-describedby={error ? "register-error" : undefined}
                 onChange={(event) => setConfirmPassword(event.target.value)}
                 type={showConfirmPassword ? "text" : "password"}
                 placeholder={copy.confirmPlaceholder}
@@ -2246,10 +2281,10 @@ function Signup({ onLogin }: { onLogin: (session: Session) => void }) {
             </div>
           </label>
           <label className="auth-terms">
-            <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
+            <input id="register-accepted" name="accepted" type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} required />
             <span>{copy.acceptPrefix} <Link to={`/${locale}/terms-of-use`}>{copy.terms}</Link> {copy.and} <Link to={`/${locale}/privacy-policy`}>{copy.privacy}</Link></span>
           </label>
-          {error && <p className="error">{error}</p>}
+          {error && <p id="register-error" className="error" role="alert">{error}</p>}
           <button className="auth-submit" disabled={busy}>{busy ? copy.creatingAccount : copy.createAccount}</button>
         </form>
         <p className="auth-divider">{copy.registerDivider}</p>
@@ -2301,11 +2336,14 @@ function ForgotPassword() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder={copy.forgotPlaceholder}
+              id="forgot-email"
+              name="email"
+              aria-describedby={notice ? "forgot-notice" : undefined}
               autoComplete="email"
               required
             />
           </label>
-          {notice && <p className="notice">{notice}</p>}
+          {notice && <p id="forgot-notice" className="notice" role="status">{notice}</p>}
           <button className="auth-submit" disabled={busy}>
             {busy ? copy.sending : copy.sendLink}
           </button>
@@ -4471,34 +4509,22 @@ function Catalog({ session }: { session: Session }) {
   const locale = localeOf();
   const copy = CATALOG_COPY[locale];
   const navigate = useNavigate();
-  const storageOwner = catalogText(
-    session?.user.id ??
-      session?.user.profileId ??
-      session?.user.email ??
-      "anonymous",
-  );
-  const storageKey = `lbpCatalogFilters:${storageOwner}:${locale}`;
-  const stored = (() => {
-    try {
-      return JSON.parse(sessionStorage.getItem(storageKey) || "null") as {
-        period?: number;
-        filters?: CatalogFilters;
-      } | null;
-    } catch {
-      return null;
-    }
-  })();
-  const [filters, setFilters] = useState<CatalogFilters>(() =>
-    stored?.filters
-      ? { ...emptyCatalogFilters(), ...stored.filters }
-      : emptyCatalogFilters(),
-  );
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters = useMemo(() => {
+    const next = emptyCatalogFilters();
+    next.country = searchParams.getAll("country").filter(Boolean);
+    next.profileTypes = searchParams.getAll("profileType").filter(Boolean);
+    next.donorTypes = searchParams.getAll("donorType").filter(Boolean);
+    next.lookingFor = searchParams.getAll("lookingFor").filter(Boolean);
+    next.verifiedOnly = searchParams.get("verifiedOnly") === "true";
+    for (const key of ["city", "ageMin", "ageMax", "ethnicity", "hairColor", "eyeColor", "education", "religion"] as const) next[key] = searchParams.get(key) || "";
+    return next;
+  }, [searchParams]);
   const [draftFilters, setDraftFilters] = useState<CatalogFilters>(() => ({
     ...filters,
   }));
-  const [period, setPeriod] = useState(() =>
-    [0, 1, 7, 30].includes(Number(stored?.period)) ? Number(stored?.period) : 0,
-  );
+  const requestedPeriod = Number(searchParams.get("days"));
+  const period = [0, 1, 7, 30].includes(requestedPeriod) ? requestedPeriod : 0;
   const [items, setItems] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
@@ -4508,25 +4534,10 @@ function Catalog({ session }: { session: Session }) {
   const [premiumPromptOpen, setPremiumPromptOpen] = useState(false);
   const loadMoreSentinel = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    let nextStored: { period?: number; filters?: CatalogFilters } | null = null;
-    try {
-      nextStored = JSON.parse(sessionStorage.getItem(storageKey) || "null");
-    } catch {
-      nextStored = null;
-    }
-    const nextFilters = nextStored?.filters
-      ? { ...emptyCatalogFilters(), ...nextStored.filters }
-      : emptyCatalogFilters();
-    setFilters(nextFilters);
-    setDraftFilters(nextFilters);
-    setPeriod(
-      [0, 1, 7, 30].includes(Number(nextStored?.period))
-        ? Number(nextStored?.period)
-        : 0,
-    );
+    setDraftFilters(filters);
     setItems([]);
     setOffset(0);
-  }, [storageKey]);
+  }, [filters, period]);
   const [catalogOptions, setCatalogOptions] = useState<{
     countries: CatalogOption[];
     premium: boolean;
@@ -4616,14 +4627,18 @@ function Catalog({ session }: { session: Session }) {
     };
   }, [filterOpen]);
   const persist = (nextFilters: CatalogFilters, nextPeriod = period) => {
-    try {
-      sessionStorage.setItem(
-        storageKey,
-        JSON.stringify({ period: nextPeriod, filters: nextFilters }),
-      );
-    } catch {
-      /* optional */
+    const next = new URLSearchParams(searchParams);
+    for (const key of ["country", "profileType", "donorType", "lookingFor", "verifiedOnly", "city", "ageMin", "ageMax", "ethnicity", "hairColor", "eyeColor", "education", "religion", "days"]) next.delete(key);
+    nextFilters.country.forEach(value => next.append("country", value));
+    nextFilters.profileTypes.forEach(value => next.append("profileType", value));
+    nextFilters.donorTypes.forEach(value => next.append("donorType", value));
+    nextFilters.lookingFor.forEach(value => next.append("lookingFor", value));
+    if (nextFilters.verifiedOnly) next.set("verifiedOnly", "true");
+    if (nextPeriod) next.set("days", String(nextPeriod));
+    for (const key of ["city", "ageMin", "ageMax", "ethnicity", "hairColor", "eyeColor", "education", "religion"] as const) {
+      if (nextFilters[key]) next.set(key, nextFilters[key]);
     }
+    if (next.toString() !== searchParams.toString()) setSearchParams(next);
   };
   const like = async (item: Row) => {
     const id = catalogText(item.id);
@@ -4716,14 +4731,12 @@ function Catalog({ session }: { session: Session }) {
       return;
     }
     const next = { ...draftFilters };
-    setFilters(next);
     setOffset(0);
     persist(next);
     setFilterOpen(false);
     setPremiumPromptOpen(false);
   };
   const changePeriod = (next: number) => {
-    setPeriod(next);
     setOffset(0);
     persist(filters, next);
   };
@@ -6368,6 +6381,18 @@ function Photos({ session }: { session: Session }) {
   );
 }
 
+function notificationLabel(type: string, locale: CookieLocale) {
+  const labels = ACCOUNT_COPY[locale] ?? ACCOUNT_COPY.en;
+  switch (type) {
+    case "NEW_MATCH": return labels.newMatch;
+    case "NEW_LIKE": return labels.newLike;
+    case "NEW_MESSAGE": return labels.newMessage;
+    case "PROFILE_VIEW": return labels.profileView;
+    case "MARKETING": return labels.marketing;
+    default: return type.replaceAll("_", " ");
+  }
+}
+
 function Settings({ session }: { session: Session }) {
   const locale = localeOf();
   const navigate = useNavigate();
@@ -6447,6 +6472,8 @@ function Settings({ session }: { session: Session }) {
       <label className="toggle-row">
         <input
           type="checkbox"
+          id="settings-visible-in-catalog"
+          name="visibleInCatalog"
           checked={Boolean(settings.visibleInCatalog)}
           onChange={(event) =>
             setSettings((current) => ({
@@ -6460,6 +6487,8 @@ function Settings({ session }: { session: Session }) {
       <label className="toggle-row">
         <input
           type="checkbox"
+          id="settings-incognito"
+          name="incognitoEnabled"
           checked={Boolean(settings.incognitoAvailable && settings.incognitoEnabled)}
           disabled={!settings.incognitoAvailable}
           onChange={(event) =>
@@ -6482,12 +6511,14 @@ function Settings({ session }: { session: Session }) {
           <label className="toggle-row" key={asText(item.type)}>
             <input
               type="checkbox"
+              id={`notification-${asText(item.type)}`}
+              name={`notification-${asText(item.type)}`}
               checked={item.emailEnabled !== false}
               onChange={(event) =>
                 toggleNotification(asText(item.type), event.target.checked)
               }
             />
-            {asText(item.type).replaceAll("_", " ")}
+            {notificationLabel(asText(item.type), locale)}
           </label>
         ))}
       </fieldset>

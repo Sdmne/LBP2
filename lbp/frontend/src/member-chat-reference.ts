@@ -2,7 +2,7 @@ const CHAT_COPY_BASE = {
   "en": {
     "messagesTitle": "Messages",
     "searchConversations": "Search conversations...",
-    "noSearchConversations": "No conversations yet",
+    "noSearchConversations": "No conversations found",
     "noConversations": "No conversations yet. Use Message on a profile to start one.",
     "selectConversation": "Select a conversation to start messaging",
     "backConversations": "Back to conversations",
@@ -77,7 +77,7 @@ const CHAT_COPY_BASE = {
   "ru": {
     "messagesTitle": "Сообщения",
     "searchConversations": "Поиск бесед",
-    "noSearchConversations": "Пока нет бесед",
+    "noSearchConversations": "Беседы не найдены",
     "noConversations": "Диалогов пока нет. Откройте профиль и нажмите «Написать».",
     "selectConversation": "Выберите диалог, чтобы начать общение",
     "backConversations": "Назад к диалогам",
@@ -152,7 +152,7 @@ const CHAT_COPY_BASE = {
   "es": {
     "messagesTitle": "Mensajes",
     "searchConversations": "Buscar conversaciones...",
-    "noSearchConversations": "Aún no hay conversaciones",
+    "noSearchConversations": "No se encontraron conversaciones",
     "noConversations": "Aún no hay conversaciones. Usa Mensaje en un perfil para iniciar una.",
     "selectConversation": "Selecciona una conversación para empezar",
     "backConversations": "Volver a conversaciones",
@@ -229,7 +229,7 @@ const CHAT_COPY_BASE = {
 export const CHAT_COPY = {
   ...CHAT_COPY_BASE,
   pt: {
-    "messagesTitle": "Mensagens", "searchConversations": "Pesquisar conversas...", "noSearchConversations": "Ainda não há conversas",
+    "messagesTitle": "Mensagens", "searchConversations": "Pesquisar conversas...", "noSearchConversations": "Nenhuma conversa encontrada",
     "noConversations": "Ainda nao ha conversas.",
     "selectConversation": "Selecione uma conversa para começar", "backConversations": "Voltar às conversas",
     "secureChat": "", "loadingMessages": "",
@@ -264,7 +264,7 @@ export const CHAT_COPY = {
     }
   },
   fr: {
-    "messagesTitle": "Messages", "searchConversations": "Rechercher des conversations...", "noSearchConversations": "Aucune conversation pour l'instant",
+    "messagesTitle": "Messages", "searchConversations": "Rechercher des conversations...", "noSearchConversations": "Aucune conversation trouvée",
     "noConversations": "Aucune conversation pour le moment.",
     "selectConversation": "Sélectionnez une conversation pour commencer à discuter", "backConversations": "Retour aux conversations",
     "secureChat": "", "loadingMessages": "",
@@ -299,7 +299,7 @@ export const CHAT_COPY = {
     }
   },
   de: {
-    "messagesTitle": "Nachrichten", "searchConversations": "Unterhaltungen suchen...", "noSearchConversations": "Noch keine Unterhaltungen",
+    "messagesTitle": "Nachrichten", "searchConversations": "Unterhaltungen suchen...", "noSearchConversations": "Keine Unterhaltungen gefunden",
     "noConversations": "Noch keine Unterhaltungen.",
     "selectConversation": "Wähle eine Unterhaltung aus, um zu chatten", "backConversations": "Zurück zu den Unterhaltungen",
     "secureChat": "", "loadingMessages": "",
@@ -334,7 +334,7 @@ export const CHAT_COPY = {
     }
   },
   it: {
-    "messagesTitle": "Messaggi", "searchConversations": "Cerca conversazioni...", "noSearchConversations": "Ancora nessuna conversazione",
+    "messagesTitle": "Messaggi", "searchConversations": "Cerca conversazioni...", "noSearchConversations": "Nessuna conversazione trovata",
     "noConversations": "Ancora nessuna conversazione.",
     "selectConversation": "Seleziona una conversazione per iniziare a scrivere", "backConversations": "Torna alle conversazioni",
     "secureChat": "", "loadingMessages": "",
@@ -369,7 +369,7 @@ export const CHAT_COPY = {
     }
   },
   pl: {
-    "messagesTitle": "Wiadomosci", "searchConversations": "Szukaj rozmow...", "noSearchConversations": "Brak rozmów",
+    "messagesTitle": "Wiadomosci", "searchConversations": "Szukaj rozmow...", "noSearchConversations": "Nie znaleziono rozmów",
     "noConversations": "Brak rozmow.",
     "selectConversation": "Wybierz rozmowę, aby zacząć pisać", "backConversations": "Wróć do rozmów",
     "secureChat": "", "loadingMessages": "",

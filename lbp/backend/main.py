@@ -535,6 +535,9 @@ def fetch_count(cursor, table: str) -> int:
 
 def normalize_row(row: dict[str, Any]) -> dict[str, Any]:
     result = {key: value for key, value in row.items()}
+    for key in ("avatarUrl", "avatar_url", "peerAvatarUrl", "senderAvatarUrl", "profileAvatarUrl"):
+        if key in result:
+            result[key] = normalized_avatar_url(result[key])
     if "body_html" in result or "bodyHtml" in result:
         result = sanitize_content_values(result)
     return result
@@ -1876,6 +1879,19 @@ class ProfileUpdatePayload(BaseModel):
     hairColor: str | None = Field(default=None, max_length=80)
     ethnicity: str | None = Field(default=None, max_length=120)
     occupation: str | None = Field(default=None, max_length=255)
+
+    @field_validator("displayName", "occupation", "about", "bio")
+    @classmethod
+    def validate_plain_profile_text(cls, value: str | None, info: Any) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        multiline = info.field_name in {"about", "bio"}
+        if (not multiline and ("<" in value or ">" in value)) or re.search(r"<\s*/?\s*[A-Za-z!][^>]*>", value):
+            raise ValueError("Profile text must not contain HTML markup")
+        if any((ord(char) < 32 and not (multiline and char in "\n\r\t")) or ord(char) == 127 for char in value):
+            raise ValueError("Profile text contains unsupported control characters")
+        return value
     education: str | None = Field(default=None, max_length=120)
     religion: str | None = Field(default=None, max_length=120)
     smokingStatus: str | None = Field(default=None, max_length=120)
@@ -3323,11 +3339,21 @@ def profile_has_verified_badge(profile: dict[str, Any] | None) -> bool:
     )
 
 
+def normalized_avatar_url(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return None if value.lower() in {"", "null", "none", "undefined"} else value
+
+
 def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
         return None
     data = public_safe_data(row.get("data"))
     data = data if isinstance(data, dict) else {}
+    avatar_url = normalized_avatar_url(row.get("avatarUrl")) or normalized_avatar_url(data.get("avatarUrl"))
+    if "avatarUrl" in data:
+        data["avatarUrl"] = avatar_url
     verified = profile_has_verified_badge({**row, "data": data})
     recorded_status = row.get("verificationState") if "verificationState" in row else data.get("verificationStatus")
     verification_status = str(recorded_status or "NOT_STARTED").strip().upper()
@@ -3344,7 +3370,7 @@ def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
         "status": row.get("status"),
         "country": row.get("country") or data.get("country"),
         "city": row.get("city") or data.get("city"),
-        "avatarUrl": row.get("avatarUrl") or data.get("avatarUrl"),
+        "avatarUrl": avatar_url,
         "profileType": data.get("profileType") or row.get("role"),
         "isVerified": verified,
         "isVideoVerified": data.get("isVideoVerified"),
