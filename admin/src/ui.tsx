@@ -7684,7 +7684,7 @@ function GenericList({ view }: { view: string }) {
                   setFilters((current) => ({ ...current, status }));
                 }}
               >
-                {status ? statusLabel(status) : "All"}
+                {status ? statusLabel(status) : "All active"}
               </button>
             ))}
           </div>
@@ -9499,6 +9499,24 @@ function ArticleEditor({
   const [coverUploading, setCoverUploading] = useState(false);
   const [coverError, setCoverError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const archiveTarget = translations.find((item) => String(item.locale) === locale)
+    ?? (String(row.locale ?? "en") === locale ? row : null);
+  const archiveArticle = async () => {
+    if (!archiveTarget?.id || archiving) return;
+    setArchiving(true);
+    setSaveError("");
+    try {
+      await api.delete(`/admin/item/articles/${encodeURIComponent(String(archiveTarget.id))}`);
+      onClose();
+    } catch {
+      setSaveError("Could not archive article. Try again.");
+      setArchiveOpen(false);
+    } finally {
+      setArchiving(false);
+    }
+  };
   const [tags, setTags] = useState(
     Array.isArray(initialMeta.tags)
       ? (initialMeta.tags as unknown[]).join(", ")
@@ -9825,8 +9843,14 @@ function ArticleEditor({
               />
             </label>
           </section>
-          <div className="article-editor-actions">
-            {saveError && <p className="article-save-error">{saveError}</p>}
+        <div className="article-editor-actions">
+          {saveError && <p className="article-save-error">{saveError}</p>}
+          {Boolean(archiveTarget?.id) && String(archiveTarget?.status ?? "").toUpperCase() !== "ARCHIVED" && (
+            <button type="button" className="secondary-button" disabled={busy || archiving}
+              onClick={() => setArchiveOpen(true)}>
+              Archive article
+            </button>
+          )}
             <button
               type="button"
               className="secondary-button"
@@ -9842,13 +9866,18 @@ function ArticleEditor({
             </button>
             <button
               className="primary"
-              disabled={busy || coverUploading || !title.trim() || !slug.trim()}
+            disabled={busy || archiving || coverUploading || !title.trim() || !slug.trim()}
             >
               <EditorIcon name="save" /> {busy ? "Saving…" : "Save Article"}
             </button>
           </div>
         </aside>
       </div>
+      <ConfirmModal open={archiveOpen} title="Archive article"
+        message="This language version will be archived and hidden from ordinary lists. It remains available in the Archived filter. Unsaved changes will not be saved."
+        confirmLabel={archiving ? "Archiving…" : "Archive"}
+        onClose={() => { if (!archiving) setArchiveOpen(false); }}
+        onConfirm={archiveArticle} />
     </form>
   );
 }

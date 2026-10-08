@@ -18047,6 +18047,8 @@ def admin_list(
             seeks_co_parent,
             is_online,
         )
+        if view == "articles" and not status_filter:
+            where += (" AND " if where else "WHERE ") + "LOWER(COALESCE(status, '')) <> 'archived'"
         table = definition["table"]
         order = definition["order"]
         if view in {"users", "profiles"}:
