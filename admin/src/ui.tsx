@@ -28,6 +28,7 @@ import {
 import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
 import { sanitizeRichHtml } from "./rich-html";
+import { supportMessageIsSupport } from "./support-message";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
@@ -5124,10 +5125,7 @@ function Support() {
                   !previous ||
                   supportDayKey(createdAt) !==
                     supportDayKey(previous.created_at ?? previous.createdAt);
-                const isSupport =
-                  String(message.senderRole ?? "").toUpperCase() === "SUPPORT" ||
-                  String(message.senderProfileId ?? message.sender_profile_id ?? "") ===
-                    String(supportProfile.id ?? "");
+                const isSupport = supportMessageIsSupport(message, supportProfile);
                 return (
                   <div
                     className="support-message-entry"
@@ -8555,6 +8553,7 @@ function GenericList({ view }: { view: string }) {
       <EntityModal
         row={editing}
         title={label(view)}
+        regularTypography={view === "community-groups"}
         busy={saving}
         onClose={() => setEditing(null)}
         onSave={saveRow}
@@ -11309,6 +11308,7 @@ function EntityModal({
   onClose,
   onSave,
   onDelete,
+  regularTypography = false,
 }: {
   row: RecordValue | null;
   title: string;
@@ -11316,6 +11316,7 @@ function EntityModal({
   onClose: () => void;
   onSave: (values: RecordValue) => Promise<void>;
   onDelete: () => void | Promise<void>;
+  regularTypography?: boolean;
 }) {
   const [status, setStatus] = useState("");
   const [entityTitle, setEntityTitle] = useState("");
@@ -11346,7 +11347,7 @@ function EntityModal({
   };
   return (
     <div className="modal-backdrop" role="presentation">
-      <form className="modal entity-modal" onSubmit={submit}>
+      <form className={`modal entity-modal${regularTypography ? " entity-modal-regular" : ""}`} onSubmit={submit}>
         <button
           className="modal-close"
           type="button"
@@ -11903,7 +11904,7 @@ function UserTabContent({
             const right = String(b.created_at ?? b.createdAt ?? "");
             return left.localeCompare(right) || String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { numeric: true });
           }).map((row, index) => {
-            const isSupport = String(row.sender_role ?? row.senderRole ?? "").toUpperCase() === "SUPPORT";
+            const isSupport = supportMessageIsSupport(row);
             const stamp = profileSupportDate(row.created_at ?? row.createdAt);
             return (
             <article
