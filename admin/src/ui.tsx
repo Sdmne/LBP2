@@ -33,6 +33,7 @@ import { integrationStatus } from "./integration-status";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
+declare const __ADMIN_BUILD_REVISION__: string;
 type Session = { email: string; role?: string; permissions?: string[] };
 type RecordValue = Record<string, unknown>;
 type ListResponse = {
@@ -14123,7 +14124,7 @@ export function AdminApp() {
           ))}
         </nav>
         <div className="admin-account">
-          <div className="admin-version">v4.3.50 (f16e15ad)</div>
+          <div className="admin-version">v4.3.50 ({__ADMIN_BUILD_REVISION__})</div>
           <div className="admin-identity">
             <strong>{session.email}</strong>
             <small>{session.role ?? "ADMIN"}</small>
