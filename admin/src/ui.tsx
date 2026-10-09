@@ -12736,7 +12736,7 @@ function UserDetail() {
               ["Display Name", dataValue("displayName", "display_name")],
               ["User Type (legacy)", dataValue("donorType", "userType")],
               ["Date of Birth", profileBirthDate(dataValue("dateOfBirth", "birthDate"))],
-              ["Country", dataValue("country")],
+              ["Country", dataValue("country") ? userCountryName(dataValue("country")) : null],
               ["State", dataValue("state", "region", "stateName")],
               ["City", dataValue("city")],
             ])}
