@@ -8,7 +8,7 @@ function text(value: unknown): string {
 
 export function personName(row: PersonRecord): string {
   for (const value of [
-    row.displayName, row.display_name, row.profileName, row.name,
+    row.displayName, row.display_name, row.profileName, row.userName, row.user_name, row.name,
     row.title, row.email, row.profileEmail, row.id,
   ]) {
     const name = text(value);

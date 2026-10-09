@@ -16507,8 +16507,8 @@ def admin_support_list(
                   AND online_session.revoked_at IS NULL
                   AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
               ) AS isOnline,
-              (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
-              (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
+                (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE' ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
+                (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE' ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
               (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount,
               EXISTS (
                 SELECT 1 FROM jsonb_each(COALESCE(CASE WHEN a.role = 'SUPPORT' THEN b.data ELSE a.data END, '{{}}'::jsonb)) AS flag
@@ -16522,7 +16522,7 @@ def admin_support_list(
             {where_sql}
             ORDER BY COALESCE(
               (SELECT created_at FROM conversation_messages lm
-               WHERE lm.conversation_id = c.id
+               WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE'
                ORDER BY lm.created_at DESC, lm.id DESC
                LIMIT 1),
               c.updated_at
@@ -16593,7 +16593,7 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
                    m.sender_profile_id, p.display_name AS senderName, p.role AS senderRole
             FROM conversation_messages m
             JOIN profiles p ON p.id = m.sender_profile_id
-            WHERE m.conversation_id = %s
+            WHERE m.conversation_id = %s AND m.status = 'ACTIVE'
             ORDER BY m.created_at ASC, m.id ASC
             """,
             (conversation_id,),
