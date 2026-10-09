@@ -13874,7 +13874,7 @@ def admin_navigation_counts(_admin: str = Depends(require_admin)):
                   SELECT 1 FROM conversation_messages um
                   WHERE um.conversation_id = c.id
                     AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END
-                    AND um.read_at IS NULL AND um.status = 'ACTIVE'
+                  AND um.status = 'ACTIVE'
               )
             """
         )
@@ -13988,7 +13988,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "partner_accounts": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'PARTNER'",
             "pending_subscriptions": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND status = 'PENDING'",
             "pending_verifications": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND status = 'PENDING'",
-            "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE c.status = 'ACTIVE' AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')",
+        "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE c.status = 'ACTIVE' AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.status = 'ACTIVE')",
             "pending_photo_moderation": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_photo' AND status = 'PENDING'",
             "pending_reports": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_report' AND status = 'PENDING'",
             "pending_boosts": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'boost' AND status = 'PENDING'",
@@ -16463,7 +16463,7 @@ def admin_support_list(
             """)
             like = f"%{search}%"
             base_params.extend([like, like, like, like, like])
-    unanswered_clause = "c.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE')"
+    unanswered_clause = "c.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.status = 'ACTIVE')"
     where = list(base_where)
     if unanswered:
         where.append(unanswered_clause)
@@ -16520,7 +16520,7 @@ def admin_support_list(
             JOIN profiles a ON a.id = c.profile_a_id
             JOIN profiles b ON b.id = c.profile_b_id
             {where_sql}
-            ORDER BY "isPriority" DESC, COALESCE(
+            ORDER BY COALESCE(
               (SELECT created_at FROM conversation_messages lm
                WHERE lm.conversation_id = c.id
                ORDER BY lm.created_at DESC, lm.id DESC

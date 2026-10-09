@@ -34,6 +34,7 @@ import { personName, personSecondaryText } from "./person-name";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
+const ADMIN_NAV_COUNTS_CHANGED_EVENT = "admin-navigation-counts-changed";
 declare const __ADMIN_BUILD_REVISION__: string;
 type Session = { email: string; role?: string; permissions?: string[] };
 type RecordValue = Record<string, unknown>;
@@ -4935,6 +4936,7 @@ function Support() {
     setResolving(true);
     try {
       await api.post(`/admin/support/${encodeURIComponent(String(active.id))}/resolve`, {});
+      window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
       const updated = await api.get<RecordValue>(
         `/admin/support/${encodeURIComponent(String(active.id))}`,
       );
@@ -4978,7 +4980,7 @@ function Support() {
             aria-pressed={unanswered}
             onClick={() => resetThread(true)}
           >
-            Unanswered ({result?.totalUnanswered ?? (unanswered ? total : 0)})
+            Unresolved ({result?.totalUnanswered ?? (unanswered ? total : 0)})
           </button>
           <button
             type="button"
@@ -13983,10 +13985,12 @@ export function AdminApp() {
         })
         .catch(() => undefined);
     void loadNavCounts();
+    window.addEventListener(ADMIN_NAV_COUNTS_CHANGED_EVENT, loadNavCounts);
     const timer = window.setInterval(loadNavCounts, 30000);
     return () => {
       live = false;
       controller.abort();
+      window.removeEventListener(ADMIN_NAV_COUNTS_CHANGED_EVENT, loadNavCounts);
       window.clearInterval(timer);
     };
   }, [session, location.pathname]);
