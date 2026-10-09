@@ -442,6 +442,29 @@ function languageName(value: string) {
     return label(language);
   }
 }
+
+function profileLanguageNames(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "";
+  let languages: unknown = value;
+  if (typeof value === "string") {
+    try {
+      languages = JSON.parse(value);
+    } catch {
+      languages = value.split(",");
+    }
+  }
+  const entries = Array.isArray(languages) ? languages : [languages];
+  return entries
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => {
+      const language = String(entry).trim();
+      return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(language)
+        ? languageName(language)
+        : language;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
 function directoryDate(value: unknown) {
   return compactDate(value).replaceAll("/", ".");
 }
@@ -12765,7 +12788,7 @@ function UserDetail() {
               ["Smoking", dataValue("smoking")],
               ["Drinking", dataValue("drinking")],
               ["Religion", dataValue("religion")],
-              ["Languages", dataValue("languages")],
+              ["Languages", profileLanguageNames(dataValue("languages"))],
             ])}
             <section className="profile-section profile-bio">
               <p>
