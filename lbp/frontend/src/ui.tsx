@@ -1164,7 +1164,7 @@ function Shell({
               <button className="cookie-link" onClick={() => window.dispatchEvent(new Event("open-cookie-settings"))}>{text.cookies}</button>
               <label className="locale-switcher">
                 <span className="sr-only">{text.language}</span>
-                <select aria-label={text.language} value={locale} onChange={(event) => switchLocale(event.target.value)}>
+                <select id="footer-interface-language" name="footerLanguage" aria-label={text.language} value={locale} onChange={(event) => switchLocale(event.target.value)}>
                   <option value="en">English</option>
                   <option value="ru">Русский</option>
                   <option value="es">Español</option>
@@ -6440,13 +6440,16 @@ function Settings({ session }: { session: Session }) {
       <h1>{text.title}</h1>
       <MemberLinks locale={locale} />
       {notice && (
-        <p className={notice === text.loadError || notice === text.saveError ? "error" : "notice"}>
+        <p id="settings-feedback" role={notice === text.loadError || notice === text.saveError ? "alert" : "status"} className={notice === text.loadError || notice === text.saveError ? "error" : "notice"}>
           {notice}
         </p>
       )}
       <label>
         {text.interfaceLanguageLabel}
         <select
+          id="settings-interface-language"
+          name="interfaceLanguage"
+          aria-describedby={notice ? "settings-feedback" : undefined}
           value={asText(
             settings.interfaceLanguage === "—"
               ? "en"
