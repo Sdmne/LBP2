@@ -2768,7 +2768,8 @@ function Dashboard({ onStatsLoaded }: { onStatsLoaded?: (stats: RecordValue) => 
           <section className="metric-grid">
             <MetricCard
               title="Total Users"
-              value={profiles.totalProfiles ?? counts.profiles}
+              value={counts.total_users}
+              hint="USER profiles, all statuses — matches Users list"
               icon="users"
             />
             <MetricCard

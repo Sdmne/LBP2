@@ -2477,17 +2477,6 @@ def send_profile_notification(
         preview = preview[:177] + "..."
     body = preview if notification_type == "MARKETING" and preview else body_template.format(actor=actor, message=preview)
     target_url = notification_target_path(notification_type, locale_code)
-    push_tokens = profile_data.get("pushTokens")
-    if isinstance(push_tokens, list) and push_tokens:
-        send_expo_push(push_tokens, subject, body, {"type": notification_type, "url": target_url})
-    if not email_address:
-        record_notification_delivery(notification_type, profile_id, "SKIPPED", detail="EMAIL_NOT_FOUND")
-        return {"ok": False, "status": "EMAIL_NOT_FOUND"}
-    if not email_notifications_configured():
-        record_notification_delivery(notification_type, profile_id, "FAILED", email_address, "SMTP_NOT_CONFIGURED")
-        return {"ok": False, "status": "SMTP_NOT_CONFIGURED"}
-
-
     # Push (item 16) - independent of email deliverability/config below,
     # so a profile with SMTP misconfigured, or simply no email on file,
     # still gets pushed if they have a registered device. send_expo_push()
@@ -13976,6 +13965,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
             entity_counts = []
 
         scalar_queries = {
+            "total_users": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'USER'",
             "registrations_30d": "SELECT COUNT(*) AS cnt FROM profiles WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 30 DAY",
             "registrations_1d": "SELECT COUNT(*) AS cnt FROM profiles WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY",
             "registrations_7d": "SELECT COUNT(*) AS cnt FROM profiles WHERE created_at >= UTC_TIMESTAMP() - INTERVAL 7 DAY",
@@ -18585,6 +18575,42 @@ def admin_storage(
             [*params, limit, offset],
         )
         files = cursor.fetchall()
+
+        # Family-room documents belong to a match, not directly to a chat.
+        # Resolve its unique active conversation without changing stored metadata.
+        family_match_ids = {
+            int_or_none(as_dict(item.get("metadata")).get("matchId"))
+            for item in files
+            if str(item.get("storageKey") or "").startswith("family-room/")
+        } - {None}
+        family_conversations: dict[int, list[int]] = {}
+        if family_match_ids:
+            placeholders = ", ".join(["%s"] * len(family_match_ids))
+            cursor.execute(
+                f"""
+                SELECT pm.id AS match_id, c.id AS conversation_id
+                FROM profile_matches pm
+                JOIN conversations c ON (
+                    (c.profile_a_id = pm.profile_a_id AND c.profile_b_id = pm.profile_b_id)
+                    OR (c.profile_a_id = pm.profile_b_id AND c.profile_b_id = pm.profile_a_id)
+                ) AND c.status = 'ACTIVE'
+                WHERE pm.id IN ({placeholders})
+                """,
+                list(family_match_ids),
+            )
+            for row in cursor.fetchall():
+                family_conversations.setdefault(int(row["match_id"]), []).append(int(row["conversation_id"]))
+        for item in files:
+            if not str(item.get("storageKey") or "").startswith("family-room/"):
+                continue
+            metadata = dict(as_dict(item.get("metadata")))
+            uploader_id = int_or_none(metadata.get("uploadedByProfileId"))
+            if uploader_id:
+                metadata.setdefault("senderProfileId", uploader_id)
+            candidates = family_conversations.get(int_or_none(metadata.get("matchId")) or -1, [])
+            if len(candidates) == 1:
+                metadata.setdefault("conversationId", candidates[0])
+            item["metadata"] = metadata
 
         conversation_ids: set[int] = set()
         local_profile_ids: set[int] = set()
