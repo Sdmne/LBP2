@@ -8654,6 +8654,14 @@ function VerificationDetail() {
     "approve" | "revoke" | "delete" | null
   >(null);
   const [busy, setBusy] = useState(false);
+  // Manual approval is limited to ADMIN accounts (the API enforces it too).
+  const [isAdminRole, setIsAdminRole] = useState(false);
+  useEffect(() => {
+    api
+      .get<Session>("/admin/session")
+      .then((response) => setIsAdminRole((response.role ?? "ADMIN").toUpperCase() === "ADMIN"))
+      .catch(() => setIsAdminRole(false));
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -8928,7 +8936,7 @@ function VerificationDetail() {
               >
                 <AdminIcon name="externalLink" /> Open in Didit
               </a>
-              {["PENDING", "DECLINED", "FAILED"].includes(status) && (
+              {isAdminRole && status !== "APPROVED" && (
                 <button
                   className="primary"
                   type="button"

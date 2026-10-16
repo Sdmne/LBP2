@@ -18321,11 +18321,21 @@ def admin_verification_detail(
     return {"item": item}
 
 
+def require_admin_role(actor: str, action: str) -> None:
+    """Allow only full ADMIN accounts; STAFF accounts are refused even when
+    their permission list covers the section."""
+    account = dynamic_admin_account(actor)
+    role = str(account.get("role") or "ADMIN").upper() if account else "ADMIN"
+    if role != "ADMIN":
+        raise HTTPException(status_code=403, detail=f"Only administrators can {action}")
+
+
 @app.post("/api/admin/verifications/{verification_id}/approve")
 def admin_approve_verification(
     verification_id: str,
     actor: str = Depends(require_admin),
 ):
+    require_admin_role(actor, "approve a verification manually")
     with db_cursor() as (conn, cursor):
         item = fetch_admin_verification(cursor, verification_id, for_update=True)
         data = as_dict(item.get("data"))
