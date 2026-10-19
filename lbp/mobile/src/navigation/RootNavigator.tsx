@@ -274,7 +274,7 @@ export default function RootNavigator() {
               component={ProfileDetailScreen}
               options={{ headerShown: true, title: t("nav.profileDetailTitle") }}
             />
-            <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: true, title: t("nav.settingsTitle") }} />
+            <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: true, headerTransparent: true, headerShadowVisible: false, title: t("nav.settingsTitle") }} />
             <Stack.Screen name="AiAdvisor" component={AiAdvisorScreen} options={{ headerShown: true, title: t("nav.aiAdvisorTitle") }} />
             <Stack.Screen name="AskAi" component={AskAiScreen} options={{ headerShown: true, title: t("whatsnew.askAiTitle") }} />
             <Stack.Screen name="AgreementDraft" component={AgreementDraftScreen} options={{ headerShown: true, title: t("whatsnew.agreementDraftTitle") }} />

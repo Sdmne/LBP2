@@ -49,10 +49,30 @@
 }
 
 .catalog-filter-chip-list b {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   font-size: 12px;
   font-weight: 600;
   line-height: 16px;
+}
+.catalog-filter-chip-list b > [role="button"] {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  border-radius: 50%;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.catalog-filter-chip-list b > [role="button"]:hover,
+.catalog-filter-chip-list b > [role="button"]:focus-visible {
+  color: #111827;
+  background: #e2e8f0;
+  outline: none;
 }
 
 .catalog-filter-select.premium {
@@ -77,12 +97,12 @@
 }
 
 .catalog-filter-select.premium > .catalog-filter-value {
-  opacity: .4;
+  opacity: 0.4;
 }
 
 .catalog-filter-select.premium > .catalog-filter-chevron {
   stroke: #64748b;
-  opacity: .4;
+  opacity: 0.4;
 }
 
 .catalog-filter-dropdown {
@@ -188,7 +208,7 @@
 .catalog-filter-field.disabled .catalog-city-autocomplete {
   background: #fff;
   color: #020817;
-  opacity: .5;
+  opacity: 0.5;
 }
 
 .catalog-city-dropdown {

@@ -18,6 +18,7 @@ import { fetchSubscriptionStatus } from "../api/subscription";
 import { fetchBoostStatus, requestBoost, type BoostStatus } from "../api/boost";
 import { fetchMe } from "../api/profile";
 import { ApiError } from "../api/client";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 import type { SubscriptionTier } from "../api/types";
 import * as Application from "expo-application";
 import * as Updates from "expo-updates";
@@ -244,7 +245,7 @@ export default function MeProfileScreen(_props: Props) {
         <Pressable style={styles.avatarWrap} onPress={() => rootNav.navigate("Photos")}>
           {avatarUrl && !avatarPhotoFailed ? (
             <Image
-              source={{ uri: avatarUrl }}
+              source={profilePhotoSource(avatarUrl)}
               style={styles.avatar}
               onError={() => setAvatarPhotoFailed(true)}
             />

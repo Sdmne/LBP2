@@ -26,6 +26,7 @@ import { emptyCatalogFilters, type CatalogFilters } from "../api/catalogFilters"
 import { createConversation } from "../api/messages";
 import { fetchPhotos } from "../api/photos";
 import { ApiError } from "../api/client";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 import type { CatalogProfile, SubscriptionTier } from "../api/types";
 import { fetchSubscriptionStatus } from "../api/subscription";
 import { useAuth } from "../context/AuthContext";
@@ -476,7 +477,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
           <View style={styles.matchMid}>
             <View style={styles.matchPhotos}>
               {myPhotoUrl ? (
-                <Image source={{ uri: myPhotoUrl }} style={styles.matchPhoto} />
+                <Image source={profilePhotoSource(myPhotoUrl)} style={styles.matchPhoto} />
               ) : (
                 <View style={[styles.matchPhoto, styles.matchPhotoPlaceholder]} />
               )}

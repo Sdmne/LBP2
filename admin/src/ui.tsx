@@ -27,9 +27,15 @@ import {
 } from "react-router-dom";
 import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
+import { sanitizeRichHtml } from "./rich-html";
+import { supportMessageIsSupport } from "./support-message";
+import { integrationStatus } from "./integration-status";
+import { personName, personSecondaryText } from "./person-name";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
 
 const api = createApiClient("/admin/api");
+const ADMIN_NAV_COUNTS_CHANGED_EVENT = "admin-navigation-counts-changed";
+declare const __ADMIN_BUILD_REVISION__: string;
 type Session = { email: string; role?: string; permissions?: string[] };
 type RecordValue = Record<string, unknown>;
 type ListResponse = {
@@ -238,7 +244,7 @@ const nav: ReadonlyArray<{
   { path: "/settings", title: "Settings", view: "settings", icon: "settings" },
 ];
 const columnsByView: Record<string, string[]> = {
-  articles: ["title", "category", "status", "views", "updated_at"],
+  articles: ["title", "category", "status", "updated_at"],
   users: [
     "displayName",
     "status",
@@ -436,6 +442,29 @@ function languageName(value: string) {
     return label(language);
   }
 }
+
+function profileLanguageNames(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "";
+  let languages: unknown = value;
+  if (typeof value === "string") {
+    try {
+      languages = JSON.parse(value);
+    } catch {
+      languages = value.split(",");
+    }
+  }
+  const entries = Array.isArray(languages) ? languages : [languages];
+  return entries
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => {
+      const language = String(entry).trim();
+      return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(language)
+        ? languageName(language)
+        : language;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
 function directoryDate(value: unknown) {
   return compactDate(value).replaceAll("/", ".");
 }
@@ -561,14 +590,7 @@ function auditActionLabel(value: unknown, source: unknown) {
   return source === "native" ? label(action) : action;
 }
 function rowName(row: RecordValue) {
-  return valueOf(
-    row.displayName ??
-      row.profileName ??
-      row.name ??
-      row.title ??
-      row.email ??
-      row.id,
-  );
+  return personName(row);
 }
 
 function recordValue(value: unknown): RecordValue | null {
@@ -1261,13 +1283,18 @@ function isDonorProfile(row: RecordValue) {
     row.data && typeof row.data === "object" ? row.data : {}
   ) as RecordValue;
   const donorType = row.donorType ?? data.donorType;
+  if (row.isDonor != null) return settingBoolean(row.isDonor);
+  let offered: unknown = donorType;
+  if (typeof offered === "string") {
+    try { offered = JSON.parse(offered); }
+    catch { /* Legacy comma-separated value is handled below. */ }
+  }
+  if (typeof offered === "string") offered = offered.split(",");
   return (
-    settingBoolean(row.isDonor) ||
-    (Array.isArray(donorType) && donorType.length > 0) ||
-    (typeof donorType === "string" && donorType.trim().length > 0) ||
-    String(row.profileType ?? "")
-      .toUpperCase()
-      .includes("DONOR")
+    (Array.isArray(offered) && offered.some((value) =>
+      ["SPERM", "EGG", "SPERM_DONOR", "EGG_DONOR"].includes(String(value).trim().toUpperCase()))) ||
+    ["DONOR", "SPERM_DONOR", "EGG_DONOR"].includes(
+      String(row.profileType ?? data.profileType ?? "").trim().toUpperCase())
   );
 }
 
@@ -1370,9 +1397,9 @@ function RichTextEditor({
   const command = (name: string, commandValue?: string) => {
     editorRef.current?.focus();
     document.execCommand(name, false, commandValue);
-    if (editorRef.current) onChange(editorRef.current.innerHTML);
+    if (editorRef.current) onChange(sanitizeRichHtml(editorRef.current.innerHTML));
   };
-  const insertHtml = (html: string) => command("insertHTML", html);
+  const insertHtml = (html: string) => command("insertHTML", sanitizeRichHtml(html));
   const insertImage = (file?: File) => {
     if (!file) return;
     const reader = new FileReader();
@@ -1581,8 +1608,24 @@ function RichTextEditor({
           className="article-content-editor"
           contentEditable
           suppressContentEditableWarning
-          onInput={(event) => onChange(event.currentTarget.innerHTML)}
-          dangerouslySetInnerHTML={{ __html: value }}
+          onInput={(event) => onChange(sanitizeRichHtml(event.currentTarget.innerHTML))}
+          onPaste={(event) => {
+            event.preventDefault();
+            const html = event.clipboardData.getData("text/html");
+            if (html) insertHtml(html);
+            else command("insertText", event.clipboardData.getData("text/plain"));
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const image = Array.from(event.dataTransfer.files).find((file) => file.type.startsWith("image/"));
+            if (image && allowImages) insertImage(image);
+            else {
+              const html = event.dataTransfer.getData("text/html");
+              if (html) insertHtml(html);
+              else command("insertText", event.dataTransfer.getData("text/plain"));
+            }
+          }}
+          dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(value) }}
           data-placeholder={placeholder}
         />
       )}
@@ -2275,6 +2318,8 @@ function Login({
           <label>
             Email
             <input
+              id="admin-login-email"
+              name="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="username"
@@ -2285,6 +2330,8 @@ function Login({
           <label>
             Password
             <input
+              id="admin-login-password"
+              name="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
@@ -2593,20 +2640,43 @@ function ProfileDonutPanel({
   );
 }
 
+function LoadError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div role="alert">
+      <p className="error">{message}</p>
+      <button type="button" onClick={onRetry}>Try again</button>
+    </div>
+  );
+}
+
 function Dashboard({ onStatsLoaded }: { onStatsLoaded?: (stats: RecordValue) => void }) {
   const [stats, setStats] = useState<RecordValue | null>(null);
   const [tab, setTab] = useState("users");
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
+    let live = true;
+    const controller = new AbortController();
+    setError("");
     api
-      .get<RecordValue>("/admin/stats")
+      .get<RecordValue>("/admin/stats", { signal: controller.signal })
       .then((payload) => {
+        if (!live) return;
         setStats(payload);
         onStatsLoaded?.(payload);
       })
-      .catch(() => setError("Could not load dashboard metrics."));
-  }, [onStatsLoaded]);
-  if (error) return <p className="error">{error}</p>;
+      .catch(() => {
+        if (live && !controller.signal.aborted) setError("Could not load dashboard metrics.");
+      });
+    return () => {
+      live = false;
+      controller.abort();
+    };
+  }, [onStatsLoaded, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => {
+    setError("");
+    setRefresh(value => value + 1);
+  }} />;
   if (!stats) return <p className="loading-inline">Loading dashboard…</p>;
   const counts = (stats.counts ?? {}) as RecordValue;
   const dashboard = (stats.dashboard ?? {}) as RecordValue;
@@ -2698,7 +2768,8 @@ function Dashboard({ onStatsLoaded }: { onStatsLoaded?: (stats: RecordValue) => 
           <section className="metric-grid">
             <MetricCard
               title="Total Users"
-              value={counts.profiles}
+              value={counts.total_users}
+              hint="USER profiles, all statuses — matches Users list"
               icon="users"
             />
             <MetricCard
@@ -3534,11 +3605,7 @@ function DashboardSeries({
         rows={source}
         series={chartSeries}
         animationKey={period}
-        footnote={
-          isEngagement
-            ? "Последняя точка (полая, пунктирная) — «сегодня (неполный день)», значение ещё будет расти до конца суток."
-            : undefined
-        }
+        footnote="The last point (hollow, dashed) represents today, which is still in progress. Its value will keep rising until the end of the day."
       />
     </>
   );
@@ -4570,7 +4637,7 @@ function StoragePage() {
           <h1>Storage</h1>
           <span className="storage-total-badge">
             {data
-              ? `${formatBytes(data.totalBytes)} / ${Number(data.totalFiles ?? 0).toLocaleString()} files`
+              ? `${formatBytes(data.totalBytes)}${Number(data.unknownSizes ?? 0) > 0 ? " known" : ""} / ${Number(data.totalFiles ?? 0).toLocaleString()} files`
               : "Loading…"}
           </span>
         </div>
@@ -4590,7 +4657,7 @@ function StoragePage() {
               </header>
               <div>
                 <strong>{Number(item.files ?? 0).toLocaleString()}</strong>
-                <small>{formatBytes(item.bytes)}</small>
+                <small>{formatBytes(item.bytes)}{Number(item.unknownSizes ?? 0) > 0 ? ` known · ${Number(item.unknownSizes).toLocaleString()} sizes unknown` : ""}</small>
               </div>
             </article>
           );
@@ -4679,10 +4746,14 @@ function StoragePage() {
                     <span>{directoryDate(row.createdAt)}</span>
                   </small>
                   {Boolean(row.relatedUrl && row.relatedLabel) && (
-                    <Link to={String(row.relatedUrl)}>
+                    <a
+                      href={String(row.relatedUrl)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <AdminIcon name="externalLink" />
                       <span>{valueOf(row.relatedLabel)}</span>
-                    </Link>
+                    </a>
                   )}
                 </div>
               </article>
@@ -4889,6 +4960,7 @@ function Support() {
     setResolving(true);
     try {
       await api.post(`/admin/support/${encodeURIComponent(String(active.id))}/resolve`, {});
+      window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
       const updated = await api.get<RecordValue>(
         `/admin/support/${encodeURIComponent(String(active.id))}`,
       );
@@ -4932,7 +5004,7 @@ function Support() {
             aria-pressed={unanswered}
             onClick={() => resetThread(true)}
           >
-            Unanswered ({result?.totalUnanswered ?? (unanswered ? total : 0)})
+            Unresolved ({result?.totalUnanswered ?? (unanswered ? total : 0)})
           </button>
           <button
             type="button"
@@ -5075,10 +5147,7 @@ function Support() {
                   !previous ||
                   supportDayKey(createdAt) !==
                     supportDayKey(previous.created_at ?? previous.createdAt);
-                const isSupport =
-                  String(message.senderRole ?? "").toUpperCase() === "SUPPORT" ||
-                  String(message.senderProfileId ?? message.sender_profile_id ?? "") ===
-                    String(supportProfile.id ?? "");
+                const isSupport = supportMessageIsSupport(message, supportProfile);
                 return (
                   <div
                     className="support-message-entry"
@@ -6839,20 +6908,28 @@ function StaticPageRoute({ create = false }: { create?: boolean }) {
       : null,
   );
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     if (create) return;
+    const controller = new AbortController();
+    setRows(null);
+    setError("");
     api
-      .get<ListResponse>("/admin/list/static-pages?limit=200&offset=0")
+      .get<ListResponse>("/admin/list/static-pages?limit=200&offset=0", { signal: controller.signal })
       .then((result) => {
+        if (controller.signal.aborted) return;
         const matches = result.items.filter(
           (item) => String(item.slug ?? "") === decodeURIComponent(slug),
         );
         if (!matches.length) setError("Page not found.");
         else setRows(matches);
       })
-      .catch(() => setError("Could not load this page."));
-  }, [create, slug]);
-  if (error) return <p className="error">{error}</p>;
+      .catch(() => {
+        if (!controller.signal.aborted) setError("Could not load this page.");
+      });
+    return () => controller.abort();
+  }, [create, slug, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   if (!rows) return <p className="loading-inline">Loading page…</p>;
   return (
     <StaticPageEditor
@@ -6867,12 +6944,21 @@ function StaticPageRoute({ create = false }: { create?: boolean }) {
 function DeletionFeedback() {
   const [result, setResult] = useState<ListResponse | null>(null);
   const [days, setDays] = useState("30");
+  const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
+    const controller = new AbortController();
+    setResult(null);
+    setError("");
     api
-      .get<ListResponse>("/admin/list/deletion-feedback?limit=200&offset=0")
-      .then(setResult)
-      .catch(() => setResult({ items: [], total: 0, limit: 200, offset: 0 }));
-  }, []);
+      .get<ListResponse>("/admin/list/deletion-feedback?limit=200&offset=0", { signal: controller.signal })
+      .then(value => { if (!controller.signal.aborted) setResult(value); })
+      .catch(() => {
+        if (!controller.signal.aborted) setError("Could not load deletion feedback.");
+      });
+    return () => controller.abort();
+  }, [refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   const profileTypes: Array<[string, string]> = [
     ["GayCouple", "Gay Couple"],
     ["HeteroCouple", "Hetero Couple"],
@@ -7029,8 +7115,10 @@ function GenericList({ view }: { view: string }) {
   const isPartnerUsers =
     view === "users" && location.pathname.endsWith("/partners");
   const [result, setResult] = useState<ListResponse | null>(null);
+  const loadedView = useRef(view);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const lastRequestedSearch = useRef({ view, isPartnerUsers, query: "" });
   const [offset, setOffset] = useState(0);
   const [filters, setFilters] = useState<Record<string, string>>(() =>
     isPartnerUsers
@@ -7169,24 +7257,42 @@ function GenericList({ view }: { view: string }) {
   }, [view, grantOpen, grantUser, grantSelectedUser]);
   useEffect(() => {
     let live = true;
-    setResult(null);
+    if (loadedView.current !== view) {
+      loadedView.current = view;
+      setResult(null);
+    }
     setError("");
+    const controller = new AbortController();
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
     });
-    if (query.trim()) params.set("q", query.trim());
+    const search = query.trim();
+    if (search) params.set("q", search);
     Object.entries(filters).forEach(([key, value]) => {
       if (value) params.set(key, value);
     });
-    api
-      .get<ListResponse>(`/admin/list/${view}?${params}`)
-      .then((data) => live && setResult(data))
-      .catch(() => live && setError("Could not load this section."));
+    const previous = lastRequestedSearch.current;
+    const delay = search && previous.view === view &&
+      previous.isPartnerUsers === isPartnerUsers && previous.query !== search
+      ? 300 : 0;
+    const load = () => {
+      lastRequestedSearch.current = { view, isPartnerUsers, query: search };
+      api
+        .get<ListResponse>(`/admin/list/${view}?${params}`, { signal: controller.signal })
+        .then((data) => live && setResult(data))
+        .catch(() => {
+          if (live && !controller.signal.aborted) setError("Could not load this section.");
+        });
+    };
+    const timer = delay ? window.setTimeout(load, delay) : undefined;
+    if (!delay) load();
     return () => {
       live = false;
+      window.clearTimeout(timer);
+      controller.abort();
     };
-  }, [view, query, offset, filters, refresh]);
+  }, [view, isPartnerUsers, query, offset, filters, refresh]);
   const columns = useMemo(() => columnsByView[view] ?? [], [view]);
   const items = result?.items ?? [];
   const total = result?.total ?? 0;
@@ -7454,7 +7560,7 @@ function GenericList({ view }: { view: string }) {
     }
   };
   if (view === "subscriptions" && (error || summaryError)) {
-    return <div role="alert"><p className="error">{error || summaryError}</p><button type="button" onClick={() => setRefresh(value => value + 1)}>Try again</button></div>;
+    return <LoadError message={error || summaryError} onRetry={() => setRefresh(value => value + 1)} />;
   }
   if (view === "subscriptions" && (summaryLoading || result === null)) {
     return <p className="loading-inline" role="status" aria-label="Loading subscriptions">Loading subscriptions…</p>;
@@ -7600,7 +7706,7 @@ function GenericList({ view }: { view: string }) {
                   setFilters((current) => ({ ...current, status }));
                 }}
               >
-                {status ? statusLabel(status) : "All"}
+                {status ? statusLabel(status) : "All active"}
               </button>
             ))}
           </div>
@@ -7709,6 +7815,7 @@ function GenericList({ view }: { view: string }) {
               <>
                 {!isPartnerUsers && <>
                 <AdminSelect
+                  aria-label="Profile type"
                   value={filters.profileType ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -7755,6 +7862,7 @@ function GenericList({ view }: { view: string }) {
                 </label>
                 </>}
                 <AdminSelect
+                  aria-label="Country"
                   value={filters.country ?? ""}
                   menuMaxHeight={520}
                   onChange={(event) => {
@@ -7910,7 +8018,7 @@ function GenericList({ view }: { view: string }) {
         </section>
       )}
       {error ? (
-        <p className="error">{error}</p>
+        <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />
       ) : (
         <>
           {total > limit &&
@@ -7998,11 +8106,6 @@ function GenericList({ view }: { view: string }) {
                               <span className="category-badge">
                                 {articleCategory(row)}
                               </span>
-                            ) : view === "articles" && column === "views" ? (
-                              valueOf(
-                                (row.data as RecordValue | undefined)?.views ??
-                                  0,
-                              )
                             ) : column === "location" ? (
                               (view === "users"
                                 ? [userCountryName(row.country), row.city]
@@ -8147,11 +8250,9 @@ function GenericList({ view }: { view: string }) {
                                     {view === "users" && ["DELETED", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
                                     {view === "users" && <UserLocationMismatchFlag row={row} />}
                                   </span>
-                                  <small>
-                                    {valueOf(
-                                      row.email ?? row.profileEmail ?? row.slug,
-                                    )}
-                                  </small>
+                                  {personSecondaryText(row) && (
+                                    <small>{personSecondaryText(row)}</small>
+                                  )}
                                 </span>
                               </div>
                             ) : (
@@ -8467,6 +8568,7 @@ function GenericList({ view }: { view: string }) {
       <EntityModal
         row={editing}
         title={label(view)}
+        regularTypography={view === "community-groups"}
         busy={saving}
         onClose={() => setEditing(null)}
         onSave={saveRow}
@@ -8615,7 +8717,7 @@ function VerificationDetail() {
           <AdminIcon name="arrowLeft" /> Back to Verifications
         </Link>
         {error ? (
-          <p className="error">{error}</p>
+          <LoadError message={error} onRetry={() => setReload(value => value + 1)} />
         ) : (
           <p className="loading-inline">Loading…</p>
         )}
@@ -9089,6 +9191,9 @@ function CategoryManager({
   const [items, setItems] = useState<RecordValue[]>([]);
   const [nameEn, setNameEn] = useState("");
   const [nameRu, setNameRu] = useState("");
+  const [nameEs, setNameEs] = useState("");
+  const [additionalNames, setAdditionalNames] = useState<Record<string, string>>({});
+  const additionalLocales = ["pt", "fr", "de", "it", "pl"];
   const [slug, setSlug] = useState("");
   const [editing, setEditing] = useState<RecordValue | null>(null);
   const [busy, setBusy] = useState(false);
@@ -9099,6 +9204,8 @@ function CategoryManager({
     setEditing(null);
     setNameEn("");
     setNameRu("");
+    setNameEs("");
+    setAdditionalNames({});
     setSlug("");
   };
   const close = () => {
@@ -9157,12 +9264,15 @@ function CategoryManager({
       ru: valueOf(
         translations.find((item) => item.locale === "ru")?.name ?? "",
       ),
+      es: valueOf(
+        translations.find((item) => item.locale === "es")?.name ?? "",
+      ),
       slug: valueOf(data.slug ?? row.slug ?? row.title),
     };
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!nameEn.trim() || !nameRu.trim() || !slug.trim()) return;
+    if (!nameEn.trim() || !nameRu.trim() || !nameEs.trim() || !slug.trim()) return;
     setBusy(true);
     setError("");
     const original = editing ? fields(editing).data : {};
@@ -9183,10 +9293,19 @@ function CategoryManager({
         slug: slug.trim(),
         sortOrder: Number(preserved.sortOrder ?? 0),
         isActive: true,
-        translations: [
-          { locale: "en", name: nameEn.trim() },
-          ...(nameRu.trim() ? [{ locale: "ru", name: nameRu.trim() }] : []),
-        ],
+          translations: [
+            ...((Array.isArray(original.translations)
+              ? original.translations
+              : []) as RecordValue[]).filter(
+                (item) => !["en", "ru", "es", ...additionalLocales].includes(String(item.locale ?? "").toLowerCase()),
+              ),
+            { locale: "en", name: nameEn.trim() },
+            { locale: "ru", name: nameRu.trim() },
+            { locale: "es", name: nameEs.trim() },
+            ...additionalLocales
+              .filter((locale) => additionalNames[locale]?.trim())
+              .map((locale) => ({ locale, name: additionalNames[locale].trim() })),
+          ],
       },
     };
     try {
@@ -9253,6 +9372,25 @@ function CategoryManager({
                 required
               />
             </label>
+            <label>
+              Name (ES)
+              <input
+                value={nameEs}
+                onChange={(event) => setNameEs(event.target.value)}
+                placeholder="Category name in Spanish"
+                required
+              />
+            </label>
+            {additionalLocales.map((locale) => (
+              <label key={locale}>
+                Name ({locale.toUpperCase()})
+                <input
+                  value={additionalNames[locale] ?? ""}
+                  onChange={(event) => setAdditionalNames((names) => ({ ...names, [locale]: event.target.value }))}
+                  placeholder={`Category name (${locale.toUpperCase()})`}
+                />
+              </label>
+            ))}
           </div>
           <label>
             Slug
@@ -9267,7 +9405,11 @@ function CategoryManager({
             <button
               className="primary"
               disabled={
-                busy || !nameEn.trim() || !nameRu.trim() || !slug.trim()
+                busy ||
+                !nameEn.trim() ||
+                !nameRu.trim() ||
+                !nameEs.trim() ||
+                !slug.trim()
               }
             >
               {editing ? "Update" : "Add"}
@@ -9290,66 +9432,76 @@ function CategoryManager({
           </p>
         )}
         {loading ? (
-          <div className="category-list-loading" aria-label="Loading categories">
+          <div
+            className="category-list-loading"
+            aria-label="Loading categories"
+          >
             <span />
           </div>
         ) : (
           <div className="category-list">
-          {items.map((item) => {
-            const data = fields(item);
-            const selected = String(editing?.id ?? "") === String(item.id ?? "");
-            return (
-              <div
-                className={`category-row${selected ? " editing" : ""}`}
-                key={String(item.id ?? data.slug)}
-              >
-                <span>
-                  <b>{data.en}</b>
-                  <small>{data.slug}</small>
-                </span>
-                <div>
-                  <button
-                    type="button"
-                    className={selected ? "selected" : ""}
-                    aria-label={`Edit ${data.en}`}
-                    onClick={() => {
-                      setEditing(item);
-                      setNameEn(data.en === "—" ? "" : data.en);
-                      setNameRu(data.ru === "—" ? "" : data.ru);
-                      setSlug(data.slug === "—" ? "" : data.slug);
-                    }}
-                  >
-                    <AdminIcon name="pencil" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${data.en}`}
-                    onClick={async () => {
-                      if (!window.confirm(`Archive ${data.en}?`)) return;
-                      setBusy(true);
-                      setError("");
-                      try {
-                        await api.delete(
-                          `/admin/item/categories/${encodeURIComponent(String(item.id))}`,
-                        );
-                        if (selected) reset();
-                        await load();
-                      } catch {
-                        setError("Could not delete this category.");
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
-                  >
-                    <AdminIcon name="trash" />
-                  </button>
+            {items.map((item) => {
+              const data = fields(item);
+              const selected =
+                String(editing?.id ?? "") === String(item.id ?? "");
+              return (
+                <div
+                  className={`category-row${selected ? " editing" : ""}`}
+                  key={String(item.id ?? data.slug)}
+                >
+                  <span>
+                    <b>{data.en}</b>
+                    <small>{data.slug}</small>
+                  </span>
+                  <div>
+                    <button
+                      type="button"
+                      className={selected ? "selected" : ""}
+                      aria-label={`Edit ${data.en}`}
+                      onClick={() => {
+                        setEditing(item);
+                        setNameEn(data.en === "—" ? "" : data.en);
+                        setNameRu(data.ru === "—" ? "" : data.ru);
+                        setNameEs(data.es === "—" ? "" : data.es);
+                        setAdditionalNames(Object.fromEntries(additionalLocales.map((locale) => {
+                          const translations = Array.isArray(data.data.translations) ? data.data.translations as RecordValue[] : [];
+                          const translation = translations.find((entry) => String(entry.locale ?? "").toLowerCase() === locale);
+                          return [locale, String(translation?.name ?? "")];
+                        })));
+                        setSlug(data.slug === "—" ? "" : data.slug);
+                      }}
+                    >
+                      <AdminIcon name="pencil" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${data.en}`}
+                      onClick={async () => {
+                        if (!window.confirm(`Archive ${data.en}?`)) return;
+                        setBusy(true);
+                        setError("");
+                        try {
+                          await api.delete(
+                            `/admin/item/categories/${encodeURIComponent(String(item.id))}`,
+                          );
+                          if (selected) reset();
+                          await load();
+                        } catch {
+                          setError("Could not delete this category.");
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      <AdminIcon name="trash" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-          {!items.length && !error && (
-            <p className="category-empty">No categories yet.</p>
-          )}
+              );
+            })}
+            {!items.length && !error && (
+              <p className="category-empty">No categories yet.</p>
+            )}
           </div>
         )}
       </section>
@@ -9383,6 +9535,24 @@ function ArticleEditor({
   const [coverUploading, setCoverUploading] = useState(false);
   const [coverError, setCoverError] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const archiveTarget = translations.find((item) => String(item.locale) === locale)
+    ?? (String(row.locale ?? "en") === locale ? row : null);
+  const archiveArticle = async () => {
+    if (!archiveTarget?.id || archiving) return;
+    setArchiving(true);
+    setSaveError("");
+    try {
+      await api.delete(`/admin/item/articles/${encodeURIComponent(String(archiveTarget.id))}`);
+      onClose();
+    } catch {
+      setSaveError("Could not archive article. Try again.");
+      setArchiveOpen(false);
+    } finally {
+      setArchiving(false);
+    }
+  };
   const [tags, setTags] = useState(
     Array.isArray(initialMeta.tags)
       ? (initialMeta.tags as unknown[]).join(", ")
@@ -9540,7 +9710,7 @@ function ArticleEditor({
         >
           <EditorIcon name="arrowLeft" />
         </button>
-        <h1>Edit Article</h1>
+        <h1>{row.id ? "Edit Article" : "New Article"}</h1>
       </header>
       <div className="article-editor-grid">
         <section className="article-editor-main">
@@ -9709,8 +9879,14 @@ function ArticleEditor({
               />
             </label>
           </section>
-          <div className="article-editor-actions">
-            {saveError && <p className="article-save-error">{saveError}</p>}
+        <div className="article-editor-actions">
+          {saveError && <p className="article-save-error">{saveError}</p>}
+          {Boolean(archiveTarget?.id) && String(archiveTarget?.status ?? "").toUpperCase() !== "ARCHIVED" && (
+            <button type="button" className="secondary-button" disabled={busy || archiving}
+              onClick={() => setArchiveOpen(true)}>
+              Archive article
+            </button>
+          )}
             <button
               type="button"
               className="secondary-button"
@@ -9726,13 +9902,18 @@ function ArticleEditor({
             </button>
             <button
               className="primary"
-              disabled={busy || coverUploading || !title.trim() || !slug.trim()}
+            disabled={busy || archiving || coverUploading || !title.trim() || !slug.trim()}
             >
               <EditorIcon name="save" /> {busy ? "Saving…" : "Save Article"}
             </button>
           </div>
         </aside>
       </div>
+      <ConfirmModal open={archiveOpen} title="Archive article"
+        message="This language version will be archived and hidden from ordinary lists. It remains available in the Archived filter. Unsaved changes will not be saved."
+        confirmLabel={archiving ? "Archiving…" : "Archive"}
+        onClose={() => { if (!archiving) setArchiveOpen(false); }}
+        onConfirm={archiveArticle} />
     </form>
   );
 }
@@ -10205,18 +10386,15 @@ function SettingsList({ view }: { view: string }) {
             <article>
               <AdminIcon name="map" />
               <div>
-                <h3>Google Places API</h3>
+                <h3>City autocomplete</h3>
                 <p>
-                  City autocomplete in profile editing and clinic management
+                  Local location directory for profile editing and clinic management
                 </p>
               </div>
               <span
-                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).googlePlacesConfigured ? "configured" : ""}`}
+                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).cityAutocompleteConfigured === true ? "configured" : ""}`}
               >
-                {((operations.integrations ?? {}) as RecordValue)
-                  .googlePlacesConfigured
-                  ? "Configured"
-                  : "Not Configured"}
+                {integrationStatus(((operations.integrations ?? {}) as RecordValue).cityAutocompleteConfigured)}
               </span>
             </article>
             <article>
@@ -10224,15 +10402,12 @@ function SettingsList({ view }: { view: string }) {
               <div>
                 <h3>Google Vision API</h3>
                 <p>Automatic photo moderation (SafeSearch detection)</p>
-                <small>Shares the same API key as Google Places</small>
+                <small>Uses a separate server-side service account</small>
               </div>
               <span
-                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).visionConfigured ? "configured" : ""}`}
+                className={`integration-status ${((operations.integrations ?? {}) as RecordValue).visionConfigured === true ? "configured" : ""}`}
               >
-                {((operations.integrations ?? {}) as RecordValue)
-                  .visionConfigured
-                  ? "Configured"
-                  : "Not Configured"}
+                {integrationStatus(((operations.integrations ?? {}) as RecordValue).visionConfigured)}
               </span>
             </article>
           </div>
@@ -11192,6 +11367,7 @@ function EntityModal({
   onClose,
   onSave,
   onDelete,
+  regularTypography = false,
 }: {
   row: RecordValue | null;
   title: string;
@@ -11199,6 +11375,7 @@ function EntityModal({
   onClose: () => void;
   onSave: (values: RecordValue) => Promise<void>;
   onDelete: () => void | Promise<void>;
+  regularTypography?: boolean;
 }) {
   const [status, setStatus] = useState("");
   const [entityTitle, setEntityTitle] = useState("");
@@ -11229,7 +11406,7 @@ function EntityModal({
   };
   return (
     <div className="modal-backdrop" role="presentation">
-      <form className="modal entity-modal" onSubmit={submit}>
+      <form className={`modal entity-modal${regularTypography ? " entity-modal-regular" : ""}`} onSubmit={submit}>
         <button
           className="modal-close"
           type="button"
@@ -11568,7 +11745,9 @@ function UserTabContent({
   const [messageMode, setMessageMode] = useState<"visible" | "hidden">(
     "visible",
   );
-  const [selectedConversation, setSelectedConversation] = useState<string>("");
+  const [selectedConversation, setSelectedConversation] = useState<string>(() =>
+    new URLSearchParams(window.location.search).get("chat") || "",
+  );
   const [revealedSubscriptionId, setRevealedSubscriptionId] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => setRevealedSubscriptionId(""), [tab]);
@@ -11580,7 +11759,7 @@ function UserTabContent({
     const messages = supportMessagesRef.current;
     if (tab === "support" && messages) messages.scrollTop = messages.scrollHeight;
   }, [tab, rows]);
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <LoadError message={error} onRetry={onReload} />;
   const nested = (row: RecordValue, key = "data") =>
     row[key] && typeof row[key] === "object" ? (row[key] as RecordValue) : {};
   const detailDeviceDate = (value: unknown, utc = false) => {
@@ -11784,7 +11963,7 @@ function UserTabContent({
             const right = String(b.created_at ?? b.createdAt ?? "");
             return left.localeCompare(right) || String(a.id ?? "").localeCompare(String(b.id ?? ""), undefined, { numeric: true });
           }).map((row, index) => {
-            const isSupport = String(row.sender_role ?? row.senderRole ?? "").toUpperCase() === "SUPPORT";
+            const isSupport = supportMessageIsSupport(row);
             const stamp = profileSupportDate(row.created_at ?? row.createdAt);
             return (
             <article
@@ -12238,7 +12417,9 @@ function UserDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<RecordValue | null>(null);
-  const [tab, setTab] = useState("profile");
+  const [tab, setTab] = useState(() =>
+    new URLSearchParams(window.location.search).get("tab") || "profile",
+  );
   const [tabRows, setTabRows] = useState<RecordValue[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
   const [error, setError] = useState("");
@@ -12290,7 +12471,7 @@ function UserDetail() {
       cancelled = true;
     };
   }, [id, tab, reload]);
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <LoadError message={error} onRetry={() => setReload(value => value + 1)} />;
   if (!detail) return <p className="loading-inline">Loading user…</p>;
   const profile = (detail.profile ?? {}) as RecordValue;
   const counts = (detail.counts ?? {}) as RecordValue;
@@ -12483,12 +12664,12 @@ function UserDetail() {
                 </span>
               )}{" "}
               {premium && <span className="premium-mark" title="Premium" aria-label="Premium"><AdminIcon name="crown" /></span>}
-              <em>{online ? "Online" : "Offline"}</em>
+              {online && <em>Online</em>}
             </h1>
             <p>{valueOf(profile.email)}</p>
             <p>
-              Blocked by <b>{tabCount("blockedBy")}</b> users　{" "}
-              <b>{tabCount("reports")}</b> reports
+              Blocked by <span className="user-detail-stat-value">{tabCount("blockedBy")}</span> users　{" "}
+              <span className="user-detail-stat-value">{tabCount("reports")}</span> reports
             </p>
           </div>
         </div>
@@ -12556,7 +12737,7 @@ function UserDetail() {
           </button>
         ))}
       </nav>
-      <div className="user-detail-tab-region" aria-busy={tabLoading}>
+      <div className={`user-detail-tab-region${tab === "profile" ? "" : " user-detail-tab-card"}`} aria-busy={tabLoading}>
         {tabLoading && (
           <div
             className="user-detail-tab-loading-overlay"
@@ -12581,7 +12762,7 @@ function UserDetail() {
               ["Display Name", dataValue("displayName", "display_name")],
               ["User Type (legacy)", dataValue("donorType", "userType")],
               ["Date of Birth", profileBirthDate(dataValue("dateOfBirth", "birthDate"))],
-              ["Country", dataValue("country")],
+              ["Country", dataValue("country") ? userCountryName(dataValue("country")) : null],
               ["State", dataValue("state", "region", "stateName")],
               ["City", dataValue("city")],
             ])}
@@ -12608,7 +12789,7 @@ function UserDetail() {
               ["Smoking", dataValue("smoking")],
               ["Drinking", dataValue("drinking")],
               ["Religion", dataValue("religion")],
-              ["Languages", dataValue("languages")],
+              ["Languages", profileLanguageNames(dataValue("languages"))],
             ])}
             <section className="profile-section profile-bio">
               <p>
@@ -12841,18 +13022,25 @@ function ClinicDetail() {
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const load = () => {
+  const [refresh, setRefresh] = useState(0);
+  const load = (signal?: AbortSignal) => {
     setData(null);
-    api
-      .get<RecordValue>(`/admin/clinics/${encodeURIComponent(id)}/overview`)
+    setError("");
+    return api
+      .get<RecordValue>(`/admin/clinics/${encodeURIComponent(id)}/overview`, { signal })
       .then((result) => {
+        if (signal?.aborted) return;
         setData(result);
         setDraft((result.clinic ?? {}) as RecordValue);
       })
-      .catch(() => setError("Could not load clinic details."));
+      .catch(() => { if (!signal?.aborted) setError("Could not load clinic details."); });
   };
-  useEffect(load, [id]);
-  if (error) return <p className="error">{error}</p>;
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [id, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   if (!data) return <p className="loading-inline">Loading clinic…</p>;
   const clinic = (data.clinic ?? {}) as RecordValue;
   const serviceGroups = (data.serviceGroups ?? {}) as Record<
@@ -13449,18 +13637,25 @@ function LawyerDetail() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () =>
-    api
-      .get<RecordValue>(`/admin/lawyers/${encodeURIComponent(id)}/overview`)
+  const [refresh, setRefresh] = useState(0);
+  const load = (signal?: AbortSignal) => {
+    setError("");
+    return api
+      .get<RecordValue>(`/admin/lawyers/${encodeURIComponent(id)}/overview`, { signal })
       .then((result) => {
+        if (signal?.aborted) return;
         setData(result);
         setDraft((result.lawyer ?? {}) as RecordValue);
       })
-      .catch(() => setError("Could not load lawyer details."));
+      .catch(() => { if (!signal?.aborted) setError("Could not load lawyer details."); });
+  };
   useEffect(() => {
-    void load();
-  }, [id]);
-  if (error) return <p className="error">{error}</p>;
+    const controller = new AbortController();
+    setData(null);
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [id, refresh]);
+  if (error) return <LoadError message={error} onRetry={() => setRefresh(value => value + 1)} />;
   if (!data) return <p className="loading-inline">Loading lawyer…</p>;
   const lawyer = (data.lawyer ?? {}) as RecordValue;
   const options = (data.practiceAreaOptions ?? []) as RecordValue[];
@@ -13805,19 +14000,21 @@ export function AdminApp() {
     if (!session) return;
     if (location.pathname === "/dashboard" || location.pathname === "/") return;
     let live = true;
+    const controller = new AbortController();
     const loadNavCounts = () =>
       api
-        .get<RecordValue>("/admin/stats")
+        .get<RecordValue>("/admin/navigation-counts", { signal: controller.signal })
         .then((payload) => {
           if (live) setNavCounts((payload.counts ?? {}) as RecordValue);
         })
-        .catch(() => {
-          if (live) setNavCounts({});
-        });
+        .catch(() => undefined);
     void loadNavCounts();
+    window.addEventListener(ADMIN_NAV_COUNTS_CHANGED_EVENT, loadNavCounts);
     const timer = window.setInterval(loadNavCounts, 30000);
     return () => {
       live = false;
+      controller.abort();
+      window.removeEventListener(ADMIN_NAV_COUNTS_CHANGED_EVENT, loadNavCounts);
       window.clearInterval(timer);
     };
   }, [session, location.pathname]);
@@ -13937,6 +14134,13 @@ export function AdminApp() {
         beginContentTransition();
       }}
     >
+      <a
+        className="admin-skip-link"
+        href="#admin-main-content"
+        onClick={() => document.getElementById("admin-main-content")?.focus()}
+      >
+        Skip to main content
+      </a>
       <aside>
         <Link className="brand" to="/dashboard">
           LetsBeParents
@@ -13961,7 +14165,7 @@ export function AdminApp() {
           ))}
         </nav>
         <div className="admin-account">
-          <div className="admin-version">v4.3.50 (f16e15ad)</div>
+          <div className="admin-version">v4.3.50 ({__ADMIN_BUILD_REVISION__})</div>
           <div className="admin-identity">
             <strong>{session.email}</strong>
             <small>{session.role ?? "ADMIN"}</small>
@@ -13977,6 +14181,8 @@ export function AdminApp() {
         </div>
       </aside>
       <main
+        id="admin-main-content"
+        tabIndex={-1}
         className={`content ${location.pathname.startsWith("/support") ? "support-content" : ""}`}
         aria-busy={contentTransitioning}
       >

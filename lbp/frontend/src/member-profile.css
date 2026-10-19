@@ -1243,6 +1243,11 @@
 .member-profile-surface .detail-like.active .action-icon {
   fill: currentColor;
 }
+.member-profile-surface .detail-like.active:disabled {
+  opacity: 1;
+  cursor: default;
+  pointer-events: none;
+}
 
 @media (max-width: 767px) {
   .member-profile-surface .verification-prompt {

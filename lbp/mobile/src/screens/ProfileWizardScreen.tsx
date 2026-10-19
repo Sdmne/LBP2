@@ -18,6 +18,7 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { updateProfile } from "../api/profile";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 import { fetchCatalogFilterOptions, type CatalogFilterOptionRow } from "../api/catalogFilters";
 import { CATALOG_ENUM_OPTIONS, catalogOptionLabel } from "../data/catalogLabels";
 import { OptionListPicker, type OptionRow } from "../components/OptionListPicker";
@@ -773,7 +774,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
               {uploadingMain ? (
                 <ActivityIndicator color={colors.pink} />
               ) : mainPhoto ? (
-                <Image source={{ uri: mainPhoto.publicUrl }} style={styles.mainPhotoImage} />
+                <Image source={profilePhotoSource(mainPhoto.publicUrl)} style={styles.mainPhotoImage} />
               ) : (
                 <>
                   <Text style={styles.mainPhotoPlus}>{"+"}</Text>
@@ -785,7 +786,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
           <View style={styles.photoSlotWrap}>
             <Text style={styles.photoSlotLabel}>{t("wizard.avatar")}</Text>
             <View style={styles.avatarCircle}>
-              {mainPhoto ? <Image source={{ uri: mainPhoto.publicUrl }} style={styles.avatarImage} /> : null}
+              {mainPhoto ? <Image source={profilePhotoSource(mainPhoto.publicUrl)} style={styles.avatarImage} /> : null}
             </View>
             {!mainPhoto ? <Text style={styles.avatarStatus}>{t("wizard.uploadPhotoFirst")}</Text> : null}
           </View>
@@ -798,7 +799,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         <View style={styles.photoGrid}>
           {extraPhotos.map((photo) => (
             <View key={photo.id} style={styles.photoCell}>
-              <Image source={{ uri: photo.publicUrl }} style={styles.photoCellImage} />
+              <Image source={profilePhotoSource(photo.publicUrl)} style={styles.photoCellImage} />
             </View>
           ))}
           {nextExtraPosition !== null && mainPhoto ? (

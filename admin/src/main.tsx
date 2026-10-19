@@ -4,5 +4,6 @@ import { AdminApp } from "./ui";
 import "./styles.css";
 import "./dashboard-tables.css";
 import "./table-typography.css";
+import "./accessibility.css";
 
 createRoot(document.getElementById("root")!).render(<BrowserRouter><AdminApp /></BrowserRouter>);

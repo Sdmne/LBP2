@@ -10,11 +10,14 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
+    "dompurify": "^3.4.16",
     "firebase": "^12.18.0",
     "livekit-client": "^2.22.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.1.5"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.1.5",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.13.1",

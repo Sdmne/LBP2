@@ -1,4 +1,22 @@
 /* Shared responsive container widths measured from the public reference. */
+.web-app > .web-header .compact-navigation nav { display: none; }
+.web-app > .web-header .compact-navigation .mobile-menu { display: inline-flex; width: 40px; height: 40px; order: 3; padding: 0; flex: 0 0 40px; }
+.web-app > .web-header .compact-navigation nav.open {
+  position: absolute; z-index: 60; top: 64px; right: 16px; left: auto;
+  display: flex; width: 288px; max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 80px); flex-direction: column; align-items: stretch;
+  gap: 0; margin: 0; padding: 4px; overflow-y: auto; overflow-x: hidden;
+  border: 1px solid #e2e8f0; border-radius: 6px; background: white;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 10%), 0 2px 4px -2px rgb(0 0 0 / 10%);
+}
+.web-app > .web-header .compact-navigation nav.open > a,
+.web-app > .web-header .compact-navigation nav.open .mobile-nav-actions > a,
+.web-app > .web-header .compact-navigation nav.open .mobile-nav-actions > button {
+  display: flex; align-items: center; width: 100%; min-height: 32px;
+  padding: 6px 8px; border: 0; border-radius: 4px; background: transparent;
+  font-size: 14px; line-height: 20px; text-decoration: none; white-space: normal;
+}
+.web-app > .web-header .compact-navigation nav.open .mobile-nav-actions { display: block; }
 .web-app { --site-container-max: 100%; }
 @media (min-width: 480px) { .web-app { --site-container-max: 480px; } }
 @media (min-width: 640px) { .web-app { --site-container-max: 640px; } }
@@ -26,14 +44,14 @@
 
 .web-app > .web-header .web-header-inner {
   width: 100%;
-  max-width: var(--site-container-max);
+  max-width: 1280px;
   height: 80px;
   padding: 0 16px;
 }
 
 .web-app > .web-header .logo {
   min-width: 0;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
 }
 
 .web-app > .web-header .logo img {
@@ -86,13 +104,13 @@
     flex: 0 1 auto;
     align-items: center;
     gap: 4px;
-    margin-left: 40px;
+    margin-left: 8px;
   }
 
   .web-app > .web-header nav > a {
     display: block;
-    padding: 10px 20px;
-    white-space: normal;
+    padding: 10px 12px;
+    white-space: nowrap;
   }
 
   .web-app > .web-header .mobile-menu,

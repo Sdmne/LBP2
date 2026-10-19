@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { BlurView } from "expo-blur";
 import { Feather } from "@expo/vector-icons";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -109,10 +109,7 @@ export default function FiltersScreen({ navigation, route }: Props) {
       setPicker(field);
       return;
     }
-    Alert.alert(t("filters.premiumLockedTitle"), t("filters.premiumLockedBody"), [
-      { text: t("filters.premiumLockedCancel"), style: "cancel" },
-      { text: t("filters.premiumLockedUpgrade"), onPress: () => navigation.navigate("Subscription") },
-    ]);
+    navigation.navigate("Subscription");
   }
 
   function applyAndClose() {
@@ -264,6 +261,7 @@ export default function FiltersScreen({ navigation, route }: Props) {
       </ScrollView>
 
       <View style={[styles.applyBar, { paddingBottom: spacing.lg + insets.bottom }]}>
+        <BlurView pointerEvents="none" intensity={60} tint="light" style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(250,250,250,0.55)" }]} />
         <Pressable style={styles.applyButton} onPress={applyAndClose}>
           <Text style={styles.applyButtonText}>{t("filters.apply")}</Text>
         </Pressable>
@@ -400,9 +398,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    backgroundColor: colors.bg,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
+    backgroundColor: "transparent",
   },
   applyButton: {
     height: 52,

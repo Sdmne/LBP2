@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, FlatList, Image, Pressable, StyleSheet, Text,
 import * as ImagePicker from "expo-image-picker";
 import { deletePhoto, fetchPhotos, setPrimaryPhoto, uploadAvatar, uploadPhoto } from "../api/photos";
 import { ApiError } from "../api/client";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 import type { ProfilePhoto } from "../api/types";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
@@ -218,7 +219,7 @@ export default function PhotosScreen() {
                 <Text style={styles.slotTitle}>{t("photos.primaryTitle")}</Text>
                 <View style={styles.slotImageWrap}>
                   {primary ? (
-                    <Image source={{ uri: primary.publicUrl }} style={styles.slotImage} />
+                    <Image source={profilePhotoSource(primary.publicUrl)} style={styles.slotImage} />
                   ) : (
                     <View style={[styles.slotImage, styles.slotImagePlaceholder]}>
                       <Feather name="user" size={28} color={colors.muted} />
@@ -255,7 +256,7 @@ export default function PhotosScreen() {
                 <Text style={styles.slotTitle}>{t("photos.avatarTitle")}</Text>
                 <View style={styles.slotImageWrap}>
                   {avatarPreviewUrl ? (
-                    <Image source={{ uri: avatarPreviewUrl }} style={[styles.slotImage, styles.avatarImage]} />
+                    <Image source={profilePhotoSource(avatarPreviewUrl)} style={[styles.slotImage, styles.avatarImage]} />
                   ) : (
                     <View style={[styles.slotImage, styles.avatarImage, styles.slotImagePlaceholder]}>
                       <Feather name="image" size={28} color={colors.muted} />
@@ -288,7 +289,7 @@ export default function PhotosScreen() {
         }
         renderItem={({ item }) => (
           <View style={styles.cell}>
-            <Image source={{ uri: item.publicUrl }} style={styles.thumb} />
+            <Image source={profilePhotoSource(item.publicUrl)} style={styles.thumb} />
             {item.moderationStatus !== "APPROVED" ? (
               <Pressable
                 style={styles.statusBadge}
