@@ -1,4 +1,5 @@
 import { profilePhotoUrls } from "./profile-media";
+import { countryLabel } from "./country-label";
 import { PRICING_TEXT } from "./pricing-reference";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -110,20 +111,7 @@ export function profileAge(item: Row, now = new Date()): string {
 }
 
 export function profileCountry(value: unknown, locale: Locale) {
-  const country = text(value);
-  const code =
-    ({ USA: "US", UK: "GB", UAE: "AE" } as Record<string, string>)[
-      country.toUpperCase()
-] || country.toUpperCase();
-if (locale === "en" && code === "CZ") return "Czech Republic";
-  if (locale === "en" && code === "GB") return "United Kingdom";
-try {
-    return /^[A-Z]{2}$/.test(code)
-      ? new Intl.DisplayNames([locale], { type: "region" }).of(code) || country
-      : country;
-  } catch {
-    return country;
-  }
+  return countryLabel(value, locale);
 }
 
 export function profilePhotos(item: Row, failedSources: string[] = []): string[] {

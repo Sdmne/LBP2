@@ -1,4 +1,5 @@
 import { TOOLS_FIELD_TRANSLATIONS, TOOLS_TRANSLATIONS, TOOLS_OPTIONS, TOOLS_LANGUAGES } from './member-tools-reference';
+export { countryLabel } from './country-label';
 export type Locale = 'en' | 'ru' | 'es';
 export type Row = Record<string, unknown>;
 export const row = (v: unknown): Row => v && typeof v === 'object' && !Array.isArray(v) ? v as Row : {};
@@ -10,12 +11,6 @@ export function fieldLabel(locale: Locale, key: string, value: string) {
  const all = TOOLS_TRANSLATIONS as Record<string, Record<string,string>>;
  const options = TOOLS_OPTIONS as Record<string,string[][]>;
  return fields[locale]?.[key]?.[value] || all[locale]?.[value] || options[key]?.find(x=>x[0]===value)?.[1] || value;
-}
-export function countryLabel(value: string, locale: Locale) {
-const code=value.toUpperCase();
-if (locale==='en'&&code==='CZ') return 'Czech Republic';
-if (locale==='en'&&code==='GB') return 'UK';
-try { return /^[a-z]{2}$/i.test(value) ? new Intl.DisplayNames([locale],{type:'region'}).of(code) || value : value; } catch { return value; }
 }
 export function languageLabel(value: string, locale: Locale) {
  try { return TOOLS_LANGUAGES.includes(value) ? new Intl.DisplayNames([locale],{type:'language'}).of(value) || value : value; } catch { return value; }

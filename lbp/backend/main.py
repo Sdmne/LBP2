@@ -21120,7 +21120,8 @@ def member_catalog_filter_options(
     profile_id = require_profile_id(user)
     country_code = str(country or "").strip().upper()
     search = str(q or "").strip().casefold()
-    countries = [dict(item) for item in CATALOG_LOCATIONS["countries"] if isinstance(item, dict)]
+    retired_country_codes = {"AN", "CS", "YU"}
+    countries = [dict(item) for item in CATALOG_LOCATIONS["countries"] if isinstance(item, dict) and str(item.get("value") or "").upper() not in retired_country_codes]
     city_candidates: dict[tuple[str, str], dict[str, Any]] = {}
 
     if country_code:
@@ -21186,7 +21187,7 @@ def member_catalog_filter_options(
         item["count"] = available_country_counts.get(str(item.get("value") or "").upper(), 0)
     known_country_codes = {str(item.get("value") or "").upper() for item in countries}
     for code, count in available_country_counts.items():
-        if code not in known_country_codes:
+        if code not in known_country_codes and code not in retired_country_codes:
             countries.append({"value": code, "label": code, "count": count})
     countries.sort(key=lambda item: str(item.get("label") or item.get("value") or "").casefold())
 
