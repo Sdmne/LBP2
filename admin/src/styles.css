@@ -1709,6 +1709,7 @@ body {
 }
 .article-editor-page {
   width: 100%;
+  min-width: 0;
 }
 .article-editor-heading {
   display: flex;
@@ -1746,15 +1747,21 @@ body {
 }
 .article-editor-main {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 .article-editor-side {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
 }
 .article-editor-main label,
 .article-settings-card label {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 7px;
   color: #0f172a;
   font-size: 14px;
@@ -1793,6 +1800,8 @@ body {
 }
 .article-language-tabs {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 4px;
   padding: 4px;
   border: 1px solid #e2e8f0;
@@ -1801,6 +1810,7 @@ body {
   margin-bottom: 8px;
 }
 .article-language-tabs button {
+  flex: 0 0 auto;
   height: 32px;
   padding: 0 16px;
   border: 0;
@@ -1817,6 +1827,7 @@ body {
 .rich-editor {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   overflow: hidden;
   min-height: 330px;
   border: 1px solid #e2e8f0;
@@ -1855,7 +1866,10 @@ body {
 }
 .article-content-editor {
   flex: 1;
+  min-width: 0;
   min-height: 260px;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
   padding: 16px;
   outline: none;
   color: #0f172a;
@@ -1866,6 +1880,10 @@ body {
 .article-content-editor:empty::before {
   content: attr(data-placeholder);
   color: #94a3b8;
+}
+.article-content-editor img {
+  max-width: 100%;
+  height: auto;
 }
 .cover-picker {
   display: grid;
@@ -8716,26 +8734,25 @@ body {
   background: #fff0f6;
   color: #f31260;
 }
-.article-source-editor {
+.article-source-editor,
+.article-editor-main textarea.article-source-editor {
   box-sizing: border-box;
+  display: block;
+  flex: 1 1 auto;
   width: 100%;
+  min-width: 0;
   min-height: 620px;
   padding: 16px;
   border: 0;
   outline: 0;
   resize: vertical;
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #fff;
+  color: #0f172a;
   font:
-    13px/1.6 ui-monospace,
+    14px/1.6 ui-monospace,
     SFMono-Regular,
     Consolas,
     monospace;
-}
-.article-editor-main textarea.article-source-editor {
-  flex: 1;
-  min-height: 260px;
-  border: 0;
   border-radius: 0;
 }
 .article-content-editor table {
