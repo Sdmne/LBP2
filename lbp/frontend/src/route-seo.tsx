@@ -44,7 +44,7 @@ export function RouteSeo() {
     const routePath = parts.slice(1).join("/");
     const routeLabel = routeLabels[routePath]?.[locale] || routeLabels[`${route}/${parts[2]}`]?.[locale] || routeLabels[route]?.[locale] || routeLabels["not-found"][locale];
     const label = route === "home" ? routeLabels.home[locale] : routeLabel;
-    const title = (!route && homeTitles[locale]) || `${label} | LetsBeParents`;
+    const title = (route === "home" && homeTitles[locale]) || `${label} | LetsBeParents`;
     const description = `${label}. ${descriptions[locale]}`;
     const canonical = `${window.location.origin}${pathname.replace(/\/$/, "") || `/${locale}`}`;
     const suffix = parts.length > 1 ? `/${parts.slice(1).join("/")}` : "";
