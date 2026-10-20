@@ -13,6 +13,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { useI18n } from "../i18n/I18nContext";
 import { colors, radius, spacing } from "../theme";
 import { catalogOptionLabel } from "../data/catalogLabels";
+import { languageName } from "../utils/languageNames";
 import {
   buildDetailRows,
   dataList,
@@ -22,7 +23,7 @@ import {
 } from "../utils/profileFields";
 
 export default function ProfileDetailSections({ profile }: { profile: ProfileDetailData }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const bio = firstString(profile.data, ["bio", "about", "aboutMe", "description"]);
   const lookingFor = dataList(profile.data, "lookingFor");
   const contactWithChildRaw = dataString(profile.data, "desiredDonorContact");
@@ -57,7 +58,7 @@ export default function ProfileDetailSections({ profile }: { profile: ProfileDet
           <Text style={styles.sectionTitle}>{t("profileDetail.languages")}</Text>
           <View style={styles.tagRow}>
             {languages.map((v) => (
-              <Text key={v} style={styles.chip}>{v}</Text>
+              <Text key={v} style={styles.chip}>{languageName(v, locale)}</Text>
             ))}
           </View>
         </View>

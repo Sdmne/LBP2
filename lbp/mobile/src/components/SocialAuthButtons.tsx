@@ -9,6 +9,7 @@ import { GoogleSignin, isSuccessResponse } from "@react-native-google-signin/goo
 import { firebaseAuth } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
+import { describeSessionStorageError, SessionStorageError } from "../utils/sessionStorage";
 import { useI18n } from "../i18n/I18nContext";
 import { GOOGLE_OAUTH_CLIENT_IDS } from "../config";
 import { colors, radius, spacing } from "../theme";
@@ -159,6 +160,7 @@ export default function SocialAuthButtons({ intent, variant = "full" }: { intent
   // response body actually says ACCOUNT_INACTIVE, otherwise fall back to the
   // generic message rather than mislabeling an unrelated 403.
   function describeSocialError(err: unknown): string {
+    if (err instanceof SessionStorageError) return describeSessionStorageError(err, t);
     if (err instanceof ApiError) {
       if (err.status === 409) return t("auth.socialErrorConflict");
       if (err.status === 403 && err.message.includes("ACCOUNT_INACTIVE")) return t("auth.socialErrorInactive");

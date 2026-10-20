@@ -16,6 +16,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { ApiError } from "../api/client";
+import { describeSessionStorageError, SessionStorageError } from "../utils/sessionStorage";
 import SocialAuthButtons from "../components/SocialAuthButtons";
 import { colors, radius, spacing } from "../theme";
 import { Feather } from "@expo/vector-icons";
@@ -45,7 +46,9 @@ export default function LoginScreen({ navigation }: Props) {
       // No manual navigation needed - RootNavigator swaps to MainTabs as
       // soon as isAuthenticated flips to true.
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof SessionStorageError) {
+        setError(describeSessionStorageError(err, t));
+      } else if (err instanceof ApiError) {
         setError(describeAuthError(err, t));
       } else {
         setError(t("common.somethingWrong"));
@@ -138,13 +141,10 @@ function describeAuthError(err: ApiError, t: (key: string) => string): string {
     case 0:
       return err.message;
     case 404:
-      return t("login.error404");
     case 401:
-      return t("login.error401");
     case 403:
-      return t("login.error403");
     case 409:
-      return t("login.error409");
+      return t("login.errorInvalidCredentials");
     default:
       return err.message || t("login.errorDefault");
   }

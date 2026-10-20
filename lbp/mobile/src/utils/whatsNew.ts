@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// One-shot "what's new" screen (see screens/WhatsNewScreen.tsx). Keyed by
+// One-shot automatic prompt; Profile and Settings can always open the list.
+// The flag only controls automatic display. Keyed by
 // a version suffix (v1) rather than a bare flag so a future batch of new
 // features can bump this to "whatsnew_v2_seen" and show again to everyone,
 // without needing a server-side migration - same idea as the web's own

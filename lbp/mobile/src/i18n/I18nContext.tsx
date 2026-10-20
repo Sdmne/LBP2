@@ -50,7 +50,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
         const raw = translations[locale][key] ?? translations.en[key] ?? key;
         if (!vars) return raw;
         return Object.entries(vars).reduce(
-          (acc, [name, value]) => acc.replace(new RegExp(`{{${name}}}`, "g"), String(value)),
+          (acc, [name, value]) => acc.replace(new RegExp(`{{${name}}}`, "g"), () => String(value)),
           raw
         );
       },

@@ -232,7 +232,7 @@ function PhotoCrop({
       }}
     >
       <header>
-        <h2 id="admin-photo-crop-title">Crop as avatar</h2>
+        <h2 id="admin-photo-crop-title">Crop photo</h2>
         <button
           type="button"
           aria-label="Close crop"
@@ -329,7 +329,7 @@ function PhotoCrop({
           disabled={busy || !g}
           onClick={() => void save()}
         >
-          {busy ? "Saving…" : "Save Avatar"}
+          {busy ? "Saving…" : "Save crop"}
         </button>
       </footer>
     </dialog>,
@@ -358,7 +358,7 @@ export function UserPhotos({
   const saving = useRef(false);
   const visibleRows = rows.filter((row) => {
     const state = String(row.status ?? "").toUpperCase();
-    return state !== "DELETED" && state !== "REPLACED";
+    return ["ACTIVE", "PENDING", "REJECTED"].includes(state) && row.isDeleted !== true;
   });
   const sourceFor = (id: string) =>
     `/api/admin/profile-photos/${encodeURIComponent(id)}/content`;
@@ -428,7 +428,7 @@ export function UserPhotos({
             <article className="profile-photo-card" key={id}>
               <div className="profile-photo-preview">
                 <PhotoPreview
-                  source={sourceFor(id)}
+                  source={String(row.previewUrl ?? "") || sourceFor(id)}
                   fallback={safeFallback}
                   deleted={deleted}
                 />
@@ -446,11 +446,11 @@ export function UserPhotos({
                   <span className="profile-photo-deleted">Replaced</span>
                 )}
               <div className="profile-photo-actions">
-                {primary && (
+                {state === "ACTIVE" && status === "APPROVED" && (
                     <button
                       type="button"
-                      title="Crop as avatar"
-                      aria-label="Crop as avatar"
+                      title="Crop photo"
+                      aria-label="Crop photo"
                       disabled={busy}
                       onClick={() => setCropId(id)}
                     >

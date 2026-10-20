@@ -69,6 +69,7 @@ export default function ChatScreen({ route, navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const sendInFlight = useRef(false);
   const [callError, setCallError] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
   // The route only carries a conversationId + display title (see
@@ -212,10 +213,11 @@ export default function ChatScreen({ route, navigation }: Props) {
   }, [load]);
 
   async function handleSend() {
-    const body = draft.trim();
-    if (!body || sending) return;
+    const submittedDraft = draft;
+    const body = submittedDraft.trim();
+    if (!body || sending || sendInFlight.current) return;
+    sendInFlight.current = true;
     setSending(true);
-    setDraft("");
     try {
       const res = await sendMessage(conversationId, body);
       // The send endpoint only echoes back id/conversationId/senderProfileId/
@@ -233,13 +235,15 @@ export default function ChatScreen({ route, navigation }: Props) {
         status: "ACTIVE",
       };
       setMessages((prev) => [...prev, sent]);
+      setDraft((current) => (current === submittedDraft ? "" : current));
       requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
     } catch (err) {
-      // Give the text back so nothing is lost - but only if the person
-      // hasn't already started typing something new in the meantime,
-      // otherwise this would clobber their newer draft.
-      setDraft((current) => (current ? current : body));
+      const detail = err instanceof ApiError && err.status !== 0 && err.message.trim()
+        ? err.message
+        : t("common.pleaseTryAgain");
+      Alert.alert(t("chat.sendError"), detail);
     } finally {
+      sendInFlight.current = false;
       setSending(false);
     }
   }
@@ -614,7 +618,7 @@ export default function ChatScreen({ route, navigation }: Props) {
           placeholderTextColor={colors.muted}
           multiline
         />
-        <Pressable style={[styles.sendButton, (sending || !draft.trim()) && styles.sendButtonDisabled]} onPress={handleSend} disabled={sending || !draft.trim()}>
+        <Pressable style={[styles.sendButton, (sending || !draft.trim()) && styles.sendButtonDisabled]} onPress={handleSend} disabled={sending || !draft.trim()} accessibilityRole="button" accessibilityLabel={t("chat.send")}>
           <Text style={styles.sendButtonText}>{sending ? "…" : "➤"}</Text>
         </Pressable>
       </View>

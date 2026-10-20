@@ -68,7 +68,7 @@ export type CatalogResponse = {
 };
 
 // public_profile_summary() in main.py - a narrower shape than CatalogProfile
-// (no sourceId/photos/age/dateOfBirth/donorType/lookingFor/createdAt), used
+// (no sourceId/photos/dateOfBirth/donorType/lookingFor/createdAt), used
 // by /api/member/likes, /api/member/profile-views and /api/member/blocks.
 export type ProfileSummary = {
   id: number;
@@ -86,14 +86,7 @@ export type ProfileSummary = {
   likeReadOnly?: boolean;
   likedAt?: string | null;
   matchedAt?: string | null;
-  // Present on a free-tier viewer's "who liked you" preview rows only
-  // (see anonymized_admirer_summary() in main.py) - when identityHidden is
-  // true, displayName/city/country are NOT sent at all. avatarUrl MAY be
-  // present too, but if so it is a server-blurred copy (Pillow Gaussian
-  // blur baked into the image itself), never the real photo - see
-  // blurred_preview_url_for() in main.py. It can also be null (no source
-  // photo, or blurring it failed), so LikesScreen must still fall back to
-  // a generic placeholder + age for these rows, never assume it's present.
+  // Calculated from the birth date for public and anonymous summaries.
   age?: number | null;
   identityHidden?: boolean;
 };
@@ -111,7 +104,9 @@ export type LikesResponse = {
   likesYouCount: number;
   likesYouLocked: boolean;
   myLikes: ProfileSummary[];
+  myLikesCount?: number;
   matches: ProfileSummary[];
+  matchesCount?: number;
   readThroughId: number;
 };
 

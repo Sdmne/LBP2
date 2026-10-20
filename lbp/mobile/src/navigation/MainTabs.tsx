@@ -1,13 +1,12 @@
-import React from "react";
+import React, { useContext } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { BottomTabBarHeightCallbackContext, createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import { Feather } from "@expo/vector-icons";
-import { colors } from "../theme";
+import { colors, navigationLayout } from "../theme";
 import { useI18n } from "../i18n/I18nContext";
 import ExploreScreen from "../screens/ExploreScreen";
 import CatalogScreen from "../screens/CatalogScreen";
@@ -53,7 +52,7 @@ const ICON_NAMES: Record<keyof MainTabsParamList, keyof typeof Feather.glyphMap>
   Me: "user",
 };
 
-const TAB_BAR_HEIGHT = 60;
+const TAB_BAR_HEIGHT = navigationLayout.tabBarHeight;
 
 // UPDATE (Sept 2026, THIRD attempt at this same bug): every previous fix
 // (tabIconWrap centering, then tabBarButton's justifyContent override,
@@ -73,12 +72,19 @@ const TAB_BAR_HEIGHT = 60;
 // code fully owns, with zero dependency on BottomTabBar/BottomTabItem's
 // internal layout at any point.
 function CustomTabBar({ state, descriptors, navigation, insets }: BottomTabBarProps) {
+  const onHeightChange = useContext(BottomTabBarHeightCallbackContext);
   return (
+    <View
+      style={[styles.footer, { height: insets.bottom + navigationLayout.tabBarBottom + TAB_BAR_HEIGHT }]}
+      onLayout={(event) => onHeightChange?.(event.nativeEvent.layout.height)}
+    >
     <View
       style={[
         styles.bar,
         {
-          bottom: 22 + insets.bottom,
+          bottom: navigationLayout.tabBarBottom + insets.bottom,
+          left: 16 + insets.left,
+          right: 16 + insets.right + navigationLayout.aiButtonSize + navigationLayout.aiButtonGap,
         },
       ]}
     >
@@ -115,11 +121,15 @@ function CustomTabBar({ state, descriptors, navigation, insets }: BottomTabBarPr
         })}
       </View>
     </View>
+    <AiAdvisorFab bottomInset={insets.bottom} rightInset={insets.right} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  // Reserve the footer in the navigator layout so neither control overlays a scene.
+  footer: { flexShrink: 0 },
   bar: {
     position: "absolute",
     left: 16,
@@ -149,9 +159,9 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     right: 16,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: navigationLayout.aiButtonSize,
+    height: navigationLayout.aiButtonSize,
+    borderRadius: navigationLayout.aiButtonSize / 2,
     backgroundColor: colors.pink,
     alignItems: "center",
     justifyContent: "center",
@@ -166,23 +176,20 @@ const styles = StyleSheet.create({
 
 // Persistent "AI Family Advisor" shortcut (Alena: "надо сделать типа
 // значка чата где-то справа чтобы в любой момент человек мог перейти") -
-// a floating round button above the tab bar, on every main tab, so the
+// a round button beside the tab bar, on every main tab, so the
 // advisor is reachable without digging through Settings. Free-tier
 // members can tap it too - AiAdvisorScreen already renders its own
 // "Premium only" message for a 402 (see aiAdvisor.premiumTitle/Body), so
 // this button doesn't need to know or guess the member's tier itself.
-function AiAdvisorFab() {
-  const insets = useSafeAreaInsets();
+function AiAdvisorFab({ bottomInset, rightInset }: { bottomInset: number; rightInset: number }) {
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   return (
     <Pressable
       onPress={() => rootNav.navigate("AiAdvisor")}
-      // Nudged down slightly (was 22+14=36px clear of the tab bar) - on the
-      // Catalog/Browse screen the swipe-card's own action row (X/profile/
-      // message/like buttons) sits close enough above the tab bar that the
-      // FAB was overlapping the like button there; Alena flagged it via
-      // screenshot. 8px still clears the tab bar with room to spare.
-      style={[styles.fab, { bottom: 8 + insets.bottom + TAB_BAR_HEIGHT }]}
+      style={[styles.fab, {
+        bottom: bottomInset + navigationLayout.tabBarBottom + (TAB_BAR_HEIGHT - navigationLayout.aiButtonSize) / 2,
+        right: 16 + rightInset,
+      }]}
       accessibilityRole="button"
       accessibilityLabel="AI Family Advisor"
     >
@@ -193,17 +200,6 @@ function AiAdvisorFab() {
 
 export default function MainTabs() {
   const { t } = useI18n();
-  // The pill used to float a fixed 22px off the raw screen edge, matching
-  // the prototype's own CSS bottom:22 - but the prototype runs in a
-  // browser mockup with no real OS gesture-navigation bar to clear. On an
-  // actual Android device with gesture nav, that fixed 22px sits the pill
-  // partly under/behind the system nav area rather than above it (reported
-  // by Alena: tab bar "stuck at the very bottom, not fully visible").
-  // Adding the real safe-area bottom inset on top of the prototype's own
-  // 22px keeps the same visual spacing from the *usable* screen edge on
-  // every device, gesture-nav or 3-button. CustomTabBar above reads
-  // `insets` from its own BottomTabBarProps (react-navigation passes the
-  // same safe-area value in), so nothing here needs it directly anymore.
   return (
     <View style={styles.root}>
     <Tab.Navigator
@@ -234,7 +230,7 @@ export default function MainTabs() {
         component={CatalogScreen}
         options={{ title: t("nav.browse"), headerShown: false }}
       />
-      <Tab.Screen name="Likes" component={LikesScreen} options={{ title: t("nav.likes") }} />
+      <Tab.Screen name="Likes" component={LikesScreen} options={{ title: t("nav.likes"), headerShown: false }} />
       <Tab.Screen
         name="Messages"
         component={MessagesScreen}
@@ -242,7 +238,7 @@ export default function MainTabs() {
       />
       <Tab.Screen name="Me" component={MeProfileScreen} options={{ title: t("nav.profile"), headerShown: false }} />
     </Tab.Navigator>
-    <AiAdvisorFab />
+
     </View>
   );
 }

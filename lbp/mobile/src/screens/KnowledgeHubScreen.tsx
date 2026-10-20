@@ -1,21 +1,22 @@
-import React, { useEffect, useState } from "react";
+import React, { createRef, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { ScrollView } from "react-native-gesture-handler";
 import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { fetchArticles, type ArticleSummary } from "../api/articles";
+import type { ArticleSummary } from "../api/articles";
+import { groupKnowledgeArticles, knowledgeCategory, KNOWLEDGE_CATEGORIES, loadKnowledgeArticles, type KnowledgeSection } from "../utils/knowledgeHub";
 import { REFERENCE_ARTICLE_COVERS } from "../data/referenceArticleCovers";
 import { SITE_BASE_URL } from "../config";
 import { useI18n } from "../i18n/I18nContext";
@@ -25,26 +26,16 @@ import GradientBackground from "../components/GradientBackground";
 import AppHeader from "../components/AppHeader";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
-const SECTION_LIMIT = 10;
-
-// Real Knowledge Hub, backed by the same GET /api/public/articles the
-// website's article reader page (Article() in ui.tsx) uses for a single
-// article - see api/articles.ts for why this hits the live endpoint
-// directly rather than porting the site's static reference-article file.
-// Categories are the same fixed list the backend itself returns/filters on
-// (public_articles() in main.py hardcodes them - there's no "list
-// categories" endpoint).
-const CATEGORIES = ["ivf", "co-parenting", "sperm-donor", "fertility", "lgbtq"];
 
 export function categoryLabel(t: (key: string) => string, slug: string): string {
-  if (!CATEGORIES.includes(slug)) return slug;
-  return t(`knowledgeHub.category.${slug}`);
+  const category = knowledgeCategory(slug);
+  return KNOWLEDGE_CATEGORIES.includes(category) ? t(`knowledgeHub.category.${category}`) : slug;
 }
 
 // See the comment at its call sites: the live API often has no cover_url,
 // the site's own same-slug photo is the fallback.
 function resolveCover(item: ArticleSummary): string | null {
-  return item.cover_url || REFERENCE_ARTICLE_COVERS[item.slug] || null;
+  return item.cover_url?.trim() || REFERENCE_ARTICLE_COVERS[item.slug] || null;
 }
 
 // Alena, 2026-09-24: "на сайте почти все есть" (the website shows almost
@@ -65,74 +56,40 @@ function resolveCover(item: ArticleSummary): string | null {
 // anything - so this only ever showed up on mobile.
 function coverUri(coverPath: string | null): string {
   if (!coverPath) return "";
-  return /^https?:\/\//i.test(coverPath) ? coverPath : `${SITE_BASE_URL}${coverPath}`;
+  return new URL(coverPath, `${SITE_BASE_URL}/`).toString();
 }
 
-// UPDATE (Sept 2026): rebuilt as category-sectioned horizontal-scroll rows
-// per Alena's explicit reference (a Flo-app screen recording: "по темами и
-// вправо листает как у фло") - replaces the earlier filter-chip + 2-column
-// grid layout entirely. One GET /api/public/articles per category (the
-// backend has no "grouped by category" endpoint) rather than one big fetch
-// filtered client-side, so each section can show its own loading state and
-// a category with zero published articles just doesn't render a section at
-// all instead of leaving an empty one.
-//
-// NOTE (corrected 2026-09-24): earlier session claimed the website's own
-// Knowledge Hub grid never reads this live endpoint and just renders a
-// hardcoded `referenceKnowledgeArticles` array (reference-article-meta.ts)
-// - that's stale. `referenceKnowledgeArticles` isn't imported anywhere in
-// frontend/src/ui.tsx any more (grepped, zero hits outside its own file);
-// the live KnowledgeHub() component there calls loadKnowledgeArticles(),
-// same /api/public/articles this screen hits. So this screen and the
-// website are reading the same real DB rows - see coverUri() above for
-// the actual cause of covers not showing here while they show on web.
-type Section = { category: string; items: ArticleSummary[] };
 
 export default function KnowledgeHubScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { t, locale } = useI18n();
-  const [sections, setSections] = useState<Section[] | null>(null);
+  const [sections, setSections] = useState<KnowledgeSection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [allItems, setAllItems] = useState<ArticleSummary[]>([]);
+  const pageScrollRef = useRef<ScrollView>(null);
+  const rowScrollRefs = useMemo(
+    () => Object.fromEntries((sections ?? []).map(({ category }) => [category, createRef<ScrollView>()])),
+    [sections],
+  );
 
   useEffect(() => {
     let alive = true;
     setSections(null);
+    setAllItems([]);
     setError(null);
-    Promise.all(
-      CATEGORIES.map((category) =>
-        fetchArticles({ locale, category, limit: SECTION_LIMIT, offset: 0 })
-          .then((page) => ({ category, items: page.items }))
-          .catch(() => ({ category, items: [] as ArticleSummary[] })),
-      ),
-    )
-      .then((results) => {
+    loadKnowledgeArticles(locale)
+      .then((items) => {
         if (!alive) return;
-        const withContent = results.filter((s) => s.items.length > 0);
-        if (withContent.length === 0 && results.every((s) => s.items.length === 0)) {
-          setError(t("knowledgeHub.empty"));
-        }
-        setSections(withContent);
+        setSections(groupKnowledgeArticles(items));
+        setAllItems(items);
+        if (items.length === 0) setError(t("knowledgeHub.empty"));
       })
       .catch(() => {
         if (alive) setError(t("knowledgeHub.loadError"));
       });
-    // Search needs one flat list across every category, not just the first
-    // SECTION_LIMIT of each - omitting `category` returns all published
-    // articles (public_articles() in main.py only filters when a category
-    // is passed), so this is a single extra call rather than 5 bigger ones.
-    fetchArticles({ locale, limit: 100 })
-      .then((page) => {
-        if (alive) setAllItems(page.items);
-      })
-      .catch(() => {
-        if (alive) setAllItems([]);
-      });
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [locale, t]);
 
   const trimmedQuery = query.trim().toLowerCase();
@@ -148,19 +105,23 @@ export default function KnowledgeHubScreen() {
   return (
     <GradientBackground variant="soft">
       <ScrollView
+        ref={pageScrollRef}
+        simultaneousHandlers={Object.values(rowScrollRefs)}
+        disallowInterruption={false}
+        nestedScrollEnabled
+        directionalLockEnabled
+        contentInsetAdjustmentBehavior="never"
+        automaticallyAdjustContentInsets={false}
         style={styles.container}
         contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}
       >
-        <AppHeader title={t("nav.knowledgeHubTitle")} onBackPress={() => navigation.goBack()} />
+        <AppHeader
+          title={t("nav.knowledgeHubTitle")}
+          onBackPress={() => navigation.goBack()}
+          onAvatarPress={() => navigation.popTo("MainTabs", { screen: "Me" })}
+        />
 
-        {/* Alena's reference recording had a search bar above the category
-            chips - the chips themselves were deliberately dropped for the
-            current per-category sectioned layout (see the UPDATE comment
-            above), but search itself is real and worth keeping. Searches
-            allItems (a separate, category-less fetch - see the effect above)
-            rather than just what's currently rendered in the sections, so it
-            actually covers every published article, not only the first
-            SECTION_LIMIT of each category. */}
+        {/* Search uses the same complete article list as the category rows. */}
         <View style={styles.searchBar}>
           <Feather name="search" size={18} color={colors.muted} />
           <TextInput
@@ -208,17 +169,14 @@ export default function KnowledgeHubScreen() {
           sections!.map((section) => (
             <View key={section.category} style={styles.section}>
               <Text style={styles.sectionTitle}>{categoryLabel(t, section.category)}</Text>
-              {/* Alena: "пока статьи из одной категории двигаются, статьи
-                  их другой категории листать нельзя" - each category is
-                  its own horizontal ScrollView nested inside this screen's
-                  vertical one. nestedScrollEnabled mainly matters on
-                  Android (nested scrollables don't cooperate by default
-                  there); nothing here should be blocking a DIFFERENT row
-                  on iOS since they're sibling views, not parent/child, so
-                  if this persists on her device it's worth a quick screen
-                  recording - that'd point at something more specific than
-                  a generic nested-scroll conflict. */}
+              {/* Keep each row and the vertical page free to scroll independently. */}
               <ScrollView
+                ref={rowScrollRefs[section.category]}
+                simultaneousHandlers={[pageScrollRef, ...Object.entries(rowScrollRefs).filter(([category]) => category !== section.category).map(([, ref]) => ref)]}
+                disallowInterruption={false}
+                directionalLockEnabled
+                contentInsetAdjustmentBehavior="never"
+                automaticallyAdjustContentInsets={false}
                 horizontal
                 nestedScrollEnabled
                 showsHorizontalScrollIndicator={false}
@@ -273,16 +231,16 @@ function ArticleCoverCard({
   item: ArticleSummary;
   onPress: () => void;
 }) {
-  const [photoFailed, setPhotoFailed] = useState(false);
-  const coverPath = resolveCover(item);
-  const hasCover = Boolean(coverPath) && !photoFailed;
+  const [failedCoverUri, setFailedCoverUri] = useState<string | null>(null);
+  const uri = coverUri(resolveCover(item));
+  const hasCover = Boolean(uri) && uri !== failedCoverUri;
   return (
     <Pressable style={styles.card} onPress={onPress}>
       {hasCover ? (
         <Image
-          source={{ uri: coverUri(coverPath) }}
+          source={{ uri }}
           style={styles.cover}
-          onError={() => setPhotoFailed(true)}
+          onError={() => setFailedCoverUri(uri)}
         />
       ) : (
         <View style={[styles.cover, styles.coverPlaceholder]}>
@@ -315,16 +273,16 @@ function SearchResultRow({
   categoryText: string;
   onPress: () => void;
 }) {
-  const [photoFailed, setPhotoFailed] = useState(false);
-  const coverPath = resolveCover(item);
-  const hasCover = Boolean(coverPath) && !photoFailed;
+  const [failedCoverUri, setFailedCoverUri] = useState<string | null>(null);
+  const uri = coverUri(resolveCover(item));
+  const hasCover = Boolean(uri) && uri !== failedCoverUri;
   return (
     <Pressable style={styles.searchRow} onPress={onPress}>
       {hasCover ? (
         <Image
-          source={{ uri: coverUri(coverPath) }}
+          source={{ uri }}
           style={styles.searchThumb}
-          onError={() => setPhotoFailed(true)}
+          onError={() => setFailedCoverUri(uri)}
         />
       ) : (
         <View style={[styles.searchThumb, styles.coverPlaceholder]}>

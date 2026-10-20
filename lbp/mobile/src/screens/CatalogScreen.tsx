@@ -20,7 +20,7 @@ import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { fetchCatalog, fetchCatalogProfileDetail, likeProfile, unlikeProfile } from "../api/catalog";
-import type { ProfileDetailData } from "../utils/profileFields";
+import { profileAge, type ProfileDetailData } from "../utils/profileFields";
 import ProfileDetailSections from "../components/ProfileDetailSections";
 import { emptyCatalogFilters, type CatalogFilters } from "../api/catalogFilters";
 import { createConversation } from "../api/messages";
@@ -31,12 +31,12 @@ import type { CatalogProfile, SubscriptionTier } from "../api/types";
 import { fetchSubscriptionStatus } from "../api/subscription";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
-import { colors, radius, spacing, tabBarClearance } from "../theme";
+import { colors, radius, spacing } from "../theme";
 import { catalogOptionLabel } from "../data/catalogLabels";
 import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
+import AppHeader, { APP_HEADER_ITEM_SIZE } from "../components/AppHeader";
 import { countryName } from "../utils/countryNames";
 
 const PAGE_SIZE = 24;
@@ -74,8 +74,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user } = useAuth();
   const { t } = useI18n();
-  const insets = useSafeAreaInsets();
-  const initial = (user?.displayName?.[0] ?? "?").toUpperCase();
+
   const [profiles, setProfiles] = useState<CatalogProfile[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -338,44 +337,44 @@ export default function CatalogScreen({ navigation, route }: Props) {
     );
   }
 
+  const cardActions = current ? (
+    <ProfileCardActions
+      onPass={() => advance("pass", current)}
+      onViewProfile={() => rootNav.navigate("ProfileDetail", { profileId: current.id })}
+      onMessage={() => handleMessage(current)}
+      onLike={() => advance("like", current)}
+    />
+  ) : null;
+  const rewindAction = (
+    <Pressable
+      style={[styles.rewindBtn, !lastSwipe && styles.rewindBtnDisabled]}
+      onPress={handleRewind}
+      disabled={!lastSwipe}
+      accessibilityRole="button"
+      accessibilityLabel={t("catalog.rewindAction")}
+      accessibilityState={{ disabled: !lastSwipe }}
+    >
+      <Feather name="rotate-ccw" size={20} color={lastSwipe && tier && tier !== "EXPLORE" ? "#c9a227" : colors.muted} />
+    </Pressable>
+  );
+
   return (
     <GradientBackground variant="vivid">
     <View style={styles.screen}>
-      {/* CatalogScreen builds its own header rather than reusing
-          AppHeader (it needs the extra filter button), so it needed the
-          same top safe-area fix separately - AppHeader.tsx's own fix
-          doesn't reach this one. */}
-      <View style={[styles.header, { paddingTop: spacing.sm + insets.top }]}>
-        <View style={styles.headerBrand}>
-          <Image source={require("../../assets/logo-mark.png")} style={styles.headerLogo} />
-          <Text style={styles.headerTitle}>{t("catalog.browseTitle")}</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <Pressable
-            hitSlop={8}
-            style={styles.avatarButton}
-            onPress={() => rootNav.navigate("Filters", { initial: filters })}
-          >
-            <Feather name="sliders" size={16} color={colors.ink} />
-          </Pressable>
-          {/* Alena: "фильтр и аватар разного размера" - both circles were
-              already the same 44x44/borderRadius 22 numerically, but
-              avatarButton (the filter button) carries a drop shadow that
-              gives it visible weight/halo the plain gradient avatar never
-              had, so side by side they read as two different sizes even
-              though neither's box actually changed. Wrapping the avatar in
-              the same shadow style (avatarButtonShadow) makes them match. */}
-          <Pressable hitSlop={8} onPress={() => navigation.navigate("Me")} style={styles.avatarButtonShadow}>
-            <LinearGradient
-              colors={["#4e9bff", "#f070a9"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.profileAvatar}
+      <View style={styles.header}>
+        <AppHeader
+          title={t("catalog.browseTitle")}
+          actions={
+            <Pressable
+              style={styles.avatarButton}
+              onPress={() => rootNav.navigate("Filters", { initial: filters })}
+              accessibilityRole="button"
+              accessibilityLabel={t("nav.filtersTitle")}
             >
-              <Text style={styles.profileAvatarText}>{initial}</Text>
-            </LinearGradient>
-          </Pressable>
-        </View>
+              <Feather name="sliders" size={24} color={colors.ink} />
+            </Pressable>
+          }
+        />
       </View>
 
       {/* Verification is its own dedicated popup now (below, outside this
@@ -388,7 +387,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
         </Pressable>
       ) : null}
 
-      <View style={[styles.deck, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
+      <View style={styles.deck}>
         {!current ? (
           <View style={styles.center}>
             <Text style={styles.emptyText}>{t("catalog.empty")}</Text>
@@ -407,6 +406,8 @@ export default function CatalogScreen({ navigation, route }: Props) {
                   loading={expandedLoading}
                   error={expandedError}
                   onCollapse={() => setExpandedId(null)}
+                  actions={cardActions}
+                  rewindAction={rewindAction}
                 />
               ) : (
                 <SwipeCard
@@ -415,50 +416,12 @@ export default function CatalogScreen({ navigation, route }: Props) {
                   isTop
                   onSwiped={(direction) => advance(direction, current)}
                   onOpenProfile={() => setExpandedId(current.id)}
+                  actions={cardActions}
+                  rewindAction={rewindAction}
                 />
               )}
             </View>
-            {/* Reference mockup (her side-by-side comparison, Sept 2026):
-                ALL FOUR buttons sit in one row below the card, not split
-                between the photo's top corner and the info panel like the
-                previous pass had it - card+row were laid out as siblings
-                that were BOTH still absolutely positioned relative to the
-                whole deck though (the card via `card`'s own inset styles,
-                this row via its own bottom offset), so they still had no
-                real relationship to each other and could still overlap
-                once the info panel grew. Now cardArea is a normal flex:1
-                box and this row is a normal flex sibling below it, in
-                actual layout flow - structurally can't overlap. */}
-            <View style={styles.actionsRowWrap}>
-              {/* Rewind - kept OUTSIDE the 4-button group below so that
-                  group still matches Alena's "her" reference exactly
-                  (space-evenly, all 4 equal size). Dimmed + disabled when
-                  there's nothing to undo; tapping it while on the free
-                  tier shows the same upgrade-Alert pattern FiltersScreen
-                  already uses for its own premium-locked fields, rather
-                  than a new paywall UI just for this one button. */}
-              <Pressable
-                style={[styles.rewindBtn, !lastSwipe && styles.rewindBtnDisabled]}
-                onPress={handleRewind}
-                disabled={!lastSwipe}
-              >
-                <Feather name="rotate-ccw" size={17} color={lastSwipe && tier && tier !== "EXPLORE" ? "#c9a227" : colors.muted} />
-              </Pressable>
-              <View style={styles.actionsRow}>
-                <Pressable style={styles.actionBtn} onPress={() => advance("pass", current)}>
-                  <Feather name="x" size={22} color={colors.ink} />
-                </Pressable>
-                <Pressable style={styles.actionBtn} onPress={() => rootNav.navigate("ProfileDetail", { profileId: current.id })}>
-                  <Feather name="user" size={20} color={colors.ink} />
-                </Pressable>
-                <Pressable style={styles.actionBtn} onPress={() => handleMessage(current)}>
-                  <Feather name="message-circle" size={20} color={colors.ink} />
-                </Pressable>
-                <Pressable style={[styles.actionBtn, styles.actionBtnFilled]} onPress={() => advance("like", current)}>
-                  <Feather name="thumbs-up" size={20} color={colors.pink} />
-                </Pressable>
-              </View>
-            </View>
+
           </>
         )}
       </View>
@@ -546,30 +509,65 @@ export default function CatalogScreen({ navigation, route }: Props) {
   );
 }
 
+function ProfileCardActions({
+  onPass,
+  onViewProfile,
+  onMessage,
+  onLike,
+}: {
+  onPass: () => void;
+  onViewProfile: () => void;
+  onMessage: () => void;
+  onLike: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <View style={styles.actionsRow}>
+      <Pressable style={styles.actionBtn} onPress={onPass} accessibilityRole="button" accessibilityLabel={t("catalog.stampPass")}>
+        <Feather name="x" size={22} color={colors.ink} />
+      </Pressable>
+      <Pressable style={styles.actionBtn} onPress={onViewProfile} accessibilityRole="button" accessibilityLabel={t("nav.profileDetailTitle")}>
+        <Feather name="user" size={20} color={colors.ink} />
+      </Pressable>
+      <Pressable style={styles.actionBtn} onPress={onMessage} accessibilityRole="button" accessibilityLabel={t("profileDetail.sendMessageBtn")}>
+        <Feather name="message-circle" size={20} color={colors.ink} />
+      </Pressable>
+      <Pressable style={styles.actionBtn} onPress={onLike} accessibilityRole="button" accessibilityLabel={t("profileDetail.likeBtn")}>
+        <Feather name="thumbs-up" size={20} color={colors.pink} />
+      </Pressable>
+    </View>
+  );
+}
+
 function SwipeCard({
   profile,
   isTop,
   onSwiped,
   onOpenProfile,
+  actions,
+  rewindAction,
 }: {
   profile: CatalogProfile;
   isTop: boolean;
   onSwiped?: (direction: "like" | "pass") => void;
   onOpenProfile?: () => void;
+  actions?: React.ReactNode;
+  rewindAction?: React.ReactNode;
 }) {
   const { t, locale } = useI18n();
-  const insets = useSafeAreaInsets();
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   // A failed image load (broken/expired photo URL, or a network hiccup)
   // otherwise left the whole card blank - Image renders nothing and the
   // photoUrl-is-truthy check never falls back to the placeholder. Reset
   // per profile.id since this component gets re-keyed per card.
-  const [photoFailed, setPhotoFailed] = useState(false);
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState<string | null>(null);
   const [photoIndex, setPhotoIndex] = useState(0);
 
   const photos = profile.photos?.length ? profile.photos : profile.avatarUrl ? [profile.avatarUrl] : [];
   const photoUrl = photos[photoIndex] || photos[0] || null;
+  const age = profileAge(profile);
+  const firstDot = Math.max(0, Math.min(photoIndex - 3, photos.length - 7));
 
   function showPrevPhoto() {
     setPhotoIndex((i) => (i - 1 + photos.length) % photos.length);
@@ -605,12 +603,20 @@ function SwipeCard({
 
   const panGesture = Gesture.Pan()
     .enabled(isTop)
+    .minDistance(12)
     .onUpdate((e: GestureUpdateEvent<PanGestureHandlerEventPayload>) => {
       translateX.value = e.translationX;
       translateY.value = e.translationY;
     })
     .onEnd((e: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
-      if (e.translationX > SWIPE_THRESHOLD) {
+      if (e.translationY < -60 && Math.abs(e.translationY) > Math.abs(e.translationX)) {
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+        if (onOpenProfile) runOnJS(onOpenProfile)();
+      } else if (Math.abs(e.translationX) <= Math.abs(e.translationY)) {
+        translateX.value = withSpring(0);
+        translateY.value = withSpring(0);
+      } else if (e.translationX > SWIPE_THRESHOLD) {
         translateX.value = withTiming(SWIPE_OUT_DISTANCE, { duration: 220 });
         runOnJS(finishSwipe)("like");
       } else if (e.translationX < -SWIPE_THRESHOLD) {
@@ -637,153 +643,134 @@ function SwipeCard({
     opacity: translateX.value < -20 ? Math.min(-translateX.value / SWIPE_THRESHOLD, 1) : 0,
   }));
 
-  // Redesigned (Sept 2026) against Alena's side-by-side reference (her own
-  // approved prototype vs. the app): the photo used to fill the ENTIRE
-  // card, with name/location/looking-for text overlaid on a bottom scrim
-  // AND a separate, independently-positioned 4-button row floating a fixed
-  // distance up from the *screen* bottom (styles.actionsRow, position:
-  // absolute/bottom: spacing.lg + tabBarClearance). Those two floating
-  // layers had no relationship to each other, so whenever the scrim's
-  // content grew tall enough (e.g. a profile with a "Looking for" chip),
-  // the actions row landed right on top of the name/looking-for text -
-  // exactly what her screenshot showed ("Ro..Red," half-hidden behind the
-  // X button, "Looking for" text behind the button row). The reference
-  // design instead gives the photo a fixed portion of the card (flex:1
-  // inside photoWrap) and puts name/location/looking-for/buttons in a real
-  // panel BELOW it (infoPanel) that sizes to its own content - nothing can
-  // overlap because everything is normal flex flow now, not independently
-  // floating absolute layers. Message/like also moved from generic emoji
-  // (💬/👍) to real Feather icons, matching LikesScreen's row buttons.
+  // Keep profile information, carousel and actions in one footer flow.
   const cardInner = (
     <Animated.View style={[styles.card, isTop ? cardStyle : styles.cardUnder]}>
-      {/* Alena: "можно сделать просмотр по тапу на фото" - the grey "^^"
-          pill (expandBtn, removed) was the only way to open the full
-          profile besides the name/location text itself. Tapping anywhere
-          on the photo now does the same thing as tapping that text - the
-          nested overlayInfo Pressable below still gets its own tap first
-          (nested Pressables don't bubble here, already relied on
-          elsewhere in this file for the carousel arrows), so this is
-          purely additive. */}
-      <Pressable style={styles.photoWrap} onPress={onOpenProfile} disabled={!isTop || !onOpenProfile}>
-        {photoUrl && !photoFailed ? (
-          <Image source={{ uri: photoUrl }} style={styles.cardPhoto} onError={() => setPhotoFailed(true)} />
-        ) : (
-          // Was a bare tinted box with just a big initial letter - on a
-          // profile with a missing/failed photo this read as a blank,
-          // broken-looking card (Alena: "вот как у тебя", showing a swipe
-          // card that looked entirely empty). Made the no-photo state look
-          // deliberate: a real icon plus explicit copy, so it's obviously
-          // "this profile has no photo yet" rather than something failing to
-          // render.
-          <View style={[styles.cardPhoto, styles.cardPhotoPlaceholder]}>
-            <Feather name="user" size={64} color={colors.blue} />
-            <Text style={styles.cardPhotoPlaceholderName}>{profile.displayName || t("catalog.noPhotoFallbackName")}</Text>
-            <Text style={styles.cardPhotoPlaceholderText}>{t("catalog.noPhoto")}</Text>
-          </View>
-        )}
+      {/* The photo opens details; controls are siblings so their taps stay independent. */}
+      <View style={styles.photoWrap}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onOpenProfile}
+          disabled={!isTop || !onOpenProfile}
+          accessibilityRole="button"
+          accessibilityLabel={t("nav.profileDetailTitle")}
+        >
+          {photoUrl && failedPhotoUrl !== photoUrl ? (
+            <Image source={profilePhotoSource(photoUrl)} style={styles.cardPhoto} onError={() => setFailedPhotoUrl(photoUrl)} />
+          ) : (
+            // Was a bare tinted box with just a big initial letter - on a
+            // profile with a missing/failed photo this read as a blank,
+            // broken-looking card (Alena: "вот как у тебя", showing a swipe
+            // card that looked entirely empty). Made the no-photo state look
+            // deliberate: a real icon plus explicit copy, so it's obviously
+            // "this profile has no photo yet" rather than something failing to
+            // render.
+            <View style={[styles.cardPhoto, styles.cardPhotoPlaceholder]}>
+              <Feather name="user" size={64} color={colors.blue} />
+              <Text style={styles.cardPhotoPlaceholderName}>{profile.displayName || t("catalog.noPhotoFallbackName")}</Text>
+              <Text style={styles.cardPhotoPlaceholderText}>{t("catalog.noPhoto")}</Text>
+            </View>
+          )}
 
-        {isTop ? (
-          <>
-            <Animated.View style={[styles.stamp, styles.stampLike, likeStampStyle]}>
-              <Feather name="heart" size={44} color="#fff" />
-            </Animated.View>
-            <Animated.View style={[styles.stamp, styles.stampPass, passStampStyle]}>
-              <Feather name="x" size={44} color="#fff" />
-            </Animated.View>
-          </>
-        ) : null}
+          {isTop ? (
+            <>
+              <Animated.View style={[styles.stamp, styles.stampLike, likeStampStyle]}>
+                <Feather name="heart" size={44} color="#fff" />
+              </Animated.View>
+              <Animated.View style={[styles.stamp, styles.stampPass, passStampStyle]}>
+                <Feather name="x" size={44} color="#fff" />
+              </Animated.View>
+            </>
+          ) : null}
 
-        {profileTypeBadge || donorTypeBadge ? (
-          <View style={styles.badgeRow}>
-            {profileTypeBadge ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{profileTypeBadge}</Text>
-              </View>
-            ) : null}
-            {donorTypeBadge ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{donorTypeBadge}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
-        {/* Alena's reference: name/location/looking-for sit directly on
-            the photo, over a dark gradient scrim fading up from the
-            bottom edge - not in a separate solid-color panel underneath
-            (her "почему чёрная заливка" report on the earlier version).
-            Buttons stay out of this area entirely (CatalogScreen's own
-            actionsRow, below the whole card - see the comment there), so
-            nothing here can collide with them the way the very first pass
-            did. */}
-        <LinearGradient
-          colors={["transparent", "rgba(10,4,10,0.55)", "rgba(10,4,10,0.92)"]}
-          locations={[0, 0.55, 1]}
-          style={styles.photoScrim}
-          pointerEvents="none"
-        />
-
-        <Pressable style={styles.overlayInfo} onPress={onOpenProfile} disabled={!isTop}>
-          <View style={styles.nameRow}>
-            <Text style={styles.cardName} numberOfLines={1}>
-              {profile.displayName}
-              {profile.age ? `, ${profile.age}` : ""}
-            </Text>
-            {profile.isVerified ? (
-              <View style={styles.verifiedBadge}>
-                <Feather name="check" size={11} color="#fff" />
-              </View>
-            ) : null}
-            {profile.isVideoVerified ? (
-              <View style={styles.videoVerifiedBadge}>
-                <Feather name="video" size={10} color="#fff" />
-              </View>
-            ) : null}
-          </View>
-          {location ? (
-            <View style={styles.cardLocRow}>
-              <Feather name="map-pin" size={11} color="rgba(255,255,255,0.85)" />
-              <Text style={styles.cardLoc} numberOfLines={1}>
-                {location}
-              </Text>
+          {profileTypeBadge || donorTypeBadge ? (
+            <View style={styles.badgeRow}>
+              {profileTypeBadge ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{profileTypeBadge}</Text>
+                </View>
+              ) : null}
+              {donorTypeBadge ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{donorTypeBadge}</Text>
+                </View>
+              ) : null}
             </View>
           ) : null}
 
-          {profile.lookingFor?.length ? (
-            <View style={styles.lookingForBlock}>
-              <Text style={styles.cardLookingForLabel}>{t("catalog.lookingForLabel")}</Text>
-              <View style={styles.lookingForChip}>
-                <Text style={styles.lookingForChipText} numberOfLines={1}>
-                  {profile.lookingFor.map((value) => catalogOptionLabel("lookingFor", value)).join(", ")}
+          <LinearGradient
+            colors={["transparent", "rgba(10,4,10,0.55)", "rgba(10,4,10,0.92)"]}
+            locations={[0, 0.55, 1]}
+            style={styles.photoScrim}
+            pointerEvents="none"
+          />
+
+        </Pressable>
+        {isTop ? rewindAction : null}
+        <View style={styles.cardFooter}>
+          <Pressable style={styles.overlayInfo} onPress={onOpenProfile} disabled={!isTop}>
+            <View style={styles.nameRow}>
+              <Text style={styles.cardName} numberOfLines={1}>
+                {profile.displayName}
+              </Text>
+              {age !== null ? <Text style={[styles.cardName, styles.cardAge]}>{`, ${age}`}</Text> : null}
+              {profile.isVerified ? (
+                <View style={styles.verifiedBadge}>
+                  <Feather name="check" size={11} color="#fff" />
+                </View>
+              ) : null}
+              {profile.isVideoVerified ? (
+                <View style={styles.videoVerifiedBadge}>
+                  <Feather name="video" size={10} color="#fff" />
+                </View>
+              ) : null}
+            </View>
+            {location ? (
+              <View style={styles.cardLocRow}>
+                <Feather name="map-pin" size={11} color="rgba(255,255,255,0.85)" />
+                <Text style={styles.cardLoc}>
+                  {location}
                 </Text>
               </View>
-            </View>
-          ) : null}
+            ) : null}
 
-          {/* Alena: "стрелки и буллеты карусели наползают на инфо" - this
-              used to be position:absolute against overlayInfo (itself
-              absolute), so it visually sat on top of whichever content
-              (name/looking-for) happened to be there rather than reserving
-              its own space. Now a normal flow sibling below lookingForBlock
-              - it just takes its own row underneath the text instead of
-              floating over it. */}
-          {photos.length > 1 ? (
-            <View style={styles.carouselRow}>
-              <Pressable hitSlop={10} onPress={showPrevPhoto} disabled={!isTop}>
-                <Feather name="chevron-left" size={18} color="#fff" />
-              </Pressable>
-              <View style={styles.dotsRow}>
-                {photos.map((_, i) => (
-                  <View key={i} style={[styles.dot, i === photoIndex && styles.dotActive]} />
-                ))}
+            {profile.lookingFor?.length ? (
+              <View style={styles.lookingForBlock}>
+                <Text style={styles.cardLookingForLabel}>{t("catalog.lookingForLabel")}</Text>
+                <View style={styles.lookingForChip}>
+                  <Text style={styles.lookingForChipText} numberOfLines={1}>
+                    {profile.lookingFor.map((value) => catalogOptionLabel("lookingFor", value)).join(", ")}
+                  </Text>
+                </View>
               </View>
-              <Pressable hitSlop={10} onPress={showNextPhoto} disabled={!isTop}>
-                <Feather name="chevron-right" size={18} color="#fff" />
-              </Pressable>
-            </View>
-          ) : null}
-        </Pressable>
-      </Pressable>
+            ) : null}
+
+            {/* Alena: "стрелки и буллеты карусели наползают на инфо" - this
+                used to be position:absolute against overlayInfo (itself
+                absolute), so it visually sat on top of whichever content
+                (name/looking-for) happened to be there rather than reserving
+                its own space. Now a normal flow sibling below lookingForBlock
+                - it just takes its own row underneath the text instead of
+                floating over it. */}
+            {photos.length > 1 ? (
+              <View style={styles.carouselRow}>
+                <Pressable style={styles.carouselButton} onPress={showPrevPhoto} disabled={!isTop} accessibilityRole="button" accessibilityLabel={t("catalog.previousPhoto")}>
+                  <Feather name="chevron-left" size={18} color="#fff" />
+                </Pressable>
+                <View style={styles.dotsRow}>
+                  {photos.slice(firstDot, firstDot + 7).map((_, i) => (
+                    <View key={firstDot + i} style={[styles.dot, firstDot + i === photoIndex && styles.dotActive]} />
+                  ))}
+                </View>
+                <Pressable style={styles.carouselButton} onPress={showNextPhoto} disabled={!isTop} accessibilityRole="button" accessibilityLabel={t("catalog.nextPhoto")}>
+                  <Feather name="chevron-right" size={18} color="#fff" />
+                </Pressable>
+              </View>
+            ) : null}
+          </Pressable>
+          {isTop ? actions : null}
+        </View>
+      </View>
     </Animated.View>
   );
 
@@ -807,16 +794,22 @@ function ExpandedProfileCard({
   loading,
   error,
   onCollapse,
+  actions,
+  rewindAction,
 }: {
   profile: CatalogProfile;
   detail: ProfileDetailData | null;
   loading: boolean;
   error: string | null;
   onCollapse: () => void;
+  actions?: React.ReactNode;
+  rewindAction?: React.ReactNode;
 }) {
   const { t, locale } = useI18n();
   const photos = profile.photos?.length ? profile.photos : profile.avatarUrl ? [profile.avatarUrl] : [];
   const photoUrl = photos[0] || null;
+  const [failedPhotoUrl, setFailedPhotoUrl] = useState<string | null>(null);
+  const age = profileAge(detail ? { ...profile, ...detail } : profile);
   const location = [profile.city, profile.country ? countryName(profile.country, locale) : null].filter(Boolean).join(", ");
   const badgeLabel = profile.profileType
     ? catalogOptionLabel("profileTypes", profile.profileType)
@@ -845,74 +838,83 @@ function ExpandedProfileCard({
             (styles.card) visible through the gap it created - that sliver
             was the stripe. Tapping the photo itself now collapses the card
             instead, so there's no separate button/gap to create that seam. */}
-        <Pressable style={styles.expandedPhotoWrap} onPress={onCollapse}>
-          {photoUrl ? (
-            <Image source={{ uri: photoUrl }} style={styles.cardPhoto} />
-          ) : (
-            <View style={[styles.cardPhoto, styles.cardPhotoPlaceholder]}>
-              <Feather name="user" size={64} color={colors.blue} />
-            </View>
-          )}
-          {badgeLabel ? (
-            <View style={styles.badgeRow}>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{badgeLabel}</Text>
+        <View style={styles.expandedPhotoWrap}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={onCollapse} accessibilityRole="button" accessibilityLabel={t("common.back")}>
+            {photoUrl && failedPhotoUrl !== photoUrl ? (
+              <Image source={profilePhotoSource(photoUrl)} style={styles.cardPhoto} onError={() => setFailedPhotoUrl(photoUrl)} />
+            ) : (
+              <View style={[styles.cardPhoto, styles.cardPhotoPlaceholder]}>
+                <Feather name="user" size={64} color={colors.blue} />
               </View>
+            )}
+            {badgeLabel ? (
+              <View style={styles.badgeRow}>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{badgeLabel}</Text>
+                </View>
+              </View>
+            ) : null}
+
+            <LinearGradient
+              colors={["transparent", "rgba(10,4,10,0.55)", "rgba(10,4,10,0.92)"]}
+              locations={[0, 0.55, 1]}
+              style={styles.photoScrim}
+              pointerEvents="none"
+            />
+
+          </Pressable>
+          {rewindAction}
+          <View style={[styles.cardFooter, styles.expandedCardFooter]}>
+            <View style={styles.overlayInfo}>
+              <View style={styles.nameRow}>
+                <Text style={styles.cardName} numberOfLines={1}>{profile.displayName}</Text>
+                {age !== null ? <Text style={[styles.cardName, styles.cardAge]}>{`, ${age}`}</Text> : null}
+                {profile.isVerified ? (
+                  <View style={styles.verifiedBadge}>
+                    <Feather name="check" size={11} color="#fff" />
+                  </View>
+                ) : null}
+                {profile.isVideoVerified ? (
+                  <View style={styles.videoVerifiedBadge}>
+                    <Feather name="video" size={10} color="#fff" />
+                  </View>
+                ) : null}
+              </View>
+              {location ? (
+                <View style={styles.cardLocRow}>
+                  <Feather name="map-pin" size={11} color="rgba(255,255,255,0.85)" />
+                  <Text style={styles.cardLoc}>{location}</Text>
+                </View>
+              ) : null}
+
+              {profile.lookingFor?.length ? (
+                <View style={styles.lookingForBlock}>
+                  <Text style={styles.cardLookingForLabel}>{t("catalog.lookingForLabel")}</Text>
+                  <View style={styles.lookingForChip}>
+                    <Text style={styles.lookingForChipText} numberOfLines={1}>
+                      {profile.lookingFor.map((value) => catalogOptionLabel("lookingFor", value)).join(", ")}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
             </View>
+            {actions}
+          </View>
+        </View>
+
+        <View style={styles.expandedDetails}>
+          {loading ? (
+            <View style={styles.expandedLoading}>
+              <ActivityIndicator size="small" color={colors.blue} />
+            </View>
+          ) : error ? (
+            <View style={styles.expandedLoading}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : detail ? (
+            <ProfileDetailSections profile={detail} />
           ) : null}
-
-          <LinearGradient
-            colors={["transparent", "rgba(10,4,10,0.55)", "rgba(10,4,10,0.92)"]}
-            locations={[0, 0.55, 1]}
-            style={styles.photoScrim}
-            pointerEvents="none"
-          />
-
-          <View style={styles.overlayInfo}>
-            <View style={styles.nameRow}>
-              <Text style={styles.cardName} numberOfLines={1}>{profile.displayName}</Text>
-              {profile.isVerified ? (
-                <View style={styles.verifiedBadge}>
-                  <Feather name="check" size={11} color="#fff" />
-                </View>
-              ) : null}
-              {profile.isVideoVerified ? (
-                <View style={styles.videoVerifiedBadge}>
-                  <Feather name="video" size={10} color="#fff" />
-                </View>
-              ) : null}
-            </View>
-            {location ? (
-              <View style={styles.cardLocRow}>
-                <Feather name="map-pin" size={11} color="rgba(255,255,255,0.85)" />
-                <Text style={styles.cardLoc} numberOfLines={1}>{location}</Text>
-              </View>
-            ) : null}
-
-            {profile.lookingFor?.length ? (
-              <View style={styles.lookingForBlock}>
-                <Text style={styles.cardLookingForLabel}>{t("catalog.lookingForLabel")}</Text>
-                <View style={styles.lookingForChip}>
-                  <Text style={styles.lookingForChipText} numberOfLines={1}>
-                    {profile.lookingFor.map((value) => catalogOptionLabel("lookingFor", value)).join(", ")}
-                  </Text>
-                </View>
-              </View>
-            ) : null}
-          </View>
-        </Pressable>
-
-        {loading ? (
-          <View style={styles.expandedLoading}>
-            <ActivityIndicator size="small" color={colors.blue} />
-          </View>
-        ) : error ? (
-          <View style={styles.expandedLoading}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : detail ? (
-          <ProfileDetailSections profile={detail} />
-        ) : null}
+        </View>
       </ScrollView>
     </View>
   );
@@ -920,22 +922,11 @@ function ExpandedProfileCard({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "transparent" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xs,
-  },
-  headerBrand: { flexDirection: "row", alignItems: "center", gap: 8 },
-  headerLogo: { width: 24, height: 24 },
-  headerTitle: { fontSize: 15, fontWeight: "600", color: colors.ink },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  header: { paddingHorizontal: spacing.md },
   avatarButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: APP_HEADER_ITEM_SIZE,
+    height: APP_HEADER_ITEM_SIZE,
+    borderRadius: APP_HEADER_ITEM_SIZE / 2,
     backgroundColor: colors.card,
     alignItems: "center",
     justifyContent: "center",
@@ -945,22 +936,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  avatarButtonText: { fontSize: 16 },
-  // Same shadow as avatarButton (the filter circle) so the two header
-  // circles read as the same size/weight - see the comment above this
-  // Pressable in the JSX.
-  avatarButtonShadow: {
-    borderRadius: 22,
-    shadowColor: "#020817",
-    shadowOpacity: 0.14,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  // Same gradient-initial avatar AppHeader uses elsewhere - Alena's
-  // "Browse profiles" reference has the same right-side avatar shape here.
-  profileAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  profileAvatarText: { color: "#fff", fontWeight: "700", fontSize: 14 },
   actionErrorBanner: {
     marginHorizontal: spacing.md,
     marginTop: spacing.xs,
@@ -981,12 +956,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   retryButtonText: { color: colors.white, fontWeight: "700" },
-  deck: { flex: 1, padding: spacing.md, paddingBottom: spacing.md },
-  // Real flex sibling of `actionsRow` below (see the big comment on that
-  // JSX block) - just a normal flex:1 box so `card`'s absolute-fill covers
-  // exactly this area and nothing else, with the button row sized to its
-  // own content right underneath in normal layout flow.
-  cardArea: { flex: 1, position: "relative", marginBottom: spacing.sm },
+  deck: { flex: 1, padding: spacing.md, paddingBottom: spacing.sm },
+  // The card fills the available space above the single navigation row.
+  cardArea: { flex: 1, position: "relative" },
   card: {
     position: "absolute",
     top: 0,
@@ -999,11 +971,6 @@ const styles = StyleSheet.create({
     flexDirection: "column",
   },
   cardUnder: { transform: [{ scale: 0.96 }], top: 10 },
-  // Reference mockup: the photo is a fixed portion of the card (roughly
-  // 60-65%), not the whole thing - photoWrap's flex:1 against infoPanel's
-  // natural content height below it gives that split automatically,
-  // whatever the info panel ends up containing (looking-for chip present
-  // or not, one photo or several).
   photoWrap: { flex: 1, position: "relative" },
   cardPhoto: StyleSheet.absoluteFill,
   cardPhotoPlaceholder: { alignItems: "center", justifyContent: "center", backgroundColor: colors.tint, gap: 6 },
@@ -1069,9 +1036,9 @@ const styles = StyleSheet.create({
   // separate solid-color panel underneath (Alena's "почему чёрная
   // заливка" complaint about the earlier design).
   photoScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: "62%" },
-  // All of the card's text content, floating directly over the photo/
-  // scrim instead of a panel below it. Bottom offset clears expandBtn.
-  overlayInfo: { position: "absolute", left: spacing.md, right: spacing.md, bottom: 34 },
+  // All footer content takes its own space over the photo scrim.
+  cardFooter: { position: "absolute", left: spacing.md, right: spacing.md, bottom: spacing.md, gap: 12 },
+  overlayInfo: {},
   // UPDATE: no longer absolutely positioned - see the comment where this
   // is rendered in SwipeCard. Normal flow row underneath the looking-for
   // chip (or the name/location block, if there's no looking-for chip)
@@ -1084,24 +1051,20 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   dotsRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  carouselButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.5)" },
   dotActive: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: "#fff" },
-  // The 4-button pass/info/message/like row, below cardArea - white circles
-  // with dark icons (pink for the "like" thumbs-up) floating directly on
-  // the screen's own gradient background, per Alena's reference screenshot
-  // - not on a white sheet, and not small circles pinned to the photo.
-  actionsRowWrap: { flexDirection: "row", alignItems: "center" },
-  // Smaller than the 4 main actionBtn circles (40 vs 52) and off to the
-  // side - reads as a secondary/utility control, not a 5th equal choice
-  // alongside pass/profile/message/like.
+  // Undo is a secondary photo control, separate from the main card actions.
   rewindBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    position: "absolute",
+    top: spacing.md,
+    left: spacing.md,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: spacing.sm,
     shadowColor: "#020817",
     shadowOpacity: 0.12,
     shadowRadius: 6,
@@ -1109,11 +1072,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   rewindBtnDisabled: { opacity: 0.4 },
-  actionsRow: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-evenly" },
+  actionsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   actionBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
@@ -1123,14 +1086,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 4,
   },
-  // Same white circle as the others (the reference screenshot's "like"
-  // button is a white circle with a pink icon, not a filled pink circle) -
-  // kept as its own key in case that changes again rather than hardcoding
-  // one style for all four.
-  actionBtnFilled: {},
-  // UPDATE: the grey "^^" expand/collapse pill is gone (Alena didn't like
-  // its look) - tapping the photo itself now expands/collapses (see the
-  // Pressable wrapping photoWrap/expandedPhotoWrap above).
+  // Tapping the photo or scrolling up opens details; there is no expand pill.
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   verifiedBadge: {
     width: 18,
@@ -1148,11 +1104,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  cardName: { fontSize: 20, fontWeight: "700", color: "#fff" },
+  cardName: { fontSize: 20, fontWeight: "700", color: "#fff", flexShrink: 1 },
+  cardAge: { flexShrink: 0, marginLeft: -6 },
   // Was a "📍 " emoji glyph prefix - swapped for a real Feather icon
   // (Alena: "иконка стрёмная") in its own row alongside the text.
   cardLocRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
-  cardLoc: { fontSize: 12, color: "rgba(255,255,255,0.85)" },
+  cardLoc: { fontSize: 12, color: "rgba(255,255,255,0.85)", flexShrink: 1 },
   lookingForBlock: { marginTop: 12 },
   cardLookingForLabel: { fontSize: 12.5, fontWeight: "600", color: "rgba(255,255,255,0.9)", marginBottom: 6 },
   lookingForChip: {
@@ -1166,7 +1123,9 @@ const styles = StyleSheet.create({
   lookingForChipText: { color: "#fff", fontSize: 13, fontWeight: "700" },
   expandedScroll: { flex: 1 },
   expandedScrollContent: { flexGrow: 1 },
-  expandedPhotoWrap: { height: 300, position: "relative" },
+  expandedPhotoWrap: { height: 324, alignSelf: "stretch", position: "relative" },
+  expandedCardFooter: { bottom: spacing.md + 24 },
+  expandedDetails: { flexGrow: 1, marginTop: -24, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.card },
   expandedLoading: { paddingVertical: spacing.xl, alignItems: "center", justifyContent: "center" },
   // "It's a Match!" overlay (#scr-matched) - exact prototype values: vivid
   // gradient background, two 110px overlapping circular photos, "Wow!

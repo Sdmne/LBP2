@@ -5,12 +5,11 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
-import { colors, radius, spacing, tabBarClearance } from "../theme";
+import { colors, radius, spacing } from "../theme";
 import GradientBackground from "../components/GradientBackground";
 import AppHeader from "../components/AppHeader";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { openFamilyPlan, openPregnancyRoom } from "../utils/familyPlan";
@@ -20,8 +19,7 @@ import { fetchMe } from "../api/profile";
 import { ApiError } from "../api/client";
 import { profilePhotoSource } from "../api/profilePhotoSource";
 import type { SubscriptionTier } from "../api/types";
-import * as Application from "expo-application";
-import * as Updates from "expo-updates";
+import AppVersionLabel from "../components/AppVersionLabel";
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Me">;
 
@@ -54,7 +52,6 @@ export default function MeProfileScreen(_props: Props) {
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, logout } = useAuth();
   const { t } = useI18n();
-  const insets = useSafeAreaInsets();
   const [loggingOut, setLoggingOut] = useState(false);
   // Reset per avatarUrl (not just once) so switching to a NEW photo after
   // a previous one failed to load tries the new URL fresh, instead of
@@ -221,11 +218,12 @@ export default function MeProfileScreen(_props: Props) {
     { icon: "gift", label: t("me.inviteFriends"), onPress: () => rootNav.navigate("Referral") },
     { icon: "tool", label: t("me.resources"), onPress: () => rootNav.navigate("Resources") },
     { icon: "settings", label: t("me.settings"), onPress: () => rootNav.navigate("Settings") },
+    { icon: "gift", label: t("whatsnew.menuTitle"), onPress: () => rootNav.navigate("WhatsNew") },
   ];
 
   return (
     <GradientBackground variant="soft">
-    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
+    <ScrollView style={styles.container} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} contentContainerStyle={styles.content}>
       {/* Was the only tab still relying on the native headerShown:true
           title bar (a plain white "Profile" bar, no brand mark) while
           Explore/Catalog/Messages all build this same in-content header -
@@ -398,18 +396,7 @@ export default function MeProfileScreen(_props: Props) {
         {loggingOut ? <ActivityIndicator color={colors.pink} /> : <Text style={styles.logoutText}>{t("me.logout")}</Text>}
       </Pressable>
 
-      {/* Alena asked repeatedly for a visible version number on this screen
-          (the one she actually opens, unlike Settings' own copy of this same
-          footer - see SettingsScreen.tsx). Also shows the applied OTA update
-          id/message so a screenshot from here settles "did the update
-          actually reach my phone" without guessing - Updates.updateId is
-          null when running the embedded (non-OTA-updated) build, not an
-          error, so that's rendered as "embedded build" rather than "?". */}
-      <Text style={styles.versionFooter}>
-        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"})
-        {"\n"}
-        {Updates.updateId ? `update ${Updates.updateId.slice(0, 8)}` : "embedded build"}
-      </Text>
+      <AppVersionLabel style={styles.versionFooter} />
     </ScrollView>
     </GradientBackground>
   );
@@ -417,7 +404,7 @@ export default function MeProfileScreen(_props: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "transparent" },
-  content: { padding: spacing.lg, paddingTop: spacing.xl },
+  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
   hero: { alignItems: "center", marginBottom: spacing.lg },
   avatarWrap: { marginBottom: spacing.sm, position: "relative" },
   avatar: {

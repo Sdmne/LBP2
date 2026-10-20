@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -9,13 +9,14 @@ import { createConversation } from "../api/messages";
 import { fetchLikes, fetchProfileViews, markLikesRead } from "../api/likes";
 import { fetchSubscriptionStatus } from "../api/subscription";
 import type { LikesResponse, ProfileSummary, ProfileVisitor } from "../api/types";
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
 import { useI18n } from "../i18n/I18nContext";
-import { colors, radius, spacing, tabBarClearance } from "../theme";
+import { colors, radius, spacing } from "../theme";
 import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
+import AppHeader from "../components/AppHeader";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 import { countryName } from "../utils/countryNames";
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Likes">;
@@ -65,7 +66,6 @@ const FREE_PREVIEW_COUNT = 4;
 const REAL_UNLOCKED_COUNT_FALLBACK: Partial<Record<Tab, number>> = { likesYou: 1, visitors: 2 };
 
 export default function LikesScreen({ navigation }: Props) {
-  const insets = useSafeAreaInsets();
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { t, locale } = useI18n();
   const [tab, setTab] = useState<Tab>("likesYou");
@@ -188,6 +188,7 @@ export default function LikesScreen({ navigation }: Props) {
           ]);
         }
       }
+      await loadLikes();
     } catch (err) {
       Alert.alert(t("likes.likeBackError"), err instanceof ApiError ? err.message : t("common.pleaseTryAgain"));
     } finally {
@@ -217,19 +218,16 @@ export default function LikesScreen({ navigation }: Props) {
     }
   }, [t]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    let active = true;
     setLoading(true);
-    loadLikes().finally(() => setLoading(false));
-  }, [loadLikes]);
-
-  // Load visitors lazily, the first time that tab is opened - mirrors the
-  // website's Likes component, which only fetches /profile-views once `tab
-  // === "visitors"`.
-  useEffect(() => {
-    if (tab === "visitors" && visitors === null) {
-      void loadVisitors();
-    }
-  }, [tab, visitors, loadVisitors]);
+    setLikeOverrides({});
+    setMatchedIds({});
+    void Promise.all([loadLikes(), loadVisitors()]).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [loadLikes, loadVisitors]));
 
   // Tell the server which likes have been seen, same as the website does,
   // whenever the "Likes you" tab is the active one and there's something new
@@ -245,16 +243,15 @@ export default function LikesScreen({ navigation }: Props) {
 
   async function onRefresh() {
     setRefreshing(true);
-    if (tab === "visitors") await loadVisitors();
-    else await loadLikes();
+    await Promise.all([loadLikes(), loadVisitors()]);
     setRefreshing(false);
   }
 
   const tabs: { key: Tab; label: string; badge?: number }[] = [
     { key: "likesYou", label: t("likes.tabLikesYou"), badge: data?.likesYouCount },
-    { key: "matches", label: t("likes.tabMatches") },
-    { key: "myLikes", label: t("likes.tabMyLikes") },
-    { key: "visitors", label: t("likes.tabVisitors") },
+    { key: "matches", label: t("likes.tabMatches"), badge: data?.matchesCount ?? data?.matches.length },
+    { key: "myLikes", label: t("likes.tabMyLikes"), badge: data?.myLikesCount ?? data?.myLikes.length },
+    { key: "visitors", label: t("likes.tabVisitors"), badge: visitors === null ? undefined : visitorsTotal },
   ];
 
   // likesYouLocked reflects the account's REAL tier (member_likes() in
@@ -262,32 +259,17 @@ export default function LikesScreen({ navigation }: Props) {
   // previewAsFree on to see the free view without losing their own data.
   const accountIsPremium = data ? !data.likesYouLocked : false;
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () =>
-        accountIsPremium ? (
-          <View style={styles.headerToggle}>
-            <Text style={styles.headerToggleLabel}>{t("likes.previewAsFree")}</Text>
-            {/* Alena's reference mockup (and her bug report - "when Premium
-                is switched OFF, the likes should be blurred with an
-                upgrade offer") both read the switch as a "Premium" status
-                toggle: ON means "acting as my real premium self" (full
-                unlocked list), OFF means "acting as a free user" (blurred
-                preview + upsell). That's the OPPOSITE of previewAsFree's
-                own true/false (previewAsFree=true means "simulate free"),
-                so the Switch's displayed value/handler are inverted here
-                on purpose - previewAsFree itself is unchanged everywhere
-                else in this file. */}
-            <Switch
-              value={!previewAsFree}
-              onValueChange={(isPremiumOn) => setPreviewAsFree(!isPremiumOn)}
-              trackColor={{ false: colors.line, true: colors.pink }}
-              thumbColor="#fff"
-            />
-          </View>
-        ) : null,
-    });
-  }, [navigation, accountIsPremium, previewAsFree, t]);
+  const headerActions = accountIsPremium ? (
+    <View style={styles.headerToggle}>
+      <Text style={styles.headerToggleLabel}>{t("likes.previewAsFree")}</Text>
+      <Switch
+        value={!previewAsFree}
+        onValueChange={(isPremiumOn) => setPreviewAsFree(!isPremiumOn)}
+        trackColor={{ false: colors.line, true: colors.pink }}
+        thumbColor="#fff"
+      />
+    </View>
+  ) : undefined;
 
   // Only likesYou/Visitors are ever gated for a real free account - Matches
   // and My likes are unlocked at every tier - so the preview only applies
@@ -328,9 +310,14 @@ export default function LikesScreen({ navigation }: Props) {
   const emptyTitleKey = tab === "matches" ? "likes.emptyMatchesTitle" : tab === "myLikes" ? "likes.emptyMyLikesTitle" : tab === "visitors" ? "likes.emptyVisitorsTitle" : "likes.emptyTitle";
   const emptyDescKey = tab === "matches" ? "likes.emptyMatches" : tab === "myLikes" ? "likes.emptyMyLikes" : tab === "visitors" ? "likes.emptyVisitors" : "likes.empty";
 
+  const listContentStyle = styles.list;
+
   return (
     <GradientBackground variant="vivid">
     <View style={styles.container}>
+      <View style={styles.header}>
+        <AppHeader title={t("nav.likes")} actions={headerActions} />
+      </View>
       {/* React Native's ScrollView defaults its OWN outer style to
           flexGrow:1 (see ScrollView.js's baseHorizontal) whenever no
           `style` prop overrides it - not just contentContainerStyle. Inside
@@ -347,13 +334,13 @@ export default function LikesScreen({ navigation }: Props) {
         contentContainerStyle={styles.tabsRow}
       >
         {tabs.map((item) => (
-          <Pressable key={item.key} style={[styles.tabChip, tab === item.key && styles.tabChipActive]} onPress={() => setTab(item.key)}>
+          <Pressable key={item.key} style={[styles.tabChip, tab === item.key && styles.tabChipActive]} onPress={() => setTab(item.key)} accessibilityRole="tab" accessibilityState={{ selected: tab === item.key }} accessibilityLabel={item.badge == null ? item.label : `${item.label}, ${item.badge}`}>
             <Text style={[styles.tabChipText, tab === item.key && styles.tabChipTextActive]}>{item.label}</Text>
             {/* Alena: "число новых лайков, мэтчев и тд - в баблы" - was
                 plain dimmed text appended inline inside the label's own
                 Text node; a real count bubble needs a View (a Text can't
                 nest one), so the count moved out to its own sibling here. */}
-            {item.badge ? (
+            {item.badge != null ? (
               <View style={[styles.tabChipBadge, tab === item.key && styles.tabChipBadgeActive]}>
                 <Text style={[styles.tabChipBadgeText, tab === item.key && styles.tabChipBadgeTextActive]}>{item.badge}</Text>
               </View>
@@ -371,7 +358,7 @@ export default function LikesScreen({ navigation }: Props) {
           <Text style={styles.errorText}>{tab === "visitors" ? visitorsError : likesError}</Text>
         </View>
       ) : previewMode && profileItems.length === 0 ? (
-        <ScrollView contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
+        <ScrollView contentContainerStyle={listContentStyle}>
           <View style={styles.premiumBanner}>
             <Text style={styles.premiumTitle}>{t("likes.premiumTitle")}</Text>
             <Text style={styles.premiumBody}>{t("likes.premiumBody")}</Text>
@@ -397,7 +384,7 @@ export default function LikesScreen({ navigation }: Props) {
         <FlatList
           data={profileItems}
           keyExtractor={(item, index) => String(item.id ?? index)}
-          contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}
+          contentContainerStyle={listContentStyle}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -474,7 +461,7 @@ export default function LikesScreen({ navigation }: Props) {
             return (
               <Pressable
                 style={styles.card}
-                onPress={() => (previewLocked ? rootNav.navigate("LikesPaywall") : rootNav.navigate("ProfileDetail", { profileId: item.id }))}
+                onPress={() => (item.identityHidden || previewLocked ? rootNav.navigate("LikesPaywall") : rootNav.navigate("ProfileDetail", { profileId: item.id }))}
               >
                 {/* Alena, again, verbatim: "Нет замыливания!!!" - this
                     time on the PREMIUM self-test "preview as free" toggle
@@ -497,14 +484,14 @@ export default function LikesScreen({ navigation }: Props) {
                     blur that may or may not show up. */}
                 {(() => {
                   const effectivelyHidden = item.identityHidden || previewLocked;
-                  return effectivelyHidden && item.avatarUrl ? (
-                    <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+                  return effectivelyHidden && item.identityHidden && item.avatarUrl ? (
+                    <Image source={profilePhotoSource(item.avatarUrl)} style={styles.avatar} />
                   ) : effectivelyHidden ? (
                     <View style={[styles.avatar, styles.avatarPlaceholder]}>
                       <Feather name="user" size={22} color={colors.muted} />
                     </View>
                   ) : item.avatarUrl ? (
-                    <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+                    <Image source={profilePhotoSource(item.avatarUrl)} style={styles.avatar} />
                   ) : (
                     <View style={[styles.avatar, styles.avatarPlaceholder]}>
                       <Text style={styles.avatarPlaceholderText}>{item.displayName?.[0] ?? "?"}</Text>
@@ -518,10 +505,11 @@ export default function LikesScreen({ navigation }: Props) {
                     </Text>
                   ) : (
                     <>
-                      <Text style={styles.name} numberOfLines={1}>
-                        {item.age != null ? `${item.displayName ?? "?"}, ${item.age}` : item.displayName}
-                      </Text>
-                      <Text style={styles.subtitle} numberOfLines={1}>
+                      <View style={styles.nameRow}>
+                        <Text style={styles.name} numberOfLines={1}>{item.displayName || "?"}</Text>
+                        {item.age != null ? <Text style={[styles.name, styles.age]}>{`, ${item.age}`}</Text> : null}
+                      </View>
+                      <Text style={styles.subtitle}>
                         {[item.city, item.country ? countryName(item.country, locale) : null].filter(Boolean).join(", ") || t("common.locationNotSet")}
                       </Text>
                     </>
@@ -562,13 +550,7 @@ export default function LikesScreen({ navigation }: Props) {
                 ) : previewLocked ? (
                   <Feather name="lock" size={16} color={colors.muted} />
                 ) : (
-                  // Alena: "сделай как в меню снизу иконка только закрасить
-                  // в красный" - the bottom tab bar's Likes icon is
-                  // Feather's "heart" outline (see MainTabs.tsx's
-                  // ICON_NAMES); Feather has no filled variant, so this
-                  // uses Ionicons' "heart" (same simple rounded heart
-                  // shape, solid) instead of the plain "♥" text glyph.
-                  <Ionicons name="heart" size={18} color={colors.pink} />
+                  <Feather name="thumbs-up" size={18} color={colors.pink} />
                 )}
                 {/* No BlurView overlay left here at all, on purpose. It
                     used to be the ONLY thing hiding real data on this row
@@ -596,6 +578,7 @@ export default function LikesScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "transparent" },
+  header: { paddingHorizontal: spacing.md },
   tabsScroll: { flexGrow: 0, flexShrink: 0 },
   tabsRow: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 6, alignItems: "center" },
   tabChip: {
@@ -656,7 +639,7 @@ const styles = StyleSheet.create({
   premiumBody: { fontSize: 13, color: colors.muted, marginTop: spacing.xs, textAlign: "center", lineHeight: 18 },
   premiumButton: { marginTop: spacing.md, backgroundColor: colors.pink, borderRadius: radius.pill, paddingHorizontal: spacing.lg, paddingVertical: 10 },
   premiumButtonText: { color: colors.white, fontWeight: "700" },
-  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.xs + tabBarClearance, gap: 10 },
+  list: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, gap: 10 },
   // Reference mockup (#scr-likes): each row is its own white rounded card
   // floating on the gradient background, not a flat row sharing one long
   // divided list the way it was before - Alena: "белая заливка внутри 2
@@ -688,7 +671,9 @@ const styles = StyleSheet.create({
   lockedBarNarrow: { height: 11, width: "35%", borderRadius: 6, backgroundColor: colors.line, marginTop: 8 },
   avatarPlaceholderText: { fontSize: 20, fontWeight: "700", color: colors.muted },
   rowBody: { flex: 1 },
-  name: { fontSize: 16, fontWeight: "700", color: colors.ink },
+  nameRow: { flexDirection: "row", alignItems: "baseline" },
+  name: {  fontSize: 16, fontWeight: "700", color: colors.ink , flexShrink: 1 },
+  age: { flexShrink: 0 },
   subtitle: { fontSize: 13, color: colors.muted, marginTop: 2 },
   visitorNote: { fontSize: 12, color: colors.pink, marginTop: 2, fontWeight: "600" },
   rowActions: { flexDirection: "row", gap: 8 },

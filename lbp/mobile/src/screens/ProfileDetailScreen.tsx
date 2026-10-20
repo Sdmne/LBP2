@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { api, ApiError } from "../api/client";
@@ -13,7 +13,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import GradientBackground from "../components/GradientBackground";
 import ProfileDetailSections from "../components/ProfileDetailSections";
 import { catalogOptionLabel } from "../data/catalogLabels";
-import type { ProfileDetailData } from "../utils/profileFields";
+import { profileAge, type ProfileDetailData } from "../utils/profileFields";
+import { countryName } from "../utils/countryNames";
+import { profilePhotoSource } from "../api/profilePhotoSource";
 import { Feather } from "@expo/vector-icons";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
@@ -50,9 +52,17 @@ type ProfileDetail = ProfileDetailData;
 // still reachable without cluttering the bottom bar.
 export default function ProfileDetailScreen({ route, navigation }: Props) {
   const { profileId } = route.params;
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const [photoWidth, setPhotoWidth] = useState(windowWidth);
+  const photoScroll = useRef<ScrollView>(null);
+  const photoPage = useRef(0);
+
+  useEffect(() => {
+    photoScroll.current?.scrollTo({ x: photoPage.current * photoWidth, animated: false });
+  }, [photoWidth]);
   // MeProfileScreen's new "Preview my profile" row opens this same screen
   // with the viewer's own profileId - member_catalog_detail() on the
   // backend already special-cases viewer_profile_id === target_profile_id
@@ -103,6 +113,8 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
     setLiking(false);
     setMenuVisible(false);
     setFailedPhotoIndices({});
+    photoPage.current = 0;
+    photoScroll.current?.scrollTo({ x: 0, animated: false });
   }, [profileId]);
 
   useEffect(() => {
@@ -216,6 +228,8 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
   }
 
   const photos = profile.photos?.length ? profile.photos : profile.avatarUrl ? [profile.avatarUrl] : [];
+  const age = profileAge(profile);
+  const photoSize = { width: photoWidth, height: photoWidth };
 
   return (
     <GradientBackground variant="vivid">
@@ -248,26 +262,36 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
             that sat directly on GradientBackground's vivid gradient,
             which read as a solid lilac block between the photo and the
             white card - that's what Alena's "без сиреневого" flagged. */}
-        <View style={styles.photoWrap}>
+        <View style={styles.photoWrap} onLayout={({ nativeEvent }) => {
+          if (nativeEvent.layout.width > 0) setPhotoWidth(nativeEvent.layout.width);
+        }}>
           {photos.length > 0 ? (
-            <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false}>
+            <ScrollView
+              ref={photoScroll}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={({ nativeEvent }) => {
+                photoPage.current = Math.round(nativeEvent.contentOffset.x / photoWidth);
+              }}
+            >
               {photos.map((url, i) =>
                 failedPhotoIndices[i] ? (
-                  <View key={i} style={[styles.photo, styles.photoPlaceholder]}>
+                  <View key={i} style={[styles.photo, styles.photoPlaceholder, photoSize]}>
                     <Feather name="user" size={56} color={colors.blue} />
                   </View>
                 ) : (
                   <Image
                     key={i}
-                    source={{ uri: url }}
-                    style={styles.photo}
+                    source={profilePhotoSource(url)}
+                    style={[styles.photo, photoSize]}
                     onError={() => setFailedPhotoIndices((prev) => ({ ...prev, [i]: true }))}
                   />
                 ),
               )}
             </ScrollView>
           ) : (
-            <View style={[styles.photo, styles.photoPlaceholder]}>
+            <View style={[styles.photo, styles.photoPlaceholder, photoSize]}>
               <Feather name="user" size={56} color={colors.blue} />
             </View>
           )}
@@ -289,6 +313,7 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
           <View style={styles.overlayInfo}>
             <View style={styles.nameRow}>
               <Text style={styles.name} numberOfLines={1}>{profile.displayName}</Text>
+              {age !== null ? <Text style={[styles.name, styles.age]}>{`, ${age}`}</Text> : null}
               {profile.isVerified ? (
                 <View style={styles.verifiedBadge}>
                   <Feather name="check" size={11} color="#fff" />
@@ -301,7 +326,7 @@ export default function ProfileDetailScreen({ route, navigation }: Props) {
               ) : null}
             </View>
             <Text style={styles.subtitle}>
-              {[profile.city, profile.country].filter(Boolean).join(", ") || t("common.locationNotSet")}
+              {[profile.city, profile.country ? countryName(profile.country, locale) : null].filter(Boolean).join(", ") || t("common.locationNotSet")}
             </Text>
             {profile.isPremium ? <Text style={styles.badge}>{t("profileDetail.premium")}</Text> : null}
             {profile.profileType ? (
@@ -421,14 +446,14 @@ const styles = StyleSheet.create({
   errorText: { color: colors.danger },
   container: { paddingBottom: spacing.xl, backgroundColor: "transparent" },
   // photoWrap is the positioning root for the scrim + overlaid text below -
-  // photo itself is unchanged (full-width, fixed height).
-  photoWrap: { position: "relative" },
+  // Each carousel page uses the measured container width and a square height.
+  photoWrap: { position: "relative", alignSelf: "stretch", overflow: "hidden" },
   // See the "сиреневая полоса" comment above where this is used - fills
   // any leftover ScrollView space with the same white the info card uses,
   // so a short profile's tail never exposes the vivid gradient behind it.
-  contentFill: { flex: 1, backgroundColor: colors.card },
-  photo: { width: 390, height: 390, backgroundColor: colors.border },
-  photoPlaceholder: { alignItems: "center", justifyContent: "center", width: "100%" },
+  contentFill: { flex: 1, marginTop: -24, borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: "hidden", backgroundColor: colors.card },
+  photo: { backgroundColor: colors.border },
+  photoPlaceholder: { alignItems: "center", justifyContent: "center" },
   headerMenuBtn: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
   // Dark gradient fading up from the photo's bottom edge, so the overlaid
   // name/location/badges stay readable without a separate solid-color
@@ -457,7 +482,7 @@ const styles = StyleSheet.create({
   // ProfileDetailSections' own infoCard (rounded top corners) follows
   // immediately after photoWrap with no gap, so it visually overlaps the
   // photo's bottom edge exactly like the reference.
-  overlayInfo: { position: "absolute", left: spacing.lg, right: spacing.lg, bottom: spacing.lg, gap: spacing.xs },
+  overlayInfo: { position: "absolute", left: spacing.lg, right: spacing.lg, bottom: spacing.lg + 24, gap: spacing.xs },
   nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   verifiedBadge: {
     width: 18,
@@ -476,6 +501,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   name: { fontSize: 22, fontWeight: "800", color: colors.white, flexShrink: 1 },
+  age: { flexShrink: 0, marginLeft: -6 },
   subtitle: { fontSize: 14, color: colors.white },
   badge: {
     alignSelf: "flex-start",

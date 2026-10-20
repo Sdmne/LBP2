@@ -221,7 +221,11 @@ export function AccountIcon({ name }: { name: keyof typeof ACCOUNT_ICONS }) {
 
 export function ownProfileData(value: unknown): MemberRow {
   const profile = memberRow(value);
-  return { ...profile, ...memberRow(profile.data) };
+  const data = memberRow(profile.data);
+  return { ...profile, ...data, id: profile.id ?? data.id,
+    photos: profile.photos ?? data.photos, avatarUrl: profile.avatarUrl ?? data.avatarUrl,
+    primaryPhotoUrl: profile.primaryPhotoUrl ?? data.primaryPhotoUrl,
+    isVerified: profile.isVerified ?? data.isVerified };
 }
 
 export function profileCompletion(
@@ -685,7 +689,7 @@ function Overview({
       <h1>
         {name}
         {age ? `, ${age}` : ""}
-        <Icon name={verified ? "verifiedIcon" : "unverifiedIcon"} />
+        {verified && <Icon name="verifiedIcon" />}
       </h1>
       {location && (
         <p>

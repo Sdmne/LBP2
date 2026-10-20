@@ -1,3 +1,5 @@
+import { FORM_LABELS } from "./form-labels";
+import { profilePhotoUrls } from "./profile-media";
 import {
   FormEvent,
   lazy,
@@ -13,6 +15,7 @@ import {
 import { MemberChatCalls } from "./member-chat-calls";
 import { flushSync } from "react-dom";
 import { SessionRequestGuard } from "./session-request-guard";
+import { startSessionPresence } from "./session-presence";
 import type { ChatLocale } from "./member-chat-model";
 import {
   Link,
@@ -26,9 +29,9 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { ApiError, createApiClient } from "./api";
-import { loadKnowledgeArticles, normalizeArticle } from "./articles";
+import { articleCategoryTranslation, loadKnowledgeArticles, normalizeArticle } from "./articles";
 import { firstAvatarText, userInitials, UserAvatar } from "./user-avatar";
-import { MemberProfile, profileAge, profileCountry } from "./member-profile";
+import { MemberProfile, profileAge, profileCountry, Icon as ProfileIcon } from "./member-profile";
 import { AccountPremium, MemberAccount, ownProfileData } from "./member-account";
 import { MemberLikes } from "./member-likes";
 import { SlidingTabs } from "./sliding-tabs";
@@ -977,6 +980,7 @@ function Shell({
     document.documentElement.lang = locale;
   }, [locale]);
   useEffect(() => {
+    if (pendingSession) return;
     let alive = true;
     api
       .get<{ items: FooterPageLink[] }>(`/public/footer-pages/${encodeURIComponent(locale)}`)
@@ -991,7 +995,7 @@ function Shell({
     return () => {
       alive = false;
     };
-  }, [locale, text]);
+  }, [locale, text, pendingSession]);
   useEffect(() => {
     let scrolled = window.scrollY > 24;
     let frame = 0;
@@ -1204,7 +1208,7 @@ function Shell({
         </Link>
       ) : null}
       <CallManager session={session} />
-      <CookieConsent />
+      {!pendingSession && <CookieConsent />}
     </div>
   );
 }
@@ -1711,14 +1715,22 @@ function Home() {
   const steps = text.steps;
   const [playHeroVideo, setPlayHeroVideo] = useState(false);
   useEffect(() => {
-    const media = window.matchMedia("(min-width: 769px) and (prefers-reduced-motion: no-preference)");
+    const media = window.matchMedia("(min-width: 1024px) and (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)");
+    const reducedData = window.matchMedia("(prefers-reduced-data: reduce)");
+    const connection = (navigator as Navigator & { connection?: EventTarget & { saveData?: boolean; type?: string; effectiveType?: string } }).connection;
     const update = () => {
-      const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
-      setPlayHeroVideo(media.matches && !connection?.saveData);
+      setPlayHeroVideo(media.matches && !reducedData.matches && !connection?.saveData && connection?.type !== "cellular"
+        && !["slow-2g", "2g", "3g"].includes(connection?.effectiveType || ""));
     };
     update();
     media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
+    reducedData.addEventListener("change", update);
+    connection?.addEventListener("change", update);
+    return () => {
+      media.removeEventListener("change", update);
+      reducedData.removeEventListener("change", update);
+      connection?.removeEventListener("change", update);
+    };
   }, []);
   const stepIcon = (icon: string) => {
     if (icon === "profile") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>;
@@ -2991,10 +3003,10 @@ const countryName = (code: unknown) => {
 const value = cleanText(code).toUpperCase();
 if (!value) return "";
 if (locale === "en" && value === "CZ") return "Czech Republic";
-if (locale === "en" && value === "GB") return "UK";
+if (locale === "en" && value === "GB") return "United Kingdom";
 try { return new Intl.DisplayNames([locale], { type: "region" }).of(value) || value; } catch { return value; }
 };
-  const locationCountryName = (code: unknown) => ({ US: "USA", GB: "UK", AE: "UAE" }[cleanText(code).toUpperCase()] || countryName(code));
+  const locationCountryName = (code: unknown) => countryName(code);
   const itemLocation = (item: Row) => {
     const data = rowData(item);
     return cleanText(data.location ?? item.location) || [cleanText(item.city ?? data.city), cleanText(item.state ?? data.state), locationCountryName(item.country ?? data.country)].filter(Boolean).join(", ");
@@ -3388,7 +3400,7 @@ const displayCountry = (code: string, displayLocale = locale) => {
 if (!code) return "";
 if (displayLocale === "en" && code === "US") return "USA";
 if (displayLocale === "en" && code === "CZ") return "Czech Republic";
-if (displayLocale === "en" && code === "GB") return "UK";
+if (displayLocale === "en" && code === "GB") return "United Kingdom";
 try { return new Intl.DisplayNames([displayLocale], { type: "region" }).of(code) || code; } catch { return code; }
 };
   const locationLabel = kind === "clinics"
@@ -3723,24 +3735,7 @@ const catalogOptionLabel = (field: string, value: unknown) => {
     || token.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
 
-const catalogPhotoUrls = (item: Row) => {
-  const data = catalogData(item);
-  const urls: string[] = [];
-  const add = (value: unknown) => {
-    const url = typeof value === "string"
-      ? firstAvatarText(value)
-      : value && typeof value === "object"
-        ? firstAvatarText((value as Row).publicUrl, (value as Row).url)
-        : "";
-    if (url && url !== "—" && !urls.includes(url)) urls.push(url);
-  };
-  if (Array.isArray(item.photos)) item.photos.forEach(add);
-  else catalogList(item.photos).forEach(add);
-  if (Array.isArray(data.photos)) data.photos.forEach(add);
-  [item.avatarUrl, data.avatarUrl, item.photoUrl, data.photoUrl].forEach(add);
-  return urls;
-};
-
+const catalogPhotoUrls = (item: Row, failed: string[] = []) => profilePhotoUrls(item, failed);
 const catalogProfileType = (item: Row) => {
   const data = catalogData(item);
   const value = data.profileType ?? item.profileType ?? item.role;
@@ -3767,24 +3762,25 @@ function CatalogCard({
 }) {
   const copy = CATALOG_COPY[locale];
   const data = catalogData(item);
-  const photos = catalogPhotoUrls(item);
   const [photoIndex, setPhotoIndex] = useState(0);
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<Set<string>>(() => new Set());
+  const photos = catalogPhotoUrls(item, [...failedPhotoUrls]);
+  const activeIndex = Math.min(photoIndex, Math.max(0, photos.length - 1));
   const name = catalogText(item.displayName ?? data.displayName, "LetsBeParents member");
   const age = profileAge(item);
  const location = [item.city ?? data.city, profileCountry(item.countryName ?? data.countryName ?? item.country ?? data.country, legacyLocaleOf(locale))]
     .filter(Boolean).map(String).join(", ");
   const donorTypes = catalogList(item.donorType ?? data.donorType);
   const lookingFor = catalogList(item.lookingFor ?? data.lookingFor ?? item.recipientType ?? data.recipientType);
-  const verified = catalogBoolean(item.isVerified);
-  const videoVerified = catalogBoolean(item.isVideoVerified ?? data.isVideoVerified);
+  const verified = catalogBoolean(item.isVerified) && photos.length > 0;
+  const videoVerified = catalogBoolean(item.isVideoVerified ?? data.isVideoVerified) && photos.length > 0;
   const liked = catalogBoolean(item.likedByViewer ?? data.likedByViewer);
   const id = catalogText(item.id ?? data.id);
   const detailPath = `/${locale}/profile/${encodeURIComponent(id)}`;
   const title = age ? `${name}, ${age}` : name;
   const initials = userInitials(name);
-  const activePhoto = photos[photoIndex];
-  const movePhoto = (direction: number) => setPhotoIndex((current) => (current + direction + photos.length) % photos.length);
+  const activePhoto = photos[activeIndex];
+  const movePhoto = (direction: number) => setPhotoIndex((current) => (Math.min(current, photos.length - 1) + direction + photos.length) % photos.length);
   return (
     <article className="catalog-profile-card">
       <div className="catalog-photo-stage">
@@ -3823,18 +3819,18 @@ function CatalogCard({
             </>
           )}
         </div>
-        <div className={`catalog-card-dots${photos.length > 1 ? "" : " empty"}`} aria-hidden={photos.length <= 1}>
+        {photos.length > 1 && <div className={`catalog-card-dots${photos.length > 1 ? "" : " empty"}`} aria-hidden={photos.length <= 1}>
           {photos.map((_, index) => (
-            <button key={index} type="button" className={index === photoIndex ? "active" : ""} aria-label={`Show photo ${index + 1}`} onClick={() => setPhotoIndex(index)} />
+            <button key={index} type="button" className={index === activeIndex ? "active" : ""} aria-label={`Show photo ${index + 1}`} onClick={() => setPhotoIndex(index)} />
           ))}
-        </div>
+        </div>}
       </div>
       <Link className="catalog-card-meta" to={detailPath}>
         <div className="catalog-card-title-row">
           <h3>{title}</h3>
-          <svg className={`catalog-verified-icon ${verified ? "is-verified" : "is-unverified"}`} viewBox="0 0 24 24" aria-label={verified ? "Verified" : "Not verified"} role="img">
+          {verified && <svg className="catalog-verified-icon is-verified" viewBox="0 0 24 24" aria-label={verified ? "Verified" : "Not verified"} role="img">
             <path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" /><path d="m9 12 2 2 4-4" />
-          </svg>
+          </svg>}
           {videoVerified && (
             <span className="catalog-video-verified-badge" title="Video verified" style={{ marginLeft: 4 }}>
               🎥
@@ -3917,9 +3913,9 @@ function CatalogFilterModal({
     return () => document.removeEventListener("pointerdown", closeOutside);
   }, [openField]);
   useEffect(() => {
-    setCityQuery(catalogText(value.city));
+    if (openField !== "city") setCityQuery(catalogText(value.city));
     setCityActiveIndex(-1);
-  }, [value.city, value.country.join(",")]);
+  }, [value.city, value.country.join(","), openField]);
   useEffect(() => {
     if (!openField) return;
     const index = openField === "city" ? cityActiveIndex : dropdownActiveIndex;
@@ -4067,7 +4063,7 @@ function CatalogFilterModal({
             onChange={(event) => {
               const next = event.target.value;
               setCityQuery(next);
-              set("city", next);
+              set("city", "");
               setCityActiveIndex(-1);
               setOpenField("city");
             }}
@@ -7896,6 +7892,11 @@ function Subscription({ session, embedded = false }: { session: Session; embedde
   useEffect(load, [session]);
   if (!session) return <Navigate to={`/${locale}/auth/login`} replace />;
   const request = async (plan: string, tier: string) => {
+    if (!data) return;
+    if (!verified) {
+      setNotice(text.verifyPrompt);
+      return;
+    }
     setRequesting(true);
     try {
       const response = await api.post<Row>("/member/subscription-intent", {
@@ -7930,7 +7931,7 @@ function Subscription({ session, embedded = false }: { session: Session; embedde
   return (
     <section className={embedded ? "advisor-subscription premium-card" : "access-card premium-card"}>
       {embedded ? <h2>{text.title}</h2> : <h1>{text.title}</h1>}
-      {data && !verified ? (
+      {data && !verified && !embedded ? (
         <>
           <p>{text.verifyPrompt}</p>
           <Link className="primary" to={`/${locale}/verification`}>
@@ -7956,7 +7957,7 @@ function Subscription({ session, embedded = false }: { session: Session; embedde
                       <button
                         className="primary"
                         key={plan}
-                        disabled={requesting}
+                        disabled={requesting || !data}
                         onClick={() => void request(plan, "PRO")}
                       >
                         {text.upgradeToProLabel} ({text.planLabels[plan]})
@@ -7976,7 +7977,7 @@ function Subscription({ session, embedded = false }: { session: Session; embedde
                   <button
                     className="primary"
                     key={`${tier}-${plan}`}
-                    disabled={requesting}
+                    disabled={requesting || !data}
                     onClick={() => void request(plan, tier)}
                   >
                     {text.tierLabels[tier]} ({text.planLabels[plan]})
@@ -7987,7 +7988,8 @@ function Subscription({ session, embedded = false }: { session: Session; embedde
           )}
         </>
       )}
-      {notice && <p className="notice">{notice}</p>}
+      {notice && <p className="notice" role="status">{notice}</p>}
+      {embedded && !verified && notice && <Link className="link-button" to={`/${locale}/profile/verification`}>{text.startVerification}</Link>}
     </section>
   );
 }
@@ -9550,9 +9552,9 @@ function AiAdvisor({ session }: { session: Session }) {
     pl: "Wstecz",
   } as Record<string, string>)[locale] ?? "Back";
   const backButton = (
-    <button className="back advisor-back" type="button" onClick={() => navigate(-1)}>
-      <span aria-hidden="true">←</span> {backLabel}
-    </button>
+    <Link className="account-back" to={`/${locale}/profile`}>
+      <ProfileIcon name="pageBackIcon" /> {backLabel}
+    </Link>
   );
   const [status, setStatus] = useState<"loading" | "ok" | "needsPremium" | "error">("loading");
   const [configured, setConfigured] = useState(true);
@@ -9710,7 +9712,7 @@ function AiAdvisor({ session }: { session: Session }) {
           {sending && <p className="notice">{text.typing}</p>}
         </div>
         <form onSubmit={(event) => void send(event)}>
-          <input
+          <input aria-label={FORM_LABELS[locale].advisor}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={text.placeholder}
@@ -10951,8 +10953,10 @@ const knowledgeHubCopy: Record<CookieLocale, {
 };
 
 
-const knowledgeCategoryName = (slug: string, locale: CookieLocale = "en") =>
-  knowledgeCategoryCopy[locale][slug.toLowerCase()]
+const knowledgeCategoryName = (slug: string, locale: CookieLocale = "en", article?: Row) =>
+  (article && articleCategoryTranslation(article, locale))
+  || knowledgeCategoryCopy[locale][slug.toLowerCase()]
+  || (article && asText(article.categoryName))
   || knowledgeCategories.find((category) => category.slug.toLowerCase() === slug.toLowerCase())?.name
   || slug;
 
@@ -11019,7 +11023,7 @@ function KnowledgeHub() {
   }, [copy.unavailable, locale]);
   const allArticles: Row[] = (data ?? []).map((item) => ({
     ...item,
-    categoryName: knowledgeCategoryName(String(item.categorySlug), locale),
+    categoryName: knowledgeCategoryName(String(item.categorySlug), locale, item),
   }));
   const filteredArticles = category
     ? allArticles.filter((item) => String(item.categorySlug).toLowerCase() === category.toLowerCase())
@@ -11041,7 +11045,7 @@ function KnowledgeHub() {
       <div className="knowledge-filters" aria-label={copy.categoriesLabel}>
         <button className={category === "" ? "active" : ""} onClick={() => { setCategory(""); setVisibleCount(12); }}>{copy.all}</button>
         {knowledgeCategories.map((item) => (
-            <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{knowledgeCategoryName(item.slug, locale)}</button>
+        <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{knowledgeCategoryName(item.slug, locale, allArticles.find((article) => article.categorySlug === item.slug))}</button>
         ))}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
@@ -11200,7 +11204,7 @@ function Article() {
       </>
     );
   if (!article) return <>{previewBanner}<LoadingIndicator /></>;
-  const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale);
+  const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale, article);
   const coverUrl = article.coverUrl;
   const publishedAt = article.publishedAt;
   const views = article.views;
@@ -11348,14 +11352,24 @@ function Contact() {
     message: "",
   });
   const [notice, setNotice] = useState("");
+  const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (sendingRef.current || sent) return;
+    sendingRef.current = true;
+    setSending(true);
     try {
-      await api.post("/public/contact", { ...draft, locale });
-      setNotice(copy.success);
+      await api.post("/public/contact", { ...draft, locale, website: String(new FormData(event.currentTarget as HTMLFormElement).get("website") || "") });
+      setSent(true);
+      setNotice("");
       setDraft({ name: "", email: "", subject: "", message: "" });
     } catch {
       setNotice(copy.error);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
   return (
@@ -11374,7 +11388,7 @@ function Contact() {
         </dl>
       </aside>
       <div className="contact-form-panel">
-        {notice === copy.success ? (
+        {sent ? (
           <section className="contact-success-card" role="status" aria-live="polite">
             <h1>{successCopy.title}</h1>
             <p>{successCopy.intro}</p>
@@ -11405,7 +11419,7 @@ function Contact() {
             <textarea value={draft.message} onChange={(event) => setDraft((current) => ({ ...current, message: event.target.value }))} required />
           </label>
           {notice && <p className="notice contact-full">{notice}</p>}
-          <button className="contact-submit">{copy.send}</button>
+          <button className="contact-submit" disabled={sending} aria-busy={sending}>{copy.send}</button>
         </form></>}
       </div>
     </section>
@@ -11544,6 +11558,7 @@ function AskAiTool() {
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             placeholder={text.placeholder}
+            aria-label={FORM_LABELS[locale].question}
           />
           <button className="primary" disabled={!question.trim() || sending} aria-label={text.button}>
             {text.button}
@@ -15923,7 +15938,7 @@ function Referral({ session }: { session: Session }) {
           <div className="list-card referral-code-card">
             <p>{text.yourInviteLink}</p>
             <div className="referral-link-row">
-              <input className="referral-link-field" value={inviteLink} readOnly onFocus={(event) => event.target.select()} />
+              <input aria-label={FORM_LABELS[locale].invite} className="referral-link-field" value={inviteLink} readOnly onFocus={(event) => event.target.select()} />
               <button type="button" className="primary" onClick={() => void copyInviteLink()}>
                 {linkCopied ? text.copied : text.copyLink}
               </button>
@@ -18299,6 +18314,13 @@ export function WebApp() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | undefined>(undefined);
   const sessionGuard = useRef(new SessionRequestGuard());
+  useEffect(() => {
+    if (!session?.user.id) return;
+    return startSessionPresence((signal) => api.get("/auth/heartbeat", {
+      signal,
+      headers: { "X-LBP-Presence": "foreground" },
+    }));
+  }, [session?.user.id]);
   useEffect(() => {
     let active = true;
     const load = () => {

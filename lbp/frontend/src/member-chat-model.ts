@@ -10,6 +10,8 @@ export const chatRow = (value: unknown): ChatRow => value && typeof value === 'o
 export const chatName = (item: ChatRow, locale: ChatLocale) => chatText(item.otherDisplayName,item.peerDisplayName,item.displayName,item.title) || CHAT_COPY[locale].member;
 export const chatPeer = (item: ChatRow) => chatText(item.otherProfileId,item.other_profile_id);
 export const chatSenderProfileId = (item: ChatRow) => chatText(item.senderProfileId,item.sender_profile_id);
+export const chatSelfProfileId = (user: ChatRow, profile: ChatRow = {}) => chatText(user.profileId,user.profile_id,profile.localProfileId,profile.profileId,profile.profile_id,profile.id);
+export const chatMessageIsMine = (message: ChatRow, profileId: unknown) => typeof message.isMine === 'boolean' ? message.isMine : typeof message.isOwn === 'boolean' ? message.isOwn : Boolean(chatText(profileId) && chatSenderProfileId(message) === chatText(profileId));
 export const chatLastMessageSenderProfileId = (item: ChatRow) => chatText(item.lastMessageSenderProfileId,item.last_message_sender_profile_id);
 export const chatSupport = (item: ChatRow) => chatText(item.otherRole,item.other_role).toUpperCase() === 'SUPPORT';
 export const chatInitials = (name: unknown) => (chatText(name) || 'LB').normalize('NFC').split(/\s+/).slice(0,2).map(part=>Array.from(part)[0]).join('').toLocaleUpperCase();
@@ -31,7 +33,7 @@ export const chatDayKey=(date:Date|null)=>date?`${date.getFullYear()}-${date.get
 export const chatTime=(value:unknown,locale:ChatLocale)=>chatDate(value)?.toLocaleTimeString(locale,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})||'';
 export function chatDay(value:unknown,locale:ChatLocale,now=new Date()) {const date=chatDate(value);return !date?'':chatDayKey(date)===chatDayKey(now)?CHAT_COPY[locale].today:date.toLocaleDateString(locale,{day:'numeric',month:'long',year:date.getFullYear()===now.getFullYear()?undefined:'numeric'});}
 export function chatListTime(item:ChatRow,locale:ChatLocale,now=new Date()) {const raw=item.lastMessageTime||item.lastMessageAt||item.updatedAt||item.updated_at;if(/^\d{1,2}:\d{2}$/.test(chatText(raw)))return chatText(raw);const date=chatDate(raw);return !date?'':chatDayKey(date)===chatDayKey(now)?chatTime(date.toISOString(),locale):date.toLocaleDateString(locale,{day:'numeric',month:'short',year:date.getFullYear()===now.getFullYear()?undefined:'numeric'});}
-export const chatOnline=(item:ChatRow,now=Date.now())=>{const d=chatDate(item.otherLastSeenAt||item.other_last_seen_at);return !!d&&now-d.getTime()>=-60000&&now-d.getTime()<=120000;};
+export const chatOnline=(item:ChatRow,now=Date.now())=>{const online=item.otherIsOnline??item.other_is_online;if(typeof online==='boolean')return online;const d=chatDate(item.otherLastSeenAt||item.other_last_seen_at);return !!d&&now-d.getTime()>=-60000&&now-d.getTime()<=300000;};
 export function chatActivity(item:ChatRow,locale:ChatLocale,now=new Date()) {
   if(chatSupport(item))return CHAT_COPY[locale].support;
   const date=chatDate(item.otherLastSeenAt||item.other_last_seen_at);

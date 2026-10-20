@@ -6,13 +6,15 @@ export class ApiError extends Error {
 }
 
 export type ApiClient = {
-  get<T>(path: string): Promise<T>;
+  get<T>(path: string, options?: { signal?: AbortSignal; headers?: HeadersInit }): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
   upload<T>(path: string, body: FormData): Promise<T>;
 };
+
+const sharedReads = new Map<string, Promise<unknown>>();
 
 export function createApiClient(basePath = "/api"): ApiClient {
   const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
@@ -30,8 +32,9 @@ export function createApiClient(basePath = "/api"): ApiClient {
       credentials: "same-origin",
       headers,
     });
+    if (init.signal?.aborted) throw new DOMException("Request aborted", "AbortError");
     if (!response.ok) {
-      if (response.status === 401 && typeof window !== "undefined" && (path.startsWith("/member/") || path === "/auth/me")) {
+      if (response.status === 401 && typeof window !== "undefined" && (path.startsWith("/member/") || path === "/auth/me" || path === "/auth/heartbeat")) {
         window.dispatchEvent(new Event("lbp-session-expired"));
       }
       const message = await response.text();
@@ -41,7 +44,18 @@ export function createApiClient(basePath = "/api"): ApiClient {
   };
 
   return {
-    get: <T>(path: string) => request<T>(path),
+    get: <T>(path: string, options?: { signal?: AbortSignal; headers?: HeadersInit }): Promise<T> => {
+      if (options?.signal || options?.headers || (path !== "/privacy/consent" && !path.startsWith("/public/footer-pages/"))) return request<T>(path, options);
+      const key = `${basePath}${path}`;
+      const pending = sharedReads.get(key);
+      if (pending) return pending as Promise<T>;
+      const result = request<T>(path, options).finally(() => {
+        if (sharedReads.get(key) === result) sharedReads.delete(key);
+      });
+      sharedReads.set(key, result);
+      return result;
+    },
+
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),

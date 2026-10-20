@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -85,6 +85,10 @@ export default function WhatsNewScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
+  useEffect(() => {
+    markWhatsNewSeen();
+  }, []);
+
   function tierLabel(tier: Tier) {
     if (tier === "free") return t("subscription.tierNameExploreShort");
     if (tier === "builder") return t("subscription.tierNameBuilderShort");
@@ -92,58 +96,51 @@ export default function WhatsNewScreen() {
   }
 
   function dismiss() {
-    markWhatsNewSeen();
-    navigation.replace("MainTabs");
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.replace("MainTabs");
+    }
   }
 
-  // Alena: "нажала на 1й пункт посмотреть что к чему, вернуться не
-  // получилось. что там ещё нового я больше никогда не узнаю" - every
-  // branch here used navigation.replace(), which REMOVES WhatsNewScreen
-  // from the stack instead of pushing on top of it. Combined with this
-  // screen only ever being shown once per device (markWhatsNewSeen(), set
-  // the moment any item is tapped), tapping even one item meant it was
-  // gone for good with no way back to see the rest. navigate() instead -
-  // WhatsNewScreen stays underneath, so the native back gesture/button
-  // returns to the list. dismiss() below (the X and "Continue" button)
-  // intentionally keeps replace() - leaving this screen for good is the
-  // whole point there.
+  // Keep the list mounted beneath each feature, including its scroll position.
+  // Tab destinations also need a visible stack header to return on iOS.
   function openItem(key: ItemKey) {
-    markWhatsNewSeen();
     switch (key) {
       // Boost and message starters have no standalone route of their own
       // (Boost lives inside the Me tab, message starters inside an
       // existing chat thread) - land on the nearest tab instead.
       case "boost":
-        navigation.navigate("MainTabs", { screen: "Me" });
+        navigation.push("MainTabs", { screen: "Me", returnToWhatsNew: true });
         return;
       case "messages":
-        navigation.navigate("MainTabs", { screen: "Messages" });
+        navigation.push("MainTabs", { screen: "Messages", returnToWhatsNew: true });
         return;
       case "referral":
-        navigation.navigate("Referral");
+        navigation.push("Referral");
         return;
       case "safety":
-        navigation.navigate("SafetyCheckIn");
+        navigation.push("SafetyCheckIn");
         return;
       case "video":
-        navigation.navigate("VideoVerification");
+        navigation.push("VideoVerification");
         return;
       case "insight":
-        navigation.navigate("AiAdvisor");
+        navigation.push("AiAdvisor");
         return;
       case "agreement":
         // No generic entry point (needs a matched profileId) - same gap as
         // the website, which falls back to the pricing page.
-        navigation.navigate("Subscription");
+        navigation.push("Subscription");
         return;
       case "community":
-        navigation.navigate("Community");
+        navigation.push("Community");
         return;
       case "quizAi":
         // The AI reflection lives inside the existing quiz results screen
         // (a button there, not a separate route) - opening the quiz itself
         // gets a person straight to it either way.
-        navigation.navigate("CompatibilityQuiz");
+        navigation.push("CompatibilityQuiz");
         return;
       case "askAi":
         // UPDATE (Sept 2026): used to open the free website tool in the
@@ -152,16 +149,16 @@ export default function WhatsNewScreen() {
         // самом приложении" - confirmed she wants a real native screen
         // ("Конечно хочу"). Now navigates to AskAiScreen.tsx, which calls
         // the same public/ask-ai endpoint directly.
-        navigation.navigate("AskAi");
+        navigation.push("AskAi");
         return;
       case "agreementDraft":
-        navigation.navigate("AgreementDraft");
+        navigation.push("AgreementDraft");
         return;
       case "familyPlanAi":
         // No generic entry point (needs a matched profileId, same as
         // "agreement" above) - falls back to the pricing page since this
         // is a Family Builder Pro feature.
-        navigation.navigate("Subscription");
+        navigation.push("Subscription");
         return;
     }
   }

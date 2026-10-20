@@ -29,6 +29,8 @@ import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
 import { sanitizeRichHtml } from "./rich-html";
 import { supportMessageIsSupport } from "./support-message";
+import { SupportRequests, startSupportRefresh } from "./support-requests";
+import { watchUserPresence } from "./user-presence";
 import { integrationStatus } from "./integration-status";
 import { personName, personSecondaryText } from "./person-name";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
@@ -43,6 +45,7 @@ type ListResponse = {
   total: number;
   totalAll?: number;
   totalUnanswered?: number;
+  totalUnresolved?: number;
   limit: number;
   offset: number;
 };
@@ -1011,7 +1014,7 @@ function AdminSelect({
         className="admin-select-trigger"
         type="button"
         role="combobox"
-        aria-label={ariaLabel}
+        aria-label={ariaLabel?.trim() || (name ? label(name) : `Select ${adminSelectLabelText(selectedOption?.label ?? "option")}`)}
         aria-controls={listboxId}
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -1030,8 +1033,9 @@ function AdminSelect({
         defaultValue={value === undefined ? defaultValue : undefined}
         onChange={onChange}
         disabled={disabled}
-        name={name}
+        name={name || id || `${listboxId}-value`}
         required={required}
+        aria-label={ariaLabel?.trim() || "Select value"}
         aria-hidden="true"
         tabIndex={-1}
       >
@@ -2293,16 +2297,28 @@ function Login({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [blockedFor, setBlockedFor] = useState(0);
+  useEffect(() => {
+    if (!blockedFor) return;
+    const timer = window.setTimeout(() => setBlockedFor(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [blockedFor]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (blockedFor) return;
     setLoading(true);
     setError("");
     try {
       onAuthenticated(
         await api.post<Session>("/admin/login", { email, password }),
       );
-    } catch {
-      setError("Could not sign in. Please try again.");
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 429) {
+        setBlockedFor(reason.retryAfterSeconds || 1800);
+        setError(reason.message);
+      } else {
+        setError(reason instanceof ApiError && reason.status === 503 ? reason.message : "Invalid email or password.");
+      }
     } finally {
       setLoading(false);
     }
@@ -2340,8 +2356,8 @@ function Login({
             />
           </label>
           {error && <div className="error">{error}</div>}
-          <button disabled={loading}>
-            {loading ? "Signing In…" : "Sign In"}
+          <button disabled={loading || blockedFor > 0}>
+            {blockedFor ? `Try again in ${Math.ceil(blockedFor / 60)} min` : loading ? "Signing In…" : "Sign In"}
           </button>
         </form>
       </section>
@@ -4587,205 +4603,116 @@ function StorageFilePreview({ row }: { row: RecordValue }) {
 
 function StoragePage() {
   const [category, setCategory] = useState("all");
+  const [trashView, setTrashView] = useState(false);
   const [userId, setUserId] = useState("");
   const [offset, setOffset] = useState(0);
+  const [reload, setReload] = useState(0);
   const [data, setData] = useState<RecordValue | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirmAction, setConfirmAction] = useState<"trash" | "purge" | "empty" | null>(null);
   const requestSequence = useRef(0);
+  const pendingRequest = useRef<AbortController | null>(null);
   const limit = 50;
   const load = () => {
     const requestId = ++requestSequence.current;
-    const params = new URLSearchParams({
-      category,
-      limit: String(limit),
-      offset: String(offset),
-    });
+    pendingRequest.current?.abort();
+    const controller = new AbortController(); pendingRequest.current = controller;
+    const params = new URLSearchParams({category, trash: String(trashView), limit: String(limit), offset: String(offset)});
     if (userId.trim()) params.set("userId", userId.trim());
-    setData(null);
-    setLoading(true);
-    setError("");
-    api
-      .get<RecordValue>(`/admin/storage?${params}`)
-      .then((nextData) => {
-        if (requestId === requestSequence.current) setData(nextData);
-      })
-      .catch(() => {
-        if (requestId === requestSequence.current) {
-          setError("Could not load storage data.");
-        }
-      })
-      .finally(() => {
-        if (requestId === requestSequence.current) setLoading(false);
-      });
+    setLoading(true);setError("");
+    api.get<RecordValue>(`/admin/storage?${params}`, {signal: controller.signal})
+      .then(value => { if (requestId === requestSequence.current) setData(value); })
+      .catch(reason => { if (requestId === requestSequence.current && !controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load storage data."); })
+      .finally(() => { if (requestId === requestSequence.current) setLoading(false); });
   };
   useEffect(() => {
     setData(null);
-    setLoading(true);
     const timer = window.setTimeout(load, userId.trim() ? 250 : 0);
-    return () => {
-      window.clearTimeout(timer);
-      requestSequence.current += 1;
-    };
-  }, [category, userId, offset]);
+    return () => { window.clearTimeout(timer);pendingRequest.current?.abort();requestSequence.current++; };
+  }, [category, userId, offset, trashView, reload]);
+  useEffect(() => { setSelected(new Set());setOffset(0); }, [category, userId, trashView]);
+  const items = arrayOf(data?.items);
   const total = Number(data?.total ?? 0);
+  const trashFiles = Number(data?.trashFiles ?? 0);
   const summary = (data?.summary ?? {}) as RecordValue;
-  return (
-    <>
-      <header className="page-heading storage-heading">
-        <div className="storage-title-row">
-          <h1>Storage</h1>
-          <span className="storage-total-badge">
-            {data
-              ? `${formatBytes(data.totalBytes)}${Number(data.unknownSizes ?? 0) > 0 ? " known" : ""} / ${Number(data.totalFiles ?? 0).toLocaleString()} files`
-              : "Loading…"}
-          </span>
-        </div>
-        <button onClick={load} disabled={loading}>
-          <AdminIcon name="refresh" /> Refresh Stats
-        </button>
-      </header>
-      {error && <p className="error">{error}</p>}
-      <section className="storage-summary">
-        {storageCategories.slice(1).map(([key, title, icon]) => {
-          const item = (summary[key] ?? {}) as RecordValue;
-          return (
-            <article key={key}>
-              <header>
-                <span>{title}</span>
-                <AdminIcon name={icon} />
-              </header>
-              <div>
-                <strong>{Number(item.files ?? 0).toLocaleString()}</strong>
-                <small>{formatBytes(item.bytes)}{Number(item.unknownSizes ?? 0) > 0 ? ` known · ${Number(item.unknownSizes).toLocaleString()} sizes unknown` : ""}</small>
-              </div>
-            </article>
-          );
-        })}
-      </section>
-      <div className="storage-filter">
-        <label className="sr-only" htmlFor="storage-user-filter">
-          Filter by User ID
-        </label>
-        <input
-          id="storage-user-filter"
-          value={userId}
-          onChange={(event) => {
-            setUserId(event.target.value);
-            setOffset(0);
-          }}
-          placeholder="Filter by User ID (UUID)"
-        />
-        {userId.trim() && <span>Filter active</span>}
+  const visibleIds = items.map(item => Number(item.id));
+  const allVisibleSelected = Boolean(items.length) && visibleIds.every(id => selected.has(id));
+  const toggle = (id: number) => setSelected(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else if (next.size < 100) next.add(id);
+    return next;
+  });
+  const run = async (action: "trash" | "restore" | "purge", allTrash = false) => {
+    if (busy || (!allTrash && !selected.size)) return;
+    setBusy(true);setError("");
+    try {
+      const result = await api.post<{ok: boolean; cleanupPending?: number}>(`/admin/storage/${action}`, {ids: [...selected], allTrash});
+      setSelected(new Set());setConfirmAction(null);setOffset(0);setReload(value => value + 1);
+      if (result.cleanupPending) setError("Some files could not be removed from storage. Please retry permanent deletion.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The storage action could not be completed."); }
+    finally { setBusy(false); }
+  };
+  return <>
+    <header className="page-heading storage-heading">
+      <div className="storage-title-row"><h1>{trashView ? "Storage Trash" : "Storage"}</h1>
+        <span className="storage-total-badge">{data ? `${formatBytes(data.totalBytes)}${Number(data.unknownSizes ?? 0) > 0 ? " known" : ""} / ${Number(data.totalFiles ?? 0).toLocaleString()} files` : "Loading…"}</span>
       </div>
-      <nav className="storage-tabs">
-        {storageCategories.map(([key, title]) => (
-          <button
-            type="button"
-            key={key}
-            className={category === key ? "active" : ""}
-            aria-pressed={category === key}
-            onClick={() => {
-              setCategory(key);
-              setOffset(0);
-            }}
-          >
-            {title}
-          </button>
-        ))}
-      </nav>
-      {total > limit && (
-        <div className="storage-pager">
-          <button
-            className="secondary-button storage-page-previous"
-            disabled={!offset || loading}
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-          >
-            <AdminIcon name="chevronDown" /> Previous
-          </button>
-          <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
-          <button
-            className="secondary-button storage-page-next"
-            disabled={offset + limit >= total || loading}
-            onClick={() => setOffset(offset + limit)}
-          >
-            Next <AdminIcon name="chevronDown" />
-          </button>
-        </div>
-      )}
-      {!data && !error ? (
-        <p className="loading-inline">Loading…</p>
-      ) : data ? (
-        <>
-        <section className="storage-file-grid">
-          {arrayOf(data.items).map((row) => {
-            return (
-              <article key={String(row.id)}>
-                <div className="storage-file-media">
-                  {row.contentUrl ? (
-                    <a
-                      className="storage-file-preview"
-                      href={String(row.contentUrl)}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label={`Open ${String(row.name ?? "file")}`}
-                    >
-                      <StorageFilePreview row={row} />
-                    </a>
-                  ) : (
-                    <StorageFilePreview row={row} />
-                  )}
-                  <span className="storage-file-badge">
-                    {valueOf(row.categoryLabel ?? label(String(row.category ?? "file")))}
-                  </span>
-                </div>
-                <div className="storage-file-info">
-                  <b title={String(row.name ?? "")}>{valueOf(row.name)}</b>
-                  <small className="storage-file-meta">
-                    <span>{Number(row.bytes ?? 0) > 0 ? formatBytes(row.bytes) : "—"}</span>
-                    <span>{directoryDate(row.createdAt)}</span>
-                  </small>
-                  {Boolean(row.relatedUrl && row.relatedLabel) && (
-                    <a
-                      href={String(row.relatedUrl)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <AdminIcon name="externalLink" />
-                      <span>{valueOf(row.relatedLabel)}</span>
-                    </a>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-          {!arrayOf(data.items).length && (
-            <p className="storage-empty">No files in this category</p>
-          )}
-        </section>
-        {total > limit && (
-          <div className="storage-pager storage-pager-bottom">
-            <button
-              className="secondary-button storage-page-previous"
-              disabled={!offset || loading}
-              onClick={() => setOffset(Math.max(0, offset - limit))}
-            >
-              <AdminIcon name="chevronDown" /> Previous
-            </button>
-            <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
-            <button
-              className="secondary-button storage-page-next"
-              disabled={offset + limit >= total || loading}
-              onClick={() => setOffset(offset + limit)}
-            >
-              Next <AdminIcon name="chevronDown" />
-            </button>
-          </div>
-        )}
-        </>
-      ) : null}
-    </>
-  );
+      <button type="button" onClick={load} disabled={loading || busy}><AdminIcon name="refresh" /> Refresh Stats</button>
+    </header>
+    {error && <p className="error" role="alert">{error}</p>}
+    <section className="storage-summary">{storageCategories.slice(1).map(([key, title, icon]) => {
+      const group = (summary[key] ?? {}) as RecordValue;
+      return <article key={key}><header><span>{title}</span><AdminIcon name={icon} /></header><div>
+        <strong>{Number(group.files ?? 0).toLocaleString()}</strong>
+        <small>{formatBytes(group.bytes)}{Number(group.unknownSizes ?? 0) > 0 ? ` known · ${Number(group.unknownSizes).toLocaleString()} sizes unknown` : ""}</small>
+      </div></article>;
+    })}</section>
+    <div className="storage-filter"><label className="sr-only" htmlFor="storage-user-filter">Filter by User ID</label>
+      <input id="storage-user-filter" value={userId} onChange={event => setUserId(event.target.value)} placeholder="Filter by User ID (UUID)" />
+    </div>
+    <nav className="storage-tabs" aria-label="Storage categories">{storageCategories.map(([key, title]) =>
+      <button type="button" key={key} className={category === key ? "active" : ""} aria-pressed={category === key} onClick={() => {setCategory(key);setOffset(0);}}>{title}</button>
+    )}</nav>
+    <div className="storage-selection-toolbar">
+      <label><input type="checkbox" checked={allVisibleSelected} disabled={!items.length || busy} aria-label="Select all files on this page"
+        aria-checked={!allVisibleSelected && visibleIds.some(id => selected.has(id)) ? "mixed" : allVisibleSelected}
+        onChange={() => setSelected(current => {const next = new Set(current);for (const id of visibleIds) {if (allVisibleSelected) next.delete(id);else if (next.size < 100) next.add(id);}return next;})} /> Select page</label>
+      <span>{selected.size} selected</span>
+      {trashView ? <>
+        <button type="button" disabled={!selected.size || busy} onClick={() => void run("restore")}>Restore selected</button>
+        <button type="button" className="danger" disabled={!selected.size || busy} onClick={() => setConfirmAction("purge")}>Delete permanently</button>
+        <button type="button" className="danger-text" disabled={!trashFiles || busy} onClick={() => setConfirmAction("empty")}>Empty Trash</button>
+      </> : <button type="button" className="danger" disabled={!selected.size || busy} onClick={() => setConfirmAction("trash")}>Move to Trash</button>}
+      <button type="button" className="storage-trash-toggle" disabled={busy} onClick={() => setTrashView(value => !value)}>{trashView ? "Back to files" : `Trash (${trashFiles})`}</button>
+    </div>
+    {total > limit && <div className="storage-pager">
+      <button type="button" disabled={!offset || loading || busy} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button>
+      <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
+      <button type="button" disabled={offset + limit >= total || loading || busy} onClick={() => setOffset(offset + limit)}>Next</button>
+    </div>}
+    {loading && <p className="loading-inline">Loading…</p>}
+    {!loading && data && <section className="storage-file-grid">{items.map(row => <article key={String(row.id)} className={selected.has(Number(row.id)) ? "is-selected" : ""}>
+      <div className="storage-file-media">
+        <label className="storage-file-select"><input type="checkbox" checked={selected.has(Number(row.id))} disabled={busy} onChange={() => toggle(Number(row.id))} aria-label={`Select ${String(row.name ?? "file")}`} /></label>
+        {row.contentUrl ? <a className="storage-file-preview" href={String(row.contentUrl)} aria-label={`Open ${String(row.name ?? "file")}`} target="_blank" rel="noopener noreferrer"><StorageFilePreview row={row} /></a> : <StorageFilePreview row={row} />}
+        <span className="storage-file-badge">{valueOf(row.categoryLabel ?? label(String(row.category ?? "")))}</span>
+      </div>
+      <div className="storage-file-info"><b title={String(row.name ?? "")}>{valueOf(row.name)}</b>
+        <small className="storage-file-meta"><span>{row.sizeKnown ? formatBytes(row.bytes) : "Size unknown"}</span><span>{directoryDate(row.createdAt)}</span></small>
+        {Boolean(row.relatedUrl && row.relatedLabel) && <a href={String(row.relatedUrl)}><AdminIcon name="externalLink" /><span>{valueOf(row.relatedLabel)}</span></a>}
+      </div>
+    </article>)}</section>}
+    {!loading && data && !items.length && <p className="empty-state">{trashView ? "Trash is empty." : "No files found."}</p>}
+    <ConfirmModal open={Boolean(confirmAction)} title={confirmAction === "trash" ? "Move files to Trash" : "Delete files permanently"}
+      message={confirmAction === "trash" ? `Move ${selected.size} selected files to Trash? They can be restored.` : confirmAction === "empty" ? `Permanently delete all ${trashFiles} files in Trash? This cannot be undone.` : `Permanently delete ${selected.size} selected files? This cannot be undone.`}
+      confirmLabel={confirmAction === "trash" ? "Move to Trash" : "Delete permanently"} busy={busy}
+      onClose={() => {if (!busy) setConfirmAction(null);}}
+      onConfirm={() => run(confirmAction === "trash" ? "trash" : "purge", confirmAction === "empty")} />
+  </>;
 }
 
 function Operations({ kind }: { kind: "monitoring" | "storage" }) {
@@ -4873,106 +4800,114 @@ function Support() {
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [resolving, setResolving] = useState(false);
-  const [unanswered, setUnanswered] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [unresolved, setUnresolved] = useState(true);
   const messageListRef = useRef<HTMLDivElement>(null);
-  const loadSequenceRef = useRef(0);
+  const listRequests = useRef(new SupportRequests());
+  const threadRequests = useRef(new SupportRequests());
+  const workspaceLive = useRef(true);
+  useEffect(() => {
+    workspaceLive.current = true;
+    return () => { workspaceLive.current = false; };
+  }, []);
+  const activeId = active?.id == null ? null : String(active.id);
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
   const limit = 25;
   const load = () => {
-    const sequence = ++loadSequenceRef.current;
-    const params = new URLSearchParams({
-      limit: String(limit),
-      offset: String(offset),
-    });
+    if (!workspaceLive.current) return;
+    const request = listRequests.current.begin();
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (query.trim()) params.set("q", query.trim());
-    if (unanswered) params.set("unanswered", "true");
-    api
-      .get<ListResponse>(`/admin/support?${params}`)
+    if (unresolved) params.set("unresolved", "true");
+    void api.get<ListResponse>(`/admin/support?${params}`, { signal: request.signal })
       .then((value) => {
-        if (sequence !== loadSequenceRef.current) return;
+        if (!listRequests.current.isCurrent(request)) return;
         setResult(value);
         setError("");
+        const lastOffset = Math.max(0, (Math.ceil(value.total / limit) - 1) * limit);
+        if (offset > lastOffset) setOffset(lastOffset);
       })
       .catch(() => {
-        if (sequence === loadSequenceRef.current)
-          setError("Could not load support conversations.");
-      });
+        if (listRequests.current.isCurrent(request)) setError("Could not load support conversations.");
+      })
+      .finally(() => listRequests.current.finish(request));
   };
-  useEffect(load, [query, offset, unanswered]);
+  const loadThread = async (id: string) => {
+    if (!workspaceLive.current) return;
+    const request = threadRequests.current.begin();
+    try {
+      const loaded = await api.get<RecordValue>(`/admin/support/${encodeURIComponent(id)}`, { signal: request.signal });
+      if (threadRequests.current.isCurrent(request) && activeIdRef.current === id) setDetail(loaded);
+    } catch {
+      if (threadRequests.current.isCurrent(request) && activeIdRef.current === id) setError("Could not load conversation.");
+    } finally {
+      threadRequests.current.finish(request);
+    }
+  };
+  const refreshListRef = useRef(load);
+  refreshListRef.current = load;
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
   useEffect(() => {
-    if (!requestedThreadId || active?.id) return;
-    const match = result?.items.find(
-      (row) => String(row.id) === requestedThreadId,
-    );
-    if (match) setActive(match);
-    else
-      api
-        .get<RecordValue>(
-          `/admin/support/${encodeURIComponent(requestedThreadId)}`,
-        )
-        .then((loaded) =>
-          setActive((loaded.conversation ?? loaded) as RecordValue),
-        )
-        .catch(() => setError("Could not load the conversation."));
-  }, [requestedThreadId, result, active]);
+    load();
+    const stop = startSupportRefresh(() => { if (!listRequests.current.inFlight) load(); });
+    return () => { stop(); listRequests.current.invalidate(); };
+  }, [query, offset, unresolved]);
   useEffect(() => {
-    let current = true;
-    if (active?.id) {
-      setDetail(null);
-      api
-        .get<RecordValue>(
-          `/admin/support/${encodeURIComponent(String(active.id))}`,
-        )
-        .then((loaded) => {
-          if (current) setDetail(loaded);
-        })
-        .catch(() => {
-          if (current) setError("Could not load the conversation.");
-        });
-    } else setDetail(null);
-    return () => {
-      current = false;
-    };
-  }, [active]);
+    if (!requestedThreadId || activeId === requestedThreadId) return;
+    const match = result?.items.find((row) => String(row.id) === requestedThreadId);
+    if (match) { setActive(match); return; }
+    const controller = new AbortController();
+    void api.get<RecordValue>(`/admin/support/${encodeURIComponent(requestedThreadId)}`, { signal: controller.signal })
+      .then((loaded) => { if (!controller.signal.aborted) setActive((loaded.conversation ?? loaded) as RecordValue); })
+      .catch(() => { if (!controller.signal.aborted) setError("Could not load conversation."); });
+    return () => controller.abort();
+  }, [requestedThreadId, result, activeId]);
+  useEffect(() => {
+    setDetail(null);
+    if (!activeId) return;
+    void loadThread(activeId);
+    const stop = startSupportRefresh(() => {
+      if (!threadRequests.current.inFlight) void loadThread(activeId);
+    });
+    return () => { stop(); threadRequests.current.invalidate(); };
+  }, [activeId]);
+  const threadMessages = (detail?.messages ?? []) as RecordValue[];
+  const lastMessageId = threadMessages[threadMessages.length - 1]?.id;
   useEffect(() => {
     const list = messageListRef.current;
     if (list) list.scrollTop = list.scrollHeight;
-  }, [detail]);
+  }, [activeId, lastMessageId]);
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    if (!active?.id || !body.trim()) return;
+    const id = activeId;
+    if (!id || !body.trim() || sending || resolving) return;
+    setSending(true);
     try {
-      await api.post(
-        `/admin/support/${encodeURIComponent(String(active.id))}/messages`,
-        { body },
-      );
-      setBody("");
-      const updated = await api.get<RecordValue>(
-        `/admin/support/${encodeURIComponent(String(active.id))}`,
-      );
-      setDetail(updated);
-      load();
+      await api.post(`/admin/support/${encodeURIComponent(id)}/messages`, { body });
+      if (!workspaceLive.current) return;
+      if (activeIdRef.current === id) { setBody(""); await loadThread(id); }
+      if (!workspaceLive.current) return;
+      setOffset(0);
+      if (offsetRef.current === 0) refreshListRef.current();
     } catch {
-      setError("Could not send the support response.");
-    }
+      if (workspaceLive.current && activeIdRef.current === id) setError("Could not send support response.");
+    } finally { if (workspaceLive.current) setSending(false); }
   };
   const resolveThread = async () => {
-    if (!active?.id || resolving) return;
+    const id = activeId;
+    if (!id || resolving || sending) return;
     setResolving(true);
     try {
-      await api.post(`/admin/support/${encodeURIComponent(String(active.id))}/resolve`, {});
+      await api.post(`/admin/support/${encodeURIComponent(id)}/resolve`, {});
       window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
-      const updated = await api.get<RecordValue>(
-        `/admin/support/${encodeURIComponent(String(active.id))}`,
-      );
-      setDetail(updated);
-      setActive((updated.conversation as RecordValue) ?? active);
-      load();
-      setError("");
+      if (!workspaceLive.current) return;
+      refreshListRef.current();
+      if (activeIdRef.current === id) await loadThread(id);
     } catch {
-      setError("Could not resolve support conversation.");
-    } finally {
-      setResolving(false);
-    }
+      if (workspaceLive.current && activeIdRef.current === id) setError("Could not resolve support conversation.");
+    } finally { if (workspaceLive.current) setResolving(false); }
   };
   const items = result?.items ?? [];
   const total = result?.total ?? 0;
@@ -4983,11 +4918,11 @@ function Support() {
   const selectedName = rowName(selectedConversation);
   const selectedEmail = valueOf(selectedConversation.email);
   const selectedType = supportProfileType(selectedConversation.profileType);
-  const messages = ((detail?.messages ?? []) as RecordValue[]);
+  const messages = threadMessages;
   const supportProfile = (detail?.supportProfile ?? {}) as RecordValue;
-  const resetThread = (nextUnanswered: boolean) => {
+  const resetThread = (nextUnresolved: boolean) => {
     setOffset(0);
-    setUnanswered(nextUnanswered);
+    setUnresolved(nextUnresolved);
     setActive(null);
     setDetail(null);
     setBody("");
@@ -5000,19 +4935,19 @@ function Support() {
         <nav className="support-tabs">
           <button
             type="button"
-            className={unanswered ? "active" : ""}
-            aria-pressed={unanswered}
+            className={unresolved ? "active" : ""}
+            aria-pressed={unresolved}
             onClick={() => resetThread(true)}
           >
-            Unresolved ({result?.totalUnanswered ?? (unanswered ? total : 0)})
+            Unresolved ({result?.totalUnresolved ?? result?.totalUnanswered ?? (unresolved ? total : 0)})
           </button>
           <button
             type="button"
-            className={!unanswered ? "active" : ""}
-            aria-pressed={!unanswered}
+            className={!unresolved ? "active" : ""}
+            aria-pressed={!unresolved}
             onClick={() => resetThread(false)}
           >
-            All ({result?.totalAll ?? (!unanswered ? total : 0)})
+            All ({result?.totalAll ?? (!unresolved ? total : 0)})
           </button>
         </nav>
         <div className="support-search">
@@ -5036,7 +4971,10 @@ function Support() {
                 className={active?.id === row.id ? "selected" : ""}
                 aria-pressed={active?.id === row.id}
                 key={String(row.id)}
-                onClick={() => setActive(row)}
+                onClick={() => {
+                  setActive(row); setBody(""); setError("");
+                  if (requestedThreadId) navigate(`/support/${encodeURIComponent(String(row.id))}`, { replace: true });
+                }}
               >
                 <span className="support-conversation-avatar-wrap">
                   <PersonAvatar
@@ -5119,6 +5057,15 @@ function Support() {
                 </div>
                 <p>{selectedEmail}</p>
               </div>
+              <button
+                className="support-resolve-button"
+                type="button"
+                disabled={selectedResolved || resolving || sending}
+                onClick={() => void resolveThread()}
+              >
+                <AdminIcon name="badgeCheck" />
+                {selectedResolved ? "Resolved" : resolving ? "Resolving..." : "Resolve"}
+              </button>
               {Boolean(selectedConversation.userId) && (
                 <Link
                   className="support-view-profile"
@@ -5129,15 +5076,6 @@ function Support() {
                   <AdminIcon name="externalLink" /> View Profile
                 </Link>
               )}
-              <button
-                className="support-resolve-button"
-                type="button"
-                disabled={selectedResolved || resolving}
-                onClick={() => void resolveThread()}
-              >
-                <AdminIcon name="badgeCheck" />
-                {selectedResolved ? "Resolved" : resolving ? "Resolving..." : "Resolve"}
-              </button>
             </header>
             <div className="message-list" ref={messageListRef}>
               {messages.map((message, index) => {
@@ -5190,7 +5128,7 @@ function Support() {
               <textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
-                disabled={selectedResolved}
+                disabled={selectedResolved || sending || resolving}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
@@ -5209,12 +5147,14 @@ function Support() {
                 className="support-send"
                 type="submit"
                 aria-label="Send reply"
-                disabled={selectedResolved || !body.trim()}
+                disabled={selectedResolved || sending || resolving || !body.trim()}
               >
                 <AdminIcon name="send" />
               </button>
             </form>
           </>
+        ) : activeId ? (
+          <div className="support-empty" role="status"><p>Loading conversation…</p></div>
         ) : (
           <div className="support-empty">
             <AdminIcon name="headphones" />
@@ -5631,13 +5571,13 @@ function AdminVideoVerifications() {
   );
 }
 
-function reportDate(value: unknown) {
+function reportDate(value: unknown, detailed = false) {
   const date = value ? new Date(String(value)) : null;
   if (!date || Number.isNaN(date.valueOf())) return valueOf(value);
-  return `${date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  })}, ${date.toLocaleTimeString("en-US", {
+  const dateLabel = date.toLocaleDateString("en-US", detailed
+    ? { month: "long", day: "numeric", year: "numeric" }
+    : { month: "short", day: "numeric" });
+  return `${dateLabel}${detailed ? " at " : ", "}${date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
@@ -5722,7 +5662,7 @@ function ReportPerson({
             B
           </span>
         )}
-        {["DELETED", "PENDING_DELETION"].includes(profileStatus) && (
+        {["DELETED", "DELETION_PENDING", "PENDING_DELETION"].includes(profileStatus) && (
           <span
             className="moderation-report-profile-status is-deleted"
             title="Deleted"
@@ -5748,7 +5688,80 @@ function ReportPerson({
   );
 }
 
+function ReportDetailsModal({ row, busy, error, onClose, onReview }: {
+  row: RecordValue;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onReview: (row: RecordValue, next: "RESOLVED" | "DISMISSED") => Promise<void>;
+}) {
+  const titleId = useId();
+  const dateId = useId();
+  const dialogRef = useRef<HTMLElement>(null);
+  const status = String(row.status ?? "PENDING").toUpperCase();
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      if (!busy) onClose();
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [busy, onClose]);
+  return createPortal(
+    <div className="modal-backdrop moderation-report-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onClose();
+    }}>
+      <section className="modal moderation-report-modal" ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={dateId} aria-busy={busy} onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]'));
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (!first || !last) { event.preventDefault(); return; }
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || document.activeElement === event.currentTarget)) { event.preventDefault(); first.focus(); }
+      }}>
+        <button type="button" className="modal-close" aria-label="Close report details" disabled={busy} onClick={onClose}><AdminIcon name="x" /></button>
+        <h2 id={titleId}><AdminIcon name="flag" /> Report Details</h2>
+        <p className="moderation-report-detail-date" id={dateId}>{reportDate(row.createdAt ?? row.created_at, true)}</p>
+        <div className="moderation-report-detail-people">
+          <div><h3>Reporter</h3><ReportPerson row={row} kind="reporter" /></div>
+          <div><h3>Reported</h3><ReportPerson row={row} kind="reported" /></div>
+        </div>
+        <div className="moderation-report-detail-badges">
+          <span className={`moderation-report-reason reason-${reportReasonClass(row.reason)}`}>{valueOf(row.reason).toUpperCase()}</span>
+          <span className={`moderation-report-status status-${reportReasonClass(status)}`}>{status}</span>
+        </div>
+        <div className="moderation-report-detail-description"><h3>Description</h3><p>{valueOf(row.details ?? row.description)}</p></div>
+        {status !== "PENDING" && <div className="moderation-report-detail-resolution"><h3>{status === "DISMISSED" ? "Dismissed by" : "Resolved by"}</h3><p>{reportModeratorName(row)}</p>{Boolean(row.resolutionNote) && <p>{valueOf(row.resolutionNote)}</p>}</div>}
+        {error && <p className="error" role="alert">{error}</p>}
+        {status === "PENDING" && <div className="modal-actions">
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void onReview(row, "DISMISSED")}><AdminIcon name="x" /> Dismiss</button>
+          <button type="button" className="primary" disabled={busy} onClick={() => void onReview(row, "RESOLVED")}><AdminIcon name="check" /> Resolve</button>
+        </div>}
+      </section>
+    </div>, document.body,
+  );
+}
+
 function ModerationReports() {
+  const reviewing = useRef(false);
+  const [selectedReport, setSelectedReport] = useState<RecordValue | null>(null);
+  const [reviewError, setReviewError] = useState("");
+  const openReport = (row: RecordValue) => {
+    setReviewError("");
+    setSelectedReport(row);
+  };
   const [status, setStatus] = useState("PENDING");
   const [result, setResult] = useState<ListResponse | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({
@@ -5794,7 +5807,10 @@ function ModerationReports() {
     void loadCounts();
   }, []);
   const review = async (row: RecordValue, next: "RESOLVED" | "DISMISSED") => {
+    if (reviewing.current) return;
     if (!window.confirm(`Mark this report as ${next.toLowerCase()}?`)) return;
+    reviewing.current = true;
+    setReviewError("");
     setReviewingId(String(row.id));
     try {
       await api.patch(
@@ -5803,12 +5819,16 @@ function ModerationReports() {
       );
       setNotice(next === "RESOLVED" ? "Report resolved." : "Report dismissed.");
       setNoticeIsError(false);
+      setSelectedReport(null);
       load();
       void loadCounts();
+      window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
     } catch (err) {
       setNotice(err instanceof ApiError ? err.message : "Could not update this report.");
       setNoticeIsError(true);
+      setReviewError(err instanceof ApiError ? err.message : "Could not update this report.");
     } finally {
+      reviewing.current = false;
       setReviewingId("");
     }
   };
@@ -5895,23 +5915,29 @@ function ModerationReports() {
                   <td>
                     <ReportPerson row={row} kind="reported" />
                   </td>
-                  <td>
-                    <span
-                      className={`moderation-report-reason reason-${reportReasonClass(row.reason)}`}
-                    >
-                      {valueOf(row.reason).toUpperCase()}
-                    </span>
+                  <td className="moderation-report-open-cell">
+                    <button type="button" className="moderation-report-open" aria-haspopup="dialog" aria-label={`Open report details: reason ${valueOf(row.reason)}`} onClick={() => openReport(row)}>
+                      <span
+                        className={`moderation-report-reason reason-${reportReasonClass(row.reason)}`}
+                      >
+                        {valueOf(row.reason).toUpperCase()}
+                      </span>
+                    </button>
                   </td>
-                  <td>
-                    <span
-                      className="moderation-report-description"
-                      title={valueOf(row.details ?? row.description)}
-                    >
-                      {valueOf(row.details ?? row.description)}
-                    </span>
+                  <td className="moderation-report-open-cell">
+                    <button type="button" className="moderation-report-open" aria-haspopup="dialog" aria-label={`Open report details: description ${valueOf(row.details ?? row.description)}`} onClick={() => openReport(row)}>
+                      <span
+                        className="moderation-report-description"
+                        title={valueOf(row.details ?? row.description)}
+                      >
+                        {valueOf(row.details ?? row.description)}
+                      </span>
+                    </button>
                   </td>
-                  <td className="moderation-report-date">
-                    {reportDate(row.createdAt ?? row.created_at)}
+                  <td className="moderation-report-open-cell moderation-report-date">
+                    <button type="button" className="moderation-report-open" aria-haspopup="dialog" aria-label={`Open report details: date ${reportDate(row.createdAt ?? row.created_at)}`} onClick={() => openReport(row)}>
+                      {reportDate(row.createdAt ?? row.created_at)}
+                    </button>
                   </td>
                   {status !== "PENDING" && (
                     <td>
@@ -5972,6 +5998,7 @@ function ModerationReports() {
           </p>
         </section>
       )}
+      {selectedReport && <ReportDetailsModal row={selectedReport} busy={reviewingId === String(selectedReport.id)} error={reviewError} onClose={() => setSelectedReport(null)} onReview={review} />}
     </>
   );
 }
@@ -7110,6 +7137,79 @@ function DeletionFeedback() {
   );
 }
 
+function UserTrash() {
+  const [result, setResult] = useState<(ListResponse & { canPermanentlyDelete: boolean }) | null>(null);
+  const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const [action, setAction] = useState<{ kind: "restore" | "purge"; row: RecordValue } | null>(null);
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError("");
+    const params = new URLSearchParams({ limit: "50", offset: String(offset) });
+    if (query.trim()) params.set("q", query.trim());
+    api.get<ListResponse & { canPermanentlyDelete: boolean }>(`/admin/users/trash?${params}`).then(data => {
+      if (live) { setResult(data); setLoading(false); }
+    }).catch(reason => { if (live) { setLoading(false); setError(reason instanceof ApiError ? reason.message : "Could not load account Trash."); } });
+    return () => { live = false; };
+  }, [query, offset, refresh]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefresh(value => value + 1), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const runAction = async () => {
+    if (!action || pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      if (action.kind === "restore") {
+        const restored = await api.post<{ passwordResetRequired: boolean }>(`/admin/users/${encodeURIComponent(String(action.row.id))}/restore`, {});
+        setNotice(restored.passwordResetRequired ? "Account restored. The member can use Forgot password to set a password." : "Account restored. The member can sign in again.");
+      } else {
+        await api.delete(`/admin/item/users/${encodeURIComponent(String(action.row.id))}`);
+        setNotice("Account permanently deleted.");
+      }
+      setAction(null);
+      setOffset(0);
+      setRefresh(value => value + 1);
+      window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Could not update the account.");
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  return <>
+    <header className="page-heading"><h1>Account Trash</h1></header>
+    <nav className="member-tabs"><NavLink to="/users" end>Users</NavLink><NavLink to="/users/partners">Partners</NavLink><NavLink to="/users/trash">Trash{result ? ` (${result.total})` : ""}</NavLink></nav>
+    <p className="account-trash-note">Accounts are hidden and signed out immediately. Restore them within 30 days; after that they are permanently deleted automatically. Cancelled subscriptions are not restored.</p>
+    <section className="list-controls account-trash-controls"><input aria-label="Search account Trash" placeholder="Search by email, name or ID…" value={query} disabled={busy} onChange={event => { setQuery(event.target.value); setOffset(0); }} /><button type="button" disabled={busy || loading} onClick={() => setRefresh(value => value + 1)}>Refresh</button></section>
+    {error && !action && <p className="error" role="alert">{error}</p>}
+    {notice && <p className="notice" role="status">{notice}</p>}
+    {loading ? <p className="loading-inline">Loading account Trash…</p> : result && <>
+      <section className="table account-trash-table"><table><thead><tr><th>User</th><th>Email</th><th>Deleted at</th><th>Permanent deletion after</th><th>Actions</th></tr></thead><tbody>
+        {result.items.map(row => {
+          const deadline = row.deleteAfter ? new Date(String(row.deleteAfter)).valueOf() : NaN;
+          const canRestore = row.canRestore === true && Number.isFinite(deadline) && deadline > Date.now();
+          return <tr key={String(row.id)}><td><Link to={`/users/${encodeURIComponent(String(row.id))}`}>{valueOf(row.name)}</Link></td><td>{valueOf(row.email)}</td><td>{compactDate(row.requestedAt)}</td><td>{row.deleteAfter ? compactDate(row.deleteAfter) : "Not scheduled"}{Boolean(row.deleteAfter) && !canRestore && <small>Awaiting automatic deletion</small>}</td><td><div className="row-actions"><button type="button" disabled={busy || !canRestore} onClick={() => { setError(""); setAction({ kind: "restore", row }); }}>Restore account</button>{result.canPermanentlyDelete && <button type="button" className="danger-text" disabled={busy} onClick={() => { setError(""); setAction({ kind: "purge", row }); }}>Delete permanently</button>}</div></td></tr>;
+        })}
+        {!result.items.length && <tr><td colSpan={5}>{query.trim() ? "No matching accounts in Trash." : "Account Trash is empty."}</td></tr>}
+      </tbody></table></section>
+      <div className="pagination"><button type="button" disabled={busy || offset === 0} onClick={() => setOffset(value => Math.max(0, value - 50))}>Previous</button><span>{result.total ? `${offset + 1}–${Math.min(offset + result.items.length, result.total)} of ${result.total}` : "0 accounts"}</span><button type="button" disabled={busy || offset + 50 >= result.total} onClick={() => setOffset(value => value + 50)}>Next</button></div>
+    </>}
+    <ConfirmModal open={Boolean(action)} title={action?.kind === "restore" ? "Restore account" : "Delete account permanently"} message={<>{action?.kind === "restore" ? "Restore this account? The member will need to sign in again. Cancelled subscriptions remain cancelled." : "Permanently delete this account and its personal data now? This cannot be undone."}{error && <p className="error" role="alert">{error}</p>}</>} confirmLabel={action?.kind === "restore" ? "Restore account" : "Delete permanently"} busy={busy} onClose={() => { if (!pending.current) setAction(null); }} onConfirm={runAction} />
+  </>;
+}
+
+
 function GenericList({ view }: { view: string }) {
   const location = useLocation();
   const isPartnerUsers =
@@ -7276,20 +7376,46 @@ function GenericList({ view }: { view: string }) {
     const delay = search && previous.view === view &&
       previous.isPartnerUsers === isPartnerUsers && previous.query !== search
       ? 300 : 0;
+    let pending = false;
     const load = () => {
+      if (!live || pending || controller.signal.aborted) return;
+      pending = true;
       lastRequestedSearch.current = { view, isPartnerUsers, query: search };
       api
         .get<ListResponse>(`/admin/list/${view}?${params}`, { signal: controller.signal })
-        .then((data) => live && setResult(data))
+        .then((data) => {
+          if (!live) return;
+          setError("");
+          setResult(data);
+          if (view === "users") {
+            const lastOffset = Math.max(0, (Math.ceil(data.total / limit) - 1) * limit);
+            if (offset > lastOffset) setOffset(lastOffset);
+          }
+        })
         .catch(() => {
           if (live && !controller.signal.aborted) setError("Could not load this section.");
-        });
+        })
+        .finally(() => { pending = false; });
     };
     const timer = delay ? window.setTimeout(load, delay) : undefined;
     if (!delay) load();
+    const refreshVisibleUsers = () => {
+      if (document.visibilityState !== "visible") return;
+      window.clearTimeout(timer);
+      load();
+    };
+    const liveUsers = view === "users" && !isPartnerUsers;
+    const refreshTimer = liveUsers ? window.setInterval(refreshVisibleUsers, 15_000) : undefined;
+    if (liveUsers) {
+      document.addEventListener("visibilitychange", refreshVisibleUsers);
+      window.addEventListener("focus", refreshVisibleUsers);
+    }
     return () => {
       live = false;
       window.clearTimeout(timer);
+      window.clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshVisibleUsers);
+      window.removeEventListener("focus", refreshVisibleUsers);
       controller.abort();
     };
   }, [view, isPartnerUsers, query, offset, filters, refresh]);
@@ -7506,8 +7632,9 @@ function GenericList({ view }: { view: string }) {
     setSaving(true);
     try {
       if (userAction.kind === "delete")
-        await api.delete(
-          `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
+        await api.post(
+          `/admin/users/${encodeURIComponent(String(profileRef))}/trash`,
+          { reason: "Deleted from admin" },
         );
     else {
       const data = (
@@ -7516,20 +7643,8 @@ function GenericList({ view }: { view: string }) {
       : {}
       ) as RecordValue;
       if (userAction.kind === "restore") {
-      await api.patch(
-      `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
-      {
-      values: {
-      status: "ACTIVE",
-      data: {
-      ...data,
-      deletionRestoredAt: new Date().toISOString(),
-      restoredAt: new Date().toISOString(),
-      },
-      },
-      },
-      );
-      } else {
+          await api.post(`/admin/users/${encodeURIComponent(String(profileRef))}/restore`, {});
+        } else {
       await api.patch(
       `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
       {
@@ -7672,6 +7787,7 @@ function GenericList({ view }: { view: string }) {
             Users
           </NavLink>
           <NavLink to="/users/partners">Partners</NavLink>
+          <NavLink to="/users/trash">Trash</NavLink>
         </nav>
       )}
       <section
@@ -7720,7 +7836,7 @@ function GenericList({ view }: { view: string }) {
         ].includes(view) && (
           <div className="filter-row">
             {["clinics", "lawyers", "verifications"].includes(view) && (
-              <AdminSelect
+              <AdminSelect aria-label="Status"
                 value={filters.status ?? ""}
                 onChange={(event) => {
                   setOffset(0);
@@ -7740,7 +7856,7 @@ function GenericList({ view }: { view: string }) {
                       "EXPIRED",
                     ].map((value) => ({ value }))
                   : ["clinics", "lawyers"].includes(view)
-                    ? ["ACTIVE", "INACTIVE"].map((value) => ({ value }))
+                    ? ["active", "inactive"].map((value) => ({ value }))
                   : statusOptions
                 ).map((option) => {
                   const value = String(option.value ?? "");
@@ -7756,7 +7872,7 @@ function GenericList({ view }: { view: string }) {
             )}
             {["clinics", "lawyers"].includes(view) && (
               <>
-                <AdminSelect
+                <AdminSelect aria-label="Country"
                   value={filters.country ?? ""}
                   menuMaxHeight={520}
                   onChange={(event) => {
@@ -7779,7 +7895,7 @@ function GenericList({ view }: { view: string }) {
                 </AdminSelect>
                 {view === "clinics" && (
                   <>
-                    <AdminSelect
+                    <AdminSelect aria-label="Website availability"
                       value={filters.hasWebsite ?? ""}
                       onChange={(event) => {
                         setOffset(0);
@@ -7793,7 +7909,7 @@ function GenericList({ view }: { view: string }) {
                       <option value="true">Has website</option>
                       <option value="false">No website</option>
                     </AdminSelect>
-                    <AdminSelect
+                    <AdminSelect aria-label="Logo availability"
                       value={filters.hasLogo ?? ""}
                       onChange={(event) => {
                         setOffset(0);
@@ -7956,7 +8072,7 @@ function GenericList({ view }: { view: string }) {
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
                 </AdminSelect>
-                <AdminSelect
+                <AdminSelect aria-label="Status"
                   value={filters.status ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -7995,7 +8111,7 @@ function GenericList({ view }: { view: string }) {
       </section>
       {["static-pages", "marketing"].includes(view) && (
         <section className="list-controls">
-          <AdminSelect
+          <AdminSelect aria-label="Status"
             value={filters.status ?? ""}
             onChange={(event) => {
               setOffset(0);
@@ -8198,7 +8314,7 @@ function GenericList({ view }: { view: string }) {
                               ) ? (
                               <div className="person-cell">
                                 <PersonAvatar
-                                  row={row}
+                                  row={view === "clinics" ? { logoUrl: row.logoUrl } : row}
                                   name={rowName(row)}
                                   className={`person-avatar ${view === "clinics" ? "clinic-list-logo" : view === "lawyers" ? "lawyer-list-photo" : ""}`}
                                 />
@@ -8247,7 +8363,7 @@ function GenericList({ view }: { view: string }) {
                                           D
                                         </em>
                                       )}
-                                    {view === "users" && ["DELETED", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
+                                    {view === "users" && ["DELETED", "DELETION_PENDING", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
                                     {view === "users" && <UserLocationMismatchFlag row={row} />}
                                   </span>
                                   {personSecondaryText(row) && (
@@ -8300,7 +8416,7 @@ function GenericList({ view }: { view: string }) {
                   >
                     Ban
                   </button>
-                  {String(row.status ?? "").toUpperCase() === "PENDING_DELETION" && (
+                  {["DELETED", "DELETION_PENDING", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (
                   <button
                     type="button"
                     role="menuitem"
@@ -8319,7 +8435,7 @@ function GenericList({ view }: { view: string }) {
                                         setUserAction({ row, kind: "delete" })
                                       }
                                     >
-                                      <AdminIcon name="trash" /> Permanent Delete
+                                      <AdminIcon name="trash" /> Move to Trash
                                     </button>
                                   </span>
                                 )}
@@ -8629,7 +8745,7 @@ function GenericList({ view }: { view: string }) {
                   ? "Ban user"
                   : userAction.kind === "restore"
                   ? "Restore User"
-                  : "Permanently Delete User",
+                  : "Move user to Trash",
               }
             : null
         }
@@ -8654,6 +8770,16 @@ function VerificationDetail() {
     "approve" | "revoke" | "delete" | null
   >(null);
   const [busy, setBusy] = useState(false);
+  const [actionReason, setActionReason] = useState("");
+  useEffect(() => { setActionReason(""); }, [confirmAction]);
+  // Manual approval is limited to ADMIN accounts (the API enforces it too).
+  const [isAdminRole, setIsAdminRole] = useState(false);
+  useEffect(() => {
+    api
+      .get<Session>("/admin/session")
+      .then((response) => setIsAdminRole((response.role ?? "").trim().toUpperCase() === "ADMIN"))
+      .catch(() => setIsAdminRole(false));
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -8675,13 +8801,15 @@ function VerificationDetail() {
   }, [id, reload]);
 
   const runConfirmedAction = async () => {
-    if (!confirmAction) return;
+    if (!confirmAction || !isAdminRole || busy) return;
+    if (!actionReason.trim()) { setError("Enter a reason for this action."); return; }
     setBusy(true);
     setError("");
     try {
       if (confirmAction === "approve") {
         await api.post(
           `/admin/verifications/${encodeURIComponent(id)}/approve`,
+          { reason: actionReason.trim() },
         );
         setNotice("Verification manually approved.");
         setConfirmAction(null);
@@ -8689,12 +8817,13 @@ function VerificationDetail() {
       } else if (confirmAction === "revoke") {
         await api.post(
           `/admin/verifications/${encodeURIComponent(id)}/revoke`,
+          { reason: actionReason.trim() },
         );
         setNotice("Verification revoked.");
         setConfirmAction(null);
         setReload((value) => value + 1);
       } else {
-        await api.delete(`/admin/verifications/${encodeURIComponent(id)}`);
+        await api.delete(`/admin/verifications/${encodeURIComponent(id)}`, { reason: actionReason.trim() });
         navigate("/verifications");
       }
     } catch {
@@ -8710,6 +8839,7 @@ function VerificationDetail() {
     }
   };
 
+  const reasonField = <label className="verification-reason-field" htmlFor="verification-action-reason">Reason<textarea id="verification-action-reason" value={actionReason} onChange={event => setActionReason(event.target.value)} rows={3} maxLength={2000} required disabled={busy} /></label>;
   if (!detail) {
     return (
       <section className="verification-detail-page">
@@ -8731,7 +8861,7 @@ function VerificationDetail() {
   const profileEmail = valueOf(detail.profileEmail ?? data.email);
   const status = String(
     detail.verificationStatus ?? detail.status ?? "PENDING",
-  ).toUpperCase();
+  ).trim().toUpperCase();
   const statusClass = status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const sessionId = valueOf(
     detail.sessionId ?? data.sessionId ?? verificationRouteId(detail),
@@ -8928,7 +9058,7 @@ function VerificationDetail() {
               >
                 <AdminIcon name="externalLink" /> Open in Didit
               </a>
-              {["PENDING", "DECLINED", "FAILED"].includes(status) && (
+              {isAdminRole && status !== "APPROVED" && (
                 <button
                   className="primary"
                   type="button"
@@ -8938,7 +9068,7 @@ function VerificationDetail() {
                   Manual Approve
                 </button>
               )}
-              {status === "APPROVED" && (
+              {isAdminRole && status === "APPROVED" && (
                 <button
                   className="danger"
                   type="button"
@@ -8948,14 +9078,14 @@ function VerificationDetail() {
                   Revoke Verification
                 </button>
               )}
-              <button
+              {isAdminRole && (<button
                 className="danger-text"
                 type="button"
                 disabled={busy}
                 onClick={() => setConfirmAction("delete")}
               >
                 Delete Session
-              </button>
+              </button>)}
             </div>
           </section>
 
@@ -9071,10 +9201,11 @@ function VerificationDetail() {
         )}
       </section>
       <ConfirmModal
-        open={confirmAction === "approve"}
+        open={isAdminRole && confirmAction === "approve"}
+        confirmDisabled={!actionReason.trim()}
         modalClassName="verification-confirm-modal"
         title="Manual Approve Verification"
-        message="This will override the current session status to APPROVED and mark the user's profile as verified. This action will be logged."
+        message={<><p>This will override the current session status to APPROVED and mark the user's profile as verified. This action will be logged.</p>{reasonField}</>}
         confirmLabel="Approve"
         confirmClassName="primary"
         busy={busy}
@@ -9082,17 +9213,19 @@ function VerificationDetail() {
         onConfirm={runConfirmedAction}
       />
       <ConfirmModal
-        open={confirmAction === "revoke"}
+        open={isAdminRole && confirmAction === "revoke"}
+        confirmDisabled={!actionReason.trim()}
         modalClassName="verification-confirm-modal"
         title="Revoke Verification"
-        message="This will remove the verified status from this user's profile. Use this if the user changed their primary photo after verification or in case of fraud. This action will be logged."
+        message={<><p>This will remove the verified status from this user's profile. Use this if the user changed their primary photo after verification or in case of fraud. This action will be logged.</p>{reasonField}</>}
         confirmLabel="Revoke Verification"
         busy={busy}
         onClose={() => setConfirmAction(null)}
         onConfirm={runConfirmedAction}
       />
       <ConfirmModal
-        open={confirmAction === "delete"}
+        open={isAdminRole && confirmAction === "delete"}
+        confirmDisabled={!actionReason.trim()}
         modalClassName="verification-confirm-modal"
         title="Delete Session"
         message={`Delete the verification session for ${profileName}? This action cannot be undone.`}
@@ -9135,20 +9268,11 @@ function ArticleRoute({ create = false }: { create?: boolean }) {
   const [error, setError] = useState("");
   useEffect(() => {
     if (create) return;
-    api
-      .get<ListResponse>("/admin/list/articles?limit=200&offset=0")
-      .then((result) => {
-        const match = result.items.find((item) => String(item.id ?? "") === id);
-        if (match) {
-          setRow(match);
-          setTranslations(
-            result.items.filter(
-              (item) => String(item.slug ?? "") === String(match.slug ?? ""),
-            ),
-          );
-        } else setError("Article not found.");
-      })
-      .catch(() => setError("Could not load this article."));
+    let live = true;
+    api.get<{ item: RecordValue; translations: RecordValue[] }>(`/admin/articles/${encodeURIComponent(id)}`)
+      .then(result => { if (live) { setRow(result.item); setTranslations(result.translations || [result.item]); } })
+      .catch(() => { if (live) setError("Could not load this article."); });
+    return () => { live = false; };
   }, [create, id]);
   const save = async (values: RecordValue) => {
     setBusy(true);
@@ -9194,6 +9318,8 @@ function CategoryManager({
   const [nameEs, setNameEs] = useState("");
   const [additionalNames, setAdditionalNames] = useState<Record<string, string>>({});
   const additionalLocales = ["pt", "fr", "de", "it", "pl"];
+  const allNamesPresent = [nameEn, nameRu, nameEs, ...additionalLocales.map((locale) => additionalNames[locale])]
+    .every((name) => Boolean(name?.trim()));
   const [slug, setSlug] = useState("");
   const [editing, setEditing] = useState<RecordValue | null>(null);
   const [busy, setBusy] = useState(false);
@@ -9272,7 +9398,7 @@ function CategoryManager({
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!nameEn.trim() || !nameRu.trim() || !nameEs.trim() || !slug.trim()) return;
+    if (!allNamesPresent || !slug.trim()) return;
     setBusy(true);
     setError("");
     const original = editing ? fields(editing).data : {};
@@ -9388,6 +9514,7 @@ function CategoryManager({
                   value={additionalNames[locale] ?? ""}
                   onChange={(event) => setAdditionalNames((names) => ({ ...names, [locale]: event.target.value }))}
                   placeholder={`Category name (${locale.toUpperCase()})`}
+                  required
                 />
               </label>
             ))}
@@ -9406,9 +9533,7 @@ function CategoryManager({
               className="primary"
               disabled={
                 busy ||
-                !nameEn.trim() ||
-                !nameRu.trim() ||
-                !nameEs.trim() ||
+                !allNamesPresent ||
                 !slug.trim()
               }
             >
@@ -9539,15 +9664,17 @@ function ArticleEditor({
   const [archiving, setArchiving] = useState(false);
   const archiveTarget = translations.find((item) => String(item.locale) === locale)
     ?? (String(row.locale ?? "en") === locale ? row : null);
+  const archivedTarget = String(archiveTarget?.status ?? "").toUpperCase() === "ARCHIVED";
   const archiveArticle = async () => {
     if (!archiveTarget?.id || archiving) return;
     setArchiving(true);
     setSaveError("");
     try {
-      await api.delete(`/admin/item/articles/${encodeURIComponent(String(archiveTarget.id))}`);
+      if (archivedTarget) await api.delete(`/admin/articles/${encodeURIComponent(String(archiveTarget.id))}`);
+      else await api.patch(`/admin/item/articles/${encodeURIComponent(String(archiveTarget.id))}`, { values: { status: "ARCHIVED" } });
       onClose();
     } catch {
-      setSaveError("Could not archive article. Try again.");
+      setSaveError(archivedTarget ? "Could not delete this article permanently." : "Could not archive article. Try again.");
       setArchiveOpen(false);
     } finally {
       setArchiving(false);
@@ -9881,10 +10008,10 @@ function ArticleEditor({
           </section>
         <div className="article-editor-actions">
           {saveError && <p className="article-save-error">{saveError}</p>}
-          {Boolean(archiveTarget?.id) && String(archiveTarget?.status ?? "").toUpperCase() !== "ARCHIVED" && (
-            <button type="button" className="secondary-button" disabled={busy || archiving}
+          {Boolean(archiveTarget?.id) && (
+            <button type="button" className={archivedTarget ? "danger" : "secondary-button"} disabled={busy || archiving}
               onClick={() => setArchiveOpen(true)}>
-              Archive article
+              {archivedTarget ? "Delete permanently" : "Archive article"}
             </button>
           )}
             <button
@@ -9909,9 +10036,10 @@ function ArticleEditor({
           </div>
         </aside>
       </div>
-      <ConfirmModal open={archiveOpen} title="Archive article"
-        message="This language version will be archived and hidden from ordinary lists. It remains available in the Archived filter. Unsaved changes will not be saved."
-        confirmLabel={archiving ? "Archiving…" : "Archive"}
+      <ConfirmModal open={archiveOpen} title={archivedTarget ? "Delete article permanently" : "Archive article"}
+        message={archivedTarget ? "This archived language version will be permanently deleted. This cannot be undone." : "This language version will be archived and hidden from ordinary lists. It remains available in the Archived filter. Unsaved changes will not be saved."}
+        confirmLabel={archivedTarget ? "Delete permanently" : "Archive"}
+        busy={archiving}
         onClose={() => { if (!archiving) setArchiveOpen(false); }}
         onConfirm={archiveArticle} />
     </form>
@@ -11490,6 +11618,7 @@ function ConfirmModal({
   confirmClassName = "danger",
   modalClassName = "",
   busy,
+  confirmDisabled = false,
   onClose,
   onConfirm,
 }: {
@@ -11500,6 +11629,7 @@ function ConfirmModal({
   confirmClassName?: "primary" | "danger";
   modalClassName?: string;
   busy?: boolean;
+  confirmDisabled?: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }) {
@@ -11528,7 +11658,7 @@ function ConfirmModal({
           <button
             className={confirmClassName}
             type="button"
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={onConfirm}
           >
             {busy ? "Working…" : confirmLabel}
@@ -11693,10 +11823,7 @@ function ActionModal({
           </p>
         )}
         {state.kind === "delete" && (
-          <p>
-            This action cannot be undone. It permanently deletes the user
-            account, all data, photos, messages, matches and likes.
-          </p>
+          <p>The account will be hidden and signed out immediately. You can restore it from Account Trash within 30 days. After that it is permanently deleted automatically.</p>
         )}
         {error && <p className="error grant-premium-profile-error">{error}</p>}
         <div className="modal-actions">
@@ -11710,7 +11837,7 @@ function ActionModal({
             {busy
               ? "Working…"
               : state.kind === "delete"
-                ? "Delete Permanently"
+                ? "Move to Trash"
                 : state.kind === "ban"
                   ? "Ban user"
                   : state.kind === "grant"
@@ -12417,6 +12544,14 @@ function UserDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<RecordValue | null>(null);
+  const [presence, setPresence] = useState<boolean | null>(null);
+  useEffect(() => {
+    setPresence(null);
+    return watchUserPresence(
+      (signal) => api.get<{ isOnline: boolean }>(`/admin/users/${encodeURIComponent(id)}/presence`, { signal }),
+      setPresence,
+    );
+  }, [id]);
   const [tab, setTab] = useState(() =>
     new URLSearchParams(window.location.search).get("tab") || "profile",
   );
@@ -12431,6 +12566,17 @@ function UserDetail() {
   const [bioDraft, setBioDraft] = useState("");
   const [bioSaving, setBioSaving] = useState(false);
   const [reload, setReload] = useState(0);
+  const [adminSession, setAdminSession] = useState<Session | null>(null);
+  const [verificationOpen, setVerificationOpen] = useState(false);
+  const [verificationReason, setVerificationReason] = useState("");
+  const [verificationBusy, setVerificationBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.get<Session>("/admin/session").then(value => { if (live) setAdminSession(value); }).catch(() => { if (live) setAdminSession(null); });
+    return () => { live = false; };
+  }, []);
+  const canVerify = adminSession?.role?.trim().toUpperCase() === "ADMIN";
+  const canGrantPremium = canVerify || Boolean(adminSession?.permissions?.includes("subscriptions"));
   useEffect(() => {
     let live = true;
     setDetail(null);
@@ -12570,8 +12716,8 @@ function UserDetail() {
       setNotice(enabled ? "User shadow banned." : "Shadow ban removed.");
     }
     if (modal.kind === "delete") {
-      await api.delete(`/admin/item/users/${encodeURIComponent(profileId)}`);
-      navigate("/users");
+      await api.post(`/admin/users/${encodeURIComponent(profileId)}/trash`, { reason: "Deleted from admin" });
+      navigate("/users/trash");
       return;
     }
     setReload((value) => value + 1);
@@ -12599,28 +12745,22 @@ function UserDetail() {
     }
   };
   const toggleVerification = async () => {
-    const enabled = !verified;
+    if (!canVerify || !verificationReason.trim() || verificationBusy) return;
+    setVerificationBusy(true);
     setActionError("");
     try {
-      await api.patch(`/admin/item/users/${encodeURIComponent(profileId)}`, {
-        values: {
-          data: {
-            ...profileData,
-            isVerified: enabled,
-            verifiedAt: enabled ? new Date().toISOString() : null,
-          },
-        },
-      });
-      setNotice(enabled ? "User verified." : "Verification removed.");
-      setReload((value) => value + 1);
-    } catch {
-      setActionError("Could not update verification. Please try again.");
-    }
+      await api.post(`/admin/users/${encodeURIComponent(profileId)}/verification`, { verified: !verified, reason: verificationReason.trim() });
+      setNotice(verified ? "Verification removed." : "User verified manually.");
+      setVerificationOpen(false);
+      setReload(value => value + 1);
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : "Could not update verification.");
+    } finally { setVerificationBusy(false); }
   };
   const avatarUrl = String(dataValue("avatarUrl", "avatar_url") ?? "");
   const verified = typeof detail.isVerified === "boolean" ? detail.isVerified : profileIdentityVerified(profile);
   const premium = typeof detail.isPremium === "boolean" ? detail.isPremium : profileIdentityPremium(profile);
-  const online = settingBoolean(detail.isOnline ?? dataValue("isOnline", "isOnlineNow", "online"));
+  const online = presence ?? settingBoolean(detail.isOnline ?? dataValue("isOnline", "isOnlineNow", "online"));
   const saveBio = async () => {
     setBioSaving(true);
     setActionError("");
@@ -12664,7 +12804,9 @@ function UserDetail() {
                 </span>
               )}{" "}
               {premium && <span className="premium-mark" title="Premium" aria-label="Premium"><AdminIcon name="crown" /></span>}
-              {online && <em>Online</em>}
+              <em className={`user-presence ${online ? "is-online" : "is-offline"}`} role="status">
+              {online ? "Online" : "Offline"}
+            </em>
             </h1>
             <p>{valueOf(profile.email)}</p>
             <p>
@@ -12681,15 +12823,15 @@ function UserDetail() {
           <button
             type="button"
             className="user-grant-premium"
-            disabled={!verified || premium}
+            disabled={!canGrantPremium}
             title={premium ? "Premium is already active" : !verified ? "Verify the profile before granting Premium" : "Grant Premium"}
             onClick={() => setModal({ kind: "grant", title: "Grant Premium" })}
           >
             <AdminIcon name="crown" /> Grant Premium
           </button>
-          <button onClick={() => void toggleVerification()}>
-            {verified ? "Unverify" : "Verify"}
-          </button>
+          {canVerify && <button onClick={() => { setVerificationReason(""); setVerificationOpen(true); }}>
+            {verified ? "Unverify" : "Manual Verify"}
+          </button>}
           <button
             className="danger"
             onClick={() => setModal({ kind: "ban", title: "Ban user" })}
@@ -12711,7 +12853,7 @@ function UserDetail() {
           <button
             className="danger"
             onClick={() =>
-              setModal({ kind: "delete", title: "Permanently Delete User" })
+              setModal({ kind: "delete", title: "Move user to Trash" })
             }
           >
             <AdminIcon name="trash" /> Delete
@@ -12752,15 +12894,15 @@ function UserDetail() {
         <section className="detail-grid user-profile-grid">
           <article>
             {section("IDs", [
-              ["User ID", dataValue("id", "userId") ?? id],
+              ["User ID", dataValue("userId", "user_id", "authUserId", "id") ?? id],
               [
                 "Profile ID",
-                dataValue("profileId", "profile_id") ?? profile.id,
+                dataValue("profileId", "profile_id", "id") ?? profile.id,
               ],
             ])}
             {section("Basic Info", [
               ["Display Name", dataValue("displayName", "display_name")],
-              ["User Type (legacy)", dataValue("donorType", "userType")],
+              ["User Type (legacy)", dataValue("userType", "profileType", "donorType")],
               ["Date of Birth", profileBirthDate(dataValue("dateOfBirth", "birthDate"))],
               ["Country", dataValue("country") ? userCountryName(dataValue("country")) : null],
               ["State", dataValue("state", "region", "stateName")],
@@ -12777,8 +12919,8 @@ function UserDetail() {
               ["Desired Donor Contact", dataValue("desiredDonorContact")],
             ])}
             {section("Appearance", [
-              ["Height", dataValue("height")],
-              ["Weight", dataValue("weight")],
+              ["Height", dataValue("height") ? `${dataValue("height")} cm` : null],
+              ["Weight", dataValue("weight") ? `${dataValue("weight")} kg` : null],
               ["Eye Color", dataValue("eyeColor")],
               ["Hair Color", dataValue("hairColor")],
               ["Ethnicity", dataValue("ethnicity")],
@@ -12882,8 +13024,8 @@ function UserDetail() {
               ],
               ["Verified", verified],
               ["Verified At", detailDate(dataValue("verifiedAt"))],
-              ["Wizard Completed", dataValue("wizardCompleted")],
-              ["Completeness Score", dataValue("completenessScore")],
+              ["Wizard Completed", dataValue("isWizardCompleted", "wizardCompleted", "onboardingCompleted", "profileComplete")],
+              ["Completeness Score", detail.profileCompleteness != null ? `${detail.profileCompleteness}%` : dataValue("completenessScore")],
             ])}
           </article>
         </section>
@@ -12898,6 +13040,7 @@ function UserDetail() {
             />
           ))}
       </div>
+      <ConfirmModal open={canVerify && verificationOpen} title={verified ? "Revoke Verification" : "Verify User Manually"} message={<label className="verification-reason-field" htmlFor="profile-verification-reason">Reason<textarea id="profile-verification-reason" value={verificationReason} onChange={event => setVerificationReason(event.target.value)} maxLength={2000} rows={3} required /></label>} confirmLabel={verified ? "Revoke" : "Verify"} confirmClassName={verified ? "danger" : "primary"} confirmDisabled={!verificationReason.trim()} busy={verificationBusy} onClose={() => { if (!verificationBusy) setVerificationOpen(false); }} onConfirm={toggleVerification} />
       <ActionModal
         state={modal}
         onClose={() => setModal(null)}
@@ -14092,9 +14235,7 @@ export function AdminApp() {
                     ? "settings"
                     : path.split("/").filter(Boolean)[0] || "dashboard";
   const canAccess = (path: string) =>
-    session.role !== "STAFF" ||
-    permissions.has("*") ||
-    permissions.has(permissionForPath(path));
+    (session.role ?? "").toUpperCase() === "ADMIN" || permissions.has(permissionForPath(path));
   const allowedNav = nav.filter((item) => canAccess(item.path));
   const fallbackPath = allowedNav[0]?.path ?? "/dashboard";
   return (
@@ -14241,6 +14382,7 @@ export function AdminApp() {
               path="/verifications/:id"
               element={<VerificationDetail />}
             />
+            <Route path="/users/trash" element={<UserTrash />} />
             <Route path="/users/:id" element={<UserDetail />} />
             <Route
               path="/clinics/new"

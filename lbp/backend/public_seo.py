@@ -11,7 +11,7 @@ PUBLIC_ROUTES = (
     "", "knowledge-hub", "clinics", "lawyers", "resources", "professionals",
     "trust-safety", "pricing", "contact", "terms-of-use", "privacy-policy", "delete-account",
 )
-HTML_ROUTES = (*PUBLIC_ROUTES, "auth/login", "auth/register", "auth/signup", "auth/forgot-password")
+HTML_ROUTES = (*PUBLIC_ROUTES, "auth/login", "auth/register", "auth/signup", "auth/forgot-password", "tools/ask-ai", "tools/agreement-draft", "resources/co-parenting/compatibility-quiz")
 
 
 def public_origin(value):
@@ -61,11 +61,7 @@ def page_metadata(path, origin, article=None):
     origin = public_origin(origin)
     locale, route, is_article = parse_public_path(path)
     parts = route.split("/") if route else ["home"]
-    label = COPY["labels"].get(route, COPY["labels"].get(parts[0], {})).get(locale)
-    if not label:
-        label = unquote(parts[-1]).replace("-", " ").replace("_", " ").title()
-    if len(parts) > 1 and route not in COPY["labels"]:
-        label += " — " + unquote(parts[-1]).replace("-", " ").replace("_", " ").title()
+    label = COPY["labels"].get(route, COPY["labels"].get(parts[0], COPY["labels"]["not-found"])).get(locale)
     title = label + " | LetsBeParents"
     description = label + ". " + COPY["descriptions"][locale]
     image = origin + COPY["defaultImage"]

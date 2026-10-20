@@ -1,25 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from "react-native";
-import type { BottomTabNavigationProp, BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import type { CompositeNavigationProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { fetchConversations } from "../api/messages";
 import { ApiError } from "../api/client";
 import type { ConversationSummary } from "../api/types";
 import { useI18n } from "../i18n/I18nContext";
-import { colors, radius, spacing, tabBarClearance } from "../theme";
+import { colors, radius, spacing } from "../theme";
 import type { MainTabsParamList } from "../navigation/MainTabs";
 import type { RootStackParamList } from "../navigation/RootNavigator";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import AppHeader from "../components/AppHeader";
 
 type Props = BottomTabScreenProps<MainTabsParamList, "Messages">;
-type TabNav = CompositeNavigationProp<
-  BottomTabNavigationProp<MainTabsParamList, "Messages">,
-  NativeStackNavigationProp<RootStackParamList>
->;
 
 // Restyled to match the prototype's #scr-messages screen: a plain list of
 // rows separated by a hairline (.mlist/.mrow), a 52px circular avatar, a
@@ -31,9 +25,7 @@ type TabNav = CompositeNavigationProp<
 // left out here rather than faking one - a client-side search filter is
 // added instead, since that's a real, deliverable behavior.
 export default function MessagesScreen(_props: Props) {
-  const insets = useSafeAreaInsets();
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const tabNav = useNavigation<TabNav>();
   const { t } = useI18n();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [query, setQuery] = useState("");
@@ -112,7 +104,7 @@ export default function MessagesScreen(_props: Props) {
           this screen's container is a bare unpadded View) - inset it
           here so the avatar isn't flush against the screen edge. */}
       <View style={styles.headerPad}>
-        <AppHeader title={t("nav.messages")} onAvatarPress={() => tabNav.navigate("Me")} badgeCount={totalUnread} />
+        <AppHeader title={t("nav.messages")} badgeCount={totalUnread} />
       </View>
       <View style={styles.searchBar}>
         <Feather name="search" size={16} color={colors.muted} />
@@ -127,7 +119,7 @@ export default function MessagesScreen(_props: Props) {
       <FlatList
         data={filtered}
         keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={[styles.list, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}
+        contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ItemSeparatorComponent={() => <View style={styles.separatorGap} />}
         ListEmptyComponent={
@@ -212,7 +204,7 @@ const styles = StyleSheet.create({
   },
   searchIcon: { fontSize: 14 },
   searchInput: { flex: 1, fontSize: 14, color: colors.ink, padding: 0 },
-  list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.xs + tabBarClearance },
+  list: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.sm },
   separatorGap: { height: 10 },
   row: {
     flexDirection: "row",

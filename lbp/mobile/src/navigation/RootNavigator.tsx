@@ -75,7 +75,7 @@ export type RootStackParamList = {
   // navigate("MainTabs", { screen: "Resources" }) - rather than just
   // undefined, which only supported opening MainTabs at whatever tab it
   // last had focused.
-  MainTabs: NavigatorScreenParams<MainTabsParamList> | undefined;
+  MainTabs: (NavigatorScreenParams<MainTabsParamList> & { returnToWhatsNew?: boolean }) | undefined;
   Chat: { conversationId: number; title: string };
   ProfileDetail: { profileId: number };
   Settings: undefined;
@@ -174,9 +174,8 @@ export type RootStackParamList = {
   // Premium roadmap step 4 - "Invite friends" (MeProfileScreen's new row).
   // No params - reads/writes GET/POST /api/member/referral(/redeem).
   Referral: undefined;
-  // One-shot "what's new" screen (see screens/WhatsNewScreen.tsx) - pushed
-  // automatically once per device, right after ProfileWizard/VerifyCode
-  // clear, by the effect below. No params.
+  // Shown automatically once per device after onboarding, and available
+  // any time from Profile and Settings. No params.
   WhatsNew: undefined;
 };
 
@@ -263,7 +262,14 @@ export default function RootNavigator() {
           <Stack.Screen name="VerifyCode" component={VerifyCodeScreen} />
         ) : isAuthenticated ? (
           <>
-            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen
+              name="MainTabs"
+              component={MainTabs}
+              options={({ route }) => ({
+                headerShown: route.params?.returnToWhatsNew === true,
+                title: t(route.params?.screen === "Messages" ? "nav.messages" : "nav.profile"),
+              })}
+            />
             <Stack.Screen
               name="Chat"
               component={ChatScreen}
@@ -274,7 +280,7 @@ export default function RootNavigator() {
               component={ProfileDetailScreen}
               options={{ headerShown: true, title: t("nav.profileDetailTitle") }}
             />
-            <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: true, headerTransparent: true, headerShadowVisible: false, title: t("nav.settingsTitle") }} />
+            <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: true, headerTransparent: true, headerStyle: { backgroundColor: "transparent" }, headerShadowVisible: false, headerBackVisible: false, title: t("nav.settingsTitle") }} />
             <Stack.Screen name="AiAdvisor" component={AiAdvisorScreen} options={{ headerShown: true, title: t("nav.aiAdvisorTitle") }} />
             <Stack.Screen name="AskAi" component={AskAiScreen} options={{ headerShown: true, title: t("whatsnew.askAiTitle") }} />
             <Stack.Screen name="AgreementDraft" component={AgreementDraftScreen} options={{ headerShown: true, title: t("whatsnew.agreementDraftTitle") }} />

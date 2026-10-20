@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as SecureStore from "expo-secure-store";
+import { AppState } from "react-native";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
-import { setSessionToken } from "../api/session";
+import { getSessionToken, setSessionToken } from "../api/session";
 import { invalidateMyAvatarCache } from "../hooks/useMyAvatar";
-import type { PublicUser } from "../api/types";
+import type { AuthResponse, PublicUser } from "../api/types";
+import { persistSessionToken, TOKEN_STORAGE_KEY } from "../utils/sessionStorage";
 import { registerForPushNotifications, unregisterCurrentPushToken } from "../utils/pushNotifications";
 // TEMP DISABLED for OTA safety (2026-09-12, item 16): expo-notifications/
 // expo-device are not yet installed and the currently-installed app
@@ -16,7 +18,6 @@ import { registerForPushNotifications, unregisterCurrentPushToken } from "../uti
 // `eas build` (after `npx expo install expo-notifications expo-device`).
 // See pending-mobile-tasks.md item 16.
 
-const TOKEN_STORAGE_KEY = "lbp_session_token";
 
 // UPDATE (Sept 2026): GET /api/auth/me (authApi.me()) already returns
 // profileVerified/isPremium alongside the base PublicUser fields (see
@@ -88,11 +89,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // screen ever needs to read it, and it must survive without triggering
   // re-renders.
   const pushTokenRef = useRef<string | null>(null);
+  const signInPromise = useRef<Promise<void> | null>(null);
   useEffect(() => {
     invalidateMyAvatarCache(Boolean(user));
   }, [user?.id]);
+
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!user?.id || !token) return;
+    let live = true;
+    let pending: AbortController | undefined;
+    const pulse = async () => {
+      if (!live || pending || AppState.currentState !== "active" || getSessionToken() !== token) return;
+      const controller = new AbortController();
+      pending = controller;
+      try {
+        await authApi.heartbeat(controller.signal);
+      } catch (err) {
+        if (live && !controller.signal.aborted && getSessionToken() === token && err instanceof ApiError && err.status === 401) {
+          setSessionToken(null);
+          setUser(null);
+          setPendingProfileWizard(false);
+          void SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
+        }
+      } finally {
+        if (pending === controller) pending = undefined;
+      }
+    };
+    const timer = setInterval(() => { void pulse(); }, 30_000);
+    const subscription = AppState.addEventListener("change", () => { void pulse(); });
+    void pulse();
+    return () => {
+      live = false;
+      clearInterval(timer);
+      subscription.remove();
+      pending?.abort();
+    };
+  }, [user?.id]);
   async function syncPushToken() {
     pushTokenRef.current = await registerForPushNotifications();
+  }
+
+  function signIn(request: () => Promise<AuthResponse>, source: "login" | "signup" | "social"): Promise<void> {
+    if (signInPromise.current) return signInPromise.current;
+    const attempt = (async () => {
+      const res = await request();
+      const accountCreated = source === "signup" || (source === "social" && res.isNewUser === true);
+      await persistSessionToken(res.sessionToken, accountCreated);
+      setSessionToken(res.sessionToken);
+      setUser(res.user);
+      setPendingProfileWizard(source === "signup" ? res.user.needsProfileWizard !== false :
+        res.user.needsProfileWizard === true || (source === "social" && !!res.isNewUser && res.user.isWizardCompleted !== true));
+      setInitialEmailSendFailed(source === "signup" && res.emailSent === false);
+      void syncPushToken();
+    })().finally(() => {
+      if (signInPromise.current === attempt) signInPromise.current = null;
+    });
+    signInPromise.current = attempt;
+    return attempt;
   }
 
   // On app start: if we have a saved token, verify it's still valid against
@@ -128,35 +182,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       initialEmailSendFailed,
       async login(email, password) {
-        const res = await authApi.login(email, password);
-        setSessionToken(res.sessionToken);
-        await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
-        setUser(res.user);
-        // A profile can be incomplete when this is the first login after
-        // registration, or after an administrator has reset it. In both
-        // cases the API is authoritative and the navigator must open the
-        // required onboarding flow after email verification.
-        setPendingProfileWizard(res.user.needsProfileWizard === true);
-        void syncPushToken();
+        return signIn(() => authApi.login(email, password), "login");
       },
       async signup(email, password, displayName) {
-        const res = await authApi.signup(email, password, displayName);
-        setSessionToken(res.sessionToken);
-        await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
-        setUser(res.user);
-        setPendingProfileWizard(res.user.needsProfileWizard !== false);
-        setInitialEmailSendFailed(res.emailSent === false);
-        void syncPushToken();
+        return signIn(() => authApi.signup(email, password, displayName), "signup");
       },
       async socialLogin(idToken, displayName, intent) {
-        const res = await authApi.authenticateWithFirebase(idToken, displayName, intent);
-        setSessionToken(res.sessionToken);
-        await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, res.sessionToken);
-        setUser(res.user);
-        // Only a brand-new social account needs the wizard - one that already
-        // existed (a returning Google/Apple login) already has a profile.
-        setPendingProfileWizard(res.user.needsProfileWizard === true || (!!res.isNewUser && res.user.isWizardCompleted !== true));
-        void syncPushToken();
+        return signIn(() => authApi.authenticateWithFirebase(idToken, displayName, intent), "social");
       },
       async refreshUser() {
         const { user: freshUser } = await authApi.me();

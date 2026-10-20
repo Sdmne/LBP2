@@ -16,6 +16,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { ApiError } from "../api/client";
+import { describeSessionStorageError, SessionStorageError } from "../utils/sessionStorage";
 import SocialAuthButtons from "../components/SocialAuthButtons";
 import { colors, radius, spacing } from "../theme";
 import { Feather } from "@expo/vector-icons";
@@ -44,7 +45,9 @@ export default function SignupScreen({ navigation }: Props) {
     try {
       await signup(email.trim(), password, displayName.trim());
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof SessionStorageError) {
+        setError(describeSessionStorageError(err, t));
+      } else if (err instanceof ApiError) {
         setError(describeSignupError(err, t));
       } else {
         setError(t("common.somethingWrong"));

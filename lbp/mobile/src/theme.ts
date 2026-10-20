@@ -68,11 +68,11 @@ export const radius = {
   pill: 999,
 };
 
-// UPDATE (Sept 2026): MainTabs now renders a floating "pill" tab bar
-// (position:absolute, floating above the bottom edge) instead of docking a
-// flat bar in the layout flow - matches the prototype's .tabbar. Anything
-// that scrolls or absolutely-positions content in a tab screen needs this
-// much clearance at the bottom so the pill doesn't sit on top of it -
-// mirrors the prototype's own .tabbar-spacer{flex:0 0 92px}.
-export const tabBarClearance = 96;
+// MainTabs reserves the shared navigation and AI footer outside each scene.
+export const navigationLayout = {
+  tabBarHeight: 60,
+  tabBarBottom: 22,
+  aiButtonSize: 52,
+  aiButtonGap: 12,
+};
 

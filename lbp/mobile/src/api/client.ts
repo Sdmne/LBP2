@@ -232,9 +232,9 @@ export async function downloadAndOpenPrivateFile(path: string, suggestedName: st
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
+  get: <T>(path: string, options?: { signal?: AbortSignal; headers?: HeadersInit }) => request<T>(path, options),
+  post: <T>(path: string, body?: unknown, options?: Pick<RequestInit, "headers" | "signal" | "credentials">) =>
+    request<T>(path, { ...options, method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PATCH", body: body === undefined ? undefined : JSON.stringify(body) }),
   put: <T>(path: string, body?: unknown) =>

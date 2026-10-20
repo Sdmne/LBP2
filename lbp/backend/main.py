@@ -1,3 +1,4 @@
+from account_retention import TRASH_STATUSES, VISIBILITY_FIELDS, utc_datetime, deletion_deadline, can_restore_account, restored_profile_data
 import os
 import base64
 import html
@@ -29,6 +30,7 @@ from contextlib import contextmanager
 from threading import Lock, Thread
 from typing import Any, Literal
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 
 try:
@@ -65,12 +67,19 @@ from firebase_admin import credentials as firebase_credentials
 from auth_security import hash_password, password_needs_rehash, token_hash, verify_password
 from cookie_security import CookieCipher, decode_consent_level, encode_consent_level
 from content_security import sanitize_content_values
+from storage_files import inspect_storage_file, storage_file_path, clear_storage_file_facts
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from public_seo import page_metadata, parse_public_path, render_page_html, render_sitemap
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator
+import logging
+from request_security import (
+    ContactBodyLimitMiddleware, RateLimitExceeded, request_ip, throttle_key, consume_window,
+    check_login_backoff, record_login_failure, clear_login_backoff,
+)
+
 from postgres_database import postgres_cursor
 
 
@@ -95,6 +104,10 @@ ADMIN_DISABLED_LOGIN_EMAILS = {
 }
 ADMIN_SESSION_COOKIE = "lbp_admin_session"
 ADMIN_SESSION_HOURS = 12
+ADMIN_SESSION_SECRET = os.getenv("ADMIN_SESSION_SECRET", "").strip()
+ADMIN_LOGIN_MAX_FAILURES = 5
+ADMIN_LOGIN_LOCK_SECONDS = 30 * 60
+ADMIN_AUTHORIZATION_MAX_LENGTH = 4096
 AMPLITUDE_API_KEY = os.getenv("AMPLITUDE_API_KEY", "").strip()
 AMPLITUDE_USER_PROFILE_URL_TEMPLATE = os.getenv(
     "AMPLITUDE_USER_PROFILE_URL_TEMPLATE",
@@ -106,6 +119,7 @@ PARTNER_ACCOUNT_EMAIL = os.getenv("PARTNER_ACCOUNT_EMAIL", "").strip()
 PARTNER_DEFAULT_ID = os.getenv("PARTNER_DEFAULT_ID", "").strip()
 PARTNER_DEFAULT_CLINIC_ID = os.getenv("PARTNER_DEFAULT_CLINIC_ID", "").strip()
 SESSION_DAYS = 7
+AUTH_LOGIN_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 COOKIE_CONSENT_DAYS = 180
 COOKIE_ATTRIBUTION_DAYS = 90
 COOKIE_LOCALE_DAYS = 365
@@ -131,7 +145,7 @@ EMAIL_VERIFICATION_HOURS = 24
 PASSWORD_RESET_MINUTES = 60
 AUTH_EMAIL_RESEND_SECONDS = 60
 ACCOUNT_DELETION_DAYS = 30
-ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "3600")))
+ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "300")))
 ACCOUNT_DELETION_PENDING_STATUS = "DELETION_PENDING"
 ACCOUNT_DELETION_LEGACY_PENDING_STATUS = "PENDING_DELETION"
 DELETED_ACCOUNT_EMAIL_DOMAIN = "deleted.invalid"
@@ -452,9 +466,9 @@ if EXPECTED_FIREBASE_PROJECT_ID and VISION_PROJECT_ID and VISION_PROJECT_ID != E
 app = FastAPI(
     title="Elena LetsBeParents replacement API",
     version="0.1.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 app.add_middleware(
@@ -464,6 +478,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+app.add_middleware(ContactBodyLimitMiddleware)
 
 
 @app.middleware("http")
@@ -1432,7 +1449,7 @@ def ai_advisor_call_claude(
     max_tokens: int | None = None,
 ) -> str:
     if not ai_advisor_is_configured():
-        raise HTTPException(status_code=503, detail="The AI Family Advisor is not configured yet")
+        raise HTTPException(status_code=503, detail="AI service is temporarily unavailable. Please try again later.")
     body = json.dumps(
         {
             "model": ANTHROPIC_MODEL,
@@ -1456,33 +1473,25 @@ def ai_advisor_call_claude(
         with urllib.request.urlopen(request, timeout=ANTHROPIC_TIMEOUT_SECONDS) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
-        provider_body = error.read().decode("utf-8", errors="replace")[:2000]
-        try:
-            provider_data = json.loads(provider_body)
-            detail = (provider_data.get("error") or {}).get("message") or "AI Family Advisor provider rejected the request"
-        except (json.JSONDecodeError, AttributeError):
-            detail = "AI Family Advisor provider rejected the request"
-        raise HTTPException(status_code=502, detail=str(detail)) from error
-    except (urllib.error.URLError, TimeoutError) as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor is temporarily unavailable") from error
+        logging.getLogger(__name__).warning("AI provider request failed with HTTP %s", error.code)
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.") from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        logging.getLogger(__name__).warning("AI provider transport failed")
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.") from None
     try:
         data = json.loads(raw.decode("utf-8")) if raw else {}
     except json.JSONDecodeError as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an invalid response") from error
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.") from error
     content = data.get("content") if isinstance(data, dict) else None
     text_parts = [block.get("text", "") for block in (content or []) if isinstance(block, dict) and block.get("type") == "text"]
     reply = "".join(text_parts).strip()
     if not reply:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an empty response")
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.")
     return reply
 
 
 def client_ip_of(request: Request) -> str:
-    # Mirrors the forwarded-for extraction already used for device-session
-    # logging (record_device_session, below) - same reverse-proxy assumption.
-    forwarded_for = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
-    client_host = getattr(request.client, "host", "") if request.client else ""
-    return forwarded_for or client_host or "unknown"
+    return request_ip(request)
 
 
 # Public AI tools (quiz insight / Ask AI / agreement draft) are free,
@@ -1532,6 +1541,10 @@ def ai_public_record_use(cursor, feature: str, client_ip: str) -> None:
 
 
 def enforce_ai_public_rate_limit(cursor, feature: str, client_ip: str) -> None:
+    cursor.execute("SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0)) AS acquired",
+                   (throttle_key("ai-quota-" + feature, client_ip),))
+    if not cursor.fetchone()["acquired"]:
+        raise HTTPException(status_code=429, detail="An AI request is already running. Please try again shortly.", headers={"Retry-After": "5"})
     limit = AI_PUBLIC_RATE_LIMITS.get(feature, 10)
     if ai_public_daily_use_count(cursor, feature, client_ip) >= limit:
         raise HTTPException(
@@ -1718,12 +1731,17 @@ def slugify(value: str, fallback: str = "item") -> str:
     return slug or fallback
 
 
+def clinic_slug_name(name: str) -> str:
+    # These numbered Phyathai branches use their supplied city in public URLs.
+    return re.sub(r"(?i)^(phyathai hospital)\s+[1-3]$", r"\1", name.strip())
+
+
 def unique_clinic_slug(cursor, name: str, city: str = "", country: str = "") -> str:
-    base = slugify(name, "clinic")
+    base = slugify(clinic_slug_name(name), "clinic")
     location = slugify(city, "")
     country_slug = slugify(country, "")
     candidates = [
-        base,
+        f"{base}-{location}" if clinic_slug_name(name) != name.strip() and location else base,
         f"{base}-{location}" if location else "",
         f"{base}-{location}-{country_slug}" if location and country_slug else "",
         f"{base}-{country_slug}" if country_slug else "",
@@ -1753,7 +1771,7 @@ def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
         key=lambda row: (str(row.get("name") or "").casefold(), str(row.get("id") or "")),
     )
     for row in ordered_rows:
-        base = slugify(str(row.get("name") or ""), "clinic")
+        base = slugify(clinic_slug_name(str(row.get("name") or "")), "clinic")
         groups.setdefault(base, []).append(row)
     reserved = set(groups)
     used: set[str] = set()
@@ -1777,6 +1795,15 @@ def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
             used.add(canonical)
             result[str(row.get("id"))] = canonical
     return result
+
+
+def clinic_slug_target(rows: list[dict[str, Any]], slug: str) -> dict[str, Any] | None:
+    for key in ("canonicalSlug", "slug"):
+        target = next((row for row in rows if str(row.get(key) or "").strip() == slug), None)
+        if target is not None:
+            return target
+    aliases = [row for row in rows if slugify(str(row.get("name") or ""), "clinic") == slug]
+    return aliases[0] if len(aliases) == 1 else None
 
 
 def public_user(row: dict[str, Any]) -> dict[str, Any]:
@@ -1864,6 +1891,19 @@ class ContactPayload(BaseModel):
     subject: str | None = Field(default=None, max_length=255)
     message: str | None = Field(default=None, max_length=5000)
     payload: dict[str, Any] = Field(default_factory=dict)
+    website: str = Field(default="", max_length=512)
+
+    @field_validator("payload")
+    @classmethod
+    def bounded_payload(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+        except (ValueError, TypeError, RecursionError):
+            raise ValueError("Invalid contact payload") from None
+        if size > 8192:
+            raise ValueError("Contact payload exceeds the size limit")
+        return value
+
 
 
 class ProfileUpdatePayload(BaseModel):
@@ -2122,6 +2162,34 @@ class AdminPatchPayload(BaseModel):
 
 class AdminCreatePayload(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminStorageSelectionPayload(BaseModel):
+    ids: list[int] = Field(default_factory=list, max_length=100)
+    allTrash: bool = False
+
+    @field_validator("ids")
+    @classmethod
+    def positive_ids(cls, values: list[int]) -> list[int]:
+        if any(value < 1 for value in values):
+            raise ValueError("File identifiers must be positive")
+        return sorted(set(values))
+
+
+class AdminVerificationActionPayload(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Enter a reason for this verification action")
+        return value
+
+
+class AdminProfileVerificationPayload(AdminVerificationActionPayload):
+    verified: bool
 
 
 class AdminLoginPayload(BaseModel):
@@ -2759,12 +2827,71 @@ def b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode((value + padding).encode("ascii"))
 
 
+def admin_request_ip(request: Request) -> str:
+    from ipaddress import ip_address, ip_network
+    raw = str(getattr(request.client, "host", "") or "unknown")
+    trusted = [ip_network(value.strip(), strict=False) for value in os.getenv("ADMIN_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16").split(",") if value.strip()]
+    try:
+        peer = ip_address(raw)
+        if any(peer in network for network in trusted):
+            for candidate in reversed(str(request.headers.get("x-forwarded-for") or "").split(",")):
+                address = ip_address(candidate.strip())
+                if not any(address in network for network in trusted):
+                    return str(address)
+        return str(peer)
+    except ValueError:
+        return raw[:128]
+
+
+def admin_login_with_limits(request: Request, email: str, password: str) -> None:
+    identity = str(email or "").strip().lower()[:320]
+    client_ip = admin_request_ip(request)
+    key = hashlib.sha256((identity + "\0" + client_ip).encode("utf-8")).hexdigest()
+    lock_key = int.from_bytes(bytes.fromhex(key[:16]), "big", signed=True)
+    now = now_utc()
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+        cursor.execute("SELECT id, data FROM app_entities WHERE entity_type = 'admin_login_guard' AND source_key = %s ORDER BY id DESC LIMIT 1 FOR UPDATE", (key,))
+        row = cursor.fetchone()
+        state = as_dict((row or {}).get("data"))
+        def timestamp(value):
+            try:
+                result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                return result.replace(tzinfo=timezone.utc) if result.tzinfo is None else result
+            except (TypeError, ValueError):
+                return None
+        blocked_until = timestamp(state.get("blockedUntil"))
+        if blocked_until and blocked_until > now:
+            remaining = max(1, math.ceil((blocked_until - now).total_seconds()))
+            raise HTTPException(status_code=429, detail=f"Too many failed sign-in attempts. Try again in {math.ceil(remaining / 60)} minutes.", headers={"Retry-After": str(remaining)})
+        if len(identity) <= 320 and len(password) <= 200 and has_valid_admin_credentials(identity, password):
+            if row and state.get("failures"):
+                cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps({"failures": 0}), row["id"]))
+                conn.commit()
+            return
+        last_failure = timestamp(state.get("lastFailureAt"))
+        failures = int(state.get("failures") or 0) + 1 if last_failure and (now - last_failure).total_seconds() < ADMIN_LOGIN_LOCK_SECONDS and not blocked_until else 1
+        blocked_until = now + timedelta(seconds=ADMIN_LOGIN_LOCK_SECONDS) if failures >= ADMIN_LOGIN_MAX_FAILURES else None
+        state = {"failures": failures, "lastFailureAt": now.isoformat(), "blockedUntil": blocked_until.isoformat() if blocked_until else None}
+        if row:
+            cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps(state), row["id"]))
+        else:
+            cursor.execute("INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at) VALUES ('admin_login_guard', %s, 'Admin sign-in protection', 'ACTIVE', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())", (key, json.dumps(state)))
+        audit(conn, identity or "unknown", "ADMIN_LOGIN_FAILED", "admin_login", key, {"clientIp": client_ip, "failedAttempts": failures, "blockedUntil": state["blockedUntil"]})
+        conn.commit()
+    if blocked_until:
+        raise HTTPException(status_code=429, detail="Too many failed sign-in attempts. Sign-in is blocked for 30 minutes.", headers={"Retry-After": str(ADMIN_LOGIN_LOCK_SECONDS)})
+    raise HTTPException(status_code=401, detail="Invalid admin credentials")
+
+
 def sign_admin_session(user: str) -> str:
+    if len(ADMIN_SESSION_SECRET) < 32:
+        raise HTTPException(status_code=503, detail="Admin session signing is not configured")
     expires = now_utc() + timedelta(hours=ADMIN_SESSION_HOURS)
     account = dynamic_admin_account(user)
     payload = {"user": user, "exp": int(expires.timestamp()), "version": int((account or {}).get("sessionVersion") or 0)}
     body = b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signature = hmac.new(ADMIN_API_PASSWORD.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    signature = hmac.new(ADMIN_SESSION_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
 
 
@@ -2824,43 +2951,154 @@ def has_valid_admin_credentials(user: str | None, password: str | None) -> bool:
     return primary_match or test_match
 
 
-def required_admin_permissions(path: str) -> set[str]:
-    tail = path.removeprefix("/api/admin/").strip("/")
-    if not tail or tail in {"session", "logout", "login", "filters"}: return set()
-    if tail == "stats": return {"dashboard"}
-    if tail == "audit-log": return {"settings"}
-    if tail.startswith("accounts") or tail.startswith("settings") or tail.startswith("list/settings") or tail.startswith("item/settings") or tail.startswith("create/settings") or tail.startswith("notifications/test"): return {"settings"}
-    if tail.startswith("operations"): return {"monitoring", "storage", "settings"}
-    if tail.startswith("users") or tail.startswith("list/users") or tail.startswith("item/users"): return {"users"}
-    if tail.startswith("subscriptions") or tail.startswith("list/subscriptions") or tail.startswith("item/subscriptions"): return {"subscriptions"}
-    if tail.startswith("list/verifications") or tail.startswith("item/verifications"): return {"verifications"}
-    if tail.startswith("clinics") or tail.startswith("list/clinics") or tail.startswith("item/clinics"): return {"clinics"}
-    if tail.startswith("list/lawyers") or tail.startswith("item/lawyers"): return {"lawyers"}
-    if "article" in tail or "categor" in tail: return {"articles"}
-    if tail.startswith("support"): return {"support"}
-    if "moderation-photos" in tail: return {"moderation-photos"}
-    if "moderation-reports" in tail or "reports" in tail: return {"moderation-reports"}
-    if tail.startswith("livekit"): return {"livekit"}
-    if "static-pages" in tail: return {"static-pages"}
-    if "marketing" in tail: return {"marketing"}
-    return set()
+ADMIN_ROUTE_PERMISSIONS = (('GET', '/api/admin/users/trash', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/trash', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/restore', ('users',)),
+ ('POST', '/api/admin/video-verifications/[^/]+/review', ('video-verifications',)),
+ ('GET', '/api/admin/video-verifications/[^/]+/content', ('video-verifications',)),
+ ('POST', '/api/admin/users/[^/]+/community-expert', ('users',)),
+ ('POST', '/api/admin/login', ()),
+ ('POST', '/api/admin/logout', ()),
+ ('GET', '/api/admin/session', ()),
+ ('GET', '/api/admin/audit-log', ('settings',)),
+ ('GET', '/api/admin/accounts', ('settings',)),
+ ('POST', '/api/admin/accounts', ('settings',)),
+ ('PATCH', '/api/admin/accounts/[^/]+', ('settings',)),
+ ('GET', '/api/admin/marketing/campaigns', ('marketing',)),
+ ('GET', '/api/admin/marketing/preview', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns', ('marketing',)),
+ ('GET', '/api/admin/marketing/campaigns/[^/]+', ('marketing',)),
+ ('PATCH', '/api/admin/marketing/campaigns/[^/]+', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns/[^/]+/send-now', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns/[^/]+/schedule', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns/[^/]+/cancel', ('marketing',)),
+ ('POST', '/api/admin/marketing/test-send', ('marketing',)),
+ ('POST', '/api/admin/notifications/test', ('settings',)),
+ ('GET', '/api/admin/subscriptions/summary', ('subscriptions',)),
+ ('GET', '/api/admin/navigation-counts', ()),
+ ('GET', '/api/admin/stats', ('dashboard',)),
+ ('GET', '/api/admin/monitoring', ('monitoring',)),
+ ('POST', '/api/admin/monitoring/slow-queries/reset', ('monitoring',)),
+ ('GET', '/api/admin/operations', ('monitoring', 'settings', 'storage')),
+ ('GET', '/api/admin/profiles', ('users',)),
+ ('GET', '/api/admin/users/[^/]+/presence', ('users',)),
+ ('GET', '/api/admin/users/[^/]+/overview', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/support/ensure', ('users',)),
+ ('GET', '/api/admin/users/[^/]+/tabs/[^/]+', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/amplitude', ('users',)),
+ ('POST', '/api/admin/clinics', ('clinics',)),
+ ('GET', '/api/admin/clinics/[^/]+/overview', ('clinics',)),
+ ('PATCH', '/api/admin/clinics/[^/]+', ('clinics',)),
+ ('POST', '/api/admin/clinics/[^/]+/logo', ('clinics',)),
+ ('DELETE', '/api/admin/clinics/[^/]+', ('clinics',)),
+ ('POST', '/api/admin/lawyers', ('lawyers',)),
+ ('GET', '/api/admin/lawyers/[^/]+/overview', ('lawyers',)),
+ ('PATCH', '/api/admin/lawyers/[^/]+', ('lawyers',)),
+ ('POST', '/api/admin/lawyers/[^/]+/photo', ('lawyers',)),
+ ('POST', '/api/admin/subscriptions/grant', ('subscriptions',)),
+ ('POST', '/api/admin/subscriptions/[^/]+/review', ('subscriptions',)),
+ ('POST', '/api/admin/boosts/[^/]+/review', ('boosts',)),
+ ('POST', '/api/admin/subscriptions/[^/]+/revoke', ('subscriptions',)),
+ ('GET', '/api/admin/support', ('support',)),
+ ('GET', '/api/admin/support/[^/]+', ('support',)),
+ ('POST', '/api/admin/support/[^/]+/messages', ('support',)),
+ ('POST', '/api/admin/support/[^/]+/resolve', ('support',)),
+ ('POST', '/api/admin/article-images', ('articles',)),
+ ('GET', '/api/admin/verifications/[^/]+', ('verifications',)),
+ ('POST', '/api/admin/verifications/[^/]+/approve', ('verifications',)),
+ ('POST', '/api/admin/verifications/[^/]+/revoke', ('verifications',)),
+ ('DELETE', '/api/admin/verifications/[^/]+', ('verifications',)),
+ ('GET', '/api/admin/storage', ('storage',)),
+ ('POST', '/api/admin/users/[^/]+/photos/[^/]+/avatar', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/photos/[^/]+/primary', ('users',)),
+ ('DELETE', '/api/admin/users/[^/]+/photos/[^/]+', ('users',)),
+ ('GET', '/api/admin/profile-photos/[^/]+/content', ('users', 'moderation-photos', 'storage', 'verifications')),
+ ('GET',
+  '/api/admin/media/[^/]+/content',
+  ('storage',
+   'users',
+   'moderation-photos',
+   'verifications',
+   'support',
+   'articles',
+   'clinics',
+   'lawyers',
+   'video-verifications')),
+ ('GET', '/api/admin/filter-options', ()),
+ ('POST', '/api/admin/users/[^/]+/verification', ('users',)),
+ ('POST', '/api/admin/storage/(trash|restore|purge)', ('storage',)),
+ ('DELETE', '/api/admin/articles/[^/]+', ('articles',)),
+ ('GET', '/api/admin/articles/[^/]+', ('articles',)))
+ADMIN_VIEW_PERMISSIONS = {'users': 'users',
+ 'profiles': 'users',
+ 'partners': 'users',
+ 'safety-checkins': 'users',
+ 'referrals': 'users',
+ 'coparenting-agreements': 'users',
+ 'profile-views': 'users',
+ 'favourite-clinics': 'users',
+ 'favourite-lawyers': 'users',
+ 'favorite-clinics': 'users',
+ 'favorite-lawyers': 'users',
+ 'deletion-feedback': 'users',
+ 'account-deletion': 'users',
+ 'subscriptions': 'subscriptions',
+ 'subscription-events': 'subscriptions',
+ 'verifications': 'verifications',
+ 'clinics': 'clinics',
+ 'lawyers': 'lawyers',
+ 'articles': 'articles',
+ 'categories': 'articles',
+ 'boosts': 'boosts',
+ 'video-verifications': 'video-verifications',
+ 'community-groups': 'community-groups',
+ 'community-posts': 'community-groups',
+ 'community-replies': 'community-groups',
+ 'settings': 'settings',
+ 'settings-modules': 'settings',
+ 'settings-api-keys': 'settings',
+ 'settings-audit-log': 'settings',
+ 'settings-moderation': 'settings',
+ 'settings-ranking': 'settings',
+ 'settings-app-stores': 'settings',
+ 'marketing': 'marketing',
+ 'moderation-photos': 'moderation-photos',
+ 'moderation-reports': 'moderation-reports',
+ 'support': 'support',
+ 'livekit': 'livekit',
+ 'static-pages': 'static-pages'}
+
+def required_admin_permissions(path: str, method: str = "GET") -> set[str] | None:
+    generic = re.fullmatch(r"/api/admin/(list|item|create)/([^/]+)(?:/[^/]+)?", path.rstrip("/"))
+    if generic:
+        operation, view = generic.groups()
+        expected = {"list": {"GET"}, "item": {"PATCH", "DELETE"}, "create": {"POST"}}
+        section = ADMIN_VIEW_PERMISSIONS.get(view)
+        return {section} if section and method.upper() in expected[operation] else None
+    for allowed_method, pattern, permissions in ADMIN_ROUTE_PERMISSIONS:
+        if method.upper() == allowed_method and re.fullmatch(pattern, path.rstrip("/")):
+            return set(permissions)
+    return None
 
 
 def enforce_admin_permissions(request: Request, user: str) -> None:
     account = dynamic_admin_account(user)
-    if not account or str(account.get("role") or "ADMIN").upper() == "ADMIN": return
-    granted = {str(item) for item in account.get("permissions", []) if item}
-    required = required_admin_permissions(request.url.path)
-    if required and not granted.intersection(required):
+    if account and str(account.get("role") or "").strip().upper() == "ADMIN":
+        return
+    if not account and is_configured_admin_user(user):
+        return
+    required = required_admin_permissions(request.url.path, request.method)
+    granted = {str(item) for item in (account or {}).get("permissions", []) if item}
+    if required is None or (required and not granted.intersection(required)):
         raise HTTPException(status_code=403, detail="This admin account does not have permission for this section")
 
 
 def verify_admin_session(token: str | None) -> str | None:
-    if not token or not ADMIN_API_PASSWORD:
+    if not token or len(ADMIN_SESSION_SECRET) < 32:
         return None
     try:
         body, signature = token.rsplit(".", 1)
-        expected = hmac.new(ADMIN_API_PASSWORD.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+        expected = hmac.new(ADMIN_SESSION_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
         if not secrets.compare_digest(signature, expected):
             return None
         payload = json.loads(b64url_decode(body).decode("utf-8"))
@@ -2876,20 +3114,30 @@ def verify_admin_session(token: str | None) -> str | None:
         return None
 
 
-def require_admin(
-    request: Request,
-    credentials: HTTPBasicCredentials | None = Depends(security),
-) -> str:
+def require_admin(request: Request) -> str:
     if not ADMIN_API_PASSWORD:
         raise HTTPException(status_code=503, detail="Admin API password is not configured")
-    if credentials and has_valid_admin_credentials(credentials.username, credentials.password):
-        enforce_admin_permissions(request, credentials.username)
-        return credentials.username
+    authorization = str(request.headers.get("authorization") or "")
+    if len(authorization) > ADMIN_AUTHORIZATION_MAX_LENGTH:
+        raise HTTPException(status_code=431, detail="Authorization header is too large")
+    scheme, _, encoded = authorization.partition(" ")
+    if scheme.lower() == "basic":
+        email = password = ""
+        try:
+            decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+            email, separator, password = decoded.partition(":")
+            if not separator or len(email) > 320:
+                email = password = ""
+        except (ValueError, UnicodeDecodeError):
+            pass
+        admin_login_with_limits(request, email, password)
+        enforce_admin_permissions(request, email)
+        return email
     session_user = verify_admin_session(request.cookies.get(ADMIN_SESSION_COOKIE))
     if session_user:
         enforce_admin_permissions(request, session_user)
         return session_user
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin credentials")
+    raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 
 def sign_partner_token(user: dict[str, Any]) -> tuple[str, str]:
@@ -3070,7 +3318,7 @@ def require_user(request: Request, authorization: str | None = Header(None)) -> 
     tokens = request_session_tokens(request, authorization)
     if not tokens:
         raise HTTPException(status_code=401, detail="Session token required")
-    with db_cursor() as (conn, cursor):
+    with db_cursor() as (_, cursor):
         for token in tokens:
             cursor.execute(
                 """
@@ -3089,8 +3337,6 @@ def require_user(request: Request, authorization: str | None = Header(None)) -> 
             row = cursor.fetchone()
             if not row:
                 continue
-            cursor.execute("UPDATE auth_sessions SET last_seen_at = UTC_TIMESTAMP() WHERE id = %s", (row["session_id"],))
-            conn.commit()
             row["_session_token"] = token
             return row
     raise HTTPException(status_code=401, detail="Invalid or expired session")
@@ -3107,13 +3353,25 @@ def optional_user(request: Request, authorization: str | None = Header(None)) ->
         raise
 
 
+def profile_online_sql(profile_expression: str) -> str:
+    return f"""EXISTS (
+        SELECT 1 FROM local_users presence_user
+        JOIN auth_sessions presence_session ON presence_session.user_id = presence_user.id
+        WHERE presence_user.profile_id = ({profile_expression})
+          AND presence_user.status = 'ACTIVE'
+          AND presence_session.revoked_at IS NULL
+          AND presence_session.expires_at > CURRENT_TIMESTAMP
+          AND presence_session.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+    )"""
+
+
 def create_session(cursor, user_id: int) -> tuple[str, str]:
     token = secrets.token_urlsafe(42)
     expires = now_utc() + timedelta(days=SESSION_DAYS)
     cursor.execute(
         """
-        INSERT INTO auth_sessions (user_id, token_hash, expires_at)
-        VALUES (%s, %s, %s)
+        INSERT INTO auth_sessions (user_id, token_hash, expires_at, last_seen_at)
+        VALUES (%s, %s, %s, UTC_TIMESTAMP())
         """,
         (user_id, token_hash(token), database_datetime(expires)),
     )
@@ -3314,7 +3572,11 @@ def normalize_platform_name(raw_source: Any, raw_user_agent: Any) -> str:
 def profile_has_verified_badge(profile: dict[str, Any] | None) -> bool:
     if not profile:
         return False
+    if profile.get("hasApprovedPrimaryPhoto") is False:
+        return False
     data = profile_data(profile)
+    if str(data.get("source") or "").startswith("handover_") and not data.get("verificationProvider"):
+        return json_bool(profile, "approvedVerification")
     verified_at = data.get("verifiedAt") or profile.get("verifiedAt")
     has_verified_at = str(verified_at or "").strip().lower() not in {"", "null", "none"}
 
@@ -3340,6 +3602,19 @@ def normalized_avatar_url(value: Any) -> str | None:
     return None if value.lower() in {"", "null", "none", "undefined"} else value
 
 
+def profile_summary_age(row: dict[str, Any], data: dict[str, Any]) -> int | None:
+    birth_value = data.get("dateOfBirth") or row.get("dateOfBirth")
+    birth = profile_birth_date(str(birth_value or "").split("T", 1)[0])
+    if birth:
+        today = now_utc().date()
+        age = today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))
+    else:
+        age = int_or_none(row.get("age"))
+        if age is None:
+            age = int_or_none(data.get("age"))
+    return age if age is not None and 0 <= age <= 120 else None
+
+
 def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if not row:
         return None
@@ -3360,6 +3635,7 @@ def public_profile_summary(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return {
         "id": row.get("id"),
         "displayName": row.get("displayName") or row.get("display_name"),
+        "age": profile_summary_age(row, data),
         "role": row.get("role"),
         "status": row.get("status"),
         "country": row.get("country") or data.get("country"),
@@ -3457,34 +3733,81 @@ def inferred_article_category(title: str, slug: str, meta: dict[str, Any]) -> st
 
 
 def attach_profile_photos(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    profile_ids = sorted({profile_id for item in items if (profile_id := int_or_none(item.get("id")))})
+    profile_ids = [int(value) for item in items if (value := int_or_none(item.get("id")))]
     if not profile_ids:
         return items
+    legacy_ids = [int(item["id"]) for item in items
+                  if str(as_dict(item.get("data")).get("source") or "").startswith("handover_")
+                  and "approvedVerification" not in item]
+    approved_ids: set[int] = set()
+    if legacy_ids:
+        legacy_placeholders = ", ".join(["%s"] * len(legacy_ids))
+        cursor.execute(f"""
+            SELECT profiles.id AS profileId FROM profiles
+            WHERE profiles.id IN ({legacy_placeholders}) AND EXISTS (
+                SELECT 1 FROM app_entities verification
+                WHERE verification.entity_type = 'verification'
+                  AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
+                  AND (verification.data->>'profileId' = CAST(profiles.id AS TEXT)
+                       OR verification.data->'user'->>'id' = COALESCE(
+                           NULLIF(profiles.data->>'userId', ''), profiles.data->>'id'))
+            )
+            """, legacy_ids)
+        approved_ids = {int(row["profileId"]) for row in cursor.fetchall()}
     placeholders = ", ".join(["%s"] * len(profile_ids))
     cursor.execute(
         f"""
-        SELECT profile_id AS profileId, public_url AS publicUrl
-        FROM profile_photos
-        WHERE status = 'ACTIVE' AND moderation_status = 'APPROVED' AND profile_id IN ({placeholders})
-        ORDER BY profile_id ASC, position ASC, id ASC
-        """,
-        profile_ids,
+        SELECT pp.id, pp.profile_id AS profileId, pp.public_url AS publicUrl,
+               COALESCE(NULLIF(avatar_media.public_url, ''), pp.public_url) AS avatarUrl,
+               pp.position
+        FROM profile_photos pp
+        LEFT JOIN media_files avatar_media ON avatar_media.id = pp.avatar_media_file_id
+        WHERE pp.status = 'ACTIVE' AND pp.moderation_status = 'APPROVED'
+          AND pp.profile_id IN ({placeholders})
+        ORDER BY pp.profile_id ASC, pp.position ASC, pp.id ASC
+        """, profile_ids,
     )
-    photos_by_profile: dict[int, list[str]] = {}
+    by_profile: dict[int, list[dict[str, Any]]] = {}
     for photo in cursor.fetchall():
         profile_id = int_or_none(photo.get("profileId"))
-        public_url = str(photo.get("publicUrl") or "").strip()
-        if profile_id and public_url:
-            photos_by_profile.setdefault(profile_id, []).append(public_url)
+        url = normalized_avatar_url(photo.get("publicUrl"))
+        if profile_id and url:
+            by_profile.setdefault(profile_id, []).append({**photo, "publicUrl": url})
     for item in items:
-        profile_id = int_or_none(item.get("id"))
-        urls: list[str] = []
-        gallery_photos = photos_by_profile.get(profile_id or 0, [])
-        for value in gallery_photos or [item.get("avatarUrl")]:
-            url = str(value or "").strip()
-            if url and url not in urls:
-                urls.append(url)
-        item["photos"] = urls
+        profile_id = int(item["id"])
+        photos = by_profile.get(profile_id, [])
+        data = as_dict(item.get("data"))
+        if "approvedVerification" not in item and profile_id in legacy_ids:
+            item["approvedVerification"] = profile_id in approved_ids
+        primary = next((photo for photo in reversed(photos) if photo.get("position") == 0), None)
+        legacy = str(data.get("source") or "").startswith("handover_")
+        if primary is None and legacy and (item.get("approvedVerification") or data.get("verificationProvider")):
+            available = [photo for photo in admin_user_photos(cursor, profile_id, data)
+                         if photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"]
+            primary_row = next((photo for photo in available if photo.get("isPrimary")), None)
+            photos = [{**photo, "publicUrl": photo["public_url"]} for photo in available
+                      if normalized_avatar_url(photo.get("public_url"))]
+            primary = next((photo for photo in photos if primary_row and photo["id"] == primary_row["id"]), None)
+        current = primary or (photos[0] if photos else {})
+        urls = list(dict.fromkeys(photo["publicUrl"] for photo in photos))
+        avatar = normalized_avatar_url(current.get("avatarUrl")) or current.get("publicUrl")
+        item.update(photos=urls, avatarUrl=avatar, primaryPhotoUrl=current.get("publicUrl"),
+                    hasApprovedPrimaryPhoto=primary is not None)
+        if "data" in item:
+            data.update(photos=urls, avatarUrl=avatar, primaryPhotoUrl=current.get("publicUrl"))
+            item["data"] = data
+        verified = profile_has_verified_badge(item)
+        item["isVerified"] = verified
+        if "data" in item:
+            data["isVerified"] = verified
+        if not verified:
+            for record in (item, data):
+                if str(record.get("verificationStatus") or "").upper() in {"APPROVED", "VERIFIED"}:
+                    record["verificationStatus"] = "NOT_STARTED"
+        if primary is None:
+            item["isVideoVerified"] = False
+            if "data" in item:
+                data["isVideoVerified"] = False
     return items
 
 
@@ -3506,8 +3829,7 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
  AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
  AND (
  CAST(JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.profileId')) AS CHAR) = CAST(profiles.id AS CHAR)
- OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')
- )
+ OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.userId')), ''), JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')))
  )
             ) AS approvedVerification,
             (
@@ -3515,7 +3837,7 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
               WHERE verification.entity_type = 'verification'
                 AND (
                   CAST(JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.profileId')) AS CHAR) = CAST(profiles.id AS CHAR)
-                  OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id'))
+                  OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.userId')), ''), JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')))
                 )
               ORDER BY verification.created_at DESC, verification.id DESC LIMIT 1
             ) AS verificationState,
@@ -3528,7 +3850,10 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
         """,
         (profile_id,),
     )
-    return cursor.fetchone()
+    profile = cursor.fetchone()
+    if profile:
+        attach_profile_photos(cursor, [profile])
+    return profile
 
 
 def fetch_clinic(cursor, clinic_identifier: str | int) -> dict[str, Any]:
@@ -4637,6 +4962,25 @@ def record_profile_view(cursor, viewer_profile_id: int, viewed_profile_id: int) 
     return True
 
 
+def member_conversation_open_sql(alias: str = "conversations") -> str:
+    return f"""({alias}.status = 'ACTIVE' OR (
+        {alias}.status = 'RESOLVED' AND EXISTS (
+            SELECT 1 FROM profiles support_peer
+            WHERE support_peer.id IN ({alias}.profile_a_id, {alias}.profile_b_id)
+              AND support_peer.role = 'SUPPORT'
+        )
+    ))"""
+
+
+def support_unresolved_sql() -> str:
+    return """c.status = 'ACTIVE' AND EXISTS (
+        SELECT 1 FROM conversation_messages request_message
+        WHERE request_message.conversation_id = c.id
+          AND request_message.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END
+          AND request_message.status = 'ACTIVE'
+    )"""
+
+
 def ensure_conversation(cursor, profile_a_id: int, profile_b_id: int, match_id: int | None = None) -> int:
     low_id, high_id = ordered_pair(profile_a_id, profile_b_id)
     cursor.execute(
@@ -4666,6 +5010,7 @@ def require_verified_conversation_action(
     cursor,
     profile_id: int,
     conversation: dict[str, Any],
+    *, allow_reply: bool = False,
 ) -> dict[str, Any]:
     profile_a_id = int(conversation["profile_a_id"])
     profile_b_id = int(conversation["profile_b_id"])
@@ -4675,6 +5020,17 @@ def require_verified_conversation_action(
         return peer_profile
     actor_profile = fetch_profile(cursor, profile_id)
     if not profile_is_verified(actor_profile):
+        if allow_reply:
+            cursor.execute(
+                """SELECT 1 FROM conversation_messages m
+                   JOIN conversations c ON c.id = m.conversation_id
+                   WHERE c.profile_a_id = %s AND c.profile_b_id = %s
+                     AND c.status = 'ACTIVE' AND m.sender_profile_id = %s
+                     AND m.status = 'ACTIVE' LIMIT 1""",
+                (profile_a_id, profile_b_id, peer_profile_id),
+            )
+            if cursor.fetchone():
+                return peer_profile or {}
         raise HTTPException(status_code=403, detail="Verify your profile before contacting other members")
     return peer_profile or {}
 
@@ -4741,7 +5097,13 @@ def ensure_support_conversation(cursor, profile_id: int) -> tuple[int, int] | No
     if str(profile.get("role") or "").upper() == "SUPPORT":
         return None
     support_profile_id = ensure_support_profile(cursor)
-    conversation_id = ensure_conversation(cursor, profile_id, support_profile_id)
+    low_id, high_id = ordered_pair(profile_id, support_profile_id)
+    cursor.execute(
+        "SELECT id FROM conversations WHERE profile_a_id = %s AND profile_b_id = %s AND status IN ('ACTIVE', 'RESOLVED') LIMIT 1",
+        (low_id, high_id),
+    )
+    existing = cursor.fetchone()
+    conversation_id = int(existing["id"]) if existing else ensure_conversation(cursor, profile_id, support_profile_id)
     cursor.execute(
         "DELETE FROM conversation_hidden WHERE conversation_id = %s AND profile_id = %s",
         (conversation_id, profile_id),
@@ -4867,6 +5229,17 @@ def update_profile_data(cursor, profile_id: int, updates: dict[str, Any], displa
     current = fetch_profile(cursor, profile_id)
     if not current:
         raise HTTPException(status_code=404, detail="Profile not found")
+    if updates.get("isVerified") is True:
+        photos = admin_user_photos(cursor, profile_id, as_dict(current.get("data")))
+        primary = next((photo for photo in photos if photo.get("isPrimary")
+                        and photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"), None)
+        if primary is None:
+            raise HTTPException(status_code=409, detail="An approved primary photo is required for verification")
+        cursor.execute("""SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s
+                          AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE""",
+                       (primary["id"], profile_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=409, detail="An approved primary photo is required for verification")
     data = as_dict(current.get("data"))
     for key, value in updates.items():
         data[key] = value
@@ -4880,7 +5253,7 @@ def update_profile_data(cursor, profile_id: int, updates: dict[str, Any], displa
 
 
 def conversation_scope_sql() -> str:
-    return """
+    return f"""
         SELECT c.id, c.match_id, c.profile_a_id, c.profile_b_id, c.status, c.created_at, c.updated_at,
                CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END AS other_profile_id,
                p.display_name AS otherDisplayName,
@@ -4888,6 +5261,7 @@ def conversation_scope_sql() -> str:
                JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl')) AS otherAvatarUrl,
                JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.city')) AS otherCity,
                JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.country')) AS otherCountry,
+               {profile_online_sql('p.id')} AS otherIsOnline,
                COALESCE(
                  (
                    SELECT MAX(s.last_seen_at)
@@ -4943,7 +5317,7 @@ def conversation_scope_sql() -> str:
         FROM conversations c
         JOIN profiles p ON p.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
         WHERE (c.profile_a_id = %s OR c.profile_b_id = %s)
-          AND c.status = 'ACTIVE'
+          AND {member_conversation_open_sql('c')}
           AND p.status = 'ACTIVE'
            AND NOT EXISTS (
              SELECT 1
@@ -5005,7 +5379,7 @@ def health():
     with db_cursor() as (_, cursor):
         cursor.execute("SELECT 1 AS ok")
         row = cursor.fetchone()
-    return {"ok": row["ok"] == 1, "database": DB_CONFIG["database"]}
+    return {"ok": row["ok"] == 1}
 
 
 @app.get("/api")
@@ -5017,8 +5391,23 @@ def api_root():
     }
 
 
+
+
+def rate_limit_error(error: RateLimitExceeded) -> HTTPException:
+    return HTTPException(status_code=429, detail="Too many requests. Please try again later.",
+                         headers={"Retry-After": str(error.retry_after)})
+
+
+def enforce_request_limit(request: Request, scope: str, limit: int, seconds: int) -> None:
+    try:
+        consume_window(db_cursor, throttle_key(scope, client_ip_of(request)), limit, seconds)
+    except RateLimitExceeded as error:
+        raise rate_limit_error(error) from None
+
+
 @app.post("/api/auth/signup", response_model=SignupSessionResponse)
 def auth_signup(payload: SignupPayload, response: Response, request: Request):
+    enforce_request_limit(request, "auth-signup", 5, 600)
     email = normalize_email(payload.email)
     if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
         raise HTTPException(status_code=422, detail="Valid email is required")
@@ -5278,6 +5667,12 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
 @app.post("/api/auth/login", response_model=AuthSessionResponse)
 def auth_login(payload: LoginPayload, response: Response, request: Request):
     email = normalize_email(payload.email)
+    enforce_request_limit(request, "auth-login", 30, 60)
+    failure_key = throttle_key("login-failure", client_ip_of(request), email)
+    try:
+        check_login_backoff(db_cursor, failure_key)
+    except RateLimitExceeded as error:
+        raise rate_limit_error(error) from None
     with db_cursor() as (conn, cursor):
         cursor.execute(
             """
@@ -5290,14 +5685,17 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
             (email,),
         )
         user = cursor.fetchone()
-        if not user:
-            raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
-        if user["status"] != "ACTIVE":
-            raise HTTPException(status_code=403, detail="ACCOUNT_INACTIVE")
-        if not bool(user.get("password_login_enabled")):
-            raise HTTPException(status_code=409, detail="PASSWORD_LOGIN_UNAVAILABLE")
-        if not verify_password(payload.password, user["password_hash"]):
-            raise HTTPException(status_code=401, detail="INVALID_PASSWORD")
+        password_hash = user.get("password_hash") if user else None
+        password_valid = verify_password(payload.password, password_hash or AUTH_LOGIN_DUMMY_PASSWORD_HASH)
+        if (
+            not user
+            or not password_hash
+            or not password_valid
+            or str(user.get("status") or "").upper() != "ACTIVE"
+            or not bool(user.get("password_login_enabled"))
+        ):
+            record_login_failure(db_cursor, failure_key)
+            raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
         if password_needs_rehash(user["password_hash"]):
             upgraded_hash = hash_password(payload.password)
             cursor.execute(
@@ -5311,7 +5709,28 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
         token, expires_at = create_session(cursor, user["id"])
         user_payload = auth_user_payload(cursor, user)
         conn.commit()
+    clear_login_backoff(db_cursor, failure_key)
     return auth_session_response(response, token, expires_at, user, user_payload=user_payload)
+
+
+@app.get("/api/auth/heartbeat")
+def auth_heartbeat(
+    user: dict[str, Any] = Depends(require_user),
+    presence: str | None = Header(None, alias="X-LBP-Presence"),
+):
+    # Older tabs also poll this endpoint without checking window focus.
+    # Authentication and background requests must not extend online presence.
+    if presence == "foreground":
+        with db_cursor() as (conn, cursor):
+            cursor.execute(
+                """
+                UPDATE auth_sessions SET last_seen_at = UTC_TIMESTAMP()
+                WHERE id = %s AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()
+                """,
+                (user["session_id"],),
+            )
+            conn.commit()
+    return {"ok": True}
 
 
 @app.get("/api/auth/me")
@@ -5683,7 +6102,10 @@ def save_privacy_consent(payload: CookieConsentPayload, request: Request, respon
 
 
 @app.post("/api/public/contact")
-def public_contact(payload: ContactPayload):
+def public_contact(payload: ContactPayload, request: Request):
+    if payload.website.strip() or str(payload.payload.get("website") or "").strip():
+        return {"ok": True, "message": "Message sent"}
+    enforce_request_limit(request, "public-contact", 5, 600)
     body = {
         "name": payload.name,
         "email": normalize_email(payload.email) if payload.email else None,
@@ -5734,71 +6156,74 @@ def public_runtime_config(response: Response):
 # ai_advisor_call_claude() for the safety rules each one follows.
 @app.post("/api/public/quiz-insight")
 def public_quiz_insight(payload: QuizInsightPayload, request: Request):
+    enforce_request_limit(request, "ai-quiz-insight", 10, 60)
     client_ip = client_ip_of(request)
     with db_cursor() as (conn, cursor):
         enforce_ai_public_rate_limit(cursor, "quiz-insight", client_ip)
+        strongest = [s.strip()[:200] for s in payload.strongestTitles[:8] if s.strip()]
+        discuss = [s.strip()[:200] for s in payload.discussTitles[:8] if s.strip()]
+        answers = [s.strip()[:400] for s in payload.answers[:40] if s.strip()]
+        language = locale_language_name(payload.locale)
+        user_message = (
+            f"Reply in {language}.\n\n"
+            f"Their strongest areas (from the quiz's own bucketing): {'; '.join(strongest) or 'none identified'}\n"
+            f"Areas worth discussing further (from the quiz's own bucketing): {'; '.join(discuss) or 'none identified'}\n"
+            f"Their raw answers, in order: {' | '.join(answers) if answers else 'not provided'}\n\n"
+            "Write the personalized reflection now."
+        )
+        reply = ai_advisor_call_claude(
+            [{"role": "user", "content": user_message}],
+            system_prompt=QUIZ_INSIGHT_SYSTEM_PROMPT,
+            max_tokens=500,
+        )
         ai_public_record_use(cursor, "quiz-insight", client_ip)
         conn.commit()
-    strongest = [s.strip()[:200] for s in payload.strongestTitles[:8] if s.strip()]
-    discuss = [s.strip()[:200] for s in payload.discussTitles[:8] if s.strip()]
-    answers = [s.strip()[:400] for s in payload.answers[:40] if s.strip()]
-    language = locale_language_name(payload.locale)
-    user_message = (
-        f"Reply in {language}.\n\n"
-        f"Their strongest areas (from the quiz's own bucketing): {'; '.join(strongest) or 'none identified'}\n"
-        f"Areas worth discussing further (from the quiz's own bucketing): {'; '.join(discuss) or 'none identified'}\n"
-        f"Their raw answers, in order: {' | '.join(answers) if answers else 'not provided'}\n\n"
-        "Write the personalized reflection now."
-    )
-    reply = ai_advisor_call_claude(
-        [{"role": "user", "content": user_message}],
-        system_prompt=QUIZ_INSIGHT_SYSTEM_PROMPT,
-        max_tokens=500,
-    )
     return {"ok": True, "insight": reply}
 
 
 @app.post("/api/public/ask-ai")
 def public_ask_ai(payload: AskAiPayload, request: Request):
+    enforce_request_limit(request, "ai-ask-ai", 10, 60)
     client_ip = client_ip_of(request)
     with db_cursor() as (conn, cursor):
         enforce_ai_public_rate_limit(cursor, "ask-ai", client_ip)
+        question = payload.question.strip()
+        if not question:
+            raise HTTPException(status_code=422, detail="Question cannot be empty")
+        reply = ai_advisor_call_claude(
+            [{"role": "user", "content": question}],
+            system_prompt=ASK_AI_SYSTEM_PROMPT,
+            max_tokens=500,
+        )
         ai_public_record_use(cursor, "ask-ai", client_ip)
         conn.commit()
-    question = payload.question.strip()
-    if not question:
-        raise HTTPException(status_code=422, detail="Question cannot be empty")
-    reply = ai_advisor_call_claude(
-        [{"role": "user", "content": question}],
-        system_prompt=ASK_AI_SYSTEM_PROMPT,
-        max_tokens=500,
-    )
     return {"ok": True, "answer": reply}
 
 
 @app.post("/api/public/agreement-draft")
 def public_agreement_draft(payload: AgreementDraftPayload, request: Request):
+    enforce_request_limit(request, "ai-agreement-draft", 10, 60)
     client_ip = client_ip_of(request)
     with db_cursor() as (conn, cursor):
         enforce_ai_public_rate_limit(cursor, "agreement-draft", client_ip)
+        language = locale_language_name(payload.locale)
+        jurisdiction = (payload.jurisdiction or "").strip()[:200]
+        key_points = payload.keyPoints.strip()[:4000]
+        agreement_type = payload.agreementType.strip()[:120]
+        user_message = (
+            f"Reply in {language}.\n\n"
+            f"Agreement type: {agreement_type}\n"
+            f"Jurisdiction (as given by the user, may be blank or vague): {jurisdiction or 'not specified'}\n"
+            f"Key points the user wants included:\n{key_points}\n\n"
+            "Write the first-draft document now."
+        )
+        reply = ai_advisor_call_claude(
+            [{"role": "user", "content": user_message}],
+            system_prompt=AGREEMENT_DRAFT_SYSTEM_PROMPT,
+            max_tokens=1400,
+        )
         ai_public_record_use(cursor, "agreement-draft", client_ip)
         conn.commit()
-    language = locale_language_name(payload.locale)
-    jurisdiction = (payload.jurisdiction or "").strip()[:200]
-    key_points = payload.keyPoints.strip()[:4000]
-    agreement_type = payload.agreementType.strip()[:120]
-    user_message = (
-        f"Reply in {language}.\n\n"
-        f"Agreement type: {agreement_type}\n"
-        f"Jurisdiction (as given by the user, may be blank or vague): {jurisdiction or 'not specified'}\n"
-        f"Key points the user wants included:\n{key_points}\n\n"
-        "Write the first-draft document now."
-    )
-    reply = ai_advisor_call_claude(
-        [{"role": "user", "content": user_message}],
-        system_prompt=AGREEMENT_DRAFT_SYSTEM_PROMPT,
-        max_tokens=1400,
-    )
     return {"ok": True, "draft": reply}
 
 
@@ -6428,7 +6853,7 @@ def member_unread_like_count(cursor, profile_id: int, read_through_id: int) -> i
 
 def member_unread_message_count(cursor, profile_id: int) -> int:
     cursor.execute(
-        """
+        f"""
         SELECT COUNT(*) AS cnt
         FROM conversation_messages m
         JOIN conversations c ON c.id = m.conversation_id
@@ -6438,7 +6863,7 @@ def member_unread_message_count(cursor, profile_id: int) -> int:
           AND m.sender_profile_id <> %s
           AND m.read_at IS NULL
           AND m.status = 'ACTIVE'
-          AND LOWER(COALESCE(c.status, 'active')) = 'active'
+          AND {member_conversation_open_sql('c')}
           AND p.status = 'ACTIVE'
           AND NOT EXISTS (
             SELECT 1 FROM profile_blocks b
@@ -6502,7 +6927,7 @@ def member_me(user: dict[str, Any] = Depends(require_user)):
         )
         photos = cursor.fetchall()
         cursor.execute(
-            """
+            f"""
             SELECT
               (SELECT COUNT(*)
                  FROM profile_likes l
@@ -6547,7 +6972,7 @@ def member_me(user: dict[str, Any] = Depends(require_user)):
                    AND m.sender_profile_id <> %s
                    AND m.read_at IS NULL
                    AND m.status = 'ACTIVE'
-                   AND LOWER(COALESCE(c.status, 'active')) = 'active'
+                   AND {member_conversation_open_sql('c')}
                    AND p.status = 'ACTIVE'
                    AND NOT EXISTS (
                      SELECT 1
@@ -6586,7 +7011,7 @@ def member_counters(user: dict[str, Any] = Depends(require_user)):
         except (TypeError, ValueError):
             likes_viewed_id = 0
         cursor.execute(
-            """
+            f"""
             SELECT
               (SELECT COUNT(*)
                  FROM profile_likes l
@@ -6607,7 +7032,7 @@ def member_counters(user: dict[str, Any] = Depends(require_user)):
                 WHERE (c.profile_a_id = %s OR c.profile_b_id = %s)
                   AND m.sender_profile_id <> %s
                   AND m.read_at IS NULL AND m.status = 'ACTIVE'
-                  AND LOWER(COALESCE(c.status, 'active')) = 'active'
+                  AND {member_conversation_open_sql('c')}
                   AND p.status = 'ACTIVE'
                   AND NOT EXISTS (
                     SELECT 1 FROM profile_blocks b
@@ -6787,6 +7212,31 @@ def member_save_privacy_consent(payload: PrivacyConsentPayload, user: dict[str, 
     return {"ok": True, "consent": state}
 
 
+def catalog_city_identifier(country: str, city: str) -> str:
+    digest = hashlib.sha256(city.strip().casefold().encode("utf-8")).hexdigest()[:20]
+    return f"catalog:{country.strip().upper()}:{digest}"
+
+
+def require_selected_profile_city(cursor, updates: dict[str, Any], current: dict[str, Any]) -> None:
+    country = str(updates.get("country") or "").strip().upper()
+    city = str(updates.get("city") or "").strip()
+    place_id = str(updates.get("cityPlaceId") or "").strip()
+    unchanged = city == str(current.get("city") or "").strip() and country == str(current.get("country") or "").strip().upper()
+    if unchanged and (not place_id or place_id == str(current.get("cityPlaceId") or "").strip()):
+        return
+    if place_id:
+        for candidate in CATALOG_CITIES_BY_COUNTRY.get(country, []):
+            if str(candidate.get("name") or "").casefold() == city.casefold() and place_id == str(candidate.get("placeId") or catalog_city_identifier(country, city)):
+                return
+        if place_id == catalog_city_identifier(country, city):
+            cursor.execute("""SELECT 1 FROM profiles WHERE role = 'USER' AND status = 'ACTIVE'
+                              AND UPPER(BTRIM(data->>'country')) = %s AND LOWER(BTRIM(data->>'city')) = LOWER(%s) LIMIT 1""",
+                           (country, city))
+            if cursor.fetchone():
+                return
+    raise HTTPException(status_code=422, detail="Select a city from the list")
+
+
 @app.patch("/api/member/profile")
 def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
@@ -6809,17 +7259,10 @@ def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = 
         raise HTTPException(status_code=422, detail="Country is required")
     if not updates.get("city"):
         raise HTTPException(status_code=422, detail="City is required")
-    if not updates.get("cityPlaceId"):
-        # Older profiles stored a free-text city before the Google Places
-        # identifier existed.  They must still be able to change unrelated
-        # profile fields (for example, languages).  A place ID is required
-        # only when the city itself is changed.
-        with db_cursor() as (_, cursor):
-            current_profile = fetch_profile(cursor, profile_id)
+    with db_cursor() as (_, cursor):
+        current_profile = fetch_profile(cursor, profile_id)
         current_data = as_dict(current_profile.get("data")) if current_profile else {}
-        current_city = str(current_data.get("city") or "").strip()
-        if updates["city"] != current_city:
-            raise HTTPException(status_code=422, detail="Select a city from the list")
+        require_selected_profile_city(cursor, updates, current_data)
     if not updates.get("profileType"):
         raise HTTPException(status_code=422, detail="Profile type is required")
     looking_for = updates.get("lookingFor") if isinstance(updates.get("lookingFor"), list) else []
@@ -7013,17 +7456,38 @@ def update_photo_moderation_entity(cursor, photo_id: int, status_value: str, dat
         )
 
 
+def photo_is_current_primary(cursor, profile_id: int, photo_id: int, position: int) -> bool:
+    if position == 0:
+        return True
+    cursor.execute("SELECT data FROM profiles WHERE id = %s", (profile_id,))
+    profile = cursor.fetchone()
+    data = as_dict((profile or {}).get("data"))
+    if not str(data.get("source") or "").startswith("handover_"):
+        return False
+    return any(photo["id"] == photo_id and photo.get("isPrimary")
+               for photo in admin_user_photos(cursor, profile_id, data))
+
+
 def reset_verification_after_primary_photo_change(cursor, profile_id: int) -> bool:
+    update_profile_data(cursor, profile_id, {
+        "isVerified": False, "verifiedAt": None, "approvedVerification": False,
+        "verificationStatus": "NOT_STARTED", "verificationProvider": None,
+        "isVideoVerified": False, "videoVerifiedAt": None,
+    })
     cursor.execute(
         """
         SELECT id, status, data
         FROM app_entities
         WHERE entity_type = 'verification'
-          AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileId')) = %s
-          AND status IN ('APPROVED', 'PENDING', 'IN_REVIEW')
+          AND (JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileId')) = %s
+               OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.user.id')) =
+                  (SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.userId')), ''),
+                                   JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')))
+                   FROM profiles WHERE id = %s))
+          AND UPPER(status) IN ('APPROVED', 'VERIFIED', 'PENDING', 'IN_REVIEW')
         FOR UPDATE
         """,
-        (str(profile_id),),
+        (str(profile_id), profile_id),
     )
     sessions = cursor.fetchall()
     if not sessions:
@@ -7174,7 +7638,11 @@ def apply_avatar_crop_moderation(
     primary_photo_id: int,
     result: dict[str, Any],
     actor: str = "google_vision",
+    *,
+    allow_non_primary: bool = False,
 ) -> dict[str, Any]:
+    if allow_non_primary and not actor.startswith("admin:"):
+        raise HTTPException(status_code=403, detail="Only admins can crop additional photos")
     result = automatic_photo_decision(result)
     decision = str(result.get("decision") or "REJECTED").upper()
     if decision not in {"APPROVED", "REJECTED"}:
@@ -7183,14 +7651,16 @@ def apply_avatar_crop_moderation(
     public_url = None
     with db_cursor() as (conn, cursor):
         if decision == "APPROVED":
-            cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
-            if not cursor.fetchone():
+            cursor.execute("SELECT id, data, (SELECT id FROM profile_photos WHERE profile_id = profiles.id AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED' ORDER BY id DESC LIMIT 1) AS primary_photo_id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
+            locked_profile = cursor.fetchone()
+            if not locked_profile:
                 raise HTTPException(status_code=404, detail="User not found")
             cursor.execute(
-                "SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE",
-                (primary_photo_id, profile_id),
+                "SELECT id, position, public_url, (SELECT metadata->>'thumbnailUrl' FROM media_files WHERE id = profile_photos.media_file_id) AS thumbnailUrl, (SELECT public_url FROM media_files WHERE id = profile_photos.avatar_media_file_id) AS avatarUrl FROM profile_photos WHERE id = %s AND profile_id = %s AND (%s OR position = 0) AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE",
+                (primary_photo_id, profile_id, allow_non_primary),
             )
-            if not cursor.fetchone():
+            target_photo = cursor.fetchone()
+            if not target_photo:
                 raise HTTPException(status_code=409, detail="Approved primary photo is unavailable")
             public_url = promote_media_file(cursor, media_file_id)
             if not public_url:
@@ -7199,13 +7669,20 @@ def apply_avatar_crop_moderation(
                 """
                 UPDATE profile_photos
                 SET avatar_media_file_id = %s, updated_at = UTC_TIMESTAMP()
-                WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
+                WHERE id = %s AND profile_id = %s AND (%s OR position = 0) AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
                 """,
-                (media_file_id, primary_photo_id, profile_id),
+                (media_file_id, primary_photo_id, profile_id, allow_non_primary),
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=409, detail="Approved primary photo is unavailable")
-            update_profile_data(cursor, profile_id, {"avatarUrl": public_url, "isWizardCompleted": True})
+            is_primary = locked_profile.get("primary_photo_id") == primary_photo_id
+            if locked_profile.get("primary_photo_id") is None:
+                is_primary = photo_matches_avatar(target_photo, as_dict(locked_profile.get("data")))
+                if not is_primary:
+                    gallery = admin_user_photos(cursor, profile_id, as_dict(locked_profile.get("data")))
+                    is_primary = any(photo["id"] == primary_photo_id and photo["isPrimary"] for photo in gallery)
+            if is_primary:
+                update_profile_data(cursor, profile_id, {"avatarUrl": public_url, "isWizardCompleted": True})
         else:
             # Initial uploads may already point at the proposed crop. Do not let
             # a rejected crop replace the original photo or appear as an avatar.
@@ -7229,6 +7706,7 @@ def apply_avatar_crop_moderation(
                 "kind": "avatar_crop",
                 "profileId": profile_id,
                 "profilePhotoId": primary_photo_id,
+                "allowNonPrimary": allow_non_primary,
                 "mediaFileId": media_file_id,
                 "decision": decision,
                 "reason": reason,
@@ -7553,17 +8031,21 @@ async def upload_profile_avatar(
     *,
     expected_photo_id: int | None = None,
     actor: str = "google_vision",
+    allow_non_primary: bool = False,
 ):
+    if allow_non_primary and (expected_photo_id is None or not actor.startswith("admin:")):
+        raise HTTPException(status_code=403, detail="Only admins can crop additional photos")
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
             SELECT id
             FROM profile_photos
-            WHERE profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
+            WHERE profile_id = %s AND (%s OR position = 0) AND (%s::bigint IS NULL OR id = %s)
+              AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
             ORDER BY id DESC
             LIMIT 1
             """,
-            (profile_id,),
+            (profile_id, allow_non_primary, expected_photo_id, expected_photo_id),
         )
         primary_photo = cursor.fetchone()
         max_faces = 2 if profile_type_allows_couple_photo(fetch_profile(cursor, profile_id)) else 1
@@ -7608,6 +8090,7 @@ async def upload_profile_avatar(
                         "kind": "avatar_crop",
                         "profileId": profile_id,
                         "profilePhotoId": primary_photo["id"],
+                        "allowNonPrimary": allow_non_primary,
                         "mediaFileId": media_file_id,
                         "contentUrl": f"/api/admin/media/{media_file_id}/content",
                         "moderationStatus": "PENDING",
@@ -7624,6 +8107,7 @@ async def upload_profile_avatar(
         int(primary_photo["id"]),
         moderation,
         actor=actor,
+        allow_non_primary=allow_non_primary,
     )
     if outcome["status"] == "REJECTED":
         raise HTTPException(
@@ -7653,6 +8137,7 @@ def member_delete_photo(photo_id: int, user: dict[str, Any] = Depends(require_us
         if not photo:
             raise HTTPException(status_code=404, detail="Photo not found")
         deleted_position = int(photo.get("position") or 0)
+        deleted_primary = photo_is_current_primary(cursor, profile_id, photo_id, deleted_position)
         cursor.execute(
             """
             UPDATE profile_photos
@@ -8008,9 +8493,7 @@ def blurred_preview_url_for(avatar_url: str | None) -> str | None:
 
 def anonymized_admirer_summary(row: dict[str, Any]) -> dict[str, Any]:
     data = as_dict(row.get("data"))
-    birth = profile_birth_date(data.get("dateOfBirth"))
-    today = now_utc().date()
-    age = (today.year - birth.year - ((today.month, today.day) < (birth.month, birth.day))) if birth else int_or_none(row.get("age") or data.get("age"))
+    age = profile_summary_age(row, data)
     return {"id": row.get("profileId", row.get("id")), "role": row.get("role"),
             "status": row.get("status"), "age": age,
             "avatarUrl": blurred_preview_url_for(row.get("avatarUrl") or data.get("avatarUrl")),
@@ -8095,7 +8578,8 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
                    p.data ->> 'country' AS country,
                    p.data ->> 'city' AS city,
                    p.data ->> 'avatarUrl' AS "avatarUrl",
-                   p.data
+                   p.data,
+                   COUNT(*) OVER() AS "totalCount"
             FROM profile_likes l
             JOIN profiles p ON p.id = l.target_profile_id
             WHERE l.actor_profile_id = %s AND l.status = 'ACTIVE'
@@ -8106,6 +8590,8 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
             """,
             (profile_id, profile_id, profile_id),
         )
+        my_like_rows = cursor.fetchall()
+        my_likes_count = int(my_like_rows[0]["totalCount"]) if my_like_rows else 0
         my_likes = [
             public_profile_summary({
                 **row,
@@ -8113,7 +8599,7 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
                 "likedByViewer": True,
                 "likeReadOnly": True,
             })
-            for row in cursor.fetchall()
+            for row in my_like_rows
         ]
         cursor.execute(
             f"""
@@ -8122,7 +8608,8 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
                    p.data ->> 'country' AS country,
                    p.data ->> 'city' AS city,
                    p.data ->> 'avatarUrl' AS "avatarUrl",
-                   p.data
+                   p.data,
+                   COUNT(*) OVER() AS "totalCount"
             FROM profile_matches m
             JOIN profiles p ON p.id = CASE WHEN m.profile_a_id = %s THEN m.profile_b_id ELSE m.profile_a_id END
             WHERE (m.profile_a_id = %s OR m.profile_b_id = %s) AND m.status = 'ACTIVE'
@@ -8147,6 +8634,8 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
             """,
             (profile_id, profile_id, profile_id, profile_id, profile_id, profile_id, profile_id, profile_id, profile_id),
         )
+        match_rows = cursor.fetchall()
+        matches_count = int(match_rows[0]["totalCount"]) if match_rows else 0
         matches = [
             public_profile_summary({
                 **row,
@@ -8154,14 +8643,16 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
                 "likedByViewer": True,
                 "likeReadOnly": True,
             })
-            for row in cursor.fetchall()
+            for row in match_rows
         ]
     return {
         "likesYou": likes_you,
         "likesYouCount": likes_you_count,
         "likesYouLocked": not is_premium,
         "myLikes": my_likes,
+        "myLikesCount": my_likes_count,
         "matches": matches,
+        "matchesCount": matches_count,
         "readThroughId": read_through_id,
     }
 
@@ -8714,7 +9205,7 @@ def release_account_identity_for_deletion(
         cursor.execute(
             """
             UPDATE local_users
-            SET email = %s, password_hash = NULL, password_login_enabled = FALSE,
+            SET email = %s,
                 email_verified_at = NULL, updated_at = UTC_TIMESTAMP()
             WHERE id = %s
             """,
@@ -8727,73 +9218,14 @@ def release_account_identity_for_deletion(
 
 
 @app.post("/api/member/account-deletion")
-def member_account_deletion(
-    payload: AccountDeletionPayload,
-    response: Response,
-    user: dict[str, Any] = Depends(require_user),
-):
+def member_account_deletion(payload: AccountDeletionPayload, response: Response, user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
-    reason = (payload.reason or "").strip() or "Prefer not to say"
-    details = (payload.details or "").strip() or None
-    body = {
-        "profileId": profile_id,
-        "userId": user["id"],
-        "email": user["email"],
-        "emailVerified": user.get("email_verified_at") is not None,
-        "reason": reason,
-        "details": details,
-        "requestedAt": now_utc().isoformat(),
-        "deleteAfter": (now_utc() + timedelta(days=ACCOUNT_DELETION_DAYS)).isoformat(),
-        "mode": f"scheduled_{ACCOUNT_DELETION_DAYS}_days",
-    }
     with db_cursor() as (conn, cursor):
-        cursor.execute(
-            """
-            INSERT INTO app_entities (entity_type, source_key, title, status, data)
-            VALUES ('account_deletion_request', %s, %s, 'PENDING', %s)
-            ON DUPLICATE KEY UPDATE status = 'PENDING', data = VALUES(data), updated_at = UTC_TIMESTAMP()
-            """,
-            (f"local-{profile_id}", f"Account deletion request #{profile_id}", json.dumps(body, ensure_ascii=False)),
-        )
-        cursor.execute(
-            """
-            INSERT INTO api_events (event_type, payload)
-            VALUES ('member.account_deletion_requested', %s)
-            """,
-            (json.dumps(body, ensure_ascii=False),),
-        )
-        update_profile_data(cursor, profile_id, {
-            "deletionRequestedAt": body["requestedAt"],
-            "deletionScheduledFor": body["deleteAfter"],
-            "deletionReason": reason,
-            "visibleInCatalog": False,
-            "isVisibleInCatalog": False,
-        })
-        # Deletion takes the account out of the service immediately, but the
-        # profile record is retained for the statutory grace period so the
-        # scheduled worker can remove its remaining content.  The old login
-        # identity must *not* be retained for that period: otherwise an
-        # already-deleted member cannot register again with the same email or
-        # Google/Apple identity.
-        release_account_identity_for_deletion(cursor, profile_id, [int(user["id"])])
-        cursor.execute(
-            "UPDATE profiles SET status = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
-            (ACCOUNT_DELETION_PENDING_STATUS, profile_id),
-        )
-        cursor.execute(
-            "UPDATE local_users SET status = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
-            (ACCOUNT_DELETION_PENDING_STATUS, user["id"]),
-        )
-        audit(conn, user["email"], "USER_DELETION_REQUESTED", "profiles", profile_id, {"email": user["email"], "deleteAfter": body["deleteAfter"]})
+        body = schedule_account_deletion(conn, cursor, profile_id, user["email"], (payload.reason or "").strip() or "Prefer not to say", (payload.details or "").strip() or None)
         conn.commit()
     delete_private_cookie(response, COOKIE_SESSION_NAME)
     delete_private_cookie(response, COOKIE_LEGACY_SESSION_NAME)
-    return {
-        "ok": True,
-        "status": ACCOUNT_DELETION_PENDING_STATUS,
-        "deleteAfter": body["deleteAfter"],
-        "message": f"Account access ended. Permanent deletion is scheduled in {ACCOUNT_DELETION_DAYS} days.",
-    }
+    return {"ok": True, "status": ACCOUNT_DELETION_PENDING_STATUS, "deleteAfter": body["deleteAfter"], "message": "Account access ended. Contact support within 30 days to restore it. Permanent deletion follows automatically."}
 
 
 @app.get("/api/member/conversations")
@@ -8807,7 +9239,7 @@ def member_conversations(
         ensure_support_welcome(cursor, profile_id)
         ensure_priority_support_note(cursor, profile_id)
         cursor.execute(
-            """
+            f"""
             UPDATE conversation_messages AS m
             SET delivered_at = COALESCE(m.delivered_at, UTC_TIMESTAMP())
             WHERE EXISTS (
@@ -8815,7 +9247,7 @@ def member_conversations(
                 FROM conversations AS c
                 WHERE c.id = m.conversation_id
                   AND (c.profile_a_id = %s OR c.profile_b_id = %s)
-                  AND c.status = 'ACTIVE'
+                  AND {member_conversation_open_sql('c')}
             )
               AND m.sender_profile_id <> %s
               AND m.status = 'ACTIVE'
@@ -8859,7 +9291,7 @@ def member_conversation_peer_profile(
     profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT CASE
                      WHEN profile_a_id = %s THEN profile_b_id
                      WHEN profile_b_id = %s THEN profile_a_id
@@ -8867,7 +9299,7 @@ def member_conversation_peer_profile(
                    END AS other_profile_id
             FROM conversations
             WHERE id = %s
-              AND status = 'ACTIVE'
+              AND {member_conversation_open_sql()}
               AND (profile_a_id = %s OR profile_b_id = %s)
             LIMIT 1
             """,
@@ -8914,7 +9346,7 @@ def member_create_conversation(payload: ConversationCreatePayload, user: dict[st
         )
         existing = cursor.fetchone()
         match_id = active_match_id(cursor, profile_id, target_profile_id)
-        if existing and existing.get("status") == "ACTIVE":
+        if existing and (existing.get("status") == "ACTIVE" or (target_role == "SUPPORT" and existing.get("status") == "RESOLVED")):
             cursor.execute(
                 "DELETE FROM conversation_hidden WHERE conversation_id = %s AND profile_id = %s",
                 (int(existing["id"]), profile_id),
@@ -8951,13 +9383,13 @@ def member_hide_conversation(conversation_id: int, user: dict[str, Any] = Depend
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT c.id, p.role AS other_role
             FROM conversations c
             JOIN profiles p ON p.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
             WHERE c.id = %s
               AND (c.profile_a_id = %s OR c.profile_b_id = %s)
-              AND c.status = 'ACTIVE'
+              AND {member_conversation_open_sql('c')}
             LIMIT 1
             """,
             (profile_id, conversation_id, profile_id, profile_id),
@@ -8988,10 +9420,10 @@ def member_conversation_messages(
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
             LIMIT 1
             """,
             (conversation_id, profile_id, profile_id),
@@ -9039,7 +9471,8 @@ def member_conversation_messages(
         )
         page = cursor.fetchall()
         has_more = len(page) > 300
-        messages = list(reversed(page[:300]))
+        messages = [{**message, "isOwn": int_or_none(message.get("senderProfileId")) == profile_id, "isMine": int_or_none(message.get("senderProfileId")) == profile_id} for message in reversed(page[:300])]
+
         unread_messages = member_unread_message_count(cursor, profile_id)
         conn.commit()
     return {
@@ -9066,11 +9499,11 @@ def member_send_message(
     with db_cursor() as (conn, cursor):
         body = validate_chat_message(cursor, payload.body)
         cursor.execute(
-            """
+            f"""
             SELECT id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -9090,7 +9523,7 @@ def member_send_message(
         if pair and has_active_block(cursor, int(pair["profile_a_id"]), int(pair["profile_b_id"])):
             raise HTTPException(status_code=403, detail="Conversation is blocked")
         if pair:
-            require_verified_conversation_action(cursor, profile_id, pair)
+            require_verified_conversation_action(cursor, profile_id, pair, allow_reply=True)
         cursor.execute(
             """
             INSERT INTO conversation_messages (conversation_id, sender_profile_id, body, status, created_at)
@@ -9099,7 +9532,7 @@ def member_send_message(
             (conversation_id, profile_id, body),
         )
         message_id = cursor.lastrowid
-        cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
+        cursor.execute("UPDATE conversations SET status = 'ACTIVE', updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
         cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
         conn.commit()
     recipient_profile_id = int(pair["profile_b_id"] if int(pair["profile_a_id"]) == profile_id else pair["profile_a_id"])
@@ -9132,11 +9565,11 @@ async def member_send_attachment(
     profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT id, profile_a_id, profile_b_id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -9149,7 +9582,7 @@ async def member_send_attachment(
             int(authorized_conversation["profile_b_id"]),
         ):
             raise HTTPException(status_code=403, detail="Conversation is blocked")
-        require_verified_conversation_action(cursor, profile_id, authorized_conversation)
+        require_verified_conversation_action(cursor, profile_id, authorized_conversation, allow_reply=True)
     content_type = (file.content_type or "").split(";")[0].lower()
     ext = ALLOWED_CHAT_ATTACHMENT_TYPES.get(content_type)
     if not ext:
@@ -9172,11 +9605,11 @@ async def member_send_attachment(
 
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT id, profile_a_id, profile_b_id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -9217,7 +9650,7 @@ async def member_send_attachment(
             (conversation_id, profile_id, original_name, public_url),
         )
         message_id = cursor.lastrowid
-        cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
+        cursor.execute("UPDATE conversations SET status = 'ACTIVE', updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
         cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
         conn.commit()
 
@@ -10565,7 +10998,7 @@ def member_conversation_message_starters(
         if not profile_is_premium(profile):
             raise HTTPException(status_code=402, detail="Premium is required for AI-drafted message starters")
         cursor.execute(
-            """
+            f"""
             SELECT CASE
                      WHEN profile_a_id = %s THEN profile_b_id
                      WHEN profile_b_id = %s THEN profile_a_id
@@ -10573,7 +11006,7 @@ def member_conversation_message_starters(
                    END AS other_profile_id
             FROM conversations
             WHERE id = %s
-              AND status = 'ACTIVE'
+              AND {member_conversation_open_sql()}
               AND (profile_a_id = %s OR profile_b_id = %s)
             LIMIT 1
             """,
@@ -11992,11 +12425,11 @@ def member_send_sticker(
         if not profile_is_premium(profile):
             raise HTTPException(status_code=402, detail="Premium is required to send stickers")
         cursor.execute(
-            """
+            f"""
             SELECT profile_a_id, profile_b_id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -12005,7 +12438,7 @@ def member_send_sticker(
             raise HTTPException(status_code=404, detail="Conversation not found")
         if has_active_block(cursor, int(pair["profile_a_id"]), int(pair["profile_b_id"])):
             raise HTTPException(status_code=403, detail="Conversation is blocked")
-        require_verified_conversation_action(cursor, profile_id, pair)
+        require_verified_conversation_action(cursor, profile_id, pair, allow_reply=True)
         body = f"{STICKER_BODY_PREFIX}{payload.stickerId}"
         cursor.execute(
             """
@@ -12015,7 +12448,7 @@ def member_send_sticker(
             (conversation_id, profile_id, body),
         )
         message_id = cursor.lastrowid
-        cursor.execute("UPDATE conversations SET updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') WHERE id = %s", (conversation_id,))
+        cursor.execute("UPDATE conversations SET status = 'ACTIVE', updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') WHERE id = %s", (conversation_id,))
         cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
         conn.commit()
     recipient_profile_id = int(pair["profile_b_id"] if int(pair["profile_a_id"]) == profile_id else pair["profile_a_id"])
@@ -12938,7 +13371,7 @@ def member_referral_redeem(payload: ReferralRedeemPayload, user: dict[str, Any] 
     return {"ok": True, "referralId": referral_id}
 
 
-@app.get("/api/meta")
+@app.get("/api/meta", dependencies=[Depends(require_admin)])
 def meta():
     tables = [
         "pages",
@@ -12980,7 +13413,7 @@ def meta():
     return {"counts": counts}
 
 
-@app.get("/api/pages")
+@app.get("/api/pages", dependencies=[Depends(require_admin)])
 def pages(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -13008,7 +13441,7 @@ def pages(
     return {"items": items, "limit": limit, "offset": offset}
 
 
-@app.get("/api/pages/{page_id}")
+@app.get("/api/pages/{page_id}", dependencies=[Depends(require_admin)])
 def page_detail(page_id: int):
     with db_cursor() as (_, cursor):
         cursor.execute(
@@ -13049,12 +13482,15 @@ def entities(
 
 
 @app.post("/api/admin/login")
-def admin_login(payload: AdminLoginPayload, response: Response):
+def admin_login(payload: AdminLoginPayload, response: Response, request: Request):
     if not ADMIN_API_PASSWORD:
         raise HTTPException(status_code=503, detail="Admin API password is not configured")
-    email = payload.email.strip()
-    if not has_valid_admin_credentials(email, payload.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin credentials")
+    if len(ADMIN_SESSION_SECRET) < 32:
+        raise HTTPException(status_code=503, detail="Admin session signing is not configured")
+    if len(str(request.headers.get("authorization") or "")) > ADMIN_AUTHORIZATION_MAX_LENGTH:
+        raise HTTPException(status_code=431, detail="Authorization header is too large")
+    email = payload.email.strip().lower()
+    admin_login_with_limits(request, email, payload.password)
     dynamic = dynamic_admin_account(email)
     if dynamic:
         data = as_dict(dynamic.get("data")).copy()
@@ -13078,7 +13514,7 @@ def admin_login(payload: AdminLoginPayload, response: Response):
         samesite="strict",
         path="/",
     )
-    return {"ok": True, "email": email}
+    return {"ok": True, "email": email, "role": str(dynamic.get("role") or "").strip().upper() if dynamic else "ADMIN", "permissions": dynamic.get("permissions", []) if dynamic else ["*"]}
 
 
 @app.post("/api/admin/logout")
@@ -13103,7 +13539,7 @@ def admin_logout(response: Response):
 @app.get("/api/admin/session")
 def admin_session(admin: str = Depends(require_admin)):
     account = dynamic_admin_account(admin)
-    return {"ok": True, "email": admin, "role": account.get("role", "ADMIN") if account else "ADMIN", "permissions": account.get("permissions", []) if account else ["*"]}
+    return {"ok": True, "email": admin, "role": str(account.get("role") or "").strip().upper() if account else "ADMIN", "permissions": account.get("permissions", []) if account else ["*"]}
 
 
 ADMIN_AUDIT_SOURCE_SQL = """
@@ -13204,7 +13640,7 @@ def admin_create_account(payload: AdminAccountCreatePayload, actor: str = Depend
         raise HTTPException(status_code=422, detail="Enter a valid email address")
     if not re.search(r"[A-Z]", payload.password) or not re.search(r"\d", payload.password):
         raise HTTPException(status_code=422, detail="Password must contain an uppercase letter and a number")
-    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings"}
+    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings", "boosts", "video-verifications", "community-groups"}
     permissions = list(dict.fromkeys(item for item in payload.permissions if item in allowed)) if payload.role == "STAFF" else ["*"]
     with db_cursor() as (conn, cursor):
         cursor.execute("SELECT id FROM app_entities WHERE entity_type = 'admin_account' AND LOWER(source_key) = %s LIMIT 1", (email,))
@@ -13220,7 +13656,7 @@ def admin_create_account(payload: AdminAccountCreatePayload, actor: str = Depend
 
 @app.patch("/api/admin/accounts/{account_id}")
 def admin_update_account(account_id: str, payload: AdminAccountUpdatePayload, response: Response, actor: str = Depends(require_admin)):
-    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings"}
+    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings", "boosts", "video-verifications", "community-groups"}
     if not payload.model_fields_set:
         raise HTTPException(status_code=422, detail="Choose an account field to update")
     if payload.password is not None and (len(payload.password) < 8 or not re.search(r"[A-Z]", payload.password) or not re.search(r"\d", payload.password)):
@@ -13852,22 +14288,14 @@ def admin_navigation_counts(_admin: str = Depends(require_admin)):
         )
         counts = {key: int(value or 0) for key, value in cursor.fetchone().items()}
         cursor.execute(
-            """
-            SELECT COUNT(*) AS unanswered_support
-            FROM conversations c
-            JOIN profiles a ON a.id = c.profile_a_id
-            JOIN profiles b ON b.id = c.profile_b_id
-            WHERE c.status = 'ACTIVE'
-              AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT')
-              AND EXISTS (
-                  SELECT 1 FROM conversation_messages um
-                  WHERE um.conversation_id = c.id
-                    AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END
-                  AND um.status = 'ACTIVE'
-              )
-            """
+            f"""SELECT COUNT(*) AS unanswered_support FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND {support_unresolved_sql()}"""
         )
         counts["unanswered_support"] = int(cursor.fetchone()["unanswered_support"] or 0)
+    account = dynamic_admin_account(_admin)
+    if account and str(account.get("role") or "").upper() != "ADMIN":
+        sections = {"pending_subscriptions": "subscriptions", "pending_verifications": "verifications", "pending_photo_moderation": "moderation-photos", "pending_reports": "moderation-reports", "pending_boosts": "boosts", "pending_video_verifications": "video-verifications", "unanswered_support": "support"}
+        granted = set(account.get("permissions") or [])
+        counts = {key: value for key, value in counts.items() if sections.get(key) in granted}
     return {"counts": counts}
 
 
@@ -13978,7 +14406,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "partner_accounts": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'PARTNER'",
             "pending_subscriptions": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND status = 'PENDING'",
             "pending_verifications": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND status = 'PENDING'",
-        "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE c.status = 'ACTIVE' AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.status = 'ACTIVE')",
+        "unanswered_support": f"""SELECT COUNT(*) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND {support_unresolved_sql()}""",
             "pending_photo_moderation": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_photo' AND status = 'PENDING'",
             "pending_reports": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_report' AND status = 'PENDING'",
             "pending_boosts": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'boost' AND status = 'PENDING'",
@@ -15370,6 +15798,85 @@ def amplitude_is_configured() -> bool:
     return bool(AMPLITUDE_API_KEY and "{user_id}" in AMPLITUDE_USER_PROFILE_URL_TEMPLATE and url.scheme == "https" and (host == "amplitude.com" or host.endswith(".amplitude.com")))
 
 
+@lru_cache(maxsize=4096)
+def remote_profile_photo_missing(public_url: str, cache_epoch: int) -> bool:
+    del cache_epoch
+    if not re.match(r"^https?://", public_url, re.IGNORECASE):
+        return False
+    request = urllib.request.Request(public_url, headers={
+        "User-Agent": "LetsBeParents/1.0", "Accept": "image/*", "Range": "bytes=0-0",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            response.read(1)
+        return False
+    except urllib.error.HTTPError as exc:
+        return exc.code in {404, 410}
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return False
+
+
+def admin_photo_visible(photo: dict[str, Any]) -> bool:
+    if str(photo.get("status") or "").strip().upper() not in {"ACTIVE", "PENDING", "REJECTED"}:
+        return False
+    key = str(photo.get("storageKey") or "").strip().lstrip("/")
+    if key:
+        base = PRIVATE_UPLOAD_DIR if key.startswith("quarantine/") else UPLOAD_DIR
+        relative = key.removeprefix("quarantine/")
+        if safe_storage_path(base, relative).is_file():
+            return True
+    return not remote_profile_photo_missing(str(photo.get("public_url") or "").strip(), int(time.time() // 60))
+
+
+def photo_matches_avatar(photo: dict[str, Any], profile_data: dict[str, Any]) -> bool:
+    avatar = str(profile_data.get("avatarUrl") or profile_data.get("avatar_url") or "").strip()
+    return bool(avatar and avatar in {
+        str(photo.get(key) or "").strip() for key in ("public_url", "thumbnailUrl", "avatarUrl")
+    })
+
+
+def admin_user_photos(cursor, profile_id: int, profile_data: dict[str, Any]) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT pp.id, pp.public_url, pp.position, pp.status, pp.moderation_status,
+               pp.created_at, pp.updated_at, mf.storage_key AS storageKey,
+               mf.metadata->>'thumbnailUrl' AS thumbnailUrl, amf.public_url AS avatarUrl,
+               CASE WHEN pp.avatar_media_file_id IS NOT NULL
+                    THEN CONCAT('/api/admin/media/', pp.avatar_media_file_id, '/content')
+                    ELSE CONCAT('/api/admin/profile-photos/', pp.id, '/content') END AS previewUrl
+        FROM profile_photos pp
+        LEFT JOIN media_files mf ON mf.id = pp.media_file_id
+        LEFT JOIN media_files amf ON amf.id = pp.avatar_media_file_id
+        WHERE pp.profile_id = %s AND pp.status IN ('ACTIVE', 'PENDING', 'REJECTED')
+        ORDER BY pp.position ASC, pp.id ASC
+        """, (profile_id,),
+    )
+    photos = [normalize_row(row) for row in cursor.fetchall()]
+    if photos:
+        with ThreadPoolExecutor(max_workers=min(4, len(photos))) as pool:
+            available = list(pool.map(admin_photo_visible, photos))
+        photos = [photo for photo, visible in zip(photos, available) if visible]
+    approved = [photo for photo in photos if photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"]
+    primary = next((photo for photo in reversed(approved) if int(photo.get("position") or 0) == 0), None)
+    if not primary:
+        primary = next((photo for photo in approved if photo_matches_avatar(photo, profile_data)), None)
+    if not primary and approved:
+        primary = approved[0]
+    for photo in photos:
+        photo["isPrimary"] = bool(primary and photo["id"] == primary["id"])
+        photo.pop("storageKey", None)
+    return photos
+
+
+@app.get("/api/admin/users/{profile_id}/presence")
+def admin_user_presence(profile_id: str, response: Response, _admin: str = Depends(require_admin)):
+    response.headers["Cache-Control"] = "private, no-store"
+    with db_cursor() as (_, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute(f"SELECT {profile_online_sql('%s')} AS isOnline", (resolved_id,))
+        return {"isOnline": bool(cursor.fetchone()["isOnline"])}
+
+
 @app.get("/api/admin/users/{profile_id}/overview")
 def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
     """One complete, internally consistent data source for the admin profile tabs."""
@@ -15386,21 +15893,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         source_user_id = str(profile_data.get("userId") or profile_data.get("id") or "")
         profile_ref = str(profile_id)
 
-        cursor.execute(
-            """
-            SELECT pp.id, pp.public_url, pp.position, pp.status, pp.moderation_status,
-                   pp.created_at, pp.updated_at,
-                   CASE WHEN pp.status = 'DELETED' THEN pp.updated_at ELSE NULL END AS deleted_at,
-                   (pp.id = (SELECT primary_photo.id FROM profile_photos primary_photo
-                             WHERE primary_photo.profile_id = pp.profile_id AND primary_photo.position = 0
-                               AND primary_photo.status = 'ACTIVE' AND primary_photo.moderation_status = 'APPROVED'
-                             ORDER BY primary_photo.id DESC LIMIT 1)) AS isPrimary
-            FROM profile_photos pp WHERE pp.profile_id = %s
-            ORDER BY pp.position ASC, pp.id ASC
-            """,
-            (profile_id,),
-        )
-        photos = [normalize_row(row) for row in cursor.fetchall()]
+        photos = admin_user_photos(cursor, profile_id, profile_data)
 
         verification_rows = admin_detail_rows(
             cursor,
@@ -15601,7 +16094,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         cursor.execute(
             """
             SELECT MAX(s.created_at) AS last_login_at,
-                   COALESCE(BOOL_OR(s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
+              COALESCE(BOOL_OR(u.status = 'ACTIVE' AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
                        AND s.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'), FALSE) AS is_online
             FROM local_users u JOIN auth_sessions s ON s.user_id = u.id
             WHERE u.profile_id = %s
@@ -15635,7 +16128,8 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         "boosts": len(boosts), "communityPosts": len(community_posts),
     }
     return {
-        "profile": normalize_row(profile), "counts": counts, "photos": photos,
+        "profile": normalize_row(profile),
+        "profileCompleteness": profile_completeness_percent(profile), "counts": counts, "photos": photos,
         "activity": admin_profile_activity(profile, device_sessions, auth_activity),
         "isOnline": bool(auth_activity.get("is_online")),
         **admin_profile_identity(profile, verification_rows, subscriptions),
@@ -16203,8 +16697,8 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
         profile = cursor.fetchone()
         if not profile:
             raise HTTPException(status_code=404, detail="User not found")
-        if not profile_is_verified(profile):
-            raise HTTPException(status_code=409, detail="Verify the profile before granting Premium")
+        if str(profile.get("status") or "").upper() != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Premium can only be granted to an active user")
         subscription_data = {
             "profileId": int(profile["id"]),
             "profileName": profile.get("display_name") or "No profile",
@@ -16429,6 +16923,7 @@ def admin_support_list(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     unanswered: bool = Query(False),
+    unresolved: bool | None = Query(None),
     _admin: str = Depends(require_admin),
 ):
     base_where = ["(a.role = 'SUPPORT' OR b.role = 'SUPPORT')"]
@@ -16453,9 +16948,10 @@ def admin_support_list(
             """)
             like = f"%{search}%"
             base_params.extend([like, like, like, like, like])
-    unanswered_clause = "c.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.status = 'ACTIVE')"
+    unanswered_clause = support_unresolved_sql()
     where = list(base_where)
-    if unanswered:
+    only_unresolved = unresolved if unresolved is not None else unanswered
+    if only_unresolved:
         where.append(unanswered_clause)
     where_sql = "WHERE " + " AND ".join(where)
     base_where_sql = "WHERE " + " AND ".join(base_where)
@@ -16488,15 +16984,7 @@ def admin_support_list(
                 THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                 ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
               END AS profileType,
-              EXISTS (
-                SELECT 1
-                FROM local_users online_user
-                JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
-                  AND online_user.status = 'ACTIVE'
-                  AND online_session.revoked_at IS NULL
-                  AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-              ) AS isOnline,
+              {profile_online_sql("CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END")} AS isOnline,
                 (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE' ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
                 (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE' ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
               (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount,
@@ -16515,7 +17003,7 @@ def admin_support_list(
                WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE'
                ORDER BY lm.created_at DESC, lm.id DESC
                LIMIT 1),
-              c.updated_at
+                    c.created_at
             ) DESC, c.id DESC
             LIMIT %s OFFSET %s
             """,
@@ -16527,6 +17015,7 @@ def admin_support_list(
         "total": total,
         "totalAll": total_all,
         "totalUnanswered": total_unanswered,
+        "totalUnresolved": total_unanswered,
         "limit": limit,
         "offset": offset,
     }
@@ -16536,7 +17025,7 @@ def admin_support_list(
 def admin_support_conversation(conversation_id: int, _admin: str = Depends(require_admin)):
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT c.id, c.status, c.profile_a_id, c.profile_b_id,
                    a.role AS profileARole, b.role AS profileBRole,
                    CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END AS userId,
@@ -16556,15 +17045,7 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
                      THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                      ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
                    END AS profileType,
-                   EXISTS (
-                     SELECT 1
-                     FROM local_users online_user
-                     JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                     WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
-                       AND online_user.status = 'ACTIVE'
-                       AND online_session.revoked_at IS NULL
-                       AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-                   ) AS isOnline
+                   {profile_online_sql("CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END")} AS isOnline
             FROM conversations c
             JOIN profiles a ON a.id = c.profile_a_id
             JOIN profiles b ON b.id = c.profile_b_id
@@ -16588,7 +17069,7 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
             """,
             (conversation_id,),
         )
-        messages = [normalize_row(row) for row in cursor.fetchall()]
+        messages = [{**normalize_row(row), "isSupport": str(row.get("senderRole") or "").upper() == "SUPPORT"} for row in cursor.fetchall()]
         cursor.execute("UPDATE conversation_messages SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE conversation_id = %s AND sender_profile_id <> %s AND status = 'ACTIVE'", (conversation_id, support["id"]))
         conn.commit()
     return {"conversation": normalize_row(conversation), "supportProfile": normalize_row(support), "messages": messages}
@@ -16599,7 +17080,7 @@ def admin_send_support_message(conversation_id: int, payload: AdminSupportMessag
     with db_cursor() as (conn, cursor):
         body = validate_chat_message(cursor, payload.body)
         support = support_profile(cursor)
-        cursor.execute("SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1", (conversation_id, support["id"], support["id"]))
+        cursor.execute("SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1 FOR UPDATE", (conversation_id, support["id"], support["id"]))
         conversation = cursor.fetchone()
         if not conversation:
             raise HTTPException(status_code=404, detail="Support conversation not found")
@@ -16618,12 +17099,16 @@ def admin_resolve_support_conversation(conversation_id: int, actor: str = Depend
     with db_cursor() as (conn, cursor):
         support = support_profile(cursor)
         cursor.execute(
-            "SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1",
+            "SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1 FOR UPDATE",
             (conversation_id, support["id"], support["id"]),
         )
         conversation = cursor.fetchone()
         if not conversation:
             raise HTTPException(status_code=404, detail="Support conversation not found")
+        if conversation.get("status") == "RESOLVED":
+            return {"ok": True, "id": conversation_id, "status": "RESOLVED"}
+        if conversation.get("status") != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Support conversation is not active")
         cursor.execute(
             "UPDATE conversation_messages SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE conversation_id = %s AND sender_profile_id <> %s AND status = 'ACTIVE'",
             (conversation_id, support["id"]),
@@ -16648,6 +17133,24 @@ ADMIN_LOCATION_MISMATCH_SQL = """
         ELSE ''
     END
 """
+
+
+def admin_directory_text_sql(*keys: str, media: bool = False) -> str:
+    candidates = []
+    for key in keys:
+        value = f"BTRIM(data ->> '{key}', E' \\t\\r\\n')"
+        condition = (
+            f"jsonb_typeof(data -> '{key}') = 'string' "
+            f"AND LOWER({value}) NOT IN ('', 'null', 'undefined')"
+        )
+        if media:
+            condition += f" AND {value} ~* '^(https?://|/|blob:|data:image/)'"
+        candidates.append(f"CASE WHEN {condition} THEN {value} END")
+    return "COALESCE(" + ", ".join([*candidates, "NULL"]) + ")"
+
+
+ADMIN_CLINIC_LOGO_SQL = admin_directory_text_sql("logoUrl", "logo", "imageUrl", media=True)
+ADMIN_CLINIC_WEBSITE_SQL = admin_directory_text_sql("website")
 
 
 ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
@@ -16697,13 +17200,7 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                AND pph.status = 'ACTIVE'
                AND pph.moderation_status = 'APPROVED'
              ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl,
-            EXISTS(
-                SELECT 1 FROM local_users lu
-                JOIN auth_sessions aus ON aus.user_id = lu.id
-                WHERE lu.profile_id = profiles.id
-                  AND aus.revoked_at IS NULL
-                  AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-            ) AS isOnline,
+            {profile_online_sql('profiles.id')} AS isOnline,
             {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
              WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
@@ -16779,13 +17276,7 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                AND pph.status = 'ACTIVE'
                AND pph.moderation_status = 'APPROVED'
              ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl,
-            EXISTS(
-                SELECT 1 FROM local_users lu
-                JOIN auth_sessions aus ON aus.user_id = lu.id
-                WHERE lu.profile_id = profiles.id
-                  AND aus.revoked_at IS NULL
-                  AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-            ) AS isOnline,
+            {profile_online_sql('profiles.id')} AS isOnline,
             {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
              WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
@@ -16817,14 +17308,10 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
     },
     "clinics": {
         "table": "clinics",
-        "select": """
+        "select": f"""
             id, name, country, city, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug,
-            COALESCE(
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl')), ''),
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logo')), ''),
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.imageUrl')), '')
-            ) AS logoUrl,
+            {ADMIN_CLINIC_LOGO_SQL} AS logoUrl,
             CASE
                 WHEN COALESCE(data->>'servicesCount', '') ~ '^[0-9]+$'
                     THEN (data->>'servicesCount')::INTEGER
@@ -16841,8 +17328,8 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
         "search": ["name", "country", "city", "JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug'))"],
         "filters": {"status": "status", "country": "COALESCE(NULLIF(country, ''), JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')))", "city": "city"},
         "boolean_filters": {
-            "hasWebsite": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.website'))",
-            "hasLogo": "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.logo')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.imageUrl')))",
+            "hasWebsite": ADMIN_CLINIC_WEBSITE_SQL,
+            "hasLogo": ADMIN_CLINIC_LOGO_SQL,
         },
         "order": "name ASC, id ASC",
     },
@@ -17077,6 +17564,12 @@ ADMIN_ARTICLE_CATEGORY_DEFAULTS: tuple[dict[str, Any], ...] = (
         "translations": [
             {"locale": "en", "name": "IVF - In Vitro Fertilization"},
             {"locale": "ru", "name": "ЭКО - Экстракорпоральное оплодотворение"},
+            {"locale": "es", "name": "FIV - Fertilización in vitro"},
+            {"locale": "pt", "name": "FIV - Fertilização in vitro"},
+            {"locale": "fr", "name": "FIV - Fécondation in vitro"},
+            {"locale": "de", "name": "IVF - In-vitro-Fertilisation"},
+            {"locale": "it", "name": "FIVET - Fecondazione in vitro"},
+            {"locale": "pl", "name": "In vitro - Zapłodnienie pozaustrojowe"},
         ],
     },
     {
@@ -17084,6 +17577,12 @@ ADMIN_ARTICLE_CATEGORY_DEFAULTS: tuple[dict[str, Any], ...] = (
         "translations": [
             {"locale": "en", "name": "Co-parenting"},
             {"locale": "ru", "name": "Копереннтинг"},
+            {"locale": "es", "name": "Coparentalidad"},
+            {"locale": "pt", "name": "Coparentalidade"},
+            {"locale": "fr", "name": "Coparentalité"},
+            {"locale": "de", "name": "Co-Parenting"},
+            {"locale": "it", "name": "Co-genitorialità"},
+            {"locale": "pl", "name": "Współrodzicielstwo"},
         ],
     },
     {
@@ -17091,22 +17590,52 @@ ADMIN_ARTICLE_CATEGORY_DEFAULTS: tuple[dict[str, Any], ...] = (
         "translations": [
             {"locale": "en", "name": "Sperm donor"},
             {"locale": "ru", "name": "Донор спермы"},
+            {"locale": "es", "name": "Donante de esperma"},
+            {"locale": "pt", "name": "Doador de esperma"},
+            {"locale": "fr", "name": "Donneur de sperme"},
+            {"locale": "de", "name": "Samenspender"},
+            {"locale": "it", "name": "Donatore di sperma"},
+            {"locale": "pl", "name": "Dawca nasienia"},
         ],
     },
     {
         "slug": "fertility",
-        "translations": [{"locale": "en", "name": "Fertility"}],
+        "translations": [
+            {"locale": "en", "name": "Fertility"},
+            {"locale": "ru", "name": "Фертильность"},
+            {"locale": "es", "name": "Fertilidad"},
+            {"locale": "pt", "name": "Fertilidade"},
+            {"locale": "fr", "name": "Fertilité"},
+            {"locale": "de", "name": "Fruchtbarkeit"},
+            {"locale": "it", "name": "Fertilità"},
+            {"locale": "pl", "name": "Płodność"},
+        ],
     },
     {
         "slug": "lgbtq",
         "translations": [
             {"locale": "en", "name": "LGBTQ+"},
             {"locale": "ru", "name": "ЛГБТК+"},
+            {"locale": "es", "name": "LGBTQ+"},
+            {"locale": "pt", "name": "LGBTQ+"},
+            {"locale": "fr", "name": "LGBTQ+"},
+            {"locale": "de", "name": "LGBTQ+"},
+            {"locale": "it", "name": "LGBTQ+"},
+            {"locale": "pl", "name": "LGBTQ+"},
         ],
     },
     {
         "slug": "Parenthood",
-        "translations": [{"locale": "en", "name": "Parenthood"}],
+        "translations": [
+            {"locale": "en", "name": "Parenthood"},
+            {"locale": "ru", "name": "Родительство"},
+            {"locale": "es", "name": "Parentalidad"},
+            {"locale": "pt", "name": "Parentalidade"},
+            {"locale": "fr", "name": "Parentalité"},
+            {"locale": "de", "name": "Elternschaft"},
+            {"locale": "it", "name": "Genitorialità"},
+            {"locale": "pl", "name": "Rodzicielstwo"},
+        ],
     },
 )
 
@@ -17151,6 +17680,18 @@ def admin_article_category_data(
         name = english["name"]
     elif name:
         translations.insert(0, {"locale": "en", "name": name})
+        seen_locales.add("en")
+    default = next(
+        (item for item in ADMIN_ARTICLE_CATEGORY_DEFAULTS if str(item["slug"]).casefold() == slug.casefold()),
+        None,
+    )
+    if default:
+        for translated in default["translations"]:
+            if translated["locale"] not in seen_locales:
+                translations.append(dict(translated))
+                seen_locales.add(translated["locale"])
+        if not name:
+            name = next(item["name"] for item in translations if item["locale"] == "en")
 
     return {
         **{key: value for key, value in raw.items() if key not in {"data", "title", "status", "locale"}},
@@ -17182,7 +17723,9 @@ def ensure_admin_article_categories(conn, cursor) -> None:
         )
         normalized_existing.append((row, normalized))
         stored = as_dict(row.get("data"))
-        if as_dict(stored.get("data")) and not (stored.get("name") or stored.get("translations")):
+        if (
+            as_dict(stored.get("data")) and not (stored.get("name") or stored.get("translations"))
+        ) or normalized["translations"] != stored.get("translations"):
             cursor.execute(
                 "UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
                 (json.dumps(normalized, ensure_ascii=False), row["id"]),
@@ -17411,6 +17954,25 @@ def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict
         item["categoryName"] = category.get("name") or ""
         item["categorySlug"] = category.get("slug") or ""
     return items
+
+
+def public_enrich_article_category_labels(cursor, items: list[dict[str, Any]]) -> None:
+    records = [
+        {"title": item.get("title"), "slug": item.get("slug"), "data": as_dict(item.get("meta"))}
+        for item in items
+    ]
+    admin_enrich_article_items(cursor, records)
+    for item, record in zip(items, records):
+        category = as_dict(record.get("category"))
+        if not category:
+            continue
+        item["categorySlug"] = str(category.get("slug") or "")
+        item["categoryName"] = str(category.get("name") or "")
+        item["categoryTranslations"] = [
+            {"locale": str(translation.get("locale") or ""), "name": str(translation.get("name") or "")}
+            for value in category.get("translations") or []
+            if (translation := as_dict(value)).get("locale") and translation.get("name")
+        ]
 
 
 @app.post("/api/admin/article-images")
@@ -17999,6 +18561,9 @@ def build_list_where(
         if value and key in filters:
             if key == "city":
                 where_parts.append(f"STRPOS(LOWER(COALESCE({filters[key]}, '')), LOWER(%s)) > 0")
+            elif key == "status":
+                where_parts.append(f"LOWER(BTRIM(COALESCE({filters[key]}, ''))) = %s")
+                value = str(value).strip().lower()
             else:
                 where_parts.append(f"LOWER(COALESCE({filters[key]}, '')) = LOWER(%s)")
             params.append(value)
@@ -18024,19 +18589,7 @@ def build_list_where(
         if seeks_co_parent and str(seeks_co_parent).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER')) = 1")
     if is_online and str(is_online).lower() in {"1", "true", "yes"} and definition.get("table") == "profiles":
-        where_parts.append(
-            """
-            EXISTS (
-                SELECT 1
-                FROM local_users online_user
-                JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                WHERE online_user.profile_id = profiles.id
-                  AND online_user.status = 'ACTIVE'
-                  AND online_session.revoked_at IS NULL
-                  AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-            )
-            """
-        )
+        where_parts.append(profile_online_sql("profiles.id"))
     return ("WHERE " + " AND ".join(where_parts)) if where_parts else "", params
 
 
@@ -18085,6 +18638,8 @@ def admin_list(
         )
         if view == "articles" and not status_filter:
             where += (" AND " if where else "WHERE ") + "LOWER(COALESCE(status, '')) <> 'archived'"
+        if view in {"users", "profiles"} and not status_filter:
+            where += (" AND " if where else "WHERE ") + "UPPER(COALESCE(status,'')) NOT IN ('DELETED','DELETION_PENDING','PENDING_DELETION')"
         table = definition["table"]
         order = definition["order"]
         if view in {"users", "profiles"}:
@@ -18341,11 +18896,73 @@ def admin_verification_detail(
     return {"item": item}
 
 
+def require_admin_role(actor: str, action: str) -> None:
+    account = dynamic_admin_account(actor)
+    allowed = str(account.get("role") or "").strip().upper() == "ADMIN" if account else is_configured_admin_user(actor)
+    if not allowed:
+        raise HTTPException(status_code=403, detail=f"Only administrators can {action}")
+
+
+def require_admin_action(action: str):
+    def authorized_actor(actor: str = Depends(require_admin)) -> str:
+        require_admin_role(actor, action)
+        return actor
+    return authorized_actor
+
+
+@app.post("/api/admin/users/{profile_id}/verification")
+def admin_set_user_verification(profile_id: str, payload: AdminProfileVerificationPayload, actor: str = Depends(require_admin_action("change profile verification manually"))):
+    require_admin_role(actor, "change profile verification manually")
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (resolved_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="User not found")
+        changed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        update_profile_data(cursor, resolved_id, {"isVerified": payload.verified, "verifiedAt": changed_at if payload.verified else None, "verificationProvider": "manual", "manualVerificationReason": payload.reason, "manualVerificationBy": actor, "manualVerificationAt": changed_at})
+        if payload.verified:
+            data = {"profileId": resolved_id, "provider": "manual", "completedAt": changed_at, "manualApprovedAt": changed_at, "manualApprovedBy": actor, "manualApprovalReason": payload.reason}
+            cursor.execute("INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at) VALUES ('verification', %s, 'Manual verification', 'APPROVED', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())", ("manual-" + secrets.token_hex(16), json.dumps(data)))
+            reward_referral_if_pending(cursor, resolved_id)
+        audit(conn, actor, "PROFILE_MANUAL_VERIFIED" if payload.verified else "PROFILE_VERIFICATION_REVOKED", "profile", resolved_id, {"verified": payload.verified, "reason": payload.reason})
+        conn.commit()
+    return {"ok": True, "profileId": resolved_id, "isVerified": payload.verified}
+
+
+@app.get("/api/admin/articles/{article_id}")
+def admin_article_detail(article_id: int, _admin: str = Depends(require_admin)):
+    with db_cursor() as (_, cursor):
+        cursor.execute("SELECT * FROM articles WHERE id = %s LIMIT 1", (article_id,))
+        article = cursor.fetchone()
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        cursor.execute("SELECT * FROM articles WHERE slug = %s ORDER BY locale, id", (article.get("slug"),))
+        translations = cursor.fetchall()
+    return {"item": normalize_row(article), "translations": [normalize_row(item) for item in translations]}
+
+
+@app.delete("/api/admin/articles/{article_id}")
+def admin_permanently_delete_article(article_id: int, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id, title, slug, status FROM articles WHERE id = %s FOR UPDATE", (article_id,))
+        item = cursor.fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="Article not found")
+        if str(item.get("status") or "").strip().upper() != "ARCHIVED":
+            raise HTTPException(status_code=409, detail="Archive the article before deleting it permanently")
+        cursor.execute("DELETE FROM articles WHERE id = %s", (article_id,))
+        audit(conn, actor, "ARTICLE_PERMANENTLY_DELETED", "article", article_id, {"title": item.get("title"), "slug": item.get("slug")})
+        conn.commit()
+    return Response(status_code=204)
+
+
 @app.post("/api/admin/verifications/{verification_id}/approve")
 def admin_approve_verification(
     verification_id: str,
-    actor: str = Depends(require_admin),
+    payload: AdminVerificationActionPayload,
+    actor: str = Depends(require_admin_action("approve a verification manually")),
 ):
+    require_admin_role(actor, "approve a verification manually")
     with db_cursor() as (conn, cursor):
         item = fetch_admin_verification(cursor, verification_id, for_update=True)
         data = as_dict(item.get("data"))
@@ -18357,6 +18974,7 @@ def admin_approve_verification(
             "completedAt": approved_at,
             "manualApprovedAt": approved_at,
             "manualApprovedBy": actor,
+                "manualApprovalReason": payload.reason,
         })
         cursor.execute(
             "UPDATE app_entities SET status = 'APPROVED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = 'verification'",
@@ -18386,7 +19004,7 @@ def admin_approve_verification(
             "VERIFICATION_MANUAL_APPROVED",
             "verification",
             item["id"],
-            {"profileId": profile_id, "sessionId": item.get("sessionId")},
+            {"profileId": profile_id, "sessionId": item.get("sessionId"), "reason": payload.reason},
         )
         conn.commit()
     return {"ok": True, "id": item["id"], "status": "APPROVED"}
@@ -18395,8 +19013,10 @@ def admin_approve_verification(
 @app.post("/api/admin/verifications/{verification_id}/revoke")
 def admin_revoke_verification(
     verification_id: str,
-    actor: str = Depends(require_admin),
+    payload: AdminVerificationActionPayload,
+    actor: str = Depends(require_admin_action("revoke a verification")),
 ):
+    require_admin_role(actor, "revoke a verification")
     with db_cursor() as (conn, cursor):
         item = fetch_admin_verification(cursor, verification_id, for_update=True)
         data = as_dict(item.get("data"))
@@ -18418,6 +19038,7 @@ def admin_revoke_verification(
                 "verifiedAt": None,
                 "verificationRevokedAt": revoked_at,
                 "verificationRevokedBy": actor,
+                "verificationRevocationReason": payload.reason,
             },
         )
         audit(
@@ -18426,7 +19047,7 @@ def admin_revoke_verification(
             "VERIFICATION_REVOKED",
             "verification",
             item["id"],
-            {"profileId": profile_id, "sessionId": item.get("sessionId")},
+            {"profileId": profile_id, "sessionId": item.get("sessionId"), "reason": payload.reason},
         )
         conn.commit()
     return {
@@ -18440,8 +19061,10 @@ def admin_revoke_verification(
 @app.delete("/api/admin/verifications/{verification_id}")
 def admin_delete_verification(
     verification_id: str,
-    actor: str = Depends(require_admin),
+    payload: AdminVerificationActionPayload,
+    actor: str = Depends(require_admin_action("delete a verification session")),
 ):
+    require_admin_role(actor, "delete a verification session")
     with db_cursor() as (conn, cursor):
         item = fetch_admin_verification(cursor, verification_id, for_update=True)
         cursor.execute(
@@ -18454,7 +19077,7 @@ def admin_delete_verification(
             "delete_verification_session",
             "verification",
             item["id"],
-            {"profileId": item.get("profileId"), "sessionId": item.get("sessionId")},
+            {"profileId": item.get("profileId"), "sessionId": item.get("sessionId"), "reason": payload.reason},
         )
         conn.commit()
     return {"ok": True, "id": item["id"], "deleted": True}
@@ -18476,126 +19099,229 @@ ADMIN_STORAGE_CATEGORY_SQL = """
 """
 
 
+def admin_storage_inventory(epoch: int) -> tuple[dict[str, Any], ...]:
+    del epoch
+    with db_cursor() as (_, cursor):
+        cursor.execute(f"SELECT mf.id, mf.storage_key AS storageKey, mf.public_url AS publicUrl, mf.mime_type AS mimeType, mf.bytes, mf.created_at AS createdAt, mf.metadata, {ADMIN_STORAGE_CATEGORY_SQL} AS category FROM media_files mf WHERE ({ADMIN_STORAGE_CATEGORY_SQL}) IS NOT NULL")
+        return tuple(cursor.fetchall())
+
+
+def admin_storage_facts(item: dict[str, Any], *, probe: bool = False) -> dict[str, Any]:
+    metadata = as_dict(item.get("metadata"))
+    trash = as_dict(metadata.get("adminTrash"))
+    if trash.get("state") == "trashed":
+        key = str(trash.get("trashKey") or "")
+        if re.fullmatch(r"[a-f0-9]{48}", key):
+            candidate = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+            if candidate.is_file():
+                return {"exists": True, "bytes": candidate.stat().st_size, "sizeKnown": True}
+        return {"exists": None, "bytes": int(item.get("bytes") or 0), "sizeKnown": int(item.get("bytes") or 0) > 0}
+    facts = inspect_storage_file(str(item.get("storageKey") or ""), str(item.get("publicUrl") or ""), item.get("bytes"), UPLOAD_DIR, PRIVATE_UPLOAD_DIR, probe=probe)
+    saved = as_dict(metadata.get("storageProbe"))
+    source_hash = hashlib.sha256((str(item.get("storageKey") or "") + "\0" + str(item.get("publicUrl") or "")).encode()).hexdigest()
+    if saved.get("sourceHash") == source_hash and facts.get("sizeSource") != "filesystem":
+        if saved.get("exists") is False and (not probe or facts.get("exists") is None):
+            facts["exists"] = False
+        if not facts.get("sizeKnown") and saved.get("bytes") is not None:
+            facts.update({"bytes": int(saved["bytes"]), "sizeKnown": True, "sizeSource": "indexed"})
+    return facts
+
+
+def admin_storage_change(action: str, payload: AdminStorageSelectionPayload, actor: str) -> dict[str, Any]:
+    if action not in {"trash", "restore", "purge"}:
+        raise HTTPException(status_code=422, detail="Unknown storage action")
+    ids = payload.ids
+    if payload.allTrash:
+        if action != "purge":
+            raise HTTPException(status_code=422, detail="Select the files to restore")
+        with db_cursor() as (_, cursor):
+            cursor.execute("SELECT id FROM media_files WHERE metadata->'adminTrash'->>'state' = 'trashed' ORDER BY id")
+            ids = [int(item["id"]) for item in cursor.fetchall()]
+        changed = pending = 0
+        for start in range(0, len(ids), 100):
+            result = admin_storage_change(action, AdminStorageSelectionPayload(ids=ids[start:start + 100]), actor)
+            changed += result["changed"];pending += result.get("cleanupPending", 0)
+        return {"ok": pending == 0, "changed": changed, "cleanupPending": pending}
+    if not ids:
+        raise HTTPException(status_code=422, detail="Select at least one file")
+    moved: list[tuple[Path, Path]] = []
+    delete_after_commit: list[tuple[int, Path | None]] = []
+    changed = 0
+    try:
+        with db_cursor() as (conn, cursor):
+            placeholders = ', '.join(['%s'] * len(ids))
+            cursor.execute(f"SELECT DISTINCT profile_id FROM profile_photos WHERE media_file_id IN ({placeholders}) OR avatar_media_file_id IN ({placeholders}) ORDER BY profile_id", [*ids, *ids])
+            profiles = [int(item["profile_id"]) for item in cursor.fetchall()]
+            if profiles:
+                profile_placeholders = ', '.join(['%s'] * len(profiles))
+                cursor.execute(f"SELECT id FROM profiles WHERE id IN ({profile_placeholders}) ORDER BY id FOR UPDATE", profiles)
+                cursor.fetchall()
+            cursor.execute(f"SELECT id, storage_key AS storageKey, public_url AS publicUrl, metadata FROM media_files WHERE id IN ({placeholders}) ORDER BY id FOR UPDATE", ids)
+            files = cursor.fetchall()
+            if len(files) != len(ids):
+                raise HTTPException(status_code=404, detail="One or more files no longer exist")
+            for item in files:
+                metadata = dict(as_dict(item.get("metadata")))
+                previous = as_dict(metadata.get("adminTrash"))
+                state = previous.get("state")
+                if action == "trash" and state in {"trashed", "purged"}:
+                    continue
+                if action == "purge" and state == "purged":
+                    continue
+                if action in {"restore", "purge"} and state != "trashed":
+                    raise HTTPException(status_code=409, detail="Only files in Trash can be restored or permanently deleted")
+                if action == "trash":
+                    public_url = str(item.get("publicUrl") or "")
+                    cursor.execute("SELECT COUNT(*) AS count FROM media_files WHERE id <> %s AND (storage_key = %s OR (public_url = %s AND public_url <> '')) AND COALESCE(metadata->'adminTrash'->>'state', '') NOT IN ('trashed', 'purged')", (item["id"], item.get("storageKey"), public_url))
+                    shared = int(cursor.fetchone()["count"] or 0) > 0
+                    snapshot = {"state": "trashed", "trashedAt": now_utc().isoformat(), "trashedBy": actor, "publicUrl": item.get("publicUrl"), "photos": [], "avatars": [], "messages": []}
+                    local_path = storage_file_path(str(item.get("storageKey") or ""), UPLOAD_DIR, PRIVATE_UPLOAD_DIR)
+                    if not shared and local_path and local_path.is_file():
+                        key = secrets.token_hex(24)
+                        trash_path = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+                        trash_path.parent.mkdir(parents=True, exist_ok=True)
+                        if trash_path.exists():
+                            raise HTTPException(status_code=409, detail="Trash destination already exists")
+                        shutil.move(str(local_path), str(trash_path))
+                        moved.append((local_path, trash_path));snapshot["trashKey"] = key
+                    cursor.execute("SELECT id, profile_id, status, position, public_url FROM profile_photos WHERE (media_file_id = %s OR avatar_media_file_id = %s) AND status = 'ACTIVE' ORDER BY profile_id, id FOR UPDATE", (item["id"], item["id"]))
+                    for photo in cursor.fetchall():
+                        snapshot["photos"].append(dict(photo))
+                        profile = fetch_profile(cursor, int(photo["profile_id"]))
+                        data = as_dict((profile or {}).get("data"))
+                        if int(photo.get("position") or 0) == 0 and data.get("avatarUrl"):
+                            snapshot["avatars"].append({"profileId": photo["profile_id"], "avatarUrl": data.get("avatarUrl"), "wizard": data.get("isWizardCompleted")})
+                            update_profile_data(cursor, int(photo["profile_id"]), {"avatarUrl": None, "isWizardCompleted": False, "isVerified": False, "verifiedAt": None})
+                            reset_verification_after_primary_photo_change(cursor, int(photo["profile_id"]))
+                        cursor.execute("UPDATE profile_photos SET status = 'TRASHED', public_url = NULL, updated_at = UTC_TIMESTAMP() WHERE id = %s", (photo["id"],))
+                    if public_url and not shared:
+                        cursor.execute("SELECT id, media_url, body FROM conversation_messages WHERE media_url = %s FOR UPDATE", (public_url,))
+                        for message in cursor.fetchall():
+                            snapshot["messages"].append({"id": message["id"], "mediaUrl": message["media_url"], "emptyBody": not message.get("body")})
+                            cursor.execute("UPDATE conversation_messages SET media_url = NULL, body = CASE WHEN COALESCE(body, '') = '' THEN 'Attachment removed' ELSE body END WHERE id = %s", (message["id"],))
+                    metadata["adminTrash"] = snapshot
+                    cursor.execute("UPDATE media_files SET public_url = NULL, metadata = %s WHERE id = %s", (json.dumps(metadata, ensure_ascii=False, default=str), item["id"]))
+                elif action == "restore":
+                    key = str(previous.get("trashKey") or "")
+                    if key:
+                        if not re.fullmatch(r"[a-f0-9]{48}", key):
+                            raise HTTPException(status_code=409, detail="Invalid Trash entry")
+                        trash_path = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+                        target = storage_file_path(str(item.get("storageKey") or ""), UPLOAD_DIR, PRIVATE_UPLOAD_DIR)
+                        if not target or not trash_path.is_file():
+                            raise HTTPException(status_code=409, detail="The stored file is unavailable")
+                        if target.exists():
+                            raise HTTPException(status_code=409, detail="A file already exists at the original path")
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(trash_path), str(target));moved.append((trash_path, target))
+                    if not key and inspect_storage_file(str(item.get("storageKey") or ""), str(previous.get("publicUrl") or ""), 0, UPLOAD_DIR, PRIVATE_UPLOAD_DIR, probe=True)["exists"] is False:
+                        raise HTTPException(status_code=409, detail="The original file is unavailable and cannot be restored")
+                    for photo in previous.get("photos") or []:
+                        position = int(photo.get("position") or 0)
+                        cursor.execute("SELECT id FROM profile_photos WHERE profile_id = %s AND status = 'ACTIVE' AND position = %s AND id <> %s LIMIT 1", (photo["profile_id"], position, photo["id"]))
+                        if cursor.fetchone():
+                            cursor.execute("SELECT COALESCE(MAX(position), 0) + 1 AS position FROM profile_photos WHERE profile_id = %s", (photo["profile_id"],))
+                            position = int(cursor.fetchone()["position"])
+                        cursor.execute("UPDATE profile_photos SET status = %s, public_url = %s, position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND status = 'TRASHED'", (photo["status"], photo.get("public_url"), position, photo["id"]))
+                    for avatar in previous.get("avatars") or []:
+                        profile = fetch_profile(cursor, int(avatar["profileId"]))
+                        if profile and not as_dict(profile.get("data")).get("avatarUrl"):
+                            update_profile_data(cursor, int(avatar["profileId"]), {"avatarUrl": avatar.get("avatarUrl"), "isWizardCompleted": bool(avatar.get("wizard"))})
+                    for message in previous.get("messages") or []:
+                        cursor.execute("UPDATE conversation_messages SET media_url = %s, body = CASE WHEN body = 'Attachment removed' AND %s THEN '' ELSE body END WHERE id = %s AND media_url IS NULL", (message["mediaUrl"], bool(message.get("emptyBody")), message["id"]))
+                    metadata.pop("adminTrash", None)
+                    cursor.execute("UPDATE media_files SET public_url = %s, metadata = %s WHERE id = %s", (previous.get("publicUrl"), json.dumps(metadata, ensure_ascii=False), item["id"]))
+                else:
+                    key = str(previous.get("trashKey") or "")
+                    if key and not re.fullmatch(r"[a-f0-9]{48}", key):
+                        raise HTTPException(status_code=409, detail="Invalid Trash entry")
+                    delete_after_commit.append((int(item["id"]), safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key) if key else None))
+                    metadata["adminTrash"] = {**previous, "purgeRequestedAt": now_utc().isoformat(), "purgeRequestedBy": actor}
+                    cursor.execute("UPDATE media_files SET metadata = %s WHERE id = %s", (json.dumps(metadata, ensure_ascii=False, default=str), item["id"]))
+                audit(conn, actor, "STORAGE_PURGE_REQUESTED" if action == "purge" else "STORAGE_" + action.upper(), "media", item["id"], {"storageKey": item.get("storageKey")})
+                changed += 1
+            conn.commit()
+    except Exception:
+        for original, destination in reversed(moved):
+            if destination.is_file() and not original.exists():
+                original.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(destination), str(original))
+        raise
+    finally:
+        clear_storage_file_facts()
+    failures = 0
+    for identifier, file in delete_after_commit:
+        try:
+            with db_cursor() as (conn, cursor):
+                cursor.execute("SELECT metadata FROM media_files WHERE id = %s FOR UPDATE", (identifier,))
+                current = cursor.fetchone()
+                metadata = dict(as_dict((current or {}).get("metadata")))
+                if not current or as_dict(metadata.get("adminTrash")).get("state") != "trashed":
+                    changed -= 1
+                    continue
+                if file:
+                    file.unlink(missing_ok=True)
+                cursor.execute("UPDATE profile_photos SET status = 'DELETED', public_url = NULL, updated_at = UTC_TIMESTAMP() WHERE (media_file_id = %s OR avatar_media_file_id = %s) AND status = 'TRASHED'", (identifier, identifier))
+                metadata["adminTrash"] = {"state": "purged", "purgedAt": now_utc().isoformat(), "purgedBy": actor}
+                cursor.execute("UPDATE media_files SET public_url = NULL, metadata = %s WHERE id = %s", (json.dumps(metadata, ensure_ascii=False), identifier))
+                audit(conn, actor, "STORAGE_PURGED", "media", identifier)
+                conn.commit()
+        except OSError:
+            failures += 1
+    clear_storage_file_facts()
+    return {"ok": failures == 0, "changed": changed - failures, "cleanupPending": failures}
+
+
+@app.post("/api/admin/storage/trash")
+def admin_trash_storage(payload: AdminStorageSelectionPayload, actor: str = Depends(require_admin)):
+    return admin_storage_change("trash", payload, actor)
+
+
+@app.post("/api/admin/storage/restore")
+def admin_restore_storage(payload: AdminStorageSelectionPayload, actor: str = Depends(require_admin)):
+    return admin_storage_change("restore", payload, actor)
+
+
+@app.post("/api/admin/storage/purge")
+def admin_purge_storage(payload: AdminStorageSelectionPayload, actor: str = Depends(require_admin)):
+    return admin_storage_change("purge", payload, actor)
+
+
 @app.get("/api/admin/storage")
 def admin_storage(
-    category: Literal[
-        "all",
-        "profile_photos",
-        "chat_images",
-        "chat_files",
-        "clinic_logos",
-        "lawyer_photos",
-        "article_images",
-    ] = "all",
+    category: Literal["all", "profile_photos", "chat_images", "chat_files", "clinic_logos", "lawyer_photos", "article_images"] = "all",
     user_id: str | None = Query(None, alias="userId", max_length=128),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    _admin: str = Depends(require_admin),
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    trash: bool = False, _admin: str = Depends(require_admin),
 ):
     normalized_user_id = str(user_id or "").strip()
-    category_sql = ADMIN_STORAGE_CATEGORY_SQL.strip()
-    summary = {
-        key: {"files": 0, "bytes": 0}
-        for key in (
-            "profile_photos",
-            "chat_images",
-            "chat_files",
-            "clinic_logos",
-            "lawyer_photos",
-            "article_images",
-        )
-    }
-
+    categories = ("profile_photos", "chat_images", "chat_files", "clinic_logos", "lawyer_photos", "article_images")
+    rows = [dict(item) for item in admin_storage_inventory(int(time.monotonic() // 30))]
+    if normalized_user_id:
+        with db_cursor() as (_, cursor):
+            cursor.execute("SELECT id, data->>'id' AS sourceId FROM profiles WHERE data->>'id' = %s OR data->>'userId' = %s OR CAST(id AS TEXT) = %s LIMIT 1", (normalized_user_id, normalized_user_id, normalized_user_id))
+            profile = cursor.fetchone() or {}
+        owners = {normalized_user_id, str(profile.get("id") or ""), str(profile.get("sourceId") or "")} - {""}
+        rows = [item for item in rows if any(str(as_dict(item.get("metadata")).get(key) or "") in owners for key in ("profileSourceId", "profileId", "senderProfileId")) or str(item.get("storageKey") or "").removeprefix("quarantine/").split("/")[1:2] in [[value] for value in owners]]
+    def state(item): return as_dict(as_dict(item.get("metadata")).get("adminTrash")).get("state")
+    candidates = [item for item in rows if (state(item) == "trashed" if trash else state(item) not in {"trashed", "purged"})]
+    candidates.sort(key=lambda item: (categories.index(item["category"]), str(item.get("storageKey") or ""), int(item["id"])))
+    selected = [item for item in candidates if category == "all" or item["category"] == category]
+    if not trash:
+        from concurrent.futures import ThreadPoolExecutor
+        visible = [item for item in selected if admin_storage_facts(item)["exists"] is not False]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda item: admin_storage_facts(item, probe=True), visible[offset:offset + limit + 10]))
+    facts = {int(item["id"]): admin_storage_facts(item) for item in candidates}
+    candidates = [item for item in candidates if trash or facts[int(item["id"])]["exists"] is not False]
+    summary = {key: {"files": 0, "bytes": 0, "unknownSizes": 0} for key in categories}
+    for item in candidates:
+        fact = facts[int(item["id"])];item["bytes"] = fact["bytes"];item["sizeKnown"] = fact["sizeKnown"]
+        group = summary[item["category"]];group["files"] += 1;group["bytes"] += int(fact["bytes"] or 0);group["unknownSizes"] += int(not fact["sizeKnown"])
+    selected = [item for item in candidates if category == "all" or item["category"] == category]
+    total = len(selected);files = selected[offset:offset + limit]
+    trash_files = sum(state(item) == "trashed" for item in rows)
     with db_cursor() as (_, cursor):
-        cursor.execute(
-            f"""
-            SELECT category, COUNT(*) AS files, COALESCE(SUM(bytes), 0) AS bytes,
-                   COUNT(*) FILTER (WHERE bytes <= 0) AS unknown_sizes
-            FROM (
-              SELECT {category_sql} AS category, COALESCE(mf.bytes, 0) AS bytes
-              FROM media_files mf
-            ) categorized
-            WHERE category IS NOT NULL
-            GROUP BY category
-            """
-        )
-        for item in cursor.fetchall():
-            key = str(item.get("category") or "")
-            if key in summary:
-                summary[key] = {
-                    "files": int(item.get("files") or 0),
-                    "bytes": int(item.get("bytes") or 0),
-                    "unknownSizes": int(item.get("unknown_sizes") or 0),
-                }
-
-        predicates = [f"({category_sql}) IS NOT NULL"]
-        params: list[Any] = []
-        if category != "all":
-            predicates.append(f"({category_sql}) = %s")
-            params.append(category)
-        if normalized_user_id:
-            cursor.execute(
-                """
-                SELECT id, data->>'id' AS sourceId
-                FROM profiles
-                WHERE data->>'id' = %s OR CAST(id AS TEXT) = %s
-                LIMIT 1
-                """,
-                (normalized_user_id, normalized_user_id),
-            )
-            filter_profile = cursor.fetchone() or {}
-            owner_values = {normalized_user_id}
-            if filter_profile.get("id") is not None:
-                owner_values.add(str(filter_profile["id"]))
-            if filter_profile.get("sourceId"):
-                owner_values.add(str(filter_profile["sourceId"]))
-            owner_placeholders = ", ".join(["%s"] * len(owner_values))
-            owner_params = list(owner_values)
-            predicates.append(
-                f"""
-                (
-                  COALESCE(mf.metadata->>'profileSourceId', '') IN ({owner_placeholders})
-                  OR COALESCE(mf.metadata->>'profileId', '') IN ({owner_placeholders})
-                  OR COALESCE(mf.metadata->>'senderProfileId', '') IN ({owner_placeholders})
-                )
-                """
-            )
-            params.extend(owner_params * 3)
-        where_sql = " AND ".join(f"({predicate.strip()})" for predicate in predicates)
-
-        cursor.execute(f"SELECT COUNT(*) AS total FROM media_files mf WHERE {where_sql}", params)
-        total_row = cursor.fetchone() or {}
-        total = int(total_row.get("total") or 0)
-        cursor.execute(
-            f"""
-            SELECT mf.id,
-                   mf.storage_key AS storageKey,
-                   mf.public_url AS publicUrl,
-                   mf.mime_type AS mimeType,
-                   mf.bytes,
-                   mf.created_at AS createdAt,
-                   mf.metadata,
-                   {category_sql} AS category
-            FROM media_files mf
-            WHERE {where_sql}
-            ORDER BY
-              CASE ({category_sql})
-                WHEN 'article_images' THEN 1
-                WHEN 'chat_images' THEN 2
-                WHEN 'chat_files' THEN 3
-                WHEN 'clinic_logos' THEN 4
-                WHEN 'lawyer_photos' THEN 5
-                WHEN 'profile_photos' THEN 6
-                ELSE 7
-              END,
-              mf.storage_key ASC,
-              mf.id ASC
-            LIMIT %s OFFSET %s
-            """,
-            [*params, limit, offset],
-        )
-        files = cursor.fetchall()
-
         # Family-room documents belong to a match, not directly to a chat.
         # Resolve its unique active conversation without changing stored metadata.
         family_match_ids = {
@@ -18816,8 +19542,10 @@ def admin_storage(
                 "id": media_id,
                 "category": file_category,
                 "categoryLabel": category_labels.get(file_category, "File"),
-                "name": str(metadata.get("originalName") or Path(normalized_key).name or f"File {media_id}"),
+                "name": urllib.parse.unquote(str(metadata.get("originalName") or Path(normalized_key).name or f"File {media_id}")),
                 "bytes": int(file.get("bytes") or 0),
+                "sizeKnown": bool(file.get("sizeKnown")),
+                "trashedAt": as_dict(metadata.get("adminTrash")).get("trashedAt"),
                 "mimeType": str(file.get("mimeType") or "application/octet-stream"),
                 "createdAt": file.get("createdAt"),
                 "contentUrl": f"/admin/api/admin/media/{media_id}/content",
@@ -18837,6 +19565,8 @@ def admin_storage(
         "unknownSizes": sum(int(item.get("unknownSizes", 0)) for item in summary.values()),
         "summary": summary,
         "filterActive": bool(normalized_user_id),
+        "trashFiles": trash_files,
+        "trashed": trash,
     }
 
 
@@ -18852,7 +19582,7 @@ async def admin_crop_user_photo(
         cursor.execute("SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s", (photo_id, resolved_id))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Photo not found")
-    return await upload_profile_avatar(file, resolved_id, expected_photo_id=photo_id, actor=f"admin:{actor}")
+    return await upload_profile_avatar(file, resolved_id, expected_photo_id=photo_id, actor=f"admin:{actor}", allow_non_primary=True)
 
 
 @app.post("/api/admin/users/{profile_id}/photos/{photo_id}/primary")
@@ -18863,6 +19593,9 @@ def admin_set_primary_user_photo(
 ):
     with db_cursor() as (conn, cursor):
         resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (resolved_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="User not found")
         cursor.execute(
             """
             SELECT id, position, status, moderation_status, public_url, avatar_media_file_id
@@ -18943,6 +19676,7 @@ def permanently_delete_profile_photo(cursor, profile_id: int, photo_id: int) -> 
     photo = cursor.fetchone()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found")
+    deleted_primary = photo_is_current_primary(cursor, profile_id, photo_id, int(photo.get("position") or 0))
     media_ids = {int(value) for value in (photo.get("media_file_id"), photo.get("avatar_media_file_id")) if value is not None}
     # Include previous crops owned by this photo, including rejected crops.
     cursor.execute(
@@ -18958,7 +19692,7 @@ def permanently_delete_profile_photo(cursor, profile_id: int, photo_id: int) -> 
         """,
         (f"profile-photo-{photo_id}", str(profile_id), str(photo_id)),
     )
-    if int(photo.get("position") or 0) == 0 and str(photo.get("status") or "").upper() == "ACTIVE":
+    if deleted_primary and str(photo.get("status") or "").upper() == "ACTIVE":
         cursor.execute(
             """
             SELECT pp.id, COALESCE(NULLIF(mf.public_url, ''), pp.public_url) AS avatar_url
@@ -19028,12 +19762,40 @@ def admin_profile_photo_content(photo_id: int, _admin: str = Depends(require_adm
     return profile_photo_content_response(photo)
 
 
+def require_admin_media_access(actor: str, media: dict[str, Any]) -> None:
+    account = dynamic_admin_account(actor)
+    if (account and str(account.get("role") or "").upper() == "ADMIN") or (not account and is_configured_admin_user(actor)):
+        return
+    granted = set((account or {}).get("permissions") or [])
+    if "storage" in granted:
+        return
+    metadata = as_dict(media.get("metadata"))
+    if as_dict(metadata.get("adminTrash")).get("state") in {"trashed", "purged"}:
+        raise HTTPException(status_code=403, detail="Storage permission is required to access files in Trash")
+    key = str(media.get("storageKey") or "").removeprefix("quarantine/")
+    if key.startswith("profiles/") and granted.intersection({"users", "moderation-photos", "verifications"}):
+        return
+    for prefix, section in (("articles/", "articles"), ("clinics/", "clinics"), ("lawyers/", "lawyers"), ("video-verifications/", "video-verifications")):
+        if key.startswith(prefix) and section in granted:
+            return
+    if key.startswith(("chat/", "family-room/")):
+        if "users" in granted:
+            return
+        if "support" in granted:
+            conversation_id = int_or_none(metadata.get("conversationId"))
+            with db_cursor() as (_, cursor):
+                cursor.execute("SELECT c.id FROM conversations c JOIN profiles a ON a.id=c.profile_a_id JOIN profiles b ON b.id=c.profile_b_id WHERE (a.role='SUPPORT' OR b.role='SUPPORT') AND (c.id=%s OR EXISTS(SELECT 1 FROM conversation_messages message WHERE message.conversation_id=c.id AND message.media_url=%s)) LIMIT 1", (conversation_id, str(media.get("publicUrl") or "")))
+                if cursor.fetchone():
+                    return
+    raise HTTPException(status_code=403, detail="This admin account does not have permission for this media")
+
+
 @app.get("/api/admin/media/{media_file_id}/content")
 def admin_media_content(media_file_id: int, _admin: str = Depends(require_admin)):
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
-            SELECT public_url AS publicUrl, storage_key AS storageKey, mime_type AS mimeType
+            SELECT public_url AS publicUrl, storage_key AS storageKey, mime_type AS mimeType, metadata
             FROM media_files
             WHERE id = %s
             LIMIT 1
@@ -19043,6 +19805,17 @@ def admin_media_content(media_file_id: int, _admin: str = Depends(require_admin)
         media = cursor.fetchone()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
+    require_admin_media_access(_admin, media)
+    trash = as_dict(as_dict(media.get("metadata")).get("adminTrash"))
+    if trash.get("state") == "purged":
+        raise HTTPException(status_code=404, detail="Media has been deleted")
+    if trash.get("state") == "trashed":
+        key = str(trash.get("trashKey") or "")
+        if re.fullmatch(r"[a-f0-9]{48}", key):
+            file = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+            if file.is_file():
+                return Response(file.read_bytes(), media_type=str(media.get("mimeType") or "application/octet-stream"), headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+        media["publicUrl"] = trash.get("publicUrl")
     return profile_photo_content_response(media, image_only=False)
 
 
@@ -19221,6 +19994,17 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
         media_files.update({int(row["id"]): str(row.get("storage_key") or "") for row in cursor.fetchall()})
 
     # Conversations have child rows, so remove them before the conversation itself.
+    cursor.execute("SELECT id,storage_key FROM media_files WHERE metadata->>'profileId'=%s OR metadata->>'userId' IN (SELECT id::text FROM local_users WHERE profile_id=%s) OR id IN (SELECT media_file_id FROM pregnancy_room_entries WHERE uploaded_by_profile_id=%s OR match_id IN (SELECT id FROM profile_matches WHERE profile_a_id=%s OR profile_b_id=%s))", (str(profile_id),profile_id,profile_id,profile_id,profile_id))
+    media_files.update({int(row["id"]):str(row.get("storage_key") or "") for row in cursor.fetchall()})
+    cursor.execute("SELECT data->>'email' AS email FROM app_entities WHERE entity_type='account_deletion_request' AND source_key=%s", (f"local-{profile_id}",))
+    retained_emails = [str(value) for value in [profile.get("email"),(cursor.fetchone() or {}).get("email")] if value]
+    trash_keys = []
+    if media_files:
+        cursor.execute("SELECT metadata FROM media_files WHERE id=ANY(%s)", (list(media_files),))
+        for row in cursor.fetchall():
+            key = str(as_dict(as_dict(row.get("metadata")).get("adminTrash")).get("trashKey") or "")
+            if re.fullmatch(r"[0-9a-f]{48}",key):
+                trash_keys.append("quarantine/trash/"+key)
     cursor.execute("DELETE FROM member_calls WHERE caller_profile_id = %s OR callee_profile_id = %s", (profile_id, profile_id))
     cursor.execute(
         """
@@ -19292,177 +20076,223 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
     )
     if media_files:
         media_file_ids = list(media_files)
+        cursor.execute("SELECT media_file_id AS id FROM profile_photos WHERE profile_id<>%s AND media_file_id=ANY(%s) UNION SELECT avatar_media_file_id AS id FROM profile_photos WHERE profile_id<>%s AND avatar_media_file_id=ANY(%s)", (profile_id,media_file_ids,profile_id,media_file_ids))
+        shared_ids = {int(row["id"]) for row in cursor.fetchall()}
+        media_file_ids = [item for item in media_file_ids if item not in shared_ids]
         placeholders = ", ".join(["%s"] * len(media_file_ids))
-        cursor.execute(f"DELETE FROM media_files WHERE id IN ({placeholders})", media_file_ids)
+        cursor.execute("DELETE FROM media_files WHERE id=ANY(%s)", (media_file_ids,))
     cursor.execute("DELETE FROM profiles WHERE id = %s", (profile_id,))
-    return {
-        "id": profile_id,
-        "email": profile.get("email"),
-        "_storageKeys": [storage_key for storage_key in media_files.values() if storage_key],
-    }
+    storage_keys = []
+    for storage_key in set(media_files.values()):
+        if not storage_key:
+            continue
+        cursor.execute("SELECT id FROM media_files WHERE storage_key=%s LIMIT 1", (storage_key,))
+        if not cursor.fetchone():
+            storage_keys.append(storage_key)
+    for trash_key in trash_keys:
+        cursor.execute("SELECT id FROM media_files WHERE metadata->'adminTrash'->>'trashKey'=%s LIMIT 1", (trash_key.rsplit("/",1)[-1],))
+        if not cursor.fetchone():
+            storage_keys.append(trash_key)
+    queue_deleted_profile_files(cursor, profile_id, storage_keys)
+    cursor.execute("UPDATE admin_audit_log SET payload=%s, actor=CASE WHEN actor=ANY(%s) THEN 'deleted-member' ELSE actor END WHERE target_id=%s AND target_type IN ('profiles','profile','users')", (json.dumps({"permanentlyDeleted": True}),retained_emails,str(profile_id)))
+    return {"id":profile_id,"_storageKeys":storage_keys}
 
 
-def remove_deleted_profile_files(storage_keys: list[str]) -> None:
+def remove_deleted_profile_files(storage_keys: list[str]) -> list[str]:
+    pending = []
     for storage_key in set(storage_keys):
         normalized = str(storage_key or "").strip().lstrip("/")
         if not normalized:
             continue
-        if normalized.startswith("quarantine/"):
-            root = PRIVATE_UPLOAD_DIR
-            relative_key = normalized.removeprefix("quarantine/")
-        elif normalized.startswith("family-room/"):
-            root = PRIVATE_UPLOAD_DIR
-            relative_key = normalized
-        else:
-            root = UPLOAD_DIR
-            relative_key = normalized
         try:
-            safe_storage_path(root, relative_key).unlink(missing_ok=True)
-        except Exception:
-            logger.exception("Could not remove deleted profile file")
+            target = storage_file_path(normalized, UPLOAD_DIR, PRIVATE_UPLOAD_DIR)
+            if target is not None:
+                target.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pending.append(normalized)
+            logger.exception("Could not remove deleted account file")
+    return pending
 
 
 def restore_retained_account(cursor, profile_id: int) -> bool:
-    cursor.execute(
-        "SELECT status, email FROM profiles WHERE id = %s FOR UPDATE",
-        (profile_id,),
-    )
+    cursor.execute("SELECT id, status, role, email, display_name, data FROM profiles WHERE id=%s FOR UPDATE", (profile_id,))
     profile = cursor.fetchone()
-    if not profile or str(profile.get("status") or "").upper() not in {
-        ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS, "DELETED",
-    }:
+    if not profile or str(profile.get("status") or "").upper() not in TRASH_STATUSES:
         return False
-
-    cursor.execute(
-        """
-        SELECT id, status, data FROM app_entities
-        WHERE entity_type = 'account_deletion_request' AND source_key = %s
-        ORDER BY id DESC LIMIT 1 FOR UPDATE
-        """,
-        (f"local-{profile_id}",),
-    )
+    if str(profile.get("role") or "").upper() in {"ADMIN", "SUPPORT"}:
+        raise HTTPException(status_code=422, detail="This account cannot be restored here")
+    cursor.execute("SELECT id, status, data FROM app_entities WHERE entity_type='account_deletion_request' AND source_key=%s FOR UPDATE", (f"local-{profile_id}",))
     request = cursor.fetchone()
-    if not request or request.get("status") != "PENDING":
-        raise HTTPException(status_code=409, detail="No pending account deletion request is available for restoration")
-    data = as_dict(request.get("data"))
+    data = as_dict((request or {}).get("data"))
+    if not request or not can_restore_account(profile["status"], request["status"], data, now_utc()):
+        raise HTTPException(status_code=409, detail="The 30-day restoration period has expired or no valid deletion request exists")
     if int_or_none(data.get("profileId")) != profile_id:
         raise HTTPException(status_code=409, detail="The deletion request does not belong to this profile")
-    try:
-        deadline = datetime.fromisoformat(str(data.get("deleteAfter") or "").replace("Z", "+00:00"))
-        if deadline.tzinfo is not None:
-            deadline = deadline.astimezone(timezone.utc).replace(tzinfo=None)
-    except ValueError:
-        raise HTTPException(status_code=409, detail="The account restoration deadline is unavailable") from None
-    current_time = now_utc()
-    if current_time.tzinfo is not None:
-        current_time = current_time.astimezone(timezone.utc).replace(tzinfo=None)
-    if deadline <= current_time:
-        raise HTTPException(status_code=409, detail="The account restoration window has expired")
-
-    cursor.execute(
-        "SELECT id, email FROM local_users WHERE profile_id = %s ORDER BY id FOR UPDATE",
-        (profile_id,),
-    )
-    users = cursor.fetchall()
-    if len(users) != 1 or int_or_none(data.get("userId")) != users[0]["id"]:
-        raise HTTPException(status_code=409, detail="The retained account identity cannot be restored safely")
     email = normalize_email(str(data.get("email") or ""))
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or email.endswith(f"@{DELETED_ACCOUNT_EMAIL_DOMAIN}"):
-        raise HTTPException(status_code=409, detail="The original account email is unavailable")
-    user_id = users[0]["id"]
-    retained_email = normalize_email(str(users[0].get("email") or ""))
-    if retained_email not in {email, f"deleted-user-{user_id}@{DELETED_ACCOUNT_EMAIL_DOMAIN}"}:
-        raise HTTPException(status_code=409, detail="The retained sign-in identity does not match the deletion request")
-    cursor.execute(
-        "SELECT id FROM local_users WHERE LOWER(email) = %s AND id <> %s LIMIT 1 FOR UPDATE",
-        (email, user_id),
-    )
+        raise HTTPException(status_code=409, detail="The original sign-in email is unavailable")
+    cursor.execute("SELECT id, email FROM local_users WHERE profile_id=%s ORDER BY id FOR UPDATE", (profile_id,))
+    users = cursor.fetchall()
+    if len(users) > 1 or (users and data.get("userId") is not None and int_or_none(data["userId"]) != users[0]["id"]):
+        raise HTTPException(status_code=409, detail="The retained sign-in identity cannot be restored safely")
+    user_id = users[0]["id"] if users else None
+    cursor.execute("SELECT id FROM local_users WHERE LOWER(email)=%s AND (%s::bigint IS NULL OR id<>%s) LIMIT 1", (email, user_id, user_id))
     if cursor.fetchone():
         raise HTTPException(status_code=409, detail="The original email is already used by another account")
-    cursor.execute(
-        "SELECT id FROM profiles WHERE LOWER(email) = %s AND id <> %s LIMIT 1 FOR UPDATE",
-        (email, profile_id),
-    )
+    cursor.execute("SELECT id FROM profiles WHERE LOWER(email)=%s AND id<>%s LIMIT 1", (email, profile_id))
     if cursor.fetchone():
         raise HTTPException(status_code=409, detail="The original email is already used by another profile")
-
-    try:
-        cursor.execute(
-            """
-            UPDATE local_users SET email = %s, status = 'ACTIVE',
-                email_verified_at = CASE WHEN %s THEN COALESCE(email_verified_at, UTC_TIMESTAMP()) ELSE email_verified_at END,
-                updated_at = UTC_TIMESTAMP() WHERE id = %s AND profile_id = %s
-            """,
-            (email, data.get("emailVerified") is True, user_id, profile_id),
-        )
-        cursor.execute("UPDATE profiles SET email = %s WHERE id = %s", (email, profile_id))
-        cursor.execute(
-            "UPDATE app_entities SET status = 'CANCELLED', updated_at = UTC_TIMESTAMP() WHERE id = %s AND status = 'PENDING'",
-            (request["id"],),
-        )
-    except psycopg.errors.UniqueViolation:
-        raise HTTPException(status_code=409, detail="The original email is already used by another account") from None
+    if user_id is None:
+        cursor.execute("INSERT INTO local_users(profile_id,email,password_hash,password_login_enabled,display_name,role,status) VALUES(%s,%s,'',0,%s,%s,'ACTIVE')", (profile_id, email, profile.get("display_name") or "", profile.get("role") or "USER"))
+    else:
+        cursor.execute("UPDATE local_users SET email=%s, status='ACTIVE', email_verified_at=CASE WHEN %s THEN COALESCE(email_verified_at,UTC_TIMESTAMP()) ELSE email_verified_at END, updated_at=UTC_TIMESTAMP() WHERE id=%s", (email, data.get("emailVerified") is True, user_id))
+    restored_at = utc_datetime(now_utc()).isoformat()
+    restored = restored_profile_data(as_dict(profile.get("data")), as_dict(data.get("retainedProfileData")), email, restored_at)
+    cursor.execute("UPDATE profiles SET email=%s, status='ACTIVE', data=%s, updated_at=UTC_TIMESTAMP() WHERE id=%s", (email, json.dumps(restored, ensure_ascii=False), profile_id))
+    cursor.execute("UPDATE app_entities SET status='CANCELLED', updated_at=UTC_TIMESTAMP() WHERE id=%s", (request["id"],))
     return True
 
 
 def purge_due_account_deletions() -> None:
-    """Permanently remove self-service deletion requests after their retention window."""
-    deleted_storage_keys: list[str] = []
     with db_cursor() as (conn, cursor):
         cursor.execute("SELECT pg_try_advisory_xact_lock(2026090801) AS locked")
-        lock_row = cursor.fetchone()
-        if not lock_row or not lock_row.get("locked"):
+        if not (cursor.fetchone() or {}).get("locked"):
             return
-        # Repair deletion requests created before identities were released at
-        # request time. This runs on every scheduled pass and is idempotent,
-        # so already-stuck accounts stop blocking a new registration as soon
-        # as the release is deployed.
-        cursor.execute(
-            "SELECT id FROM profiles WHERE status IN (%s, %s) ORDER BY id ASC",
-            (ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS),
-        )
-        for pending_profile in cursor.fetchall():
-            release_account_identity_for_deletion(cursor, int(pending_profile["id"]), require_pending=True)
-        cursor.execute(
-            """
-            SELECT data
-            FROM app_entities
-            WHERE entity_type = 'account_deletion_request' AND status = 'PENDING'
-            ORDER BY id ASC
-            """
-        )
-        current_time = now_utc()
-        if current_time.tzinfo is not None:
-            current_time = current_time.astimezone(timezone.utc).replace(tzinfo=None)
-        due_profile_ids: list[int] = []
-        for row in cursor.fetchall():
-            data = as_dict(row.get("data"))
+        enroll_legacy_account_deletions(conn, cursor)
+        cursor.execute("SELECT id,data FROM app_entities WHERE entity_type='account_deletion_request' AND status='PENDING' ORDER BY id")
+        requests = cursor.fetchall()
+        for request in requests:
+            data = as_dict(request.get("data"))
             profile_id = int_or_none(data.get("profileId"))
-            raw_due = str(data.get("deleteAfter") or "").strip()
-            try:
-                due_at = datetime.fromisoformat(raw_due.replace("Z", "+00:00"))
-                if due_at.tzinfo is not None:
-                    due_at = due_at.astimezone(timezone.utc).replace(tzinfo=None)
-            except ValueError:
+            deadline = deletion_deadline(data)
+            if not profile_id or deadline is None or utc_datetime(now_utc()) < deadline:
                 continue
-            if profile_id and due_at <= current_time:
-                cursor.execute("SELECT status FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE", (profile_id,))
-                profile = cursor.fetchone()
-                if str((profile or {}).get("status") or "").upper() in {
-                    ACCOUNT_DELETION_PENDING_STATUS,
-                    ACCOUNT_DELETION_LEGACY_PENDING_STATUS,
-                    "DELETED",
-                }:
-                    due_profile_ids.append(profile_id)
-        for profile_id in due_profile_ids:
+            cursor.execute("SAVEPOINT account_purge")
             try:
-                deleted = permanently_delete_profile(cursor, profile_id)
-                deleted_storage_keys.extend(deleted.get("_storageKeys") or [])
-            except HTTPException as exc:
-                if exc.status_code != 404:
-                    raise
+                cursor.execute("SELECT status FROM profiles WHERE id=%s FOR UPDATE SKIP LOCKED", (profile_id,))
+                profile = cursor.fetchone()
+                if profile and str(profile.get("status") or "").upper() in TRASH_STATUSES:
+                    cursor.execute("SELECT status,data FROM app_entities WHERE id=%s FOR UPDATE", (request["id"],))
+                    current = cursor.fetchone()
+                    current_deadline = deletion_deadline(as_dict((current or {}).get("data")))
+                    if current and current["status"] == "PENDING" and current_deadline and utc_datetime(now_utc()) >= current_deadline:
+                        permanently_delete_profile(cursor, profile_id)
+                        audit(conn, "system", "ACCOUNT_PERMANENTLY_DELETED", "profiles", profile_id, {"retentionDays": ACCOUNT_DELETION_DAYS})
+                cursor.execute("RELEASE SAVEPOINT account_purge")
+            except Exception:
+                cursor.execute("ROLLBACK TO SAVEPOINT account_purge")
+                cursor.execute("RELEASE SAVEPOINT account_purge")
+                logger.exception("Scheduled account deletion failed for profile %s", profile_id)
         conn.commit()
-    remove_deleted_profile_files(deleted_storage_keys)
+    drain_account_deletion_cleanup()
+
+
+def schedule_account_deletion(conn, cursor, profile_id: int, actor: str, reason: str, details: str | None = None, *, legacy: bool = False):
+    cursor.execute("SELECT id, role, status, email, display_name, data FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
+    profile = cursor.fetchone()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if str(profile.get("role") or "").upper() in {"ADMIN", "SUPPORT"}:
+        raise HTTPException(status_code=422, detail="Administrative and support accounts cannot be moved to Trash")
+    cursor.execute("SELECT status, data FROM app_entities WHERE entity_type = 'account_deletion_request' AND source_key = %s FOR UPDATE", (f"local-{profile_id}",))
+    previous = cursor.fetchone()
+    if previous and previous["status"] == "PENDING":
+        return as_dict(previous.get("data"))
+    cursor.execute("SELECT id, email, email_verified_at FROM local_users WHERE profile_id = %s ORDER BY id FOR UPDATE", (profile_id,))
+    users = cursor.fetchall()
+    profile_data = as_dict(profile.get("data"))
+    email = next((str(row.get("email") or "") for row in users if row.get("email") and not str(row["email"]).endswith(f"@{DELETED_ACCOUNT_EMAIL_DOMAIN}")), str(profile.get("email") or ""))
+    if email.endswith(f"@{DELETED_ACCOUNT_EMAIL_DOMAIN}"):
+        email = ""
+    requested = utc_datetime(now_utc())
+    body = {"profileId": profile_id, "userId": users[0]["id"] if len(users) == 1 else None, "email": email, "emailVerified": bool(users and users[0].get("email_verified_at")), "reason": reason, "details": details, "requestedAt": requested.isoformat(), "deleteAfter": (requested + timedelta(days=ACCOUNT_DELETION_DAYS)).isoformat(), "mode": "scheduled_30_days", "retainedProfileData": {key: profile_data[key] for key in VISIBILITY_FIELDS if key in profile_data}, "legacy": legacy}
+    cursor.execute("INSERT INTO app_entities(entity_type, source_key, title, status, data) VALUES ('account_deletion_request', %s, %s, 'PENDING', %s) ON CONFLICT (entity_type,source_key) DO UPDATE SET status='PENDING', data=EXCLUDED.data, updated_at=UTC_TIMESTAMP()", (f"local-{profile_id}", f"Account deletion #{profile_id}", json.dumps(body, ensure_ascii=False)))
+    cursor.execute("SELECT id, data FROM app_entities WHERE entity_type IN ('subscription', 'boost') AND data->>'profileId' = %s AND UPPER(status) IN ('PENDING','APPROVED','ACTIVE') FOR UPDATE", (str(profile_id),))
+    for subscription in cursor.fetchall():
+        data = as_dict(subscription.get("data"))
+        data.update(autoRenew=False, autoRenewing=False, cancelledAt=requested.isoformat(), cancellationReason="ACCOUNT_DELETION")
+        cursor.execute("UPDATE app_entities SET status='CANCELLED', data=%s, updated_at=UTC_TIMESTAMP() WHERE id=%s", (json.dumps(data, ensure_ascii=False), subscription["id"]))
+    recompute_profile_premium(cursor, profile_id)
+    update_profile_data(cursor, profile_id, {"deletionRequestedAt": body["requestedAt"], "deletionScheduledFor": body["deleteAfter"], "deletionReason": reason, "visibleInCatalog": False, "isVisibleInCatalog": False, "boostActive": False})
+    release_account_identity_for_deletion(cursor, profile_id, [int(row["id"]) for row in users])
+    cursor.execute("UPDATE profiles SET status=%s, updated_at=UTC_TIMESTAMP() WHERE id=%s", (ACCOUNT_DELETION_PENDING_STATUS, profile_id))
+    cursor.execute("UPDATE local_users SET status=%s, updated_at=UTC_TIMESTAMP() WHERE profile_id=%s", (ACCOUNT_DELETION_PENDING_STATUS, profile_id))
+    audit(conn, actor, "USER_DELETION_REQUESTED", "profiles", profile_id, {"deleteAfter": body["deleteAfter"], "legacy": legacy})
+    return body
+
+def enroll_legacy_account_deletions(conn, cursor):
+    cursor.execute("SELECT p.id FROM profiles p WHERE UPPER(p.status) IN ('DELETED','DELETION_PENDING','PENDING_DELETION') AND UPPER(p.role) NOT IN ('ADMIN','SUPPORT') AND NOT EXISTS(SELECT 1 FROM app_entities r WHERE r.entity_type='account_deletion_request' AND r.source_key='local-' || p.id::text AND r.status='PENDING') ORDER BY p.id LIMIT 200 FOR UPDATE OF p SKIP LOCKED")
+    ids = [int(row["id"]) for row in cursor.fetchall()]
+    for profile_id in ids:
+        schedule_account_deletion(conn, cursor, profile_id, "system", "Legacy deleted account", legacy=True)
+    return len(ids)
+
+def queue_deleted_profile_files(cursor, profile_id: int, storage_keys: list[str]):
+    keys = sorted(set(key for key in storage_keys if key))
+    if keys:
+        cursor.execute("INSERT INTO app_entities(entity_type,source_key,title,status,data) VALUES('account_deletion_cleanup',%s,'Deleted account file cleanup','PENDING',%s)", (f"profile-{profile_id}-{secrets.token_hex(8)}", json.dumps({"storageKeys": keys})))
+
+def drain_account_deletion_cleanup():
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id,data FROM app_entities WHERE entity_type='account_deletion_cleanup' AND status='PENDING' ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED")
+        for row in cursor.fetchall():
+            pending = remove_deleted_profile_files(as_dict(row.get("data")).get("storageKeys") or [])
+            if pending:
+                cursor.execute("UPDATE app_entities SET data=%s,updated_at=UTC_TIMESTAMP() WHERE id=%s", (json.dumps({"storageKeys": pending}), row["id"]))
+            else:
+                cursor.execute("DELETE FROM app_entities WHERE id=%s", (row["id"],))
+        conn.commit()
+
+class AdminAccountTrashPayload(BaseModel):
+    reason: str = Field(default="Deleted from admin", min_length=1, max_length=500)
+
+@app.post("/api/admin/users/{profile_id}/trash")
+def admin_trash_user(profile_id: str, payload: AdminAccountTrashPayload, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        body = schedule_account_deletion(conn, cursor, resolved_id, actor, payload.reason.strip() or "Deleted from admin")
+        conn.commit()
+    return {"ok": True, "profileId": resolved_id, "deleteAfter": body["deleteAfter"]}
+
+@app.post("/api/admin/users/{profile_id}/restore")
+def admin_restore_user(profile_id: str, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        if not restore_retained_account(cursor, resolved_id):
+            raise HTTPException(status_code=409, detail="The account is not in Trash")
+        cursor.execute("SELECT password_hash,password_login_enabled FROM local_users WHERE profile_id=%s", (resolved_id,))
+        account = cursor.fetchone() or {}
+        password_reset_required = not (account.get("password_hash") and account.get("password_login_enabled"))
+        audit(conn, actor, "ACCOUNT_RESTORED", "profiles", resolved_id, {})
+        conn.commit()
+    return {"ok": True, "profileId": resolved_id, "passwordResetRequired": password_reset_required}
+
+@app.get("/api/admin/users/trash")
+def admin_user_trash(q: str | None = Query(None, max_length=200), limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), actor: str = Depends(require_admin)):
+    conditions = ["UPPER(p.status) IN ('DELETED','DELETION_PENDING','PENDING_DELETION')", "UPPER(p.role) NOT IN ('ADMIN','SUPPORT')"]
+    params = []
+    if q and q.strip():
+        conditions.append("(p.display_name ILIKE %s OR COALESCE(r.data->>'email',p.email,'') ILIKE %s OR p.id::text=%s)")
+        params.extend([f"%{q.strip()}%", f"%{q.strip()}%", q.strip()])
+    joined = "FROM profiles p LEFT JOIN app_entities r ON r.entity_type='account_deletion_request' AND r.source_key='local-' || p.id::text AND r.status='PENDING' WHERE " + " AND ".join(conditions)
+    with db_cursor() as (_, cursor):
+        cursor.execute("SELECT COUNT(*) AS count " + joined, params)
+        total = int(cursor.fetchone()["count"])
+        cursor.execute("SELECT p.id,p.display_name,p.email,p.status,r.status AS request_status,r.data AS request_data " + joined + " ORDER BY r.data->>'deleteAfter' ASC NULLS LAST,p.id ASC LIMIT %s OFFSET %s", [*params,limit,offset])
+        rows = cursor.fetchall()
+    try:
+        require_admin_role(actor, "delete accounts permanently")
+        can_purge = True
+    except HTTPException as error:
+        if error.status_code != 403:
+            raise
+        can_purge = False
+    items = []
+    for row in rows:
+        data = as_dict(row.get("request_data"))
+        deadline = deletion_deadline(data)
+        items.append({"id": row["id"], "name": row.get("display_name"), "email": data.get("email") or row.get("email"), "requestedAt": data.get("requestedAt"), "deleteAfter": deadline.isoformat() if deadline else None, "canRestore": can_restore_account(row["status"],row.get("request_status"),data,now_utc()), "legacy": bool(data.get("legacy"))})
+    return {"items": items, "total": total, "limit": limit, "offset": offset, "canPermanentlyDelete": can_purge}
 
 
 def account_deletion_worker() -> None:
@@ -19486,6 +20316,9 @@ def admin_update_item(
     payload: AdminPatchPayload,
     actor: str = Depends(require_admin),
 ):
+    if view == "verifications":
+        require_admin_role(actor, "modify a verification session")
+        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
     if view == "moderation-reports":
@@ -19558,6 +20391,7 @@ def admin_update_item(
                 primary_photo_id,
                 {"decision": decision, "reason": reason, "providerConfigured": False, "manual": True},
                 actor=f"admin:{actor}",
+                    allow_non_primary=moderation_data.get("allowNonPrimary") is True,
             )
             return {"ok": True, "view": view, "id": numeric_item_id, "mediaFileId": media_file_id, "updated": updated}
         if not photo_id:
@@ -19579,6 +20413,21 @@ def admin_update_item(
             resolved_item_id: int | str = item_id
             if view in {"users", "profiles"}:
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
+                cursor.execute("SELECT status FROM profiles WHERE id=%s FOR UPDATE", (resolved_item_id,))
+                current_profile_status = str((cursor.fetchone() or {}).get("status") or "").upper()
+                if current_profile_status in TRASH_STATUSES or str(values.get("status") or "").upper() in TRASH_STATUSES:
+                    raise HTTPException(status_code=409, detail="Use the account Trash actions to delete or restore an account")
+                if "data" in payload.values:
+                    cursor.execute("SELECT data FROM profiles WHERE id = %s FOR UPDATE", (resolved_item_id,))
+                    current_data = as_dict((cursor.fetchone() or {}).get("data"))
+                    incoming = dict(as_dict(payload.values.get("data")))
+                    trust_fields = {"isVerified", "is_verified", "verifiedAt", "verificationProvider", "manualApprovedBy", "manualVerificationBy"}
+                    if any(key in incoming and incoming[key] != current_data.get(key) for key in trust_fields):
+                        require_admin_role(actor, "change profile verification manually")
+                        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
+                    incoming = {key: value for key, value in incoming.items() if key not in trust_fields}
+                    values["data"] = json.dumps({**current_data, **incoming}, ensure_ascii=False)
+
                 if str(values.get("status") or "").upper() == "ACTIVE":
                     values["status"] = "ACTIVE"
                     restore_retained_account(cursor, int(resolved_item_id))
@@ -19674,6 +20523,9 @@ def admin_create_item(
     payload: AdminCreatePayload,
     actor: str = Depends(require_admin),
 ):
+    if view == "verifications":
+        require_admin_role(actor, "modify a verification session")
+        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
     values = sanitize_content_values(payload.values) if view in {"articles", "static-pages"} else payload.values
@@ -19773,6 +20625,13 @@ def admin_create_item(
 
 @app.delete("/api/admin/item/{view}/{item_id}")
 def admin_delete_item(view: str, item_id: str, actor: str = Depends(require_admin)):
+    if view == "articles":
+        if not str(item_id).isdigit():
+            raise HTTPException(status_code=422, detail="Article id must be numeric")
+        return admin_permanently_delete_article(int(item_id), actor)
+    if view == "verifications":
+        require_admin_role(actor, "modify a verification session")
+        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
     if view in ADMIN_MUTATION_TABLES:
@@ -19781,7 +20640,11 @@ def admin_delete_item(view: str, item_id: str, actor: str = Depends(require_admi
         # changed a status flag and left the login identity behind.
         if view in {"users", "profiles"}:
             with db_cursor() as (conn, cursor):
+                require_admin_role(actor, "delete accounts permanently")
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
+                cursor.execute("SELECT status FROM profiles WHERE id=%s FOR UPDATE", (resolved_item_id,))
+                if str((cursor.fetchone() or {}).get("status") or "").upper() not in TRASH_STATUSES:
+                    raise HTTPException(status_code=409, detail="Move the account to Trash before deleting it permanently")
                 deleted = permanently_delete_profile(cursor, resolved_item_id)
                 audit(conn, actor, "permanent_delete", view, resolved_item_id, {"profileDeleted": True})
                 conn.commit()
@@ -19927,23 +20790,7 @@ def public_clinic_detail(slug: str):
         slug_map = canonical_clinic_slug_map(slug_rows)
         for candidate in slug_rows:
             candidate["canonicalSlug"] = slug_map.get(str(candidate.get("id")))
-        target = next(
-            (
-                candidate
-                for candidate in slug_rows
-                if candidate.get("canonicalSlug") == slug
-            ),
-            None,
-        )
-        if target is None:
-            target = next(
-                (
-                    candidate
-                    for candidate in slug_rows
-                    if str(candidate.get("slug") or "").strip() == slug
-                ),
-                None,
-            )
+        target = clinic_slug_target(slug_rows, slug)
         if not target:
             raise HTTPException(status_code=404, detail="Clinic not found")
         if target.get("canonicalSlug") != slug:
@@ -20254,7 +21101,7 @@ def member_catalog_filter_options(
                 "value": name,
                 "label": name,
                 "region": region,
-                "placeId": str(city.get("placeId") or ""),
+                "placeId": str(city.get("placeId") or catalog_city_identifier(country_code, name)),
                 "population": int_or_none(city.get("population")) or 0,
             }
 
@@ -20298,7 +21145,7 @@ def member_catalog_filter_options(
                     continue
                 city_candidates.setdefault(
                     (name.casefold(), ""),
-                    {"value": name, "label": name, "region": "", "placeId": "", "population": 0},
+                    {"value": name, "label": name, "region": "", "placeId": catalog_city_identifier(country_code, name), "population": 0},
                 )
 
     for item in countries:
@@ -20391,7 +21238,7 @@ def public_catalog(
     q: str | None = Query(None, min_length=1, max_length=200),
     country: str | None = Query(None, min_length=1, max_length=128),
     city: str | None = Query(None, min_length=1, max_length=128),
-    user: dict[str, Any] | None = Depends(optional_user),
+    user: dict[str, Any] = Depends(require_user),
 ):
     viewer_profile_id = require_profile_id(user) if user else None
     params: list[Any] = []
@@ -20468,7 +21315,7 @@ def public_catalog(
 def public_catalog_detail(
     profile_id: str,
     background_tasks: BackgroundTasks,
-    user: dict[str, Any] | None = Depends(optional_user),
+    user: dict[str, Any] = Depends(require_user),
 ):
     where = "JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) = %s"
     params: tuple[Any, ...] = (profile_id,)
@@ -20597,6 +21444,9 @@ def public_articles(
             item["category"] = inferred_article_category(str(item.get("title") or ""), str(item.get("slug") or ""), meta)
             item["views"] = int_or_none(meta.get("views") or meta.get("viewCount") or meta.get("viewsCount")) or 0
             all_items.append(item)
+    if all_items:
+        with db_cursor() as (_, cursor):
+            public_enrich_article_category_labels(cursor, all_items)
     wanted = str(category or "").strip().lower()
     if wanted and wanted != "all":
         filtered = [item for item in all_items if str(item.get("category") or "").strip().lower() == wanted]
@@ -20643,6 +21493,7 @@ def public_article(locale: str, slug: str, preview: bool = Query(False)):
     item["meta"] = public_safe_data(as_dict(item.get("meta")))
     item["category"] = inferred_article_category(str(item.get("title") or ""), str(item.get("slug") or ""), item["meta"])
     with db_cursor() as (_, cursor):
+        public_enrich_article_category_labels(cursor, [item])
         cursor.execute(
             """
             SELECT slug, title
@@ -20728,7 +21579,7 @@ def public_footer_pages(locale: str):
     return {"items": [{"slug": item["slug"], "title": item["title"]} for item in items]}
 
 
-@app.get("/api/screenshot-sections")
+@app.get("/api/screenshot-sections", dependencies=[Depends(require_admin)])
 def screenshot_sections():
     with db_cursor() as (_, cursor):
         cursor.execute(

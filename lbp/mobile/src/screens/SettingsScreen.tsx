@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
-import * as Application from "expo-application";
+import AppVersionLabel from "../components/AppVersionLabel";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useHeaderHeight } from "@react-navigation/elements";
 import * as WebBrowser from "expo-web-browser";
@@ -146,6 +146,7 @@ export default function SettingsScreen({ navigation }: Props) {
   }
 
   const accountLinks: { icon: keyof typeof Feather.glyphMap; label: string; onPress: () => void }[] = [
+    { icon: "gift", label: t("whatsnew.menuTitle"), onPress: () => navigation.navigate("WhatsNew") },
     { icon: "image", label: t("settings.photos"), onPress: () => navigation.navigate("Photos") },
     { icon: "check-circle", label: t("settings.verification"), onPress: () => navigation.navigate("Verification") },
     { icon: "video", label: t("settings.videoVerification"), onPress: () => navigation.navigate("VideoVerification") },
@@ -177,7 +178,13 @@ export default function SettingsScreen({ navigation }: Props) {
 
   return (
     <GradientBackground variant="soft">
-    <ScrollView contentContainerStyle={[styles.container, { paddingTop: headerHeight + spacing.md, paddingBottom: spacing.md + insets.bottom }]}>
+    <View style={[styles.viewport, { marginTop: headerHeight }]}>
+    <ScrollView
+      style={styles.scroll}
+      contentInsetAdjustmentBehavior="never"
+      automaticallyAdjustContentInsets={false}
+      contentContainerStyle={[styles.container, { paddingBottom: spacing.md + insets.bottom }]}
+    >
       <Text style={styles.sectionTitle}>{t("settings.discovery")}</Text>
       <View style={styles.card}>
         <View style={styles.row}>
@@ -272,17 +279,9 @@ export default function SettingsScreen({ navigation }: Props) {
         </Pressable>
       </View>
 
-      {/* Small diagnostic footer - lets Alena screenshot exactly which build
-          and OTA update her phone is running when something "doesn't
-          update", instead of guessing blind (2026-09-13: the Pro-tier
-          plan-picker fix wasn't showing up after restarts, and there was no
-          way to tell from the app itself whether the update had even been
-          downloaded). Updates.updateId is null when running the embedded
-          bundle (no OTA update ever applied since install), not an error. */}
-      <Text style={styles.versionFooter}>
-        v{Application.nativeApplicationVersion ?? "?"} ({Application.nativeBuildVersion ?? "?"})
-      </Text>
+      <AppVersionLabel style={styles.versionFooter} />
     </ScrollView>
+    </View>
     </GradientBackground>
   );
 }
@@ -290,7 +289,9 @@ export default function SettingsScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   errorText: { color: colors.danger },
-  container: { padding: spacing.md, paddingBottom: spacing.xl, backgroundColor: "transparent" },
+  viewport: { flex: 1, overflow: "hidden" },
+  scroll: { flex: 1 },
+  container: { padding: spacing.md, backgroundColor: "transparent" },
   sectionTitle: {
     fontSize: 11.5,
     fontWeight: "700",

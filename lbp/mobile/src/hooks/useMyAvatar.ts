@@ -1,14 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import { fetchPhotos } from "../api/photos";
 
-// AppHeader.tsx is mounted on 4 different screens (Explore/Messages/
-// KnowledgeHub/Me), and until now every one of them just showed a
-// gradient-initial circle - never the person's real photo, even when they
-// have one (Alena: "аватарки по сути нет, хотя фото есть"). This is the
-// shared source of truth for that photo: a tiny in-memory cache plus
-// request de-duplication, so mounting AppHeader on 4 screens doesn't fire 4
-// parallel GET /api/member/photos calls, and switching tabs doesn't
-// re-fetch every time.
+// All headers share the primary photo and one in-flight request. Successful
+// results stay cached until PhotosScreen or AuthContext invalidates them;
+// failed requests can retry when a header mounts or its screen regains focus.
 let cached: string | null | undefined; // undefined = not loaded yet
 let inFlight: Promise<string | null> | null = null;
 let generation = 0;
@@ -30,15 +26,17 @@ function load(): Promise<string | null> {
       // back to publicUrl only if no avatar crop has been set yet.
       .then((res) => {
         const p = res.items.find((item) => item.position === 0);
-        return p?.avatarUrl || p?.publicUrl || null;
-      })
-      .catch(() => null)
-      .then((url) => {
+        const url = p?.avatarUrl || p?.publicUrl || null;
         if (requestGeneration !== generation) return null;
         cached = url;
-        inFlight = null;
         publish(url);
         return url;
+      })
+      // A network error is not a confirmed absence of photos. Leave the cache
+      // unloaded so another header mount or screen focus can retry.
+      .catch(() => null)
+      .finally(() => {
+        if (requestGeneration === generation) inFlight = null;
       });
   }
   return inFlight;
@@ -66,5 +64,8 @@ export function useMyAvatarUrl(): string | null {
       listeners.delete(setUrl);
     };
   }, []);
+  useFocusEffect(useCallback(() => {
+    void load();
+  }, []));
   return url;
 }

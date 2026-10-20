@@ -1,3 +1,4 @@
+import { profilePhotoUrls } from "./profile-media";
 import { PRICING_TEXT } from "./pricing-reference";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -115,7 +116,7 @@ export function profileCountry(value: unknown, locale: Locale) {
       country.toUpperCase()
 ] || country.toUpperCase();
 if (locale === "en" && code === "CZ") return "Czech Republic";
-if (locale === "en" && code === "GB") return "UK";
+  if (locale === "en" && code === "GB") return "United Kingdom";
 try {
     return /^[A-Z]{2}$/.test(code)
       ? new Intl.DisplayNames([locale], { type: "region" }).of(code) || country
@@ -126,18 +127,7 @@ try {
 }
 
 export function profilePhotos(item: Row, failedSources: string[] = []): string[] {
-  const data = row(item.data);
-  const photos = [...profileList(item.photos), ...profileList(data.photos)];
-  const avatar = text(item.avatarUrl, data.avatarUrl);
-  const source = photos.length ? photos : [avatar, item.photoUrl, data.photoUrl];
-  return [...new Set(source.map((value, index) => {
-    const photo = row(value);
-    const original = typeof value === "string" ? text(value) : text(photo.publicUrl, photo.url);
-    const primary = photo.position === undefined ? index === 0 : Number(photo.position) === 0;
-    // Use only the crop supplied by this profile response; keep additional photos unchanged.
-    const crop = text(photo.avatarUrl, avatar);
-    return primary && crop && !failedSources.includes(crop) ? crop : original;
-  }).filter((url) => /^(?:https?:\/\/|\/(?!\/)|blob:)/i.test(url)))];
+  return profilePhotoUrls(item, failedSources);
 }
 
 export function profileLanguages(data: Row, locale: Locale): string[] {
@@ -304,7 +294,7 @@ export function Overlay({
     };
   }, []);
   return createPortal(
-    <div className={`member-profile-surface ${surfaceClassName}`}>
+    <div className={`member-profile-surface member-overlay-root ${surfaceClassName}`}>
       <div
         className={className}
         ref={root}
@@ -1221,12 +1211,7 @@ function ProfileScreen({
     line("hairColor", c.hairColor, data.hairColor),
     line("ethnicity", c.ethnicity, data.ethnicity),
   ].filter(Boolean);
-  const badge = (
-    <Icon
-      name={verified ? "verifiedIcon" : "unverifiedIcon"}
-      label={verified ? c.verified : undefined}
-    />
-  );
+  const badge = verified ? <Icon name="verifiedIcon" label={c.verified} /> : null;
   const locationLine = (
     <>
       <Icon name="locationIcon" />

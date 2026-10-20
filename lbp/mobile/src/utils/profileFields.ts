@@ -16,6 +16,8 @@ import { catalogOptionLabel } from "../data/catalogLabels";
 export type ProfileDetailData = {
   id: number;
   displayName: string | null;
+  age?: string | number | null;
+  dateOfBirth?: string | null;
   city: string | null;
   country: string | null;
   avatarUrl: string | null;
@@ -27,6 +29,29 @@ export type ProfileDetailData = {
   profileType?: string | null;
   data?: Record<string, unknown>;
 };
+
+export function profileAge(
+  profile: { age?: unknown; dateOfBirth?: unknown; data?: Record<string, unknown> },
+  today = new Date(),
+): number | null {
+  const birthDate = profile.dateOfBirth || profile.data?.dateOfBirth;
+  if (typeof birthDate === "string") {
+    const match = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(birthDate.trim());
+    if (match) {
+      const [, year, month, day] = match.map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day) {
+        let age = today.getUTCFullYear() - year;
+        if (today.getUTCMonth() < month - 1 || (today.getUTCMonth() === month - 1 && today.getUTCDate() < day)) age--;
+        return age >= 0 && age <= 120 ? age : null;
+      }
+    }
+  }
+  const raw = profile.age ?? profile.data?.age;
+  if (typeof raw !== "number" && (typeof raw !== "string" || !raw.trim())) return null;
+  const age = Number(raw);
+  return Number.isInteger(age) && age >= 0 && age <= 120 ? age : null;
+}
 
 export function dataList(data: Record<string, unknown> | undefined, key: string): string[] {
   if (!data) return [];

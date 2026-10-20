@@ -12,8 +12,7 @@ import { useAuth } from "../context/AuthContext";
 import { openFamilyPlan } from "../utils/familyPlan";
 import AppHeader from "../components/AppHeader";
 import { useI18n } from "../i18n/I18nContext";
-import { colors, radius, spacing, tabBarClearance } from "../theme";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors, radius, spacing } from "../theme";
 import GradientBackground from "../components/GradientBackground";
 import { emptyCatalogFilters } from "../api/catalogFilters";
 import type { CatalogFilters } from "../api/catalogFilters";
@@ -30,7 +29,6 @@ type Nav = CompositeNavigationProp<
 // 1:1 for copy/layout; a few taps had no exact real-screen equivalent to
 // point to, called out below.
 export default function ExploreScreen() {
-  const insets = useSafeAreaInsets();
   const navigation = useNavigation<Nav>();
   const { user } = useAuth();
   const { t } = useI18n();
@@ -76,8 +74,8 @@ export default function ExploreScreen() {
 
   return (
     <GradientBackground variant="soft">
-    <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingBottom: spacing.xs + tabBarClearance + insets.bottom }]}>
-      <AppHeader onAvatarPress={() => navigation.navigate("Me")} />
+      <ScrollView style={styles.container} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} contentContainerStyle={styles.content}>
+      <AppHeader />
       <Text style={styles.greeting}>{t("explore.greeting", { name: user?.displayName || "" })}</Text>
       <Text style={styles.subtitle}>{t("explore.subtitle")}</Text>
 
@@ -200,7 +198,7 @@ const styles = StyleSheet.create({
   // was landing well below the status bar with a second gap above it.
   // Horizontal/bottom only now, matching the pattern MessagesScreen
   // already uses around the same AppHeader.
-  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xs + tabBarClearance },
+  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
   hero: { alignItems: "flex-end" },
   avatar: {
     width: 36,

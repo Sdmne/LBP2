@@ -35,8 +35,19 @@ export function forgotPassword(email: string) {
   return api.post<{ ok: true }>("/api/auth/forgot-password", { email });
 }
 
-export function logout() {
-  return api.post<{ ok: true }>("/api/auth/logout");
+export function logout(sessionToken?: string, signal?: AbortSignal) {
+  return api.post<{ ok: true }>("/api/auth/logout", undefined, sessionToken ? {
+    headers: { Authorization: `Bearer ${sessionToken}` },
+    credentials: "omit",
+    signal,
+  } : undefined);
+}
+
+export function heartbeat(signal?: AbortSignal) {
+  return api.get<{ ok: true }>("/api/auth/heartbeat", {
+    signal,
+    headers: { "X-LBP-Presence": "foreground" },
+  });
 }
 
 // UPDATE (Sept 2026): the backend now issues a 6-digit code alongside the
