@@ -1014,7 +1014,7 @@ function AdminSelect({
         className="admin-select-trigger"
         type="button"
         role="combobox"
-        aria-label={ariaLabel}
+        aria-label={ariaLabel?.trim() || (name ? label(name) : `Select ${adminSelectLabelText(selectedOption?.label ?? "option")}`)}
         aria-controls={listboxId}
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -1033,8 +1033,9 @@ function AdminSelect({
         defaultValue={value === undefined ? defaultValue : undefined}
         onChange={onChange}
         disabled={disabled}
-        name={name}
+        name={name || id || `${listboxId}-value`}
         required={required}
+        aria-label={ariaLabel?.trim() || "Select value"}
         aria-hidden="true"
         tabIndex={-1}
       >
@@ -2296,16 +2297,28 @@ function Login({
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [blockedFor, setBlockedFor] = useState(0);
+  useEffect(() => {
+    if (!blockedFor) return;
+    const timer = window.setTimeout(() => setBlockedFor(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [blockedFor]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (blockedFor) return;
     setLoading(true);
     setError("");
     try {
       onAuthenticated(
         await api.post<Session>("/admin/login", { email, password }),
       );
-    } catch {
-      setError("Could not sign in. Please try again.");
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 429) {
+        setBlockedFor(reason.retryAfterSeconds || 1800);
+        setError(reason.message);
+      } else {
+        setError(reason instanceof ApiError && reason.status === 503 ? reason.message : "Invalid email or password.");
+      }
     } finally {
       setLoading(false);
     }
@@ -2343,8 +2356,8 @@ function Login({
             />
           </label>
           {error && <div className="error">{error}</div>}
-          <button disabled={loading}>
-            {loading ? "Signing In…" : "Sign In"}
+          <button disabled={loading || blockedFor > 0}>
+            {blockedFor ? `Try again in ${Math.ceil(blockedFor / 60)} min` : loading ? "Signing In…" : "Sign In"}
           </button>
         </form>
       </section>
@@ -4590,205 +4603,116 @@ function StorageFilePreview({ row }: { row: RecordValue }) {
 
 function StoragePage() {
   const [category, setCategory] = useState("all");
+  const [trashView, setTrashView] = useState(false);
   const [userId, setUserId] = useState("");
   const [offset, setOffset] = useState(0);
+  const [reload, setReload] = useState(0);
   const [data, setData] = useState<RecordValue | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [confirmAction, setConfirmAction] = useState<"trash" | "purge" | "empty" | null>(null);
   const requestSequence = useRef(0);
+  const pendingRequest = useRef<AbortController | null>(null);
   const limit = 50;
   const load = () => {
     const requestId = ++requestSequence.current;
-    const params = new URLSearchParams({
-      category,
-      limit: String(limit),
-      offset: String(offset),
-    });
+    pendingRequest.current?.abort();
+    const controller = new AbortController(); pendingRequest.current = controller;
+    const params = new URLSearchParams({category, trash: String(trashView), limit: String(limit), offset: String(offset)});
     if (userId.trim()) params.set("userId", userId.trim());
-    setData(null);
-    setLoading(true);
-    setError("");
-    api
-      .get<RecordValue>(`/admin/storage?${params}`)
-      .then((nextData) => {
-        if (requestId === requestSequence.current) setData(nextData);
-      })
-      .catch(() => {
-        if (requestId === requestSequence.current) {
-          setError("Could not load storage data.");
-        }
-      })
-      .finally(() => {
-        if (requestId === requestSequence.current) setLoading(false);
-      });
+    setLoading(true);setError("");
+    api.get<RecordValue>(`/admin/storage?${params}`, {signal: controller.signal})
+      .then(value => { if (requestId === requestSequence.current) setData(value); })
+      .catch(reason => { if (requestId === requestSequence.current && !controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not load storage data."); })
+      .finally(() => { if (requestId === requestSequence.current) setLoading(false); });
   };
   useEffect(() => {
     setData(null);
-    setLoading(true);
     const timer = window.setTimeout(load, userId.trim() ? 250 : 0);
-    return () => {
-      window.clearTimeout(timer);
-      requestSequence.current += 1;
-    };
-  }, [category, userId, offset]);
+    return () => { window.clearTimeout(timer);pendingRequest.current?.abort();requestSequence.current++; };
+  }, [category, userId, offset, trashView, reload]);
+  useEffect(() => { setSelected(new Set());setOffset(0); }, [category, userId, trashView]);
+  const items = arrayOf(data?.items);
   const total = Number(data?.total ?? 0);
+  const trashFiles = Number(data?.trashFiles ?? 0);
   const summary = (data?.summary ?? {}) as RecordValue;
-  return (
-    <>
-      <header className="page-heading storage-heading">
-        <div className="storage-title-row">
-          <h1>Storage</h1>
-          <span className="storage-total-badge">
-            {data
-              ? `${formatBytes(data.totalBytes)}${Number(data.unknownSizes ?? 0) > 0 ? " known" : ""} / ${Number(data.totalFiles ?? 0).toLocaleString()} files`
-              : "Loading…"}
-          </span>
-        </div>
-        <button onClick={load} disabled={loading}>
-          <AdminIcon name="refresh" /> Refresh Stats
-        </button>
-      </header>
-      {error && <p className="error">{error}</p>}
-      <section className="storage-summary">
-        {storageCategories.slice(1).map(([key, title, icon]) => {
-          const item = (summary[key] ?? {}) as RecordValue;
-          return (
-            <article key={key}>
-              <header>
-                <span>{title}</span>
-                <AdminIcon name={icon} />
-              </header>
-              <div>
-                <strong>{Number(item.files ?? 0).toLocaleString()}</strong>
-                <small>{formatBytes(item.bytes)}{Number(item.unknownSizes ?? 0) > 0 ? ` known · ${Number(item.unknownSizes).toLocaleString()} sizes unknown` : ""}</small>
-              </div>
-            </article>
-          );
-        })}
-      </section>
-      <div className="storage-filter">
-        <label className="sr-only" htmlFor="storage-user-filter">
-          Filter by User ID
-        </label>
-        <input
-          id="storage-user-filter"
-          value={userId}
-          onChange={(event) => {
-            setUserId(event.target.value);
-            setOffset(0);
-          }}
-          placeholder="Filter by User ID (UUID)"
-        />
-        {userId.trim() && <span>Filter active</span>}
+  const visibleIds = items.map(item => Number(item.id));
+  const allVisibleSelected = Boolean(items.length) && visibleIds.every(id => selected.has(id));
+  const toggle = (id: number) => setSelected(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else if (next.size < 100) next.add(id);
+    return next;
+  });
+  const run = async (action: "trash" | "restore" | "purge", allTrash = false) => {
+    if (busy || (!allTrash && !selected.size)) return;
+    setBusy(true);setError("");
+    try {
+      const result = await api.post<{ok: boolean; cleanupPending?: number}>(`/admin/storage/${action}`, {ids: [...selected], allTrash});
+      setSelected(new Set());setConfirmAction(null);setOffset(0);setReload(value => value + 1);
+      if (result.cleanupPending) setError("Some files could not be removed from storage. Please retry permanent deletion.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "The storage action could not be completed."); }
+    finally { setBusy(false); }
+  };
+  return <>
+    <header className="page-heading storage-heading">
+      <div className="storage-title-row"><h1>{trashView ? "Storage Trash" : "Storage"}</h1>
+        <span className="storage-total-badge">{data ? `${formatBytes(data.totalBytes)}${Number(data.unknownSizes ?? 0) > 0 ? " known" : ""} / ${Number(data.totalFiles ?? 0).toLocaleString()} files` : "Loading…"}</span>
       </div>
-      <nav className="storage-tabs">
-        {storageCategories.map(([key, title]) => (
-          <button
-            type="button"
-            key={key}
-            className={category === key ? "active" : ""}
-            aria-pressed={category === key}
-            onClick={() => {
-              setCategory(key);
-              setOffset(0);
-            }}
-          >
-            {title}
-          </button>
-        ))}
-      </nav>
-      {total > limit && (
-        <div className="storage-pager">
-          <button
-            className="secondary-button storage-page-previous"
-            disabled={!offset || loading}
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-          >
-            <AdminIcon name="chevronDown" /> Previous
-          </button>
-          <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
-          <button
-            className="secondary-button storage-page-next"
-            disabled={offset + limit >= total || loading}
-            onClick={() => setOffset(offset + limit)}
-          >
-            Next <AdminIcon name="chevronDown" />
-          </button>
-        </div>
-      )}
-      {!data && !error ? (
-        <p className="loading-inline">Loading…</p>
-      ) : data ? (
-        <>
-        <section className="storage-file-grid">
-          {arrayOf(data.items).map((row) => {
-            return (
-              <article key={String(row.id)}>
-                <div className="storage-file-media">
-                  {row.contentUrl ? (
-                    <a
-                      className="storage-file-preview"
-                      href={String(row.contentUrl)}
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label={`Open ${String(row.name ?? "file")}`}
-                    >
-                      <StorageFilePreview row={row} />
-                    </a>
-                  ) : (
-                    <StorageFilePreview row={row} />
-                  )}
-                  <span className="storage-file-badge">
-                    {valueOf(row.categoryLabel ?? label(String(row.category ?? "file")))}
-                  </span>
-                </div>
-                <div className="storage-file-info">
-                  <b title={String(row.name ?? "")}>{valueOf(row.name)}</b>
-                  <small className="storage-file-meta">
-                    <span>{Number(row.bytes ?? 0) > 0 ? formatBytes(row.bytes) : "—"}</span>
-                    <span>{directoryDate(row.createdAt)}</span>
-                  </small>
-                  {Boolean(row.relatedUrl && row.relatedLabel) && (
-                    <a
-                      href={String(row.relatedUrl)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <AdminIcon name="externalLink" />
-                      <span>{valueOf(row.relatedLabel)}</span>
-                    </a>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-          {!arrayOf(data.items).length && (
-            <p className="storage-empty">No files in this category</p>
-          )}
-        </section>
-        {total > limit && (
-          <div className="storage-pager storage-pager-bottom">
-            <button
-              className="secondary-button storage-page-previous"
-              disabled={!offset || loading}
-              onClick={() => setOffset(Math.max(0, offset - limit))}
-            >
-              <AdminIcon name="chevronDown" /> Previous
-            </button>
-            <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
-            <button
-              className="secondary-button storage-page-next"
-              disabled={offset + limit >= total || loading}
-              onClick={() => setOffset(offset + limit)}
-            >
-              Next <AdminIcon name="chevronDown" />
-            </button>
-          </div>
-        )}
-        </>
-      ) : null}
-    </>
-  );
+      <button type="button" onClick={load} disabled={loading || busy}><AdminIcon name="refresh" /> Refresh Stats</button>
+    </header>
+    {error && <p className="error" role="alert">{error}</p>}
+    <section className="storage-summary">{storageCategories.slice(1).map(([key, title, icon]) => {
+      const group = (summary[key] ?? {}) as RecordValue;
+      return <article key={key}><header><span>{title}</span><AdminIcon name={icon} /></header><div>
+        <strong>{Number(group.files ?? 0).toLocaleString()}</strong>
+        <small>{formatBytes(group.bytes)}{Number(group.unknownSizes ?? 0) > 0 ? ` known · ${Number(group.unknownSizes).toLocaleString()} sizes unknown` : ""}</small>
+      </div></article>;
+    })}</section>
+    <div className="storage-filter"><label className="sr-only" htmlFor="storage-user-filter">Filter by User ID</label>
+      <input id="storage-user-filter" value={userId} onChange={event => setUserId(event.target.value)} placeholder="Filter by User ID (UUID)" />
+    </div>
+    <nav className="storage-tabs" aria-label="Storage categories">{storageCategories.map(([key, title]) =>
+      <button type="button" key={key} className={category === key ? "active" : ""} aria-pressed={category === key} onClick={() => {setCategory(key);setOffset(0);}}>{title}</button>
+    )}</nav>
+    <div className="storage-selection-toolbar">
+      <label><input type="checkbox" checked={allVisibleSelected} disabled={!items.length || busy} aria-label="Select all files on this page"
+        aria-checked={!allVisibleSelected && visibleIds.some(id => selected.has(id)) ? "mixed" : allVisibleSelected}
+        onChange={() => setSelected(current => {const next = new Set(current);for (const id of visibleIds) {if (allVisibleSelected) next.delete(id);else if (next.size < 100) next.add(id);}return next;})} /> Select page</label>
+      <span>{selected.size} selected</span>
+      {trashView ? <>
+        <button type="button" disabled={!selected.size || busy} onClick={() => void run("restore")}>Restore selected</button>
+        <button type="button" className="danger" disabled={!selected.size || busy} onClick={() => setConfirmAction("purge")}>Delete permanently</button>
+        <button type="button" className="danger-text" disabled={!trashFiles || busy} onClick={() => setConfirmAction("empty")}>Empty Trash</button>
+      </> : <button type="button" className="danger" disabled={!selected.size || busy} onClick={() => setConfirmAction("trash")}>Move to Trash</button>}
+      <button type="button" className="storage-trash-toggle" disabled={busy} onClick={() => setTrashView(value => !value)}>{trashView ? "Back to files" : `Trash (${trashFiles})`}</button>
+    </div>
+    {total > limit && <div className="storage-pager">
+      <button type="button" disabled={!offset || loading || busy} onClick={() => setOffset(Math.max(0, offset - limit))}>Previous</button>
+      <span>Page {Math.floor(offset / limit) + 1} of {Math.ceil(total / limit)}</span>
+      <button type="button" disabled={offset + limit >= total || loading || busy} onClick={() => setOffset(offset + limit)}>Next</button>
+    </div>}
+    {loading && <p className="loading-inline">Loading…</p>}
+    {!loading && data && <section className="storage-file-grid">{items.map(row => <article key={String(row.id)} className={selected.has(Number(row.id)) ? "is-selected" : ""}>
+      <div className="storage-file-media">
+        <label className="storage-file-select"><input type="checkbox" checked={selected.has(Number(row.id))} disabled={busy} onChange={() => toggle(Number(row.id))} aria-label={`Select ${String(row.name ?? "file")}`} /></label>
+        {row.contentUrl ? <a className="storage-file-preview" href={String(row.contentUrl)} aria-label={`Open ${String(row.name ?? "file")}`} target="_blank" rel="noopener noreferrer"><StorageFilePreview row={row} /></a> : <StorageFilePreview row={row} />}
+        <span className="storage-file-badge">{valueOf(row.categoryLabel ?? label(String(row.category ?? "")))}</span>
+      </div>
+      <div className="storage-file-info"><b title={String(row.name ?? "")}>{valueOf(row.name)}</b>
+        <small className="storage-file-meta"><span>{row.sizeKnown ? formatBytes(row.bytes) : "Size unknown"}</span><span>{directoryDate(row.createdAt)}</span></small>
+        {Boolean(row.relatedUrl && row.relatedLabel) && <a href={String(row.relatedUrl)}><AdminIcon name="externalLink" /><span>{valueOf(row.relatedLabel)}</span></a>}
+      </div>
+    </article>)}</section>}
+    {!loading && data && !items.length && <p className="empty-state">{trashView ? "Trash is empty." : "No files found."}</p>}
+    <ConfirmModal open={Boolean(confirmAction)} title={confirmAction === "trash" ? "Move files to Trash" : "Delete files permanently"}
+      message={confirmAction === "trash" ? `Move ${selected.size} selected files to Trash? They can be restored.` : confirmAction === "empty" ? `Permanently delete all ${trashFiles} files in Trash? This cannot be undone.` : `Permanently delete ${selected.size} selected files? This cannot be undone.`}
+      confirmLabel={confirmAction === "trash" ? "Move to Trash" : "Delete permanently"} busy={busy}
+      onClose={() => {if (!busy) setConfirmAction(null);}}
+      onConfirm={() => run(confirmAction === "trash" ? "trash" : "purge", confirmAction === "empty")} />
+  </>;
 }
 
 function Operations({ kind }: { kind: "monitoring" | "storage" }) {
@@ -7762,7 +7686,7 @@ function GenericList({ view }: { view: string }) {
         ].includes(view) && (
           <div className="filter-row">
             {["clinics", "lawyers", "verifications"].includes(view) && (
-              <AdminSelect
+              <AdminSelect aria-label="Status"
                 value={filters.status ?? ""}
                 onChange={(event) => {
                   setOffset(0);
@@ -7798,7 +7722,7 @@ function GenericList({ view }: { view: string }) {
             )}
             {["clinics", "lawyers"].includes(view) && (
               <>
-                <AdminSelect
+                <AdminSelect aria-label="Country"
                   value={filters.country ?? ""}
                   menuMaxHeight={520}
                   onChange={(event) => {
@@ -7821,7 +7745,7 @@ function GenericList({ view }: { view: string }) {
                 </AdminSelect>
                 {view === "clinics" && (
                   <>
-                    <AdminSelect
+                    <AdminSelect aria-label="Website availability"
                       value={filters.hasWebsite ?? ""}
                       onChange={(event) => {
                         setOffset(0);
@@ -7835,7 +7759,7 @@ function GenericList({ view }: { view: string }) {
                       <option value="true">Has website</option>
                       <option value="false">No website</option>
                     </AdminSelect>
-                    <AdminSelect
+                    <AdminSelect aria-label="Logo availability"
                       value={filters.hasLogo ?? ""}
                       onChange={(event) => {
                         setOffset(0);
@@ -7998,7 +7922,7 @@ function GenericList({ view }: { view: string }) {
                   <option value="MONTHLY">Monthly</option>
                   <option value="QUARTERLY">Quarterly</option>
                 </AdminSelect>
-                <AdminSelect
+                <AdminSelect aria-label="Status"
                   value={filters.status ?? ""}
                   onChange={(event) => {
                     setOffset(0);
@@ -8037,7 +7961,7 @@ function GenericList({ view }: { view: string }) {
       </section>
       {["static-pages", "marketing"].includes(view) && (
         <section className="list-controls">
-          <AdminSelect
+          <AdminSelect aria-label="Status"
             value={filters.status ?? ""}
             onChange={(event) => {
               setOffset(0);
@@ -8696,12 +8620,14 @@ function VerificationDetail() {
     "approve" | "revoke" | "delete" | null
   >(null);
   const [busy, setBusy] = useState(false);
+  const [actionReason, setActionReason] = useState("");
+  useEffect(() => { setActionReason(""); }, [confirmAction]);
   // Manual approval is limited to ADMIN accounts (the API enforces it too).
   const [isAdminRole, setIsAdminRole] = useState(false);
   useEffect(() => {
     api
       .get<Session>("/admin/session")
-      .then((response) => setIsAdminRole((response.role ?? "ADMIN").toUpperCase() === "ADMIN"))
+      .then((response) => setIsAdminRole((response.role ?? "").trim().toUpperCase() === "ADMIN"))
       .catch(() => setIsAdminRole(false));
   }, []);
 
@@ -8725,13 +8651,15 @@ function VerificationDetail() {
   }, [id, reload]);
 
   const runConfirmedAction = async () => {
-    if (!confirmAction) return;
+    if (!confirmAction || !isAdminRole || busy) return;
+    if (!actionReason.trim()) { setError("Enter a reason for this action."); return; }
     setBusy(true);
     setError("");
     try {
       if (confirmAction === "approve") {
         await api.post(
           `/admin/verifications/${encodeURIComponent(id)}/approve`,
+          { reason: actionReason.trim() },
         );
         setNotice("Verification manually approved.");
         setConfirmAction(null);
@@ -8739,12 +8667,13 @@ function VerificationDetail() {
       } else if (confirmAction === "revoke") {
         await api.post(
           `/admin/verifications/${encodeURIComponent(id)}/revoke`,
+          { reason: actionReason.trim() },
         );
         setNotice("Verification revoked.");
         setConfirmAction(null);
         setReload((value) => value + 1);
       } else {
-        await api.delete(`/admin/verifications/${encodeURIComponent(id)}`);
+        await api.delete(`/admin/verifications/${encodeURIComponent(id)}`, { reason: actionReason.trim() });
         navigate("/verifications");
       }
     } catch {
@@ -8760,6 +8689,7 @@ function VerificationDetail() {
     }
   };
 
+  const reasonField = <label className="verification-reason-field" htmlFor="verification-action-reason">Reason<textarea id="verification-action-reason" value={actionReason} onChange={event => setActionReason(event.target.value)} rows={3} maxLength={2000} required disabled={busy} /></label>;
   if (!detail) {
     return (
       <section className="verification-detail-page">
@@ -8781,7 +8711,7 @@ function VerificationDetail() {
   const profileEmail = valueOf(detail.profileEmail ?? data.email);
   const status = String(
     detail.verificationStatus ?? detail.status ?? "PENDING",
-  ).toUpperCase();
+  ).trim().toUpperCase();
   const statusClass = status.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const sessionId = valueOf(
     detail.sessionId ?? data.sessionId ?? verificationRouteId(detail),
@@ -8988,7 +8918,7 @@ function VerificationDetail() {
                   Manual Approve
                 </button>
               )}
-              {status === "APPROVED" && (
+              {isAdminRole && status === "APPROVED" && (
                 <button
                   className="danger"
                   type="button"
@@ -8998,14 +8928,14 @@ function VerificationDetail() {
                   Revoke Verification
                 </button>
               )}
-              <button
+              {isAdminRole && (<button
                 className="danger-text"
                 type="button"
                 disabled={busy}
                 onClick={() => setConfirmAction("delete")}
               >
                 Delete Session
-              </button>
+              </button>)}
             </div>
           </section>
 
@@ -9121,10 +9051,11 @@ function VerificationDetail() {
         )}
       </section>
       <ConfirmModal
-        open={confirmAction === "approve"}
+        open={isAdminRole && confirmAction === "approve"}
+        confirmDisabled={!actionReason.trim()}
         modalClassName="verification-confirm-modal"
         title="Manual Approve Verification"
-        message="This will override the current session status to APPROVED and mark the user's profile as verified. This action will be logged."
+        message={<><p>This will override the current session status to APPROVED and mark the user's profile as verified. This action will be logged.</p>{reasonField}</>}
         confirmLabel="Approve"
         confirmClassName="primary"
         busy={busy}
@@ -9132,17 +9063,19 @@ function VerificationDetail() {
         onConfirm={runConfirmedAction}
       />
       <ConfirmModal
-        open={confirmAction === "revoke"}
+        open={isAdminRole && confirmAction === "revoke"}
+        confirmDisabled={!actionReason.trim()}
         modalClassName="verification-confirm-modal"
         title="Revoke Verification"
-        message="This will remove the verified status from this user's profile. Use this if the user changed their primary photo after verification or in case of fraud. This action will be logged."
+        message={<><p>This will remove the verified status from this user's profile. Use this if the user changed their primary photo after verification or in case of fraud. This action will be logged.</p>{reasonField}</>}
         confirmLabel="Revoke Verification"
         busy={busy}
         onClose={() => setConfirmAction(null)}
         onConfirm={runConfirmedAction}
       />
       <ConfirmModal
-        open={confirmAction === "delete"}
+        open={isAdminRole && confirmAction === "delete"}
+        confirmDisabled={!actionReason.trim()}
         modalClassName="verification-confirm-modal"
         title="Delete Session"
         message={`Delete the verification session for ${profileName}? This action cannot be undone.`}
@@ -9185,20 +9118,11 @@ function ArticleRoute({ create = false }: { create?: boolean }) {
   const [error, setError] = useState("");
   useEffect(() => {
     if (create) return;
-    api
-      .get<ListResponse>("/admin/list/articles?limit=200&offset=0")
-      .then((result) => {
-        const match = result.items.find((item) => String(item.id ?? "") === id);
-        if (match) {
-          setRow(match);
-          setTranslations(
-            result.items.filter(
-              (item) => String(item.slug ?? "") === String(match.slug ?? ""),
-            ),
-          );
-        } else setError("Article not found.");
-      })
-      .catch(() => setError("Could not load this article."));
+    let live = true;
+    api.get<{ item: RecordValue; translations: RecordValue[] }>(`/admin/articles/${encodeURIComponent(id)}`)
+      .then(result => { if (live) { setRow(result.item); setTranslations(result.translations || [result.item]); } })
+      .catch(() => { if (live) setError("Could not load this article."); });
+    return () => { live = false; };
   }, [create, id]);
   const save = async (values: RecordValue) => {
     setBusy(true);
@@ -9590,15 +9514,17 @@ function ArticleEditor({
   const [archiving, setArchiving] = useState(false);
   const archiveTarget = translations.find((item) => String(item.locale) === locale)
     ?? (String(row.locale ?? "en") === locale ? row : null);
+  const archivedTarget = String(archiveTarget?.status ?? "").toUpperCase() === "ARCHIVED";
   const archiveArticle = async () => {
     if (!archiveTarget?.id || archiving) return;
     setArchiving(true);
     setSaveError("");
     try {
-      await api.delete(`/admin/item/articles/${encodeURIComponent(String(archiveTarget.id))}`);
+      if (archivedTarget) await api.delete(`/admin/articles/${encodeURIComponent(String(archiveTarget.id))}`);
+      else await api.patch(`/admin/item/articles/${encodeURIComponent(String(archiveTarget.id))}`, { values: { status: "ARCHIVED" } });
       onClose();
     } catch {
-      setSaveError("Could not archive article. Try again.");
+      setSaveError(archivedTarget ? "Could not delete this article permanently." : "Could not archive article. Try again.");
       setArchiveOpen(false);
     } finally {
       setArchiving(false);
@@ -9932,10 +9858,10 @@ function ArticleEditor({
           </section>
         <div className="article-editor-actions">
           {saveError && <p className="article-save-error">{saveError}</p>}
-          {Boolean(archiveTarget?.id) && String(archiveTarget?.status ?? "").toUpperCase() !== "ARCHIVED" && (
-            <button type="button" className="secondary-button" disabled={busy || archiving}
+          {Boolean(archiveTarget?.id) && (
+            <button type="button" className={archivedTarget ? "danger" : "secondary-button"} disabled={busy || archiving}
               onClick={() => setArchiveOpen(true)}>
-              Archive article
+              {archivedTarget ? "Delete permanently" : "Archive article"}
             </button>
           )}
             <button
@@ -9960,9 +9886,10 @@ function ArticleEditor({
           </div>
         </aside>
       </div>
-      <ConfirmModal open={archiveOpen} title="Archive article"
-        message="This language version will be archived and hidden from ordinary lists. It remains available in the Archived filter. Unsaved changes will not be saved."
-        confirmLabel={archiving ? "Archiving…" : "Archive"}
+      <ConfirmModal open={archiveOpen} title={archivedTarget ? "Delete article permanently" : "Archive article"}
+        message={archivedTarget ? "This archived language version will be permanently deleted. This cannot be undone." : "This language version will be archived and hidden from ordinary lists. It remains available in the Archived filter. Unsaved changes will not be saved."}
+        confirmLabel={archivedTarget ? "Delete permanently" : "Archive"}
+        busy={archiving}
         onClose={() => { if (!archiving) setArchiveOpen(false); }}
         onConfirm={archiveArticle} />
     </form>
@@ -11541,6 +11468,7 @@ function ConfirmModal({
   confirmClassName = "danger",
   modalClassName = "",
   busy,
+  confirmDisabled = false,
   onClose,
   onConfirm,
 }: {
@@ -11551,6 +11479,7 @@ function ConfirmModal({
   confirmClassName?: "primary" | "danger";
   modalClassName?: string;
   busy?: boolean;
+  confirmDisabled?: boolean;
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }) {
@@ -11579,7 +11508,7 @@ function ConfirmModal({
           <button
             className={confirmClassName}
             type="button"
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={onConfirm}
           >
             {busy ? "Working…" : confirmLabel}
@@ -12490,6 +12419,17 @@ function UserDetail() {
   const [bioDraft, setBioDraft] = useState("");
   const [bioSaving, setBioSaving] = useState(false);
   const [reload, setReload] = useState(0);
+  const [adminSession, setAdminSession] = useState<Session | null>(null);
+  const [verificationOpen, setVerificationOpen] = useState(false);
+  const [verificationReason, setVerificationReason] = useState("");
+  const [verificationBusy, setVerificationBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.get<Session>("/admin/session").then(value => { if (live) setAdminSession(value); }).catch(() => { if (live) setAdminSession(null); });
+    return () => { live = false; };
+  }, []);
+  const canVerify = adminSession?.role?.trim().toUpperCase() === "ADMIN";
+  const canGrantPremium = canVerify || Boolean(adminSession?.permissions?.includes("subscriptions"));
   useEffect(() => {
     let live = true;
     setDetail(null);
@@ -12658,23 +12598,17 @@ function UserDetail() {
     }
   };
   const toggleVerification = async () => {
-    const enabled = !verified;
+    if (!canVerify || !verificationReason.trim() || verificationBusy) return;
+    setVerificationBusy(true);
     setActionError("");
     try {
-      await api.patch(`/admin/item/users/${encodeURIComponent(profileId)}`, {
-        values: {
-          data: {
-            ...profileData,
-            isVerified: enabled,
-            verifiedAt: enabled ? new Date().toISOString() : null,
-          },
-        },
-      });
-      setNotice(enabled ? "User verified." : "Verification removed.");
-      setReload((value) => value + 1);
-    } catch {
-      setActionError("Could not update verification. Please try again.");
-    }
+      await api.post(`/admin/users/${encodeURIComponent(profileId)}/verification`, { verified: !verified, reason: verificationReason.trim() });
+      setNotice(verified ? "Verification removed." : "User verified manually.");
+      setVerificationOpen(false);
+      setReload(value => value + 1);
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : "Could not update verification.");
+    } finally { setVerificationBusy(false); }
   };
   const avatarUrl = String(dataValue("avatarUrl", "avatar_url") ?? "");
   const verified = typeof detail.isVerified === "boolean" ? detail.isVerified : profileIdentityVerified(profile);
@@ -12742,15 +12676,15 @@ function UserDetail() {
           <button
             type="button"
             className="user-grant-premium"
-            disabled={!verified || premium}
+            disabled={!canGrantPremium}
             title={premium ? "Premium is already active" : !verified ? "Verify the profile before granting Premium" : "Grant Premium"}
             onClick={() => setModal({ kind: "grant", title: "Grant Premium" })}
           >
             <AdminIcon name="crown" /> Grant Premium
           </button>
-          <button onClick={() => void toggleVerification()}>
-            {verified ? "Unverify" : "Verify"}
-          </button>
+          {canVerify && <button onClick={() => { setVerificationReason(""); setVerificationOpen(true); }}>
+            {verified ? "Unverify" : "Manual Verify"}
+          </button>}
           <button
             className="danger"
             onClick={() => setModal({ kind: "ban", title: "Ban user" })}
@@ -12813,15 +12747,15 @@ function UserDetail() {
         <section className="detail-grid user-profile-grid">
           <article>
             {section("IDs", [
-              ["User ID", dataValue("id", "userId") ?? id],
+              ["User ID", dataValue("userId", "user_id", "authUserId", "id") ?? id],
               [
                 "Profile ID",
-                dataValue("profileId", "profile_id") ?? profile.id,
+                dataValue("profileId", "profile_id", "id") ?? profile.id,
               ],
             ])}
             {section("Basic Info", [
               ["Display Name", dataValue("displayName", "display_name")],
-              ["User Type (legacy)", dataValue("donorType", "userType")],
+              ["User Type (legacy)", dataValue("userType", "profileType", "donorType")],
               ["Date of Birth", profileBirthDate(dataValue("dateOfBirth", "birthDate"))],
               ["Country", dataValue("country") ? userCountryName(dataValue("country")) : null],
               ["State", dataValue("state", "region", "stateName")],
@@ -12838,8 +12772,8 @@ function UserDetail() {
               ["Desired Donor Contact", dataValue("desiredDonorContact")],
             ])}
             {section("Appearance", [
-              ["Height", dataValue("height")],
-              ["Weight", dataValue("weight")],
+              ["Height", dataValue("height") ? `${dataValue("height")} cm` : null],
+              ["Weight", dataValue("weight") ? `${dataValue("weight")} kg` : null],
               ["Eye Color", dataValue("eyeColor")],
               ["Hair Color", dataValue("hairColor")],
               ["Ethnicity", dataValue("ethnicity")],
@@ -12943,8 +12877,8 @@ function UserDetail() {
               ],
               ["Verified", verified],
               ["Verified At", detailDate(dataValue("verifiedAt"))],
-              ["Wizard Completed", dataValue("wizardCompleted")],
-              ["Completeness Score", dataValue("completenessScore")],
+              ["Wizard Completed", dataValue("isWizardCompleted", "wizardCompleted", "onboardingCompleted", "profileComplete")],
+              ["Completeness Score", detail.profileCompleteness != null ? `${detail.profileCompleteness}%` : dataValue("completenessScore")],
             ])}
           </article>
         </section>
@@ -12959,6 +12893,7 @@ function UserDetail() {
             />
           ))}
       </div>
+      <ConfirmModal open={canVerify && verificationOpen} title={verified ? "Revoke Verification" : "Verify User Manually"} message={<label className="verification-reason-field" htmlFor="profile-verification-reason">Reason<textarea id="profile-verification-reason" value={verificationReason} onChange={event => setVerificationReason(event.target.value)} maxLength={2000} rows={3} required /></label>} confirmLabel={verified ? "Revoke" : "Verify"} confirmClassName={verified ? "danger" : "primary"} confirmDisabled={!verificationReason.trim()} busy={verificationBusy} onClose={() => { if (!verificationBusy) setVerificationOpen(false); }} onConfirm={toggleVerification} />
       <ActionModal
         state={modal}
         onClose={() => setModal(null)}
@@ -14153,9 +14088,7 @@ export function AdminApp() {
                     ? "settings"
                     : path.split("/").filter(Boolean)[0] || "dashboard";
   const canAccess = (path: string) =>
-    session.role !== "STAFF" ||
-    permissions.has("*") ||
-    permissions.has(permissionForPath(path));
+    (session.role ?? "").toUpperCase() === "ADMIN" || permissions.has(permissionForPath(path));
   const allowedNav = nav.filter((item) => canAccess(item.path));
   const fallbackPath = allowedNav[0]?.path ?? "/dashboard";
   return (

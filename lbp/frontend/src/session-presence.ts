@@ -2,7 +2,12 @@ export function startSessionPresence(heartbeat: (signal: AbortSignal) => Promise
   let stopped = false;
   let pending: AbortController | undefined;
   const pulse = async () => {
-    if (stopped || pending || document.visibilityState !== "visible") return;
+    if (stopped) return;
+    if (document.visibilityState !== "visible" || !document.hasFocus()) {
+      pending?.abort();
+      return;
+    }
+    if (pending) return;
     const controller = new AbortController();
     pending = controller;
     try {
@@ -18,12 +23,14 @@ export function startSessionPresence(heartbeat: (signal: AbortSignal) => Promise
   const timer = window.setInterval(resume, 30_000);
   document.addEventListener("visibilitychange", resume);
   window.addEventListener("focus", resume);
+  window.addEventListener("blur", resume);
   resume();
   return () => {
     stopped = true;
     window.clearInterval(timer);
     document.removeEventListener("visibilitychange", resume);
     window.removeEventListener("focus", resume);
+    window.removeEventListener("blur", resume);
     pending?.abort();
   };
 }

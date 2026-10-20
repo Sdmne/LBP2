@@ -11117,3 +11117,54 @@ body,
     width: 19%;
   }
 }
+
+
+/* Admin workspace scrolling and readable data controls. */
+.skip-link { position: fixed; z-index: 10000; top: 8px; left: 8px; padding: 12px 16px; border-radius: 8px; background: #fff; color: #0f172a; transform: translateY(-160%); }
+.skip-link:focus { transform: translateY(0); outline: 2px solid #ff0066; }
+.verification-reason-field { display: grid; gap: 8px; margin-top: 16px; font-weight: 400; }
+.verification-reason-field textarea { width: 100%; min-height: 88px; font: inherit; }
+.community-group-modal, .community-group-modal :is(h1,h2,h3,label,input,textarea,select,button) { font-weight: 400; }
+.entity-modal-regular, .entity-modal-regular :is(h1,h2,h3,label,input,textarea,select,button) { font-weight: 400 !important; }
+.storage-selection-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.storage-selection-toolbar label { display: inline-flex; align-items: center; gap: 8px; font-weight: 400; }
+.storage-selection-toolbar input[type=checkbox], .storage-file-select input { width: 18px; height: 18px; margin: 0; accent-color: #ff0066; }
+.storage-trash-toggle { margin-left: auto; }
+.storage-file-media { position: relative; }
+.storage-file-select { position: absolute; z-index: 2; top: 10px; left: 10px; padding: 6px; background: #fff; border-radius: 5px; display: flex; }
+.storage-file-grid > article.is-selected { outline: 2px solid #ff0066; outline-offset: -2px; }
+.generic-list-table { max-width: 100%; overflow-x: auto; }
+.subscriptions-table tbody, .subscriptions-table tbody * { font-weight: 400 !important; }
+.person-name-line { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 4px; min-width: 0; max-width: 100%; }
+.person-name-line :is(.verified-mark,.premium-mark,.donor-mark,.deleted-mark) { position: static; margin: 0; transform: none; flex-shrink: 0; }
+.person-name-line :is(.deleted-user-badge,.subscription-donor-badge) { position: static !important; margin: 0 !important; transform: none !important; display: inline-flex; flex-shrink: 0; }
+.users-table .person-name-line > b { min-width: 0; max-width: 240px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.person-name-line svg { position: static; width: 16px; height: 16px; flex-shrink: 0; }
+.user-detail-heading { display: block; }
+.user-detail-actions { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.user-detail-tabs { border-bottom: 0; }
+.user-detail-tab-region { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-top: 16px; }
+.user-detail-tab-region > .user-profile-grid { border: 0; box-shadow: none; margin: 0; padding: 0; background: transparent; }
+@media (min-width: 768px) {
+  .app { height: 100dvh; min-height: 0; overflow: hidden; }
+  .app > aside { position: relative; top: 0; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; flex-shrink: 0; }
+  .app > aside nav { min-height: 0; overflow-y: auto; overflow-x: hidden; flex: 1 1 auto; }
+  .app > main.content { min-width: 0; min-height: 0; height: 100dvh; overflow-y: auto; flex: 1 1 auto; }
+  .users-table > table { min-width: 1180px; }
+  .articles-table > table { min-width: 760px; }
+  :is(.users-table,.articles-table) > table { display: table; width: 100%; border-collapse: collapse; }
+  :is(.users-table,.articles-table) thead { display: table-header-group; }
+  :is(.users-table,.articles-table) tbody { display: table-row-group; }
+  :is(.users-table,.articles-table) tr { display: table-row; padding: 0; border-radius: 0; }
+  :is(.users-table,.articles-table) :is(th,td) { display: table-cell; width: auto; }
+  :is(.users-table,.articles-table) td::before { display: none; }
+  .articles-table .table-column-title { width: 42%; }
+}
+@media (max-width: 767px) {
+  .app { display: block; height: auto; overflow: visible; }
+  .app > aside { position: relative; width: 100%; min-width: 0; max-width: none; height: auto; }
+  .app > aside nav { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); min-width: 0; max-width: 100%; max-height: 60dvh; overflow-x: hidden; overflow-y: auto; }
+  .app > aside nav a { min-width: 0; white-space: normal; overflow: visible; text-overflow: clip; }
+  .app > aside nav a svg { flex-shrink: 0; }
+  .app > main.content { height: auto; overflow: visible; min-width: 0; }
+}

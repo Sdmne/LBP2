@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(public readonly status: number, message: string, public readonly retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
   }
@@ -12,7 +12,7 @@ export type ApiClient = {
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
-  delete<T>(path: string): Promise<T>;
+  delete<T>(path: string, body?: unknown): Promise<T>;
   upload<T>(path: string, body: FormData): Promise<T>;
 };
 
@@ -29,6 +29,7 @@ export function createApiClient(basePath = "/api"): ApiClient {
     const response = await fetch(`${basePath}${path}`, {
       ...init,
       credentials: "same-origin",
+      cache: "no-store",
       headers,
     });
     if (!response.ok) {
@@ -64,7 +65,7 @@ export function createApiClient(basePath = "/api"): ApiClient {
       ) {
         window.dispatchEvent(new Event(ADMIN_AUTH_REQUIRED_EVENT));
       }
-      throw new ApiError(response.status, message || `Request failed (${response.status})`);
+      throw new ApiError(response.status, message || `Request failed (${response.status})`, Number(response.headers.get("Retry-After")) || undefined);
     }
     return response.status === 204 ? (undefined as T) : response.json() as Promise<T>;
   };
@@ -74,7 +75,7 @@ export function createApiClient(basePath = "/api"): ApiClient {
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
-    delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+    delete: <T>(path: string, body?: unknown) => request<T>(path, { method: "DELETE", body: body === undefined ? undefined : JSON.stringify(body) }),
     upload: <T>(path: string, body: FormData) => request<T>(path, { method: "POST", body }),
   };
 }

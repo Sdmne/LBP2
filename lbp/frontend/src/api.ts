@@ -6,7 +6,7 @@ export class ApiError extends Error {
 }
 
 export type ApiClient = {
-  get<T>(path: string, options?: { signal?: AbortSignal }): Promise<T>;
+  get<T>(path: string, options?: { signal?: AbortSignal; headers?: HeadersInit }): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
@@ -44,8 +44,8 @@ export function createApiClient(basePath = "/api"): ApiClient {
   };
 
   return {
-    get: <T>(path: string, options?: { signal?: AbortSignal }): Promise<T> => {
-      if (options?.signal || (path !== "/privacy/consent" && !path.startsWith("/public/footer-pages/"))) return request<T>(path, options);
+    get: <T>(path: string, options?: { signal?: AbortSignal; headers?: HeadersInit }): Promise<T> => {
+      if (options?.signal || options?.headers || (path !== "/privacy/consent" && !path.startsWith("/public/footer-pages/"))) return request<T>(path, options);
       const key = `${basePath}${path}`;
       const pending = sharedReads.get(key);
       if (pending) return pending as Promise<T>;
@@ -55,6 +55,7 @@ export function createApiClient(basePath = "/api"): ApiClient {
       sharedReads.set(key, result);
       return result;
     },
+
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),

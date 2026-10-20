@@ -40,7 +40,10 @@ export function logout() {
 }
 
 export function heartbeat(signal?: AbortSignal) {
-  return api.get<{ ok: true }>("/api/auth/heartbeat", { signal });
+  return api.get<{ ok: true }>("/api/auth/heartbeat", {
+    signal,
+    headers: { "X-LBP-Presence": "foreground" },
+  });
 }
 
 // UPDATE (Sept 2026): the backend now issues a 6-digit code alongside the

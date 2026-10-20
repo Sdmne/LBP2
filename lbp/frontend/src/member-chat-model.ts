@@ -10,6 +10,8 @@ export const chatRow = (value: unknown): ChatRow => value && typeof value === 'o
 export const chatName = (item: ChatRow, locale: ChatLocale) => chatText(item.otherDisplayName,item.peerDisplayName,item.displayName,item.title) || CHAT_COPY[locale].member;
 export const chatPeer = (item: ChatRow) => chatText(item.otherProfileId,item.other_profile_id);
 export const chatSenderProfileId = (item: ChatRow) => chatText(item.senderProfileId,item.sender_profile_id);
+export const chatSelfProfileId = (user: ChatRow, profile: ChatRow = {}) => chatText(user.profileId,user.profile_id,profile.localProfileId,profile.profileId,profile.profile_id,profile.id);
+export const chatMessageIsMine = (message: ChatRow, profileId: unknown) => typeof message.isMine === 'boolean' ? message.isMine : typeof message.isOwn === 'boolean' ? message.isOwn : Boolean(chatText(profileId) && chatSenderProfileId(message) === chatText(profileId));
 export const chatLastMessageSenderProfileId = (item: ChatRow) => chatText(item.lastMessageSenderProfileId,item.last_message_sender_profile_id);
 export const chatSupport = (item: ChatRow) => chatText(item.otherRole,item.other_role).toUpperCase() === 'SUPPORT';
 export const chatInitials = (name: unknown) => (chatText(name) || 'LB').normalize('NFC').split(/\s+/).slice(0,2).map(part=>Array.from(part)[0]).join('').toLocaleUpperCase();

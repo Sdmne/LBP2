@@ -1,4 +1,5 @@
 export function supportMessageIsSupport(message: Record<string, unknown>, supportProfile: Record<string, unknown> = {}) {
+  if (typeof message.isSupport === "boolean") return message.isSupport;
   const role = String(message.senderRole ?? message.sender_role ?? "").trim().toUpperCase();
   if (role) return role === "SUPPORT";
   const senderId = String(message.senderProfileId ?? message.sender_profile_id ?? "").trim();

@@ -18316,7 +18316,10 @@ export function WebApp() {
   const sessionGuard = useRef(new SessionRequestGuard());
   useEffect(() => {
     if (!session?.user.id) return;
-    return startSessionPresence((signal) => api.get("/auth/heartbeat", { signal }));
+    return startSessionPresence((signal) => api.get("/auth/heartbeat", {
+      signal,
+      headers: { "X-LBP-Presence": "foreground" },
+    }));
   }, [session?.user.id]);
   useEffect(() => {
     let active = true;

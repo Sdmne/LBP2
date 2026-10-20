@@ -66,6 +66,7 @@ from firebase_admin import credentials as firebase_credentials
 from auth_security import hash_password, password_needs_rehash, token_hash, verify_password
 from cookie_security import CookieCipher, decode_consent_level, encode_consent_level
 from content_security import sanitize_content_values
+from storage_files import inspect_storage_file, storage_file_path, clear_storage_file_facts
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -102,6 +103,10 @@ ADMIN_DISABLED_LOGIN_EMAILS = {
 }
 ADMIN_SESSION_COOKIE = "lbp_admin_session"
 ADMIN_SESSION_HOURS = 12
+ADMIN_SESSION_SECRET = os.getenv("ADMIN_SESSION_SECRET", "").strip()
+ADMIN_LOGIN_MAX_FAILURES = 5
+ADMIN_LOGIN_LOCK_SECONDS = 30 * 60
+ADMIN_AUTHORIZATION_MAX_LENGTH = 4096
 AMPLITUDE_API_KEY = os.getenv("AMPLITUDE_API_KEY", "").strip()
 AMPLITUDE_USER_PROFILE_URL_TEMPLATE = os.getenv(
     "AMPLITUDE_USER_PROFILE_URL_TEMPLATE",
@@ -2157,6 +2162,34 @@ class AdminCreatePayload(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
 
 
+class AdminStorageSelectionPayload(BaseModel):
+    ids: list[int] = Field(default_factory=list, max_length=100)
+    allTrash: bool = False
+
+    @field_validator("ids")
+    @classmethod
+    def positive_ids(cls, values: list[int]) -> list[int]:
+        if any(value < 1 for value in values):
+            raise ValueError("File identifiers must be positive")
+        return sorted(set(values))
+
+
+class AdminVerificationActionPayload(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Enter a reason for this verification action")
+        return value
+
+
+class AdminProfileVerificationPayload(AdminVerificationActionPayload):
+    verified: bool
+
+
 class AdminLoginPayload(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=1, max_length=200)
@@ -2792,12 +2825,71 @@ def b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode((value + padding).encode("ascii"))
 
 
+def admin_request_ip(request: Request) -> str:
+    from ipaddress import ip_address, ip_network
+    raw = str(getattr(request.client, "host", "") or "unknown")
+    trusted = [ip_network(value.strip(), strict=False) for value in os.getenv("ADMIN_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16").split(",") if value.strip()]
+    try:
+        peer = ip_address(raw)
+        if any(peer in network for network in trusted):
+            for candidate in reversed(str(request.headers.get("x-forwarded-for") or "").split(",")):
+                address = ip_address(candidate.strip())
+                if not any(address in network for network in trusted):
+                    return str(address)
+        return str(peer)
+    except ValueError:
+        return raw[:128]
+
+
+def admin_login_with_limits(request: Request, email: str, password: str) -> None:
+    identity = str(email or "").strip().lower()[:320]
+    client_ip = admin_request_ip(request)
+    key = hashlib.sha256((identity + "\0" + client_ip).encode("utf-8")).hexdigest()
+    lock_key = int.from_bytes(bytes.fromhex(key[:16]), "big", signed=True)
+    now = now_utc()
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+        cursor.execute("SELECT id, data FROM app_entities WHERE entity_type = 'admin_login_guard' AND source_key = %s ORDER BY id DESC LIMIT 1 FOR UPDATE", (key,))
+        row = cursor.fetchone()
+        state = as_dict((row or {}).get("data"))
+        def timestamp(value):
+            try:
+                result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                return result.replace(tzinfo=timezone.utc) if result.tzinfo is None else result
+            except (TypeError, ValueError):
+                return None
+        blocked_until = timestamp(state.get("blockedUntil"))
+        if blocked_until and blocked_until > now:
+            remaining = max(1, math.ceil((blocked_until - now).total_seconds()))
+            raise HTTPException(status_code=429, detail=f"Too many failed sign-in attempts. Try again in {math.ceil(remaining / 60)} minutes.", headers={"Retry-After": str(remaining)})
+        if len(identity) <= 320 and len(password) <= 200 and has_valid_admin_credentials(identity, password):
+            if row and state.get("failures"):
+                cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps({"failures": 0}), row["id"]))
+                conn.commit()
+            return
+        last_failure = timestamp(state.get("lastFailureAt"))
+        failures = int(state.get("failures") or 0) + 1 if last_failure and (now - last_failure).total_seconds() < ADMIN_LOGIN_LOCK_SECONDS and not blocked_until else 1
+        blocked_until = now + timedelta(seconds=ADMIN_LOGIN_LOCK_SECONDS) if failures >= ADMIN_LOGIN_MAX_FAILURES else None
+        state = {"failures": failures, "lastFailureAt": now.isoformat(), "blockedUntil": blocked_until.isoformat() if blocked_until else None}
+        if row:
+            cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps(state), row["id"]))
+        else:
+            cursor.execute("INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at) VALUES ('admin_login_guard', %s, 'Admin sign-in protection', 'ACTIVE', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())", (key, json.dumps(state)))
+        audit(conn, identity or "unknown", "ADMIN_LOGIN_FAILED", "admin_login", key, {"clientIp": client_ip, "failedAttempts": failures, "blockedUntil": state["blockedUntil"]})
+        conn.commit()
+    if blocked_until:
+        raise HTTPException(status_code=429, detail="Too many failed sign-in attempts. Sign-in is blocked for 30 minutes.", headers={"Retry-After": str(ADMIN_LOGIN_LOCK_SECONDS)})
+    raise HTTPException(status_code=401, detail="Invalid admin credentials")
+
+
 def sign_admin_session(user: str) -> str:
+    if len(ADMIN_SESSION_SECRET) < 32:
+        raise HTTPException(status_code=503, detail="Admin session signing is not configured")
     expires = now_utc() + timedelta(hours=ADMIN_SESSION_HOURS)
     account = dynamic_admin_account(user)
     payload = {"user": user, "exp": int(expires.timestamp()), "version": int((account or {}).get("sessionVersion") or 0)}
     body = b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    signature = hmac.new(ADMIN_API_PASSWORD.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+    signature = hmac.new(ADMIN_SESSION_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
 
 
@@ -2857,43 +2949,151 @@ def has_valid_admin_credentials(user: str | None, password: str | None) -> bool:
     return primary_match or test_match
 
 
-def required_admin_permissions(path: str) -> set[str]:
-    tail = path.removeprefix("/api/admin/").strip("/")
-    if not tail or tail in {"session", "logout", "login", "filters"}: return set()
-    if tail == "stats": return {"dashboard"}
-    if tail == "audit-log": return {"settings"}
-    if tail.startswith("accounts") or tail.startswith("settings") or tail.startswith("list/settings") or tail.startswith("item/settings") or tail.startswith("create/settings") or tail.startswith("notifications/test"): return {"settings"}
-    if tail.startswith("operations"): return {"monitoring", "storage", "settings"}
-    if tail.startswith("users") or tail.startswith("list/users") or tail.startswith("item/users"): return {"users"}
-    if tail.startswith("subscriptions") or tail.startswith("list/subscriptions") or tail.startswith("item/subscriptions"): return {"subscriptions"}
-    if tail.startswith("list/verifications") or tail.startswith("item/verifications"): return {"verifications"}
-    if tail.startswith("clinics") or tail.startswith("list/clinics") or tail.startswith("item/clinics"): return {"clinics"}
-    if tail.startswith("list/lawyers") or tail.startswith("item/lawyers"): return {"lawyers"}
-    if "article" in tail or "categor" in tail: return {"articles"}
-    if tail.startswith("support"): return {"support"}
-    if "moderation-photos" in tail: return {"moderation-photos"}
-    if "moderation-reports" in tail or "reports" in tail: return {"moderation-reports"}
-    if tail.startswith("livekit"): return {"livekit"}
-    if "static-pages" in tail: return {"static-pages"}
-    if "marketing" in tail: return {"marketing"}
-    return set()
+ADMIN_ROUTE_PERMISSIONS = (('POST', '/api/admin/video-verifications/[^/]+/review', ('video-verifications',)),
+ ('GET', '/api/admin/video-verifications/[^/]+/content', ('video-verifications',)),
+ ('POST', '/api/admin/users/[^/]+/community-expert', ('users',)),
+ ('POST', '/api/admin/login', ()),
+ ('POST', '/api/admin/logout', ()),
+ ('GET', '/api/admin/session', ()),
+ ('GET', '/api/admin/audit-log', ('settings',)),
+ ('GET', '/api/admin/accounts', ('settings',)),
+ ('POST', '/api/admin/accounts', ('settings',)),
+ ('PATCH', '/api/admin/accounts/[^/]+', ('settings',)),
+ ('GET', '/api/admin/marketing/campaigns', ('marketing',)),
+ ('GET', '/api/admin/marketing/preview', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns', ('marketing',)),
+ ('GET', '/api/admin/marketing/campaigns/[^/]+', ('marketing',)),
+ ('PATCH', '/api/admin/marketing/campaigns/[^/]+', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns/[^/]+/send-now', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns/[^/]+/schedule', ('marketing',)),
+ ('POST', '/api/admin/marketing/campaigns/[^/]+/cancel', ('marketing',)),
+ ('POST', '/api/admin/marketing/test-send', ('marketing',)),
+ ('POST', '/api/admin/notifications/test', ('settings',)),
+ ('GET', '/api/admin/subscriptions/summary', ('subscriptions',)),
+ ('GET', '/api/admin/navigation-counts', ()),
+ ('GET', '/api/admin/stats', ('dashboard',)),
+ ('GET', '/api/admin/monitoring', ('monitoring',)),
+ ('POST', '/api/admin/monitoring/slow-queries/reset', ('monitoring',)),
+ ('GET', '/api/admin/operations', ('monitoring', 'settings', 'storage')),
+ ('GET', '/api/admin/profiles', ('users',)),
+ ('GET', '/api/admin/users/[^/]+/presence', ('users',)),
+ ('GET', '/api/admin/users/[^/]+/overview', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/support/ensure', ('users',)),
+ ('GET', '/api/admin/users/[^/]+/tabs/[^/]+', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/amplitude', ('users',)),
+ ('POST', '/api/admin/clinics', ('clinics',)),
+ ('GET', '/api/admin/clinics/[^/]+/overview', ('clinics',)),
+ ('PATCH', '/api/admin/clinics/[^/]+', ('clinics',)),
+ ('POST', '/api/admin/clinics/[^/]+/logo', ('clinics',)),
+ ('DELETE', '/api/admin/clinics/[^/]+', ('clinics',)),
+ ('POST', '/api/admin/lawyers', ('lawyers',)),
+ ('GET', '/api/admin/lawyers/[^/]+/overview', ('lawyers',)),
+ ('PATCH', '/api/admin/lawyers/[^/]+', ('lawyers',)),
+ ('POST', '/api/admin/lawyers/[^/]+/photo', ('lawyers',)),
+ ('POST', '/api/admin/subscriptions/grant', ('subscriptions',)),
+ ('POST', '/api/admin/subscriptions/[^/]+/review', ('subscriptions',)),
+ ('POST', '/api/admin/boosts/[^/]+/review', ('boosts',)),
+ ('POST', '/api/admin/subscriptions/[^/]+/revoke', ('subscriptions',)),
+ ('GET', '/api/admin/support', ('support',)),
+ ('GET', '/api/admin/support/[^/]+', ('support',)),
+ ('POST', '/api/admin/support/[^/]+/messages', ('support',)),
+ ('POST', '/api/admin/support/[^/]+/resolve', ('support',)),
+ ('POST', '/api/admin/article-images', ('articles',)),
+ ('GET', '/api/admin/verifications/[^/]+', ('verifications',)),
+ ('POST', '/api/admin/verifications/[^/]+/approve', ('verifications',)),
+ ('POST', '/api/admin/verifications/[^/]+/revoke', ('verifications',)),
+ ('DELETE', '/api/admin/verifications/[^/]+', ('verifications',)),
+ ('GET', '/api/admin/storage', ('storage',)),
+ ('POST', '/api/admin/users/[^/]+/photos/[^/]+/avatar', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/photos/[^/]+/primary', ('users',)),
+ ('DELETE', '/api/admin/users/[^/]+/photos/[^/]+', ('users',)),
+ ('GET', '/api/admin/profile-photos/[^/]+/content', ('users', 'moderation-photos', 'storage', 'verifications')),
+ ('GET',
+  '/api/admin/media/[^/]+/content',
+  ('storage',
+   'users',
+   'moderation-photos',
+   'verifications',
+   'support',
+   'articles',
+   'clinics',
+   'lawyers',
+   'video-verifications')),
+ ('GET', '/api/admin/filter-options', ()),
+ ('POST', '/api/admin/users/[^/]+/verification', ('users',)),
+ ('POST', '/api/admin/storage/(trash|restore|purge)', ('storage',)),
+ ('DELETE', '/api/admin/articles/[^/]+', ('articles',)),
+ ('GET', '/api/admin/articles/[^/]+', ('articles',)))
+ADMIN_VIEW_PERMISSIONS = {'users': 'users',
+ 'profiles': 'users',
+ 'partners': 'users',
+ 'safety-checkins': 'users',
+ 'referrals': 'users',
+ 'coparenting-agreements': 'users',
+ 'profile-views': 'users',
+ 'favourite-clinics': 'users',
+ 'favourite-lawyers': 'users',
+ 'favorite-clinics': 'users',
+ 'favorite-lawyers': 'users',
+ 'deletion-feedback': 'users',
+ 'account-deletion': 'users',
+ 'subscriptions': 'subscriptions',
+ 'subscription-events': 'subscriptions',
+ 'verifications': 'verifications',
+ 'clinics': 'clinics',
+ 'lawyers': 'lawyers',
+ 'articles': 'articles',
+ 'categories': 'articles',
+ 'boosts': 'boosts',
+ 'video-verifications': 'video-verifications',
+ 'community-groups': 'community-groups',
+ 'community-posts': 'community-groups',
+ 'community-replies': 'community-groups',
+ 'settings': 'settings',
+ 'settings-modules': 'settings',
+ 'settings-api-keys': 'settings',
+ 'settings-audit-log': 'settings',
+ 'settings-moderation': 'settings',
+ 'settings-ranking': 'settings',
+ 'settings-app-stores': 'settings',
+ 'marketing': 'marketing',
+ 'moderation-photos': 'moderation-photos',
+ 'moderation-reports': 'moderation-reports',
+ 'support': 'support',
+ 'livekit': 'livekit',
+ 'static-pages': 'static-pages'}
+
+def required_admin_permissions(path: str, method: str = "GET") -> set[str] | None:
+    generic = re.fullmatch(r"/api/admin/(list|item|create)/([^/]+)(?:/[^/]+)?", path.rstrip("/"))
+    if generic:
+        operation, view = generic.groups()
+        expected = {"list": {"GET"}, "item": {"PATCH", "DELETE"}, "create": {"POST"}}
+        section = ADMIN_VIEW_PERMISSIONS.get(view)
+        return {section} if section and method.upper() in expected[operation] else None
+    for allowed_method, pattern, permissions in ADMIN_ROUTE_PERMISSIONS:
+        if method.upper() == allowed_method and re.fullmatch(pattern, path.rstrip("/")):
+            return set(permissions)
+    return None
 
 
 def enforce_admin_permissions(request: Request, user: str) -> None:
     account = dynamic_admin_account(user)
-    if not account or str(account.get("role") or "ADMIN").upper() == "ADMIN": return
-    granted = {str(item) for item in account.get("permissions", []) if item}
-    required = required_admin_permissions(request.url.path)
-    if required and not granted.intersection(required):
+    if account and str(account.get("role") or "").strip().upper() == "ADMIN":
+        return
+    if not account and is_configured_admin_user(user):
+        return
+    required = required_admin_permissions(request.url.path, request.method)
+    granted = {str(item) for item in (account or {}).get("permissions", []) if item}
+    if required is None or (required and not granted.intersection(required)):
         raise HTTPException(status_code=403, detail="This admin account does not have permission for this section")
 
 
 def verify_admin_session(token: str | None) -> str | None:
-    if not token or not ADMIN_API_PASSWORD:
+    if not token or len(ADMIN_SESSION_SECRET) < 32:
         return None
     try:
         body, signature = token.rsplit(".", 1)
-        expected = hmac.new(ADMIN_API_PASSWORD.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
+        expected = hmac.new(ADMIN_SESSION_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).hexdigest()
         if not secrets.compare_digest(signature, expected):
             return None
         payload = json.loads(b64url_decode(body).decode("utf-8"))
@@ -2909,20 +3109,30 @@ def verify_admin_session(token: str | None) -> str | None:
         return None
 
 
-def require_admin(
-    request: Request,
-    credentials: HTTPBasicCredentials | None = Depends(security),
-) -> str:
+def require_admin(request: Request) -> str:
     if not ADMIN_API_PASSWORD:
         raise HTTPException(status_code=503, detail="Admin API password is not configured")
-    if credentials and has_valid_admin_credentials(credentials.username, credentials.password):
-        enforce_admin_permissions(request, credentials.username)
-        return credentials.username
+    authorization = str(request.headers.get("authorization") or "")
+    if len(authorization) > ADMIN_AUTHORIZATION_MAX_LENGTH:
+        raise HTTPException(status_code=431, detail="Authorization header is too large")
+    scheme, _, encoded = authorization.partition(" ")
+    if scheme.lower() == "basic":
+        email = password = ""
+        try:
+            decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+            email, separator, password = decoded.partition(":")
+            if not separator or len(email) > 320:
+                email = password = ""
+        except (ValueError, UnicodeDecodeError):
+            pass
+        admin_login_with_limits(request, email, password)
+        enforce_admin_permissions(request, email)
+        return email
     session_user = verify_admin_session(request.cookies.get(ADMIN_SESSION_COOKIE))
     if session_user:
         enforce_admin_permissions(request, session_user)
         return session_user
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin credentials")
+    raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 
 def sign_partner_token(user: dict[str, Any]) -> tuple[str, str]:
@@ -3103,7 +3313,7 @@ def require_user(request: Request, authorization: str | None = Header(None)) -> 
     tokens = request_session_tokens(request, authorization)
     if not tokens:
         raise HTTPException(status_code=401, detail="Session token required")
-    with db_cursor() as (conn, cursor):
+    with db_cursor() as (_, cursor):
         for token in tokens:
             cursor.execute(
                 """
@@ -3122,8 +3332,6 @@ def require_user(request: Request, authorization: str | None = Header(None)) -> 
             row = cursor.fetchone()
             if not row:
                 continue
-            cursor.execute("UPDATE auth_sessions SET last_seen_at = UTC_TIMESTAMP() WHERE id = %s", (row["session_id"],))
-            conn.commit()
             row["_session_token"] = token
             return row
     raise HTTPException(status_code=401, detail="Invalid or expired session")
@@ -5482,7 +5690,22 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
 
 
 @app.get("/api/auth/heartbeat")
-def auth_heartbeat(_user: dict[str, Any] = Depends(require_user)):
+def auth_heartbeat(
+    user: dict[str, Any] = Depends(require_user),
+    presence: str | None = Header(None, alias="X-LBP-Presence"),
+):
+    # Older tabs also poll this endpoint without checking window focus.
+    # Authentication and background requests must not extend online presence.
+    if presence == "foreground":
+        with db_cursor() as (conn, cursor):
+            cursor.execute(
+                """
+                UPDATE auth_sessions SET last_seen_at = UTC_TIMESTAMP()
+                WHERE id = %s AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP()
+                """,
+                (user["session_id"],),
+            )
+            conn.commit()
     return {"ok": True}
 
 
@@ -9277,8 +9500,8 @@ def member_conversation_messages(
         )
         page = cursor.fetchall()
         has_more = len(page) > 300
-        messages = [{**message, "isOwn": int_or_none(message.get("senderProfileId")) == profile_id}
-                    for message in reversed(page[:300])]
+        messages = [{**message, "isOwn": int_or_none(message.get("senderProfileId")) == profile_id, "isMine": int_or_none(message.get("senderProfileId")) == profile_id} for message in reversed(page[:300])]
+
         unread_messages = member_unread_message_count(cursor, profile_id)
         conn.commit()
     return {
@@ -13288,12 +13511,15 @@ def entities(
 
 
 @app.post("/api/admin/login")
-def admin_login(payload: AdminLoginPayload, response: Response):
+def admin_login(payload: AdminLoginPayload, response: Response, request: Request):
     if not ADMIN_API_PASSWORD:
         raise HTTPException(status_code=503, detail="Admin API password is not configured")
-    email = payload.email.strip()
-    if not has_valid_admin_credentials(email, payload.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin credentials")
+    if len(ADMIN_SESSION_SECRET) < 32:
+        raise HTTPException(status_code=503, detail="Admin session signing is not configured")
+    if len(str(request.headers.get("authorization") or "")) > ADMIN_AUTHORIZATION_MAX_LENGTH:
+        raise HTTPException(status_code=431, detail="Authorization header is too large")
+    email = payload.email.strip().lower()
+    admin_login_with_limits(request, email, payload.password)
     dynamic = dynamic_admin_account(email)
     if dynamic:
         data = as_dict(dynamic.get("data")).copy()
@@ -13317,7 +13543,7 @@ def admin_login(payload: AdminLoginPayload, response: Response):
         samesite="strict",
         path="/",
     )
-    return {"ok": True, "email": email}
+    return {"ok": True, "email": email, "role": str(dynamic.get("role") or "").strip().upper() if dynamic else "ADMIN", "permissions": dynamic.get("permissions", []) if dynamic else ["*"]}
 
 
 @app.post("/api/admin/logout")
@@ -13342,7 +13568,7 @@ def admin_logout(response: Response):
 @app.get("/api/admin/session")
 def admin_session(admin: str = Depends(require_admin)):
     account = dynamic_admin_account(admin)
-    return {"ok": True, "email": admin, "role": account.get("role", "ADMIN") if account else "ADMIN", "permissions": account.get("permissions", []) if account else ["*"]}
+    return {"ok": True, "email": admin, "role": str(account.get("role") or "").strip().upper() if account else "ADMIN", "permissions": account.get("permissions", []) if account else ["*"]}
 
 
 ADMIN_AUDIT_SOURCE_SQL = """
@@ -13443,7 +13669,7 @@ def admin_create_account(payload: AdminAccountCreatePayload, actor: str = Depend
         raise HTTPException(status_code=422, detail="Enter a valid email address")
     if not re.search(r"[A-Z]", payload.password) or not re.search(r"\d", payload.password):
         raise HTTPException(status_code=422, detail="Password must contain an uppercase letter and a number")
-    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings"}
+    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings", "boosts", "video-verifications", "community-groups"}
     permissions = list(dict.fromkeys(item for item in payload.permissions if item in allowed)) if payload.role == "STAFF" else ["*"]
     with db_cursor() as (conn, cursor):
         cursor.execute("SELECT id FROM app_entities WHERE entity_type = 'admin_account' AND LOWER(source_key) = %s LIMIT 1", (email,))
@@ -13459,7 +13685,7 @@ def admin_create_account(payload: AdminAccountCreatePayload, actor: str = Depend
 
 @app.patch("/api/admin/accounts/{account_id}")
 def admin_update_account(account_id: str, payload: AdminAccountUpdatePayload, response: Response, actor: str = Depends(require_admin)):
-    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings"}
+    allowed = {"dashboard", "users", "subscriptions", "verifications", "clinics", "lawyers", "articles", "support", "moderation-photos", "moderation-reports", "livekit", "monitoring", "storage", "static-pages", "marketing", "settings", "boosts", "video-verifications", "community-groups"}
     if not payload.model_fields_set:
         raise HTTPException(status_code=422, detail="Choose an account field to update")
     if payload.password is not None and (len(payload.password) < 8 or not re.search(r"[A-Z]", payload.password) or not re.search(r"\d", payload.password)):
@@ -14094,6 +14320,11 @@ def admin_navigation_counts(_admin: str = Depends(require_admin)):
             f"""SELECT COUNT(*) AS unanswered_support FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND {support_unresolved_sql()}"""
         )
         counts["unanswered_support"] = int(cursor.fetchone()["unanswered_support"] or 0)
+    account = dynamic_admin_account(_admin)
+    if account and str(account.get("role") or "").upper() != "ADMIN":
+        sections = {"pending_subscriptions": "subscriptions", "pending_verifications": "verifications", "pending_photo_moderation": "moderation-photos", "pending_reports": "moderation-reports", "pending_boosts": "boosts", "pending_video_verifications": "video-verifications", "unanswered_support": "support"}
+        granted = set(account.get("permissions") or [])
+        counts = {key: value for key, value in counts.items() if sections.get(key) in granted}
     return {"counts": counts}
 
 
@@ -15926,7 +16157,8 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         "boosts": len(boosts), "communityPosts": len(community_posts),
     }
     return {
-        "profile": normalize_row(profile), "counts": counts, "photos": photos,
+        "profile": normalize_row(profile),
+        "profileCompleteness": profile_completeness_percent(profile), "counts": counts, "photos": photos,
         "activity": admin_profile_activity(profile, device_sessions, auth_activity),
         "isOnline": bool(auth_activity.get("is_online")),
         **admin_profile_identity(profile, verification_rows, subscriptions),
@@ -16494,8 +16726,8 @@ def admin_grant_subscription(payload: AdminSubscriptionGrantPayload, actor: str 
         profile = cursor.fetchone()
         if not profile:
             raise HTTPException(status_code=404, detail="User not found")
-        if not profile_is_verified(profile):
-            raise HTTPException(status_code=409, detail="Verify the profile before granting Premium")
+        if str(profile.get("status") or "").upper() != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Premium can only be granted to an active user")
         subscription_data = {
             "profileId": int(profile["id"]),
             "profileName": profile.get("display_name") or "No profile",
@@ -16866,7 +17098,7 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
             """,
             (conversation_id,),
         )
-        messages = [normalize_row(row) for row in cursor.fetchall()]
+        messages = [{**normalize_row(row), "isSupport": str(row.get("senderRole") or "").upper() == "SUPPORT"} for row in cursor.fetchall()]
         cursor.execute("UPDATE conversation_messages SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE conversation_id = %s AND sender_profile_id <> %s AND status = 'ACTIVE'", (conversation_id, support["id"]))
         conn.commit()
     return {"conversation": normalize_row(conversation), "supportProfile": normalize_row(support), "messages": messages}
@@ -18672,18 +18904,70 @@ def admin_verification_detail(
 
 
 def require_admin_role(actor: str, action: str) -> None:
-    """Allow only full ADMIN accounts; STAFF accounts are refused even when
-    their permission list covers the section."""
     account = dynamic_admin_account(actor)
-    role = str(account.get("role") or "ADMIN").upper() if account else "ADMIN"
-    if role != "ADMIN":
+    allowed = str(account.get("role") or "").strip().upper() == "ADMIN" if account else is_configured_admin_user(actor)
+    if not allowed:
         raise HTTPException(status_code=403, detail=f"Only administrators can {action}")
+
+
+def require_admin_action(action: str):
+    def authorized_actor(actor: str = Depends(require_admin)) -> str:
+        require_admin_role(actor, action)
+        return actor
+    return authorized_actor
+
+
+@app.post("/api/admin/users/{profile_id}/verification")
+def admin_set_user_verification(profile_id: str, payload: AdminProfileVerificationPayload, actor: str = Depends(require_admin_action("change profile verification manually"))):
+    require_admin_role(actor, "change profile verification manually")
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (resolved_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="User not found")
+        changed_at = now_utc().strftime("%Y-%m-%dT%H:%M:%SZ")
+        update_profile_data(cursor, resolved_id, {"isVerified": payload.verified, "verifiedAt": changed_at if payload.verified else None, "verificationProvider": "manual", "manualVerificationReason": payload.reason, "manualVerificationBy": actor, "manualVerificationAt": changed_at})
+        if payload.verified:
+            data = {"profileId": resolved_id, "provider": "manual", "completedAt": changed_at, "manualApprovedAt": changed_at, "manualApprovedBy": actor, "manualApprovalReason": payload.reason}
+            cursor.execute("INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at) VALUES ('verification', %s, 'Manual verification', 'APPROVED', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())", ("manual-" + secrets.token_hex(16), json.dumps(data)))
+            reward_referral_if_pending(cursor, resolved_id)
+        audit(conn, actor, "PROFILE_MANUAL_VERIFIED" if payload.verified else "PROFILE_VERIFICATION_REVOKED", "profile", resolved_id, {"verified": payload.verified, "reason": payload.reason})
+        conn.commit()
+    return {"ok": True, "profileId": resolved_id, "isVerified": payload.verified}
+
+
+@app.get("/api/admin/articles/{article_id}")
+def admin_article_detail(article_id: int, _admin: str = Depends(require_admin)):
+    with db_cursor() as (_, cursor):
+        cursor.execute("SELECT * FROM articles WHERE id = %s LIMIT 1", (article_id,))
+        article = cursor.fetchone()
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+        cursor.execute("SELECT * FROM articles WHERE slug = %s ORDER BY locale, id", (article.get("slug"),))
+        translations = cursor.fetchall()
+    return {"item": normalize_row(article), "translations": [normalize_row(item) for item in translations]}
+
+
+@app.delete("/api/admin/articles/{article_id}")
+def admin_permanently_delete_article(article_id: int, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id, title, slug, status FROM articles WHERE id = %s FOR UPDATE", (article_id,))
+        item = cursor.fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="Article not found")
+        if str(item.get("status") or "").strip().upper() != "ARCHIVED":
+            raise HTTPException(status_code=409, detail="Archive the article before deleting it permanently")
+        cursor.execute("DELETE FROM articles WHERE id = %s", (article_id,))
+        audit(conn, actor, "ARTICLE_PERMANENTLY_DELETED", "article", article_id, {"title": item.get("title"), "slug": item.get("slug")})
+        conn.commit()
+    return Response(status_code=204)
 
 
 @app.post("/api/admin/verifications/{verification_id}/approve")
 def admin_approve_verification(
     verification_id: str,
-    actor: str = Depends(require_admin),
+    payload: AdminVerificationActionPayload,
+    actor: str = Depends(require_admin_action("approve a verification manually")),
 ):
     require_admin_role(actor, "approve a verification manually")
     with db_cursor() as (conn, cursor):
@@ -18697,6 +18981,7 @@ def admin_approve_verification(
             "completedAt": approved_at,
             "manualApprovedAt": approved_at,
             "manualApprovedBy": actor,
+                "manualApprovalReason": payload.reason,
         })
         cursor.execute(
             "UPDATE app_entities SET status = 'APPROVED', data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND entity_type = 'verification'",
@@ -18726,7 +19011,7 @@ def admin_approve_verification(
             "VERIFICATION_MANUAL_APPROVED",
             "verification",
             item["id"],
-            {"profileId": profile_id, "sessionId": item.get("sessionId")},
+            {"profileId": profile_id, "sessionId": item.get("sessionId"), "reason": payload.reason},
         )
         conn.commit()
     return {"ok": True, "id": item["id"], "status": "APPROVED"}
@@ -18735,8 +19020,10 @@ def admin_approve_verification(
 @app.post("/api/admin/verifications/{verification_id}/revoke")
 def admin_revoke_verification(
     verification_id: str,
-    actor: str = Depends(require_admin),
+    payload: AdminVerificationActionPayload,
+    actor: str = Depends(require_admin_action("revoke a verification")),
 ):
+    require_admin_role(actor, "revoke a verification")
     with db_cursor() as (conn, cursor):
         item = fetch_admin_verification(cursor, verification_id, for_update=True)
         data = as_dict(item.get("data"))
@@ -18758,6 +19045,7 @@ def admin_revoke_verification(
                 "verifiedAt": None,
                 "verificationRevokedAt": revoked_at,
                 "verificationRevokedBy": actor,
+                "verificationRevocationReason": payload.reason,
             },
         )
         audit(
@@ -18766,7 +19054,7 @@ def admin_revoke_verification(
             "VERIFICATION_REVOKED",
             "verification",
             item["id"],
-            {"profileId": profile_id, "sessionId": item.get("sessionId")},
+            {"profileId": profile_id, "sessionId": item.get("sessionId"), "reason": payload.reason},
         )
         conn.commit()
     return {
@@ -18780,8 +19068,10 @@ def admin_revoke_verification(
 @app.delete("/api/admin/verifications/{verification_id}")
 def admin_delete_verification(
     verification_id: str,
-    actor: str = Depends(require_admin),
+    payload: AdminVerificationActionPayload,
+    actor: str = Depends(require_admin_action("delete a verification session")),
 ):
+    require_admin_role(actor, "delete a verification session")
     with db_cursor() as (conn, cursor):
         item = fetch_admin_verification(cursor, verification_id, for_update=True)
         cursor.execute(
@@ -18794,7 +19084,7 @@ def admin_delete_verification(
             "delete_verification_session",
             "verification",
             item["id"],
-            {"profileId": item.get("profileId"), "sessionId": item.get("sessionId")},
+            {"profileId": item.get("profileId"), "sessionId": item.get("sessionId"), "reason": payload.reason},
         )
         conn.commit()
     return {"ok": True, "id": item["id"], "deleted": True}
@@ -18816,126 +19106,229 @@ ADMIN_STORAGE_CATEGORY_SQL = """
 """
 
 
+def admin_storage_inventory(epoch: int) -> tuple[dict[str, Any], ...]:
+    del epoch
+    with db_cursor() as (_, cursor):
+        cursor.execute(f"SELECT mf.id, mf.storage_key AS storageKey, mf.public_url AS publicUrl, mf.mime_type AS mimeType, mf.bytes, mf.created_at AS createdAt, mf.metadata, {ADMIN_STORAGE_CATEGORY_SQL} AS category FROM media_files mf WHERE ({ADMIN_STORAGE_CATEGORY_SQL}) IS NOT NULL")
+        return tuple(cursor.fetchall())
+
+
+def admin_storage_facts(item: dict[str, Any], *, probe: bool = False) -> dict[str, Any]:
+    metadata = as_dict(item.get("metadata"))
+    trash = as_dict(metadata.get("adminTrash"))
+    if trash.get("state") == "trashed":
+        key = str(trash.get("trashKey") or "")
+        if re.fullmatch(r"[a-f0-9]{48}", key):
+            candidate = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+            if candidate.is_file():
+                return {"exists": True, "bytes": candidate.stat().st_size, "sizeKnown": True}
+        return {"exists": None, "bytes": int(item.get("bytes") or 0), "sizeKnown": int(item.get("bytes") or 0) > 0}
+    facts = inspect_storage_file(str(item.get("storageKey") or ""), str(item.get("publicUrl") or ""), item.get("bytes"), UPLOAD_DIR, PRIVATE_UPLOAD_DIR, probe=probe)
+    saved = as_dict(metadata.get("storageProbe"))
+    source_hash = hashlib.sha256((str(item.get("storageKey") or "") + "\0" + str(item.get("publicUrl") or "")).encode()).hexdigest()
+    if saved.get("sourceHash") == source_hash and facts.get("sizeSource") != "filesystem":
+        if saved.get("exists") is False and (not probe or facts.get("exists") is None):
+            facts["exists"] = False
+        if not facts.get("sizeKnown") and saved.get("bytes") is not None:
+            facts.update({"bytes": int(saved["bytes"]), "sizeKnown": True, "sizeSource": "indexed"})
+    return facts
+
+
+def admin_storage_change(action: str, payload: AdminStorageSelectionPayload, actor: str) -> dict[str, Any]:
+    if action not in {"trash", "restore", "purge"}:
+        raise HTTPException(status_code=422, detail="Unknown storage action")
+    ids = payload.ids
+    if payload.allTrash:
+        if action != "purge":
+            raise HTTPException(status_code=422, detail="Select the files to restore")
+        with db_cursor() as (_, cursor):
+            cursor.execute("SELECT id FROM media_files WHERE metadata->'adminTrash'->>'state' = 'trashed' ORDER BY id")
+            ids = [int(item["id"]) for item in cursor.fetchall()]
+        changed = pending = 0
+        for start in range(0, len(ids), 100):
+            result = admin_storage_change(action, AdminStorageSelectionPayload(ids=ids[start:start + 100]), actor)
+            changed += result["changed"];pending += result.get("cleanupPending", 0)
+        return {"ok": pending == 0, "changed": changed, "cleanupPending": pending}
+    if not ids:
+        raise HTTPException(status_code=422, detail="Select at least one file")
+    moved: list[tuple[Path, Path]] = []
+    delete_after_commit: list[tuple[int, Path | None]] = []
+    changed = 0
+    try:
+        with db_cursor() as (conn, cursor):
+            placeholders = ', '.join(['%s'] * len(ids))
+            cursor.execute(f"SELECT DISTINCT profile_id FROM profile_photos WHERE media_file_id IN ({placeholders}) OR avatar_media_file_id IN ({placeholders}) ORDER BY profile_id", [*ids, *ids])
+            profiles = [int(item["profile_id"]) for item in cursor.fetchall()]
+            if profiles:
+                profile_placeholders = ', '.join(['%s'] * len(profiles))
+                cursor.execute(f"SELECT id FROM profiles WHERE id IN ({profile_placeholders}) ORDER BY id FOR UPDATE", profiles)
+                cursor.fetchall()
+            cursor.execute(f"SELECT id, storage_key AS storageKey, public_url AS publicUrl, metadata FROM media_files WHERE id IN ({placeholders}) ORDER BY id FOR UPDATE", ids)
+            files = cursor.fetchall()
+            if len(files) != len(ids):
+                raise HTTPException(status_code=404, detail="One or more files no longer exist")
+            for item in files:
+                metadata = dict(as_dict(item.get("metadata")))
+                previous = as_dict(metadata.get("adminTrash"))
+                state = previous.get("state")
+                if action == "trash" and state in {"trashed", "purged"}:
+                    continue
+                if action == "purge" and state == "purged":
+                    continue
+                if action in {"restore", "purge"} and state != "trashed":
+                    raise HTTPException(status_code=409, detail="Only files in Trash can be restored or permanently deleted")
+                if action == "trash":
+                    public_url = str(item.get("publicUrl") or "")
+                    cursor.execute("SELECT COUNT(*) AS count FROM media_files WHERE id <> %s AND (storage_key = %s OR (public_url = %s AND public_url <> '')) AND COALESCE(metadata->'adminTrash'->>'state', '') NOT IN ('trashed', 'purged')", (item["id"], item.get("storageKey"), public_url))
+                    shared = int(cursor.fetchone()["count"] or 0) > 0
+                    snapshot = {"state": "trashed", "trashedAt": now_utc().isoformat(), "trashedBy": actor, "publicUrl": item.get("publicUrl"), "photos": [], "avatars": [], "messages": []}
+                    local_path = storage_file_path(str(item.get("storageKey") or ""), UPLOAD_DIR, PRIVATE_UPLOAD_DIR)
+                    if not shared and local_path and local_path.is_file():
+                        key = secrets.token_hex(24)
+                        trash_path = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+                        trash_path.parent.mkdir(parents=True, exist_ok=True)
+                        if trash_path.exists():
+                            raise HTTPException(status_code=409, detail="Trash destination already exists")
+                        shutil.move(str(local_path), str(trash_path))
+                        moved.append((local_path, trash_path));snapshot["trashKey"] = key
+                    cursor.execute("SELECT id, profile_id, status, position, public_url FROM profile_photos WHERE (media_file_id = %s OR avatar_media_file_id = %s) AND status = 'ACTIVE' ORDER BY profile_id, id FOR UPDATE", (item["id"], item["id"]))
+                    for photo in cursor.fetchall():
+                        snapshot["photos"].append(dict(photo))
+                        profile = fetch_profile(cursor, int(photo["profile_id"]))
+                        data = as_dict((profile or {}).get("data"))
+                        if int(photo.get("position") or 0) == 0 and data.get("avatarUrl"):
+                            snapshot["avatars"].append({"profileId": photo["profile_id"], "avatarUrl": data.get("avatarUrl"), "wizard": data.get("isWizardCompleted")})
+                            update_profile_data(cursor, int(photo["profile_id"]), {"avatarUrl": None, "isWizardCompleted": False, "isVerified": False, "verifiedAt": None})
+                            reset_verification_after_primary_photo_change(cursor, int(photo["profile_id"]))
+                        cursor.execute("UPDATE profile_photos SET status = 'TRASHED', public_url = NULL, updated_at = UTC_TIMESTAMP() WHERE id = %s", (photo["id"],))
+                    if public_url and not shared:
+                        cursor.execute("SELECT id, media_url, body FROM conversation_messages WHERE media_url = %s FOR UPDATE", (public_url,))
+                        for message in cursor.fetchall():
+                            snapshot["messages"].append({"id": message["id"], "mediaUrl": message["media_url"], "emptyBody": not message.get("body")})
+                            cursor.execute("UPDATE conversation_messages SET media_url = NULL, body = CASE WHEN COALESCE(body, '') = '' THEN 'Attachment removed' ELSE body END WHERE id = %s", (message["id"],))
+                    metadata["adminTrash"] = snapshot
+                    cursor.execute("UPDATE media_files SET public_url = NULL, metadata = %s WHERE id = %s", (json.dumps(metadata, ensure_ascii=False, default=str), item["id"]))
+                elif action == "restore":
+                    key = str(previous.get("trashKey") or "")
+                    if key:
+                        if not re.fullmatch(r"[a-f0-9]{48}", key):
+                            raise HTTPException(status_code=409, detail="Invalid Trash entry")
+                        trash_path = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+                        target = storage_file_path(str(item.get("storageKey") or ""), UPLOAD_DIR, PRIVATE_UPLOAD_DIR)
+                        if not target or not trash_path.is_file():
+                            raise HTTPException(status_code=409, detail="The stored file is unavailable")
+                        if target.exists():
+                            raise HTTPException(status_code=409, detail="A file already exists at the original path")
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(trash_path), str(target));moved.append((trash_path, target))
+                    if not key and inspect_storage_file(str(item.get("storageKey") or ""), str(previous.get("publicUrl") or ""), 0, UPLOAD_DIR, PRIVATE_UPLOAD_DIR, probe=True)["exists"] is False:
+                        raise HTTPException(status_code=409, detail="The original file is unavailable and cannot be restored")
+                    for photo in previous.get("photos") or []:
+                        position = int(photo.get("position") or 0)
+                        cursor.execute("SELECT id FROM profile_photos WHERE profile_id = %s AND status = 'ACTIVE' AND position = %s AND id <> %s LIMIT 1", (photo["profile_id"], position, photo["id"]))
+                        if cursor.fetchone():
+                            cursor.execute("SELECT COALESCE(MAX(position), 0) + 1 AS position FROM profile_photos WHERE profile_id = %s", (photo["profile_id"],))
+                            position = int(cursor.fetchone()["position"])
+                        cursor.execute("UPDATE profile_photos SET status = %s, public_url = %s, position = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s AND status = 'TRASHED'", (photo["status"], photo.get("public_url"), position, photo["id"]))
+                    for avatar in previous.get("avatars") or []:
+                        profile = fetch_profile(cursor, int(avatar["profileId"]))
+                        if profile and not as_dict(profile.get("data")).get("avatarUrl"):
+                            update_profile_data(cursor, int(avatar["profileId"]), {"avatarUrl": avatar.get("avatarUrl"), "isWizardCompleted": bool(avatar.get("wizard"))})
+                    for message in previous.get("messages") or []:
+                        cursor.execute("UPDATE conversation_messages SET media_url = %s, body = CASE WHEN body = 'Attachment removed' AND %s THEN '' ELSE body END WHERE id = %s AND media_url IS NULL", (message["mediaUrl"], bool(message.get("emptyBody")), message["id"]))
+                    metadata.pop("adminTrash", None)
+                    cursor.execute("UPDATE media_files SET public_url = %s, metadata = %s WHERE id = %s", (previous.get("publicUrl"), json.dumps(metadata, ensure_ascii=False), item["id"]))
+                else:
+                    key = str(previous.get("trashKey") or "")
+                    if key and not re.fullmatch(r"[a-f0-9]{48}", key):
+                        raise HTTPException(status_code=409, detail="Invalid Trash entry")
+                    delete_after_commit.append((int(item["id"]), safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key) if key else None))
+                    metadata["adminTrash"] = {**previous, "purgeRequestedAt": now_utc().isoformat(), "purgeRequestedBy": actor}
+                    cursor.execute("UPDATE media_files SET metadata = %s WHERE id = %s", (json.dumps(metadata, ensure_ascii=False, default=str), item["id"]))
+                audit(conn, actor, "STORAGE_PURGE_REQUESTED" if action == "purge" else "STORAGE_" + action.upper(), "media", item["id"], {"storageKey": item.get("storageKey")})
+                changed += 1
+            conn.commit()
+    except Exception:
+        for original, destination in reversed(moved):
+            if destination.is_file() and not original.exists():
+                original.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(destination), str(original))
+        raise
+    finally:
+        clear_storage_file_facts()
+    failures = 0
+    for identifier, file in delete_after_commit:
+        try:
+            with db_cursor() as (conn, cursor):
+                cursor.execute("SELECT metadata FROM media_files WHERE id = %s FOR UPDATE", (identifier,))
+                current = cursor.fetchone()
+                metadata = dict(as_dict((current or {}).get("metadata")))
+                if not current or as_dict(metadata.get("adminTrash")).get("state") != "trashed":
+                    changed -= 1
+                    continue
+                if file:
+                    file.unlink(missing_ok=True)
+                cursor.execute("UPDATE profile_photos SET status = 'DELETED', public_url = NULL, updated_at = UTC_TIMESTAMP() WHERE (media_file_id = %s OR avatar_media_file_id = %s) AND status = 'TRASHED'", (identifier, identifier))
+                metadata["adminTrash"] = {"state": "purged", "purgedAt": now_utc().isoformat(), "purgedBy": actor}
+                cursor.execute("UPDATE media_files SET public_url = NULL, metadata = %s WHERE id = %s", (json.dumps(metadata, ensure_ascii=False), identifier))
+                audit(conn, actor, "STORAGE_PURGED", "media", identifier)
+                conn.commit()
+        except OSError:
+            failures += 1
+    clear_storage_file_facts()
+    return {"ok": failures == 0, "changed": changed - failures, "cleanupPending": failures}
+
+
+@app.post("/api/admin/storage/trash")
+def admin_trash_storage(payload: AdminStorageSelectionPayload, actor: str = Depends(require_admin)):
+    return admin_storage_change("trash", payload, actor)
+
+
+@app.post("/api/admin/storage/restore")
+def admin_restore_storage(payload: AdminStorageSelectionPayload, actor: str = Depends(require_admin)):
+    return admin_storage_change("restore", payload, actor)
+
+
+@app.post("/api/admin/storage/purge")
+def admin_purge_storage(payload: AdminStorageSelectionPayload, actor: str = Depends(require_admin)):
+    return admin_storage_change("purge", payload, actor)
+
+
 @app.get("/api/admin/storage")
 def admin_storage(
-    category: Literal[
-        "all",
-        "profile_photos",
-        "chat_images",
-        "chat_files",
-        "clinic_logos",
-        "lawyer_photos",
-        "article_images",
-    ] = "all",
+    category: Literal["all", "profile_photos", "chat_images", "chat_files", "clinic_logos", "lawyer_photos", "article_images"] = "all",
     user_id: str | None = Query(None, alias="userId", max_length=128),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    _admin: str = Depends(require_admin),
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    trash: bool = False, _admin: str = Depends(require_admin),
 ):
     normalized_user_id = str(user_id or "").strip()
-    category_sql = ADMIN_STORAGE_CATEGORY_SQL.strip()
-    summary = {
-        key: {"files": 0, "bytes": 0}
-        for key in (
-            "profile_photos",
-            "chat_images",
-            "chat_files",
-            "clinic_logos",
-            "lawyer_photos",
-            "article_images",
-        )
-    }
-
+    categories = ("profile_photos", "chat_images", "chat_files", "clinic_logos", "lawyer_photos", "article_images")
+    rows = [dict(item) for item in admin_storage_inventory(int(time.monotonic() // 30))]
+    if normalized_user_id:
+        with db_cursor() as (_, cursor):
+            cursor.execute("SELECT id, data->>'id' AS sourceId FROM profiles WHERE data->>'id' = %s OR data->>'userId' = %s OR CAST(id AS TEXT) = %s LIMIT 1", (normalized_user_id, normalized_user_id, normalized_user_id))
+            profile = cursor.fetchone() or {}
+        owners = {normalized_user_id, str(profile.get("id") or ""), str(profile.get("sourceId") or "")} - {""}
+        rows = [item for item in rows if any(str(as_dict(item.get("metadata")).get(key) or "") in owners for key in ("profileSourceId", "profileId", "senderProfileId")) or str(item.get("storageKey") or "").removeprefix("quarantine/").split("/")[1:2] in [[value] for value in owners]]
+    def state(item): return as_dict(as_dict(item.get("metadata")).get("adminTrash")).get("state")
+    candidates = [item for item in rows if (state(item) == "trashed" if trash else state(item) not in {"trashed", "purged"})]
+    candidates.sort(key=lambda item: (categories.index(item["category"]), str(item.get("storageKey") or ""), int(item["id"])))
+    selected = [item for item in candidates if category == "all" or item["category"] == category]
+    if not trash:
+        from concurrent.futures import ThreadPoolExecutor
+        visible = [item for item in selected if admin_storage_facts(item)["exists"] is not False]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(lambda item: admin_storage_facts(item, probe=True), visible[offset:offset + limit + 10]))
+    facts = {int(item["id"]): admin_storage_facts(item) for item in candidates}
+    candidates = [item for item in candidates if trash or facts[int(item["id"])]["exists"] is not False]
+    summary = {key: {"files": 0, "bytes": 0, "unknownSizes": 0} for key in categories}
+    for item in candidates:
+        fact = facts[int(item["id"])];item["bytes"] = fact["bytes"];item["sizeKnown"] = fact["sizeKnown"]
+        group = summary[item["category"]];group["files"] += 1;group["bytes"] += int(fact["bytes"] or 0);group["unknownSizes"] += int(not fact["sizeKnown"])
+    selected = [item for item in candidates if category == "all" or item["category"] == category]
+    total = len(selected);files = selected[offset:offset + limit]
+    trash_files = sum(state(item) == "trashed" for item in rows)
     with db_cursor() as (_, cursor):
-        cursor.execute(
-            f"""
-            SELECT category, COUNT(*) AS files, COALESCE(SUM(bytes), 0) AS bytes,
-                   COUNT(*) FILTER (WHERE bytes <= 0) AS unknown_sizes
-            FROM (
-              SELECT {category_sql} AS category, COALESCE(mf.bytes, 0) AS bytes
-              FROM media_files mf
-            ) categorized
-            WHERE category IS NOT NULL
-            GROUP BY category
-            """
-        )
-        for item in cursor.fetchall():
-            key = str(item.get("category") or "")
-            if key in summary:
-                summary[key] = {
-                    "files": int(item.get("files") or 0),
-                    "bytes": int(item.get("bytes") or 0),
-                    "unknownSizes": int(item.get("unknown_sizes") or 0),
-                }
-
-        predicates = [f"({category_sql}) IS NOT NULL"]
-        params: list[Any] = []
-        if category != "all":
-            predicates.append(f"({category_sql}) = %s")
-            params.append(category)
-        if normalized_user_id:
-            cursor.execute(
-                """
-                SELECT id, data->>'id' AS sourceId
-                FROM profiles
-                WHERE data->>'id' = %s OR CAST(id AS TEXT) = %s
-                LIMIT 1
-                """,
-                (normalized_user_id, normalized_user_id),
-            )
-            filter_profile = cursor.fetchone() or {}
-            owner_values = {normalized_user_id}
-            if filter_profile.get("id") is not None:
-                owner_values.add(str(filter_profile["id"]))
-            if filter_profile.get("sourceId"):
-                owner_values.add(str(filter_profile["sourceId"]))
-            owner_placeholders = ", ".join(["%s"] * len(owner_values))
-            owner_params = list(owner_values)
-            predicates.append(
-                f"""
-                (
-                  COALESCE(mf.metadata->>'profileSourceId', '') IN ({owner_placeholders})
-                  OR COALESCE(mf.metadata->>'profileId', '') IN ({owner_placeholders})
-                  OR COALESCE(mf.metadata->>'senderProfileId', '') IN ({owner_placeholders})
-                )
-                """
-            )
-            params.extend(owner_params * 3)
-        where_sql = " AND ".join(f"({predicate.strip()})" for predicate in predicates)
-
-        cursor.execute(f"SELECT COUNT(*) AS total FROM media_files mf WHERE {where_sql}", params)
-        total_row = cursor.fetchone() or {}
-        total = int(total_row.get("total") or 0)
-        cursor.execute(
-            f"""
-            SELECT mf.id,
-                   mf.storage_key AS storageKey,
-                   mf.public_url AS publicUrl,
-                   mf.mime_type AS mimeType,
-                   mf.bytes,
-                   mf.created_at AS createdAt,
-                   mf.metadata,
-                   {category_sql} AS category
-            FROM media_files mf
-            WHERE {where_sql}
-            ORDER BY
-              CASE ({category_sql})
-                WHEN 'article_images' THEN 1
-                WHEN 'chat_images' THEN 2
-                WHEN 'chat_files' THEN 3
-                WHEN 'clinic_logos' THEN 4
-                WHEN 'lawyer_photos' THEN 5
-                WHEN 'profile_photos' THEN 6
-                ELSE 7
-              END,
-              mf.storage_key ASC,
-              mf.id ASC
-            LIMIT %s OFFSET %s
-            """,
-            [*params, limit, offset],
-        )
-        files = cursor.fetchall()
-
         # Family-room documents belong to a match, not directly to a chat.
         # Resolve its unique active conversation without changing stored metadata.
         family_match_ids = {
@@ -19156,8 +19549,10 @@ def admin_storage(
                 "id": media_id,
                 "category": file_category,
                 "categoryLabel": category_labels.get(file_category, "File"),
-                "name": str(metadata.get("originalName") or Path(normalized_key).name or f"File {media_id}"),
+                "name": urllib.parse.unquote(str(metadata.get("originalName") or Path(normalized_key).name or f"File {media_id}")),
                 "bytes": int(file.get("bytes") or 0),
+                "sizeKnown": bool(file.get("sizeKnown")),
+                "trashedAt": as_dict(metadata.get("adminTrash")).get("trashedAt"),
                 "mimeType": str(file.get("mimeType") or "application/octet-stream"),
                 "createdAt": file.get("createdAt"),
                 "contentUrl": f"/admin/api/admin/media/{media_id}/content",
@@ -19177,6 +19572,8 @@ def admin_storage(
         "unknownSizes": sum(int(item.get("unknownSizes", 0)) for item in summary.values()),
         "summary": summary,
         "filterActive": bool(normalized_user_id),
+        "trashFiles": trash_files,
+        "trashed": trash,
     }
 
 
@@ -19372,12 +19769,40 @@ def admin_profile_photo_content(photo_id: int, _admin: str = Depends(require_adm
     return profile_photo_content_response(photo)
 
 
+def require_admin_media_access(actor: str, media: dict[str, Any]) -> None:
+    account = dynamic_admin_account(actor)
+    if (account and str(account.get("role") or "").upper() == "ADMIN") or (not account and is_configured_admin_user(actor)):
+        return
+    granted = set((account or {}).get("permissions") or [])
+    if "storage" in granted:
+        return
+    metadata = as_dict(media.get("metadata"))
+    if as_dict(metadata.get("adminTrash")).get("state") in {"trashed", "purged"}:
+        raise HTTPException(status_code=403, detail="Storage permission is required to access files in Trash")
+    key = str(media.get("storageKey") or "").removeprefix("quarantine/")
+    if key.startswith("profiles/") and granted.intersection({"users", "moderation-photos", "verifications"}):
+        return
+    for prefix, section in (("articles/", "articles"), ("clinics/", "clinics"), ("lawyers/", "lawyers"), ("video-verifications/", "video-verifications")):
+        if key.startswith(prefix) and section in granted:
+            return
+    if key.startswith(("chat/", "family-room/")):
+        if "users" in granted:
+            return
+        if "support" in granted:
+            conversation_id = int_or_none(metadata.get("conversationId"))
+            with db_cursor() as (_, cursor):
+                cursor.execute("SELECT c.id FROM conversations c JOIN profiles a ON a.id=c.profile_a_id JOIN profiles b ON b.id=c.profile_b_id WHERE (a.role='SUPPORT' OR b.role='SUPPORT') AND (c.id=%s OR EXISTS(SELECT 1 FROM conversation_messages message WHERE message.conversation_id=c.id AND message.media_url=%s)) LIMIT 1", (conversation_id, str(media.get("publicUrl") or "")))
+                if cursor.fetchone():
+                    return
+    raise HTTPException(status_code=403, detail="This admin account does not have permission for this media")
+
+
 @app.get("/api/admin/media/{media_file_id}/content")
 def admin_media_content(media_file_id: int, _admin: str = Depends(require_admin)):
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
-            SELECT public_url AS publicUrl, storage_key AS storageKey, mime_type AS mimeType
+            SELECT public_url AS publicUrl, storage_key AS storageKey, mime_type AS mimeType, metadata
             FROM media_files
             WHERE id = %s
             LIMIT 1
@@ -19387,6 +19812,17 @@ def admin_media_content(media_file_id: int, _admin: str = Depends(require_admin)
         media = cursor.fetchone()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
+    require_admin_media_access(_admin, media)
+    trash = as_dict(as_dict(media.get("metadata")).get("adminTrash"))
+    if trash.get("state") == "purged":
+        raise HTTPException(status_code=404, detail="Media has been deleted")
+    if trash.get("state") == "trashed":
+        key = str(trash.get("trashKey") or "")
+        if re.fullmatch(r"[a-f0-9]{48}", key):
+            file = safe_storage_path(PRIVATE_UPLOAD_DIR, "trash/" + key)
+            if file.is_file():
+                return Response(file.read_bytes(), media_type=str(media.get("mimeType") or "application/octet-stream"), headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+        media["publicUrl"] = trash.get("publicUrl")
     return profile_photo_content_response(media, image_only=False)
 
 
@@ -19830,6 +20266,9 @@ def admin_update_item(
     payload: AdminPatchPayload,
     actor: str = Depends(require_admin),
 ):
+    if view == "verifications":
+        require_admin_role(actor, "modify a verification session")
+        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
     if view == "moderation-reports":
@@ -19924,6 +20363,17 @@ def admin_update_item(
             resolved_item_id: int | str = item_id
             if view in {"users", "profiles"}:
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
+                if "data" in payload.values:
+                    cursor.execute("SELECT data FROM profiles WHERE id = %s FOR UPDATE", (resolved_item_id,))
+                    current_data = as_dict((cursor.fetchone() or {}).get("data"))
+                    incoming = dict(as_dict(payload.values.get("data")))
+                    trust_fields = {"isVerified", "is_verified", "verifiedAt", "verificationProvider", "manualApprovedBy", "manualVerificationBy"}
+                    if any(key in incoming and incoming[key] != current_data.get(key) for key in trust_fields):
+                        require_admin_role(actor, "change profile verification manually")
+                        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
+                    incoming = {key: value for key, value in incoming.items() if key not in trust_fields}
+                    values["data"] = json.dumps({**current_data, **incoming}, ensure_ascii=False)
+
                 if str(values.get("status") or "").upper() == "ACTIVE":
                     values["status"] = "ACTIVE"
                     restore_retained_account(cursor, int(resolved_item_id))
@@ -20019,6 +20469,9 @@ def admin_create_item(
     payload: AdminCreatePayload,
     actor: str = Depends(require_admin),
 ):
+    if view == "verifications":
+        require_admin_role(actor, "modify a verification session")
+        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
     values = sanitize_content_values(payload.values) if view in {"articles", "static-pages"} else payload.values
@@ -20118,6 +20571,13 @@ def admin_create_item(
 
 @app.delete("/api/admin/item/{view}/{item_id}")
 def admin_delete_item(view: str, item_id: str, actor: str = Depends(require_admin)):
+    if view == "articles":
+        if not str(item_id).isdigit():
+            raise HTTPException(status_code=422, detail="Article id must be numeric")
+        return admin_permanently_delete_article(int(item_id), actor)
+    if view == "verifications":
+        require_admin_role(actor, "modify a verification session")
+        raise HTTPException(status_code=422, detail="Use the verification action and provide a reason")
     if view == "settings-audit-log":
         raise HTTPException(status_code=403, detail="Audit history is read-only")
     if view in ADMIN_MUTATION_TABLES:
