@@ -56,6 +56,28 @@
   font-size: 12px;
   font-weight: 600;
   line-height: 16px;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+
+.catalog-filter-chip-list {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.catalog-filter-dropdown section > button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.catalog-filter-select:has(.catalog-filter-chip-list) {
+  height: auto;
+  min-height: 38px;
+}
+
+.catalog-filter-chip-list b > [role="button"] {
+  flex-shrink: 0;
 }
 .catalog-filter-chip-list b > [role="button"] {
   display: inline-grid;

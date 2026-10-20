@@ -1,4 +1,14 @@
 /* Scoped HTML profile rules: no styles or assets are fetched from the reference at runtime. */
+.member-overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  isolation: isolate;
+  pointer-events: none;
+}
+.member-overlay-root > [role="dialog"] {
+  pointer-events: auto;
+}
 .web-main.member-profile-main {
   width: 100%;
   max-width: var(--site-container-max);

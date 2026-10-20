@@ -1719,12 +1719,17 @@ def slugify(value: str, fallback: str = "item") -> str:
     return slug or fallback
 
 
+def clinic_slug_name(name: str) -> str:
+    # These numbered Phyathai branches use their supplied city in public URLs.
+    return re.sub(r"(?i)^(phyathai hospital)\s+[1-3]$", r"\1", name.strip())
+
+
 def unique_clinic_slug(cursor, name: str, city: str = "", country: str = "") -> str:
-    base = slugify(name, "clinic")
+    base = slugify(clinic_slug_name(name), "clinic")
     location = slugify(city, "")
     country_slug = slugify(country, "")
     candidates = [
-        base,
+        f"{base}-{location}" if clinic_slug_name(name) != name.strip() and location else base,
         f"{base}-{location}" if location else "",
         f"{base}-{location}-{country_slug}" if location and country_slug else "",
         f"{base}-{country_slug}" if country_slug else "",
@@ -1754,7 +1759,7 @@ def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
         key=lambda row: (str(row.get("name") or "").casefold(), str(row.get("id") or "")),
     )
     for row in ordered_rows:
-        base = slugify(str(row.get("name") or ""), "clinic")
+        base = slugify(clinic_slug_name(str(row.get("name") or "")), "clinic")
         groups.setdefault(base, []).append(row)
     reserved = set(groups)
     used: set[str] = set()
@@ -1778,6 +1783,15 @@ def canonical_clinic_slug_map(rows: list[dict[str, Any]]) -> dict[str, str]:
             used.add(canonical)
             result[str(row.get("id"))] = canonical
     return result
+
+
+def clinic_slug_target(rows: list[dict[str, Any]], slug: str) -> dict[str, Any] | None:
+    for key in ("canonicalSlug", "slug"):
+        target = next((row for row in rows if str(row.get(key) or "").strip() == slug), None)
+        if target is not None:
+            return target
+    aliases = [row for row in rows if slugify(str(row.get("name") or ""), "clinic") == slug]
+    return aliases[0] if len(aliases) == 1 else None
 
 
 def public_user(row: dict[str, Any]) -> dict[str, Any]:
@@ -3327,7 +3341,11 @@ def normalize_platform_name(raw_source: Any, raw_user_agent: Any) -> str:
 def profile_has_verified_badge(profile: dict[str, Any] | None) -> bool:
     if not profile:
         return False
+    if profile.get("hasApprovedPrimaryPhoto") is False:
+        return False
     data = profile_data(profile)
+    if str(data.get("source") or "").startswith("handover_") and not data.get("verificationProvider"):
+        return json_bool(profile, "approvedVerification")
     verified_at = data.get("verifiedAt") or profile.get("verifiedAt")
     has_verified_at = str(verified_at or "").strip().lower() not in {"", "null", "none"}
 
@@ -3470,34 +3488,81 @@ def inferred_article_category(title: str, slug: str, meta: dict[str, Any]) -> st
 
 
 def attach_profile_photos(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    profile_ids = sorted({profile_id for item in items if (profile_id := int_or_none(item.get("id")))})
+    profile_ids = [int(value) for item in items if (value := int_or_none(item.get("id")))]
     if not profile_ids:
         return items
+    legacy_ids = [int(item["id"]) for item in items
+                  if str(as_dict(item.get("data")).get("source") or "").startswith("handover_")
+                  and "approvedVerification" not in item]
+    approved_ids: set[int] = set()
+    if legacy_ids:
+        legacy_placeholders = ", ".join(["%s"] * len(legacy_ids))
+        cursor.execute(f"""
+            SELECT profiles.id AS profileId FROM profiles
+            WHERE profiles.id IN ({legacy_placeholders}) AND EXISTS (
+                SELECT 1 FROM app_entities verification
+                WHERE verification.entity_type = 'verification'
+                  AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
+                  AND (verification.data->>'profileId' = CAST(profiles.id AS TEXT)
+                       OR verification.data->'user'->>'id' = COALESCE(
+                           NULLIF(profiles.data->>'userId', ''), profiles.data->>'id'))
+            )
+            """, legacy_ids)
+        approved_ids = {int(row["profileId"]) for row in cursor.fetchall()}
     placeholders = ", ".join(["%s"] * len(profile_ids))
     cursor.execute(
         f"""
-        SELECT profile_id AS profileId, public_url AS publicUrl
-        FROM profile_photos
-        WHERE status = 'ACTIVE' AND moderation_status = 'APPROVED' AND profile_id IN ({placeholders})
-        ORDER BY profile_id ASC, position ASC, id ASC
-        """,
-        profile_ids,
+        SELECT pp.id, pp.profile_id AS profileId, pp.public_url AS publicUrl,
+               COALESCE(NULLIF(avatar_media.public_url, ''), pp.public_url) AS avatarUrl,
+               pp.position
+        FROM profile_photos pp
+        LEFT JOIN media_files avatar_media ON avatar_media.id = pp.avatar_media_file_id
+        WHERE pp.status = 'ACTIVE' AND pp.moderation_status = 'APPROVED'
+          AND pp.profile_id IN ({placeholders})
+        ORDER BY pp.profile_id ASC, pp.position ASC, pp.id ASC
+        """, profile_ids,
     )
-    photos_by_profile: dict[int, list[str]] = {}
+    by_profile: dict[int, list[dict[str, Any]]] = {}
     for photo in cursor.fetchall():
         profile_id = int_or_none(photo.get("profileId"))
-        public_url = str(photo.get("publicUrl") or "").strip()
-        if profile_id and public_url:
-            photos_by_profile.setdefault(profile_id, []).append(public_url)
+        url = normalized_avatar_url(photo.get("publicUrl"))
+        if profile_id and url:
+            by_profile.setdefault(profile_id, []).append({**photo, "publicUrl": url})
     for item in items:
-        profile_id = int_or_none(item.get("id"))
-        urls: list[str] = []
-        gallery_photos = photos_by_profile.get(profile_id or 0, [])
-        for value in gallery_photos or [item.get("avatarUrl")]:
-            url = str(value or "").strip()
-            if url and url not in urls:
-                urls.append(url)
-        item["photos"] = urls
+        profile_id = int(item["id"])
+        photos = by_profile.get(profile_id, [])
+        data = as_dict(item.get("data"))
+        if "approvedVerification" not in item and profile_id in legacy_ids:
+            item["approvedVerification"] = profile_id in approved_ids
+        primary = next((photo for photo in reversed(photos) if photo.get("position") == 0), None)
+        legacy = str(data.get("source") or "").startswith("handover_")
+        if primary is None and legacy and (item.get("approvedVerification") or data.get("verificationProvider")):
+            available = [photo for photo in admin_user_photos(cursor, profile_id, data)
+                         if photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"]
+            primary_row = next((photo for photo in available if photo.get("isPrimary")), None)
+            photos = [{**photo, "publicUrl": photo["public_url"]} for photo in available
+                      if normalized_avatar_url(photo.get("public_url"))]
+            primary = next((photo for photo in photos if primary_row and photo["id"] == primary_row["id"]), None)
+        current = primary or (photos[0] if photos else {})
+        urls = list(dict.fromkeys(photo["publicUrl"] for photo in photos))
+        avatar = normalized_avatar_url(current.get("avatarUrl")) or current.get("publicUrl")
+        item.update(photos=urls, avatarUrl=avatar, primaryPhotoUrl=current.get("publicUrl"),
+                    hasApprovedPrimaryPhoto=primary is not None)
+        if "data" in item:
+            data.update(photos=urls, avatarUrl=avatar, primaryPhotoUrl=current.get("publicUrl"))
+            item["data"] = data
+        verified = profile_has_verified_badge(item)
+        item["isVerified"] = verified
+        if "data" in item:
+            data["isVerified"] = verified
+        if not verified:
+            for record in (item, data):
+                if str(record.get("verificationStatus") or "").upper() in {"APPROVED", "VERIFIED"}:
+                    record["verificationStatus"] = "NOT_STARTED"
+        if primary is None:
+            item["isVideoVerified"] = False
+            if "data" in item:
+                data["isVideoVerified"] = False
     return items
 
 
@@ -3519,8 +3584,7 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
  AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
  AND (
  CAST(JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.profileId')) AS CHAR) = CAST(profiles.id AS CHAR)
- OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')
- )
+ OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.userId')), ''), JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')))
  )
             ) AS approvedVerification,
             (
@@ -3528,7 +3592,7 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
               WHERE verification.entity_type = 'verification'
                 AND (
                   CAST(JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.profileId')) AS CHAR) = CAST(profiles.id AS CHAR)
-                  OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id'))
+                  OR JSON_UNQUOTE(JSON_EXTRACT(verification.data, '$.user.id')) = COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.userId')), ''), JSON_UNQUOTE(JSON_EXTRACT(profiles.data, '$.id')))
                 )
               ORDER BY verification.created_at DESC, verification.id DESC LIMIT 1
             ) AS verificationState,
@@ -3541,7 +3605,10 @@ def fetch_profile(cursor, profile_id: int) -> dict[str, Any] | None:
         """,
         (profile_id,),
     )
-    return cursor.fetchone()
+    profile = cursor.fetchone()
+    if profile:
+        attach_profile_photos(cursor, [profile])
+    return profile
 
 
 def fetch_clinic(cursor, clinic_identifier: str | int) -> dict[str, Any]:
@@ -4698,6 +4765,7 @@ def require_verified_conversation_action(
     cursor,
     profile_id: int,
     conversation: dict[str, Any],
+    *, allow_reply: bool = False,
 ) -> dict[str, Any]:
     profile_a_id = int(conversation["profile_a_id"])
     profile_b_id = int(conversation["profile_b_id"])
@@ -4707,6 +4775,17 @@ def require_verified_conversation_action(
         return peer_profile
     actor_profile = fetch_profile(cursor, profile_id)
     if not profile_is_verified(actor_profile):
+        if allow_reply:
+            cursor.execute(
+                """SELECT 1 FROM conversation_messages m
+                   JOIN conversations c ON c.id = m.conversation_id
+                   WHERE c.profile_a_id = %s AND c.profile_b_id = %s
+                     AND c.status = 'ACTIVE' AND m.sender_profile_id = %s
+                     AND m.status = 'ACTIVE' LIMIT 1""",
+                (profile_a_id, profile_b_id, peer_profile_id),
+            )
+            if cursor.fetchone():
+                return peer_profile or {}
         raise HTTPException(status_code=403, detail="Verify your profile before contacting other members")
     return peer_profile or {}
 
@@ -4905,6 +4984,17 @@ def update_profile_data(cursor, profile_id: int, updates: dict[str, Any], displa
     current = fetch_profile(cursor, profile_id)
     if not current:
         raise HTTPException(status_code=404, detail="Profile not found")
+    if updates.get("isVerified") is True:
+        photos = admin_user_photos(cursor, profile_id, as_dict(current.get("data")))
+        primary = next((photo for photo in photos if photo.get("isPrimary")
+                        and photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"), None)
+        if primary is None:
+            raise HTTPException(status_code=409, detail="An approved primary photo is required for verification")
+        cursor.execute("""SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s
+                          AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE""",
+                       (primary["id"], profile_id))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=409, detail="An approved primary photo is required for verification")
     data = as_dict(current.get("data"))
     for key, value in updates.items():
         data[key] = value
@@ -7057,17 +7147,38 @@ def update_photo_moderation_entity(cursor, photo_id: int, status_value: str, dat
         )
 
 
+def photo_is_current_primary(cursor, profile_id: int, photo_id: int, position: int) -> bool:
+    if position == 0:
+        return True
+    cursor.execute("SELECT data FROM profiles WHERE id = %s", (profile_id,))
+    profile = cursor.fetchone()
+    data = as_dict((profile or {}).get("data"))
+    if not str(data.get("source") or "").startswith("handover_"):
+        return False
+    return any(photo["id"] == photo_id and photo.get("isPrimary")
+               for photo in admin_user_photos(cursor, profile_id, data))
+
+
 def reset_verification_after_primary_photo_change(cursor, profile_id: int) -> bool:
+    update_profile_data(cursor, profile_id, {
+        "isVerified": False, "verifiedAt": None, "approvedVerification": False,
+        "verificationStatus": "NOT_STARTED", "verificationProvider": None,
+        "isVideoVerified": False, "videoVerifiedAt": None,
+    })
     cursor.execute(
         """
         SELECT id, status, data
         FROM app_entities
         WHERE entity_type = 'verification'
-          AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileId')) = %s
-          AND status IN ('APPROVED', 'PENDING', 'IN_REVIEW')
+          AND (JSON_UNQUOTE(JSON_EXTRACT(data, '$.profileId')) = %s
+               OR JSON_UNQUOTE(JSON_EXTRACT(data, '$.user.id')) =
+                  (SELECT COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.userId')), ''),
+                                   JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')))
+                   FROM profiles WHERE id = %s))
+          AND UPPER(status) IN ('APPROVED', 'VERIFIED', 'PENDING', 'IN_REVIEW')
         FOR UPDATE
         """,
-        (str(profile_id),),
+        (str(profile_id), profile_id),
     )
     sessions = cursor.fetchall()
     if not sessions:
@@ -7717,6 +7828,7 @@ def member_delete_photo(photo_id: int, user: dict[str, Any] = Depends(require_us
         if not photo:
             raise HTTPException(status_code=404, detail="Photo not found")
         deleted_position = int(photo.get("position") or 0)
+        deleted_primary = photo_is_current_primary(cursor, profile_id, photo_id, deleted_position)
         cursor.execute(
             """
             UPDATE profile_photos
@@ -9103,7 +9215,8 @@ def member_conversation_messages(
         )
         page = cursor.fetchall()
         has_more = len(page) > 300
-        messages = list(reversed(page[:300]))
+        messages = [{**message, "isOwn": int_or_none(message.get("senderProfileId")) == profile_id}
+                    for message in reversed(page[:300])]
         unread_messages = member_unread_message_count(cursor, profile_id)
         conn.commit()
     return {
@@ -9154,7 +9267,7 @@ def member_send_message(
         if pair and has_active_block(cursor, int(pair["profile_a_id"]), int(pair["profile_b_id"])):
             raise HTTPException(status_code=403, detail="Conversation is blocked")
         if pair:
-            require_verified_conversation_action(cursor, profile_id, pair)
+            require_verified_conversation_action(cursor, profile_id, pair, allow_reply=True)
         cursor.execute(
             """
             INSERT INTO conversation_messages (conversation_id, sender_profile_id, body, status, created_at)
@@ -9213,7 +9326,7 @@ async def member_send_attachment(
             int(authorized_conversation["profile_b_id"]),
         ):
             raise HTTPException(status_code=403, detail="Conversation is blocked")
-        require_verified_conversation_action(cursor, profile_id, authorized_conversation)
+        require_verified_conversation_action(cursor, profile_id, authorized_conversation, allow_reply=True)
     content_type = (file.content_type or "").split(";")[0].lower()
     ext = ALLOWED_CHAT_ATTACHMENT_TYPES.get(content_type)
     if not ext:
@@ -12069,7 +12182,7 @@ def member_send_sticker(
             raise HTTPException(status_code=404, detail="Conversation not found")
         if has_active_block(cursor, int(pair["profile_a_id"]), int(pair["profile_b_id"])):
             raise HTTPException(status_code=403, detail="Conversation is blocked")
-        require_verified_conversation_action(cursor, profile_id, pair)
+        require_verified_conversation_action(cursor, profile_id, pair, allow_reply=True)
         body = f"{STICKER_BODY_PREFIX}{payload.stickerId}"
         cursor.execute(
             """
@@ -19111,6 +19224,7 @@ def permanently_delete_profile_photo(cursor, profile_id: int, photo_id: int) -> 
     photo = cursor.fetchone()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found")
+    deleted_primary = photo_is_current_primary(cursor, profile_id, photo_id, int(photo.get("position") or 0))
     media_ids = {int(value) for value in (photo.get("media_file_id"), photo.get("avatar_media_file_id")) if value is not None}
     # Include previous crops owned by this photo, including rejected crops.
     cursor.execute(
@@ -19126,7 +19240,7 @@ def permanently_delete_profile_photo(cursor, profile_id: int, photo_id: int) -> 
         """,
         (f"profile-photo-{photo_id}", str(profile_id), str(photo_id)),
     )
-    if int(photo.get("position") or 0) == 0 and str(photo.get("status") or "").upper() == "ACTIVE":
+    if deleted_primary and str(photo.get("status") or "").upper() == "ACTIVE":
         cursor.execute(
             """
             SELECT pp.id, COALESCE(NULLIF(mf.public_url, ''), pp.public_url) AS avatar_url
@@ -20096,23 +20210,7 @@ def public_clinic_detail(slug: str):
         slug_map = canonical_clinic_slug_map(slug_rows)
         for candidate in slug_rows:
             candidate["canonicalSlug"] = slug_map.get(str(candidate.get("id")))
-        target = next(
-            (
-                candidate
-                for candidate in slug_rows
-                if candidate.get("canonicalSlug") == slug
-            ),
-            None,
-        )
-        if target is None:
-            target = next(
-                (
-                    candidate
-                    for candidate in slug_rows
-                    if str(candidate.get("slug") or "").strip() == slug
-                ),
-                None,
-            )
+        target = clinic_slug_target(slug_rows, slug)
         if not target:
             raise HTTPException(status_code=404, detail="Clinic not found")
         if target.get("canonicalSlug") != slug:

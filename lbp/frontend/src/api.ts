@@ -14,6 +14,8 @@ export type ApiClient = {
   upload<T>(path: string, body: FormData): Promise<T>;
 };
 
+const sharedReads = new Map<string, Promise<unknown>>();
+
 export function createApiClient(basePath = "/api"): ApiClient {
   const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
     const headers = new Headers(init.headers || {});
@@ -42,7 +44,17 @@ export function createApiClient(basePath = "/api"): ApiClient {
   };
 
   return {
-    get: <T>(path: string, options?: { signal?: AbortSignal }) => request<T>(path, options),
+    get: <T>(path: string, options?: { signal?: AbortSignal }): Promise<T> => {
+      if (options?.signal || (path !== "/privacy/consent" && !path.startsWith("/public/footer-pages/"))) return request<T>(path, options);
+      const key = `${basePath}${path}`;
+      const pending = sharedReads.get(key);
+      if (pending) return pending as Promise<T>;
+      const result = request<T>(path, options).finally(() => {
+        if (sharedReads.get(key) === result) sharedReads.delete(key);
+      });
+      sharedReads.set(key, result);
+      return result;
+    },
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),

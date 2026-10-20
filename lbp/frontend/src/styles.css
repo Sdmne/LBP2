@@ -1315,6 +1315,22 @@ a.profile-card-linked:hover {
   font-weight: 600;
   cursor: pointer;
 }
+.advisor-page > .account-back,
+.access-card > .account-back {
+  width: fit-content;
+  margin: 0;
+}
+.advisor-page > .account-back svg,
+.access-card > .account-back svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .advisor-back:hover {
   background: #f8fafc;
 }
@@ -5959,6 +5975,9 @@ button.landing-gradient-button:disabled {
 .catalog-card-actions button.active {
   background: #25a8e0;
   transform: none;
+  cursor: default;
+  opacity: 1;
+  transition: none;
 }
 
 .catalog-card-actions button.active:hover {
