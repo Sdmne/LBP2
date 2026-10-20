@@ -17,13 +17,28 @@ export function normalizeArticleCategory(value: unknown): string {
   return slug === "ivf" ? "ivf-in-vitro-fertilization" : slug;
 }
 
+export function articleCategoryTranslation(item: ArticleRow, locale: string): string {
+  const meta = record(item.meta);
+  const categories = [record(item.category), record(meta.category)];
+  const translations = [item.categoryTranslations, ...categories.map((category) => category.translations)]
+    .flatMap((value) => Array.isArray(value) ? value : []);
+  for (const value of translations) {
+    const translation = record(value);
+    if (String(translation.locale ?? "").trim().toLowerCase() === locale.toLowerCase()) {
+      const name = String(translation.name ?? "").trim();
+      if (name) return name;
+    }
+  }
+  return "";
+}
+
 export function normalizeArticle(item: ArticleRow): ArticleRow {
   const meta = record(item.meta);
   const category = record(item.category);
   const metaCategory = record(meta.category);
   const translation = record(meta.selectedTranslation);
   const categorySlug = normalizeArticleCategory(
-    category.slug ?? category.name ?? item.categorySlug
+    category.slug ?? item.categorySlug ?? category.name
       ?? (typeof item.category === "string" ? item.category : undefined)
       ?? metaCategory.slug ?? metaCategory.name ?? meta.categorySlug,
   );
@@ -32,6 +47,7 @@ export function normalizeArticle(item: ArticleRow): ArticleRow {
     ...item,
     id: item.id ?? item.slug,
     categorySlug,
+    categoryName: category.name ?? item.categoryName ?? metaCategory.name ?? meta.categoryName ?? "",
     coverUrl: item.coverUrl || item.cover_url || item.coverImageUrl || translation.coverImageUrl || "",
     publishedAt: item.publishedAt ?? item.published_at ?? meta.publishedAt ?? item.created_at,
     views: Number.isFinite(views) ? Math.max(0, views) : 0,

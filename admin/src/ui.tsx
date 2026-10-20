@@ -29,6 +29,8 @@ import { ADMIN_AUTH_REQUIRED_EVENT, ApiError, createApiClient } from "./api";
 import { UserPhotos } from "./user-photos";
 import { sanitizeRichHtml } from "./rich-html";
 import { supportMessageIsSupport } from "./support-message";
+import { SupportRequests, startSupportRefresh } from "./support-requests";
+import { watchUserPresence } from "./user-presence";
 import { integrationStatus } from "./integration-status";
 import { personName, personSecondaryText } from "./person-name";
 import { MarketingCampaignPage, MarketingFeature } from "./marketing";
@@ -43,6 +45,7 @@ type ListResponse = {
   total: number;
   totalAll?: number;
   totalUnanswered?: number;
+  totalUnresolved?: number;
   limit: number;
   offset: number;
 };
@@ -4873,106 +4876,114 @@ function Support() {
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [resolving, setResolving] = useState(false);
-  const [unanswered, setUnanswered] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [unresolved, setUnresolved] = useState(true);
   const messageListRef = useRef<HTMLDivElement>(null);
-  const loadSequenceRef = useRef(0);
+  const listRequests = useRef(new SupportRequests());
+  const threadRequests = useRef(new SupportRequests());
+  const workspaceLive = useRef(true);
+  useEffect(() => {
+    workspaceLive.current = true;
+    return () => { workspaceLive.current = false; };
+  }, []);
+  const activeId = active?.id == null ? null : String(active.id);
+  const activeIdRef = useRef<string | null>(null);
+  activeIdRef.current = activeId;
   const limit = 25;
   const load = () => {
-    const sequence = ++loadSequenceRef.current;
-    const params = new URLSearchParams({
-      limit: String(limit),
-      offset: String(offset),
-    });
+    if (!workspaceLive.current) return;
+    const request = listRequests.current.begin();
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (query.trim()) params.set("q", query.trim());
-    if (unanswered) params.set("unanswered", "true");
-    api
-      .get<ListResponse>(`/admin/support?${params}`)
+    if (unresolved) params.set("unresolved", "true");
+    void api.get<ListResponse>(`/admin/support?${params}`, { signal: request.signal })
       .then((value) => {
-        if (sequence !== loadSequenceRef.current) return;
+        if (!listRequests.current.isCurrent(request)) return;
         setResult(value);
         setError("");
+        const lastOffset = Math.max(0, (Math.ceil(value.total / limit) - 1) * limit);
+        if (offset > lastOffset) setOffset(lastOffset);
       })
       .catch(() => {
-        if (sequence === loadSequenceRef.current)
-          setError("Could not load support conversations.");
-      });
+        if (listRequests.current.isCurrent(request)) setError("Could not load support conversations.");
+      })
+      .finally(() => listRequests.current.finish(request));
   };
-  useEffect(load, [query, offset, unanswered]);
+  const loadThread = async (id: string) => {
+    if (!workspaceLive.current) return;
+    const request = threadRequests.current.begin();
+    try {
+      const loaded = await api.get<RecordValue>(`/admin/support/${encodeURIComponent(id)}`, { signal: request.signal });
+      if (threadRequests.current.isCurrent(request) && activeIdRef.current === id) setDetail(loaded);
+    } catch {
+      if (threadRequests.current.isCurrent(request) && activeIdRef.current === id) setError("Could not load conversation.");
+    } finally {
+      threadRequests.current.finish(request);
+    }
+  };
+  const refreshListRef = useRef(load);
+  refreshListRef.current = load;
+  const offsetRef = useRef(offset);
+  offsetRef.current = offset;
   useEffect(() => {
-    if (!requestedThreadId || active?.id) return;
-    const match = result?.items.find(
-      (row) => String(row.id) === requestedThreadId,
-    );
-    if (match) setActive(match);
-    else
-      api
-        .get<RecordValue>(
-          `/admin/support/${encodeURIComponent(requestedThreadId)}`,
-        )
-        .then((loaded) =>
-          setActive((loaded.conversation ?? loaded) as RecordValue),
-        )
-        .catch(() => setError("Could not load the conversation."));
-  }, [requestedThreadId, result, active]);
+    load();
+    const stop = startSupportRefresh(() => { if (!listRequests.current.inFlight) load(); });
+    return () => { stop(); listRequests.current.invalidate(); };
+  }, [query, offset, unresolved]);
   useEffect(() => {
-    let current = true;
-    if (active?.id) {
-      setDetail(null);
-      api
-        .get<RecordValue>(
-          `/admin/support/${encodeURIComponent(String(active.id))}`,
-        )
-        .then((loaded) => {
-          if (current) setDetail(loaded);
-        })
-        .catch(() => {
-          if (current) setError("Could not load the conversation.");
-        });
-    } else setDetail(null);
-    return () => {
-      current = false;
-    };
-  }, [active]);
+    if (!requestedThreadId || activeId === requestedThreadId) return;
+    const match = result?.items.find((row) => String(row.id) === requestedThreadId);
+    if (match) { setActive(match); return; }
+    const controller = new AbortController();
+    void api.get<RecordValue>(`/admin/support/${encodeURIComponent(requestedThreadId)}`, { signal: controller.signal })
+      .then((loaded) => { if (!controller.signal.aborted) setActive((loaded.conversation ?? loaded) as RecordValue); })
+      .catch(() => { if (!controller.signal.aborted) setError("Could not load conversation."); });
+    return () => controller.abort();
+  }, [requestedThreadId, result, activeId]);
+  useEffect(() => {
+    setDetail(null);
+    if (!activeId) return;
+    void loadThread(activeId);
+    const stop = startSupportRefresh(() => {
+      if (!threadRequests.current.inFlight) void loadThread(activeId);
+    });
+    return () => { stop(); threadRequests.current.invalidate(); };
+  }, [activeId]);
+  const threadMessages = (detail?.messages ?? []) as RecordValue[];
+  const lastMessageId = threadMessages[threadMessages.length - 1]?.id;
   useEffect(() => {
     const list = messageListRef.current;
     if (list) list.scrollTop = list.scrollHeight;
-  }, [detail]);
+  }, [activeId, lastMessageId]);
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    if (!active?.id || !body.trim()) return;
+    const id = activeId;
+    if (!id || !body.trim() || sending || resolving) return;
+    setSending(true);
     try {
-      await api.post(
-        `/admin/support/${encodeURIComponent(String(active.id))}/messages`,
-        { body },
-      );
-      setBody("");
-      const updated = await api.get<RecordValue>(
-        `/admin/support/${encodeURIComponent(String(active.id))}`,
-      );
-      setDetail(updated);
-      load();
+      await api.post(`/admin/support/${encodeURIComponent(id)}/messages`, { body });
+      if (!workspaceLive.current) return;
+      if (activeIdRef.current === id) { setBody(""); await loadThread(id); }
+      if (!workspaceLive.current) return;
+      setOffset(0);
+      if (offsetRef.current === 0) refreshListRef.current();
     } catch {
-      setError("Could not send the support response.");
-    }
+      if (workspaceLive.current && activeIdRef.current === id) setError("Could not send support response.");
+    } finally { if (workspaceLive.current) setSending(false); }
   };
   const resolveThread = async () => {
-    if (!active?.id || resolving) return;
+    const id = activeId;
+    if (!id || resolving || sending) return;
     setResolving(true);
     try {
-      await api.post(`/admin/support/${encodeURIComponent(String(active.id))}/resolve`, {});
+      await api.post(`/admin/support/${encodeURIComponent(id)}/resolve`, {});
       window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
-      const updated = await api.get<RecordValue>(
-        `/admin/support/${encodeURIComponent(String(active.id))}`,
-      );
-      setDetail(updated);
-      setActive((updated.conversation as RecordValue) ?? active);
-      load();
-      setError("");
+      if (!workspaceLive.current) return;
+      refreshListRef.current();
+      if (activeIdRef.current === id) await loadThread(id);
     } catch {
-      setError("Could not resolve support conversation.");
-    } finally {
-      setResolving(false);
-    }
+      if (workspaceLive.current && activeIdRef.current === id) setError("Could not resolve support conversation.");
+    } finally { if (workspaceLive.current) setResolving(false); }
   };
   const items = result?.items ?? [];
   const total = result?.total ?? 0;
@@ -4983,11 +4994,11 @@ function Support() {
   const selectedName = rowName(selectedConversation);
   const selectedEmail = valueOf(selectedConversation.email);
   const selectedType = supportProfileType(selectedConversation.profileType);
-  const messages = ((detail?.messages ?? []) as RecordValue[]);
+  const messages = threadMessages;
   const supportProfile = (detail?.supportProfile ?? {}) as RecordValue;
-  const resetThread = (nextUnanswered: boolean) => {
+  const resetThread = (nextUnresolved: boolean) => {
     setOffset(0);
-    setUnanswered(nextUnanswered);
+    setUnresolved(nextUnresolved);
     setActive(null);
     setDetail(null);
     setBody("");
@@ -5000,19 +5011,19 @@ function Support() {
         <nav className="support-tabs">
           <button
             type="button"
-            className={unanswered ? "active" : ""}
-            aria-pressed={unanswered}
+            className={unresolved ? "active" : ""}
+            aria-pressed={unresolved}
             onClick={() => resetThread(true)}
           >
-            Unresolved ({result?.totalUnanswered ?? (unanswered ? total : 0)})
+            Unresolved ({result?.totalUnresolved ?? result?.totalUnanswered ?? (unresolved ? total : 0)})
           </button>
           <button
             type="button"
-            className={!unanswered ? "active" : ""}
-            aria-pressed={!unanswered}
+            className={!unresolved ? "active" : ""}
+            aria-pressed={!unresolved}
             onClick={() => resetThread(false)}
           >
-            All ({result?.totalAll ?? (!unanswered ? total : 0)})
+            All ({result?.totalAll ?? (!unresolved ? total : 0)})
           </button>
         </nav>
         <div className="support-search">
@@ -5036,7 +5047,10 @@ function Support() {
                 className={active?.id === row.id ? "selected" : ""}
                 aria-pressed={active?.id === row.id}
                 key={String(row.id)}
-                onClick={() => setActive(row)}
+                onClick={() => {
+                  setActive(row); setBody(""); setError("");
+                  if (requestedThreadId) navigate(`/support/${encodeURIComponent(String(row.id))}`, { replace: true });
+                }}
               >
                 <span className="support-conversation-avatar-wrap">
                   <PersonAvatar
@@ -5119,6 +5133,15 @@ function Support() {
                 </div>
                 <p>{selectedEmail}</p>
               </div>
+              <button
+                className="support-resolve-button"
+                type="button"
+                disabled={selectedResolved || resolving || sending}
+                onClick={() => void resolveThread()}
+              >
+                <AdminIcon name="badgeCheck" />
+                {selectedResolved ? "Resolved" : resolving ? "Resolving..." : "Resolve"}
+              </button>
               {Boolean(selectedConversation.userId) && (
                 <Link
                   className="support-view-profile"
@@ -5129,15 +5152,6 @@ function Support() {
                   <AdminIcon name="externalLink" /> View Profile
                 </Link>
               )}
-              <button
-                className="support-resolve-button"
-                type="button"
-                disabled={selectedResolved || resolving}
-                onClick={() => void resolveThread()}
-              >
-                <AdminIcon name="badgeCheck" />
-                {selectedResolved ? "Resolved" : resolving ? "Resolving..." : "Resolve"}
-              </button>
             </header>
             <div className="message-list" ref={messageListRef}>
               {messages.map((message, index) => {
@@ -5190,7 +5204,7 @@ function Support() {
               <textarea
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
-                disabled={selectedResolved}
+                disabled={selectedResolved || sending || resolving}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
@@ -5209,12 +5223,14 @@ function Support() {
                 className="support-send"
                 type="submit"
                 aria-label="Send reply"
-                disabled={selectedResolved || !body.trim()}
+                disabled={selectedResolved || sending || resolving || !body.trim()}
               >
                 <AdminIcon name="send" />
               </button>
             </form>
           </>
+        ) : activeId ? (
+          <div className="support-empty" role="status"><p>Loading conversation…</p></div>
         ) : (
           <div className="support-empty">
             <AdminIcon name="headphones" />
@@ -7276,20 +7292,46 @@ function GenericList({ view }: { view: string }) {
     const delay = search && previous.view === view &&
       previous.isPartnerUsers === isPartnerUsers && previous.query !== search
       ? 300 : 0;
+    let pending = false;
     const load = () => {
+      if (!live || pending || controller.signal.aborted) return;
+      pending = true;
       lastRequestedSearch.current = { view, isPartnerUsers, query: search };
       api
         .get<ListResponse>(`/admin/list/${view}?${params}`, { signal: controller.signal })
-        .then((data) => live && setResult(data))
+        .then((data) => {
+          if (!live) return;
+          setError("");
+          setResult(data);
+          if (view === "users") {
+            const lastOffset = Math.max(0, (Math.ceil(data.total / limit) - 1) * limit);
+            if (offset > lastOffset) setOffset(lastOffset);
+          }
+        })
         .catch(() => {
           if (live && !controller.signal.aborted) setError("Could not load this section.");
-        });
+        })
+        .finally(() => { pending = false; });
     };
     const timer = delay ? window.setTimeout(load, delay) : undefined;
     if (!delay) load();
+    const refreshVisibleUsers = () => {
+      if (document.visibilityState !== "visible") return;
+      window.clearTimeout(timer);
+      load();
+    };
+    const liveUsers = view === "users" && !isPartnerUsers;
+    const refreshTimer = liveUsers ? window.setInterval(refreshVisibleUsers, 15_000) : undefined;
+    if (liveUsers) {
+      document.addEventListener("visibilitychange", refreshVisibleUsers);
+      window.addEventListener("focus", refreshVisibleUsers);
+    }
     return () => {
       live = false;
       window.clearTimeout(timer);
+      window.clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshVisibleUsers);
+      window.removeEventListener("focus", refreshVisibleUsers);
       controller.abort();
     };
   }, [view, isPartnerUsers, query, offset, filters, refresh]);
@@ -7740,7 +7782,7 @@ function GenericList({ view }: { view: string }) {
                       "EXPIRED",
                     ].map((value) => ({ value }))
                   : ["clinics", "lawyers"].includes(view)
-                    ? ["ACTIVE", "INACTIVE"].map((value) => ({ value }))
+                    ? ["active", "inactive"].map((value) => ({ value }))
                   : statusOptions
                 ).map((option) => {
                   const value = String(option.value ?? "");
@@ -8198,7 +8240,7 @@ function GenericList({ view }: { view: string }) {
                               ) ? (
                               <div className="person-cell">
                                 <PersonAvatar
-                                  row={row}
+                                  row={view === "clinics" ? { logoUrl: row.logoUrl } : row}
                                   name={rowName(row)}
                                   className={`person-avatar ${view === "clinics" ? "clinic-list-logo" : view === "lawyers" ? "lawyer-list-photo" : ""}`}
                                 />
@@ -9202,6 +9244,8 @@ function CategoryManager({
   const [nameEs, setNameEs] = useState("");
   const [additionalNames, setAdditionalNames] = useState<Record<string, string>>({});
   const additionalLocales = ["pt", "fr", "de", "it", "pl"];
+  const allNamesPresent = [nameEn, nameRu, nameEs, ...additionalLocales.map((locale) => additionalNames[locale])]
+    .every((name) => Boolean(name?.trim()));
   const [slug, setSlug] = useState("");
   const [editing, setEditing] = useState<RecordValue | null>(null);
   const [busy, setBusy] = useState(false);
@@ -9280,7 +9324,7 @@ function CategoryManager({
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!nameEn.trim() || !nameRu.trim() || !nameEs.trim() || !slug.trim()) return;
+    if (!allNamesPresent || !slug.trim()) return;
     setBusy(true);
     setError("");
     const original = editing ? fields(editing).data : {};
@@ -9396,6 +9440,7 @@ function CategoryManager({
                   value={additionalNames[locale] ?? ""}
                   onChange={(event) => setAdditionalNames((names) => ({ ...names, [locale]: event.target.value }))}
                   placeholder={`Category name (${locale.toUpperCase()})`}
+                  required
                 />
               </label>
             ))}
@@ -9414,9 +9459,7 @@ function CategoryManager({
               className="primary"
               disabled={
                 busy ||
-                !nameEn.trim() ||
-                !nameRu.trim() ||
-                !nameEs.trim() ||
+                !allNamesPresent ||
                 !slug.trim()
               }
             >
@@ -12425,6 +12468,14 @@ function UserDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<RecordValue | null>(null);
+  const [presence, setPresence] = useState<boolean | null>(null);
+  useEffect(() => {
+    setPresence(null);
+    return watchUserPresence(
+      (signal) => api.get<{ isOnline: boolean }>(`/admin/users/${encodeURIComponent(id)}/presence`, { signal }),
+      setPresence,
+    );
+  }, [id]);
   const [tab, setTab] = useState(() =>
     new URLSearchParams(window.location.search).get("tab") || "profile",
   );
@@ -12628,7 +12679,7 @@ function UserDetail() {
   const avatarUrl = String(dataValue("avatarUrl", "avatar_url") ?? "");
   const verified = typeof detail.isVerified === "boolean" ? detail.isVerified : profileIdentityVerified(profile);
   const premium = typeof detail.isPremium === "boolean" ? detail.isPremium : profileIdentityPremium(profile);
-  const online = settingBoolean(detail.isOnline ?? dataValue("isOnline", "isOnlineNow", "online"));
+  const online = presence ?? settingBoolean(detail.isOnline ?? dataValue("isOnline", "isOnlineNow", "online"));
   const saveBio = async () => {
     setBioSaving(true);
     setActionError("");
@@ -12672,7 +12723,9 @@ function UserDetail() {
                 </span>
               )}{" "}
               {premium && <span className="premium-mark" title="Premium" aria-label="Premium"><AdminIcon name="crown" /></span>}
-              {online && <em>Online</em>}
+              <em className={`user-presence ${online ? "is-online" : "is-offline"}`} role="status">
+              {online ? "Online" : "Offline"}
+            </em>
             </h1>
             <p>{valueOf(profile.email)}</p>
             <p>

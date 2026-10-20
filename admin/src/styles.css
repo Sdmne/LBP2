@@ -814,7 +814,7 @@ body {
   border-radius: 999px;
   background: oklab(0.968435 -0.0025647 -0.00631458 / 0.8);
   color: #334155;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 600;
 }
@@ -9319,6 +9319,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: 50% 50%;
 }
 .profile-photo-image.is-deleted img {
   opacity: 0.5;
@@ -9391,7 +9392,7 @@ body {
   background: #ffedd5;
 }
 .user-detail-stat-value {
-  font-weight: 400;
+  font-weight: 700;
 }
 .profile-photo-actions button:disabled {
   opacity: 0.5;

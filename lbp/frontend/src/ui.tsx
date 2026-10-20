@@ -13,6 +13,7 @@ import {
 import { MemberChatCalls } from "./member-chat-calls";
 import { flushSync } from "react-dom";
 import { SessionRequestGuard } from "./session-request-guard";
+import { startSessionPresence } from "./session-presence";
 import type { ChatLocale } from "./member-chat-model";
 import {
   Link,
@@ -26,7 +27,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { ApiError, createApiClient } from "./api";
-import { loadKnowledgeArticles, normalizeArticle } from "./articles";
+import { articleCategoryTranslation, loadKnowledgeArticles, normalizeArticle } from "./articles";
 import { firstAvatarText, userInitials, UserAvatar } from "./user-avatar";
 import { MemberProfile, profileAge, profileCountry } from "./member-profile";
 import { AccountPremium, MemberAccount, ownProfileData } from "./member-account";
@@ -10951,8 +10952,10 @@ const knowledgeHubCopy: Record<CookieLocale, {
 };
 
 
-const knowledgeCategoryName = (slug: string, locale: CookieLocale = "en") =>
-  knowledgeCategoryCopy[locale][slug.toLowerCase()]
+const knowledgeCategoryName = (slug: string, locale: CookieLocale = "en", article?: Row) =>
+  (article && articleCategoryTranslation(article, locale))
+  || knowledgeCategoryCopy[locale][slug.toLowerCase()]
+  || (article && asText(article.categoryName))
   || knowledgeCategories.find((category) => category.slug.toLowerCase() === slug.toLowerCase())?.name
   || slug;
 
@@ -11019,7 +11022,7 @@ function KnowledgeHub() {
   }, [copy.unavailable, locale]);
   const allArticles: Row[] = (data ?? []).map((item) => ({
     ...item,
-    categoryName: knowledgeCategoryName(String(item.categorySlug), locale),
+    categoryName: knowledgeCategoryName(String(item.categorySlug), locale, item),
   }));
   const filteredArticles = category
     ? allArticles.filter((item) => String(item.categorySlug).toLowerCase() === category.toLowerCase())
@@ -11041,7 +11044,7 @@ function KnowledgeHub() {
       <div className="knowledge-filters" aria-label={copy.categoriesLabel}>
         <button className={category === "" ? "active" : ""} onClick={() => { setCategory(""); setVisibleCount(12); }}>{copy.all}</button>
         {knowledgeCategories.map((item) => (
-            <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{knowledgeCategoryName(item.slug, locale)}</button>
+        <button key={item.slug} className={category === item.slug ? "active" : ""} onClick={() => { setCategory(item.slug); setVisibleCount(12); }}>{knowledgeCategoryName(item.slug, locale, allArticles.find((article) => article.categorySlug === item.slug))}</button>
         ))}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
@@ -11200,7 +11203,7 @@ function Article() {
       </>
     );
   if (!article) return <>{previewBanner}<LoadingIndicator /></>;
-  const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale);
+  const categoryName = knowledgeCategoryName(String(article.categorySlug ?? ""), activeLocale, article);
   const coverUrl = article.coverUrl;
   const publishedAt = article.publishedAt;
   const views = article.views;
@@ -18299,6 +18302,10 @@ export function WebApp() {
   const navigate = useNavigate();
   const [session, setSession] = useState<Session | undefined>(undefined);
   const sessionGuard = useRef(new SessionRequestGuard());
+  useEffect(() => {
+    if (!session?.user.id) return;
+    return startSessionPresence((signal) => api.get("/auth/heartbeat", { signal }));
+  }, [session?.user.id]);
   useEffect(() => {
     let active = true;
     const load = () => {

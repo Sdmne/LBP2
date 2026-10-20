@@ -31,7 +31,7 @@ export const chatDayKey=(date:Date|null)=>date?`${date.getFullYear()}-${date.get
 export const chatTime=(value:unknown,locale:ChatLocale)=>chatDate(value)?.toLocaleTimeString(locale,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})||'';
 export function chatDay(value:unknown,locale:ChatLocale,now=new Date()) {const date=chatDate(value);return !date?'':chatDayKey(date)===chatDayKey(now)?CHAT_COPY[locale].today:date.toLocaleDateString(locale,{day:'numeric',month:'long',year:date.getFullYear()===now.getFullYear()?undefined:'numeric'});}
 export function chatListTime(item:ChatRow,locale:ChatLocale,now=new Date()) {const raw=item.lastMessageTime||item.lastMessageAt||item.updatedAt||item.updated_at;if(/^\d{1,2}:\d{2}$/.test(chatText(raw)))return chatText(raw);const date=chatDate(raw);return !date?'':chatDayKey(date)===chatDayKey(now)?chatTime(date.toISOString(),locale):date.toLocaleDateString(locale,{day:'numeric',month:'short',year:date.getFullYear()===now.getFullYear()?undefined:'numeric'});}
-export const chatOnline=(item:ChatRow,now=Date.now())=>{const d=chatDate(item.otherLastSeenAt||item.other_last_seen_at);return !!d&&now-d.getTime()>=-60000&&now-d.getTime()<=120000;};
+export const chatOnline=(item:ChatRow,now=Date.now())=>{const online=item.otherIsOnline??item.other_is_online;if(typeof online==='boolean')return online;const d=chatDate(item.otherLastSeenAt||item.other_last_seen_at);return !!d&&now-d.getTime()>=-60000&&now-d.getTime()<=300000;};
 export function chatActivity(item:ChatRow,locale:ChatLocale,now=new Date()) {
   if(chatSupport(item))return CHAT_COPY[locale].support;
   const date=chatDate(item.otherLastSeenAt||item.other_last_seen_at);

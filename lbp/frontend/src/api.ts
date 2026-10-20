@@ -6,7 +6,7 @@ export class ApiError extends Error {
 }
 
 export type ApiClient = {
-  get<T>(path: string): Promise<T>;
+  get<T>(path: string, options?: { signal?: AbortSignal }): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
@@ -30,8 +30,9 @@ export function createApiClient(basePath = "/api"): ApiClient {
       credentials: "same-origin",
       headers,
     });
+    if (init.signal?.aborted) throw new DOMException("Request aborted", "AbortError");
     if (!response.ok) {
-      if (response.status === 401 && typeof window !== "undefined" && (path.startsWith("/member/") || path === "/auth/me")) {
+      if (response.status === 401 && typeof window !== "undefined" && (path.startsWith("/member/") || path === "/auth/me" || path === "/auth/heartbeat")) {
         window.dispatchEvent(new Event("lbp-session-expired"));
       }
       const message = await response.text();
@@ -41,7 +42,7 @@ export function createApiClient(basePath = "/api"): ApiClient {
   };
 
   return {
-    get: <T>(path: string) => request<T>(path),
+    get: <T>(path: string, options?: { signal?: AbortSignal }) => request<T>(path, options),
     post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
     patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
     put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),

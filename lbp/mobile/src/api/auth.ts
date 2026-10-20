@@ -39,6 +39,10 @@ export function logout() {
   return api.post<{ ok: true }>("/api/auth/logout");
 }
 
+export function heartbeat(signal?: AbortSignal) {
+  return api.get<{ ok: true }>("/api/auth/heartbeat", { signal });
+}
+
 // UPDATE (Sept 2026): the backend now issues a 6-digit code alongside the
 // verification link on every local signup/resend (see main.py's
 // issue_email_verification_code/send_auth_action_email), matching the

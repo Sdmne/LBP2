@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as SecureStore from "expo-secure-store";
+import { AppState } from "react-native";
 import * as authApi from "../api/auth";
 import { ApiError } from "../api/client";
-import { setSessionToken } from "../api/session";
+import { getSessionToken, setSessionToken } from "../api/session";
 import { invalidateMyAvatarCache } from "../hooks/useMyAvatar";
 import type { PublicUser } from "../api/types";
 import { registerForPushNotifications, unregisterCurrentPushToken } from "../utils/pushNotifications";
@@ -90,6 +91,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pushTokenRef = useRef<string | null>(null);
   useEffect(() => {
     invalidateMyAvatarCache(Boolean(user));
+  }, [user?.id]);
+
+  useEffect(() => {
+    const token = getSessionToken();
+    if (!user?.id || !token) return;
+    let live = true;
+    let pending: AbortController | undefined;
+    const pulse = async () => {
+      if (!live || pending || AppState.currentState !== "active" || getSessionToken() !== token) return;
+      const controller = new AbortController();
+      pending = controller;
+      try {
+        await authApi.heartbeat(controller.signal);
+      } catch (err) {
+        if (live && !controller.signal.aborted && getSessionToken() === token && err instanceof ApiError && err.status === 401) {
+          setSessionToken(null);
+          setUser(null);
+          setPendingProfileWizard(false);
+          void SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY).catch(() => {});
+        }
+      } finally {
+        if (pending === controller) pending = undefined;
+      }
+    };
+    const timer = setInterval(() => { void pulse(); }, 30_000);
+    const subscription = AppState.addEventListener("change", () => { void pulse(); });
+    void pulse();
+    return () => {
+      live = false;
+      clearInterval(timer);
+      subscription.remove();
+      pending?.abort();
+    };
   }, [user?.id]);
   async function syncPushToken() {
     pushTokenRef.current = await registerForPushNotifications();

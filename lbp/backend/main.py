@@ -29,6 +29,7 @@ from contextlib import contextmanager
 from threading import Lock, Thread
 from typing import Any, Literal
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 
 try:
@@ -3107,13 +3108,25 @@ def optional_user(request: Request, authorization: str | None = Header(None)) ->
         raise
 
 
+def profile_online_sql(profile_expression: str) -> str:
+    return f"""EXISTS (
+        SELECT 1 FROM local_users presence_user
+        JOIN auth_sessions presence_session ON presence_session.user_id = presence_user.id
+        WHERE presence_user.profile_id = ({profile_expression})
+          AND presence_user.status = 'ACTIVE'
+          AND presence_session.revoked_at IS NULL
+          AND presence_session.expires_at > CURRENT_TIMESTAMP
+          AND presence_session.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+    )"""
+
+
 def create_session(cursor, user_id: int) -> tuple[str, str]:
     token = secrets.token_urlsafe(42)
     expires = now_utc() + timedelta(days=SESSION_DAYS)
     cursor.execute(
         """
-        INSERT INTO auth_sessions (user_id, token_hash, expires_at)
-        VALUES (%s, %s, %s)
+        INSERT INTO auth_sessions (user_id, token_hash, expires_at, last_seen_at)
+        VALUES (%s, %s, %s, UTC_TIMESTAMP())
         """,
         (user_id, token_hash(token), database_datetime(expires)),
     )
@@ -4637,6 +4650,25 @@ def record_profile_view(cursor, viewer_profile_id: int, viewed_profile_id: int) 
     return True
 
 
+def member_conversation_open_sql(alias: str = "conversations") -> str:
+    return f"""({alias}.status = 'ACTIVE' OR (
+        {alias}.status = 'RESOLVED' AND EXISTS (
+            SELECT 1 FROM profiles support_peer
+            WHERE support_peer.id IN ({alias}.profile_a_id, {alias}.profile_b_id)
+              AND support_peer.role = 'SUPPORT'
+        )
+    ))"""
+
+
+def support_unresolved_sql() -> str:
+    return """c.status = 'ACTIVE' AND EXISTS (
+        SELECT 1 FROM conversation_messages request_message
+        WHERE request_message.conversation_id = c.id
+          AND request_message.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END
+          AND request_message.status = 'ACTIVE'
+    )"""
+
+
 def ensure_conversation(cursor, profile_a_id: int, profile_b_id: int, match_id: int | None = None) -> int:
     low_id, high_id = ordered_pair(profile_a_id, profile_b_id)
     cursor.execute(
@@ -4741,7 +4773,13 @@ def ensure_support_conversation(cursor, profile_id: int) -> tuple[int, int] | No
     if str(profile.get("role") or "").upper() == "SUPPORT":
         return None
     support_profile_id = ensure_support_profile(cursor)
-    conversation_id = ensure_conversation(cursor, profile_id, support_profile_id)
+    low_id, high_id = ordered_pair(profile_id, support_profile_id)
+    cursor.execute(
+        "SELECT id FROM conversations WHERE profile_a_id = %s AND profile_b_id = %s AND status IN ('ACTIVE', 'RESOLVED') LIMIT 1",
+        (low_id, high_id),
+    )
+    existing = cursor.fetchone()
+    conversation_id = int(existing["id"]) if existing else ensure_conversation(cursor, profile_id, support_profile_id)
     cursor.execute(
         "DELETE FROM conversation_hidden WHERE conversation_id = %s AND profile_id = %s",
         (conversation_id, profile_id),
@@ -4880,7 +4918,7 @@ def update_profile_data(cursor, profile_id: int, updates: dict[str, Any], displa
 
 
 def conversation_scope_sql() -> str:
-    return """
+    return f"""
         SELECT c.id, c.match_id, c.profile_a_id, c.profile_b_id, c.status, c.created_at, c.updated_at,
                CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END AS other_profile_id,
                p.display_name AS otherDisplayName,
@@ -4888,6 +4926,7 @@ def conversation_scope_sql() -> str:
                JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.avatarUrl')) AS otherAvatarUrl,
                JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.city')) AS otherCity,
                JSON_UNQUOTE(JSON_EXTRACT(p.data, '$.country')) AS otherCountry,
+               {profile_online_sql('p.id')} AS otherIsOnline,
                COALESCE(
                  (
                    SELECT MAX(s.last_seen_at)
@@ -4943,7 +4982,7 @@ def conversation_scope_sql() -> str:
         FROM conversations c
         JOIN profiles p ON p.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
         WHERE (c.profile_a_id = %s OR c.profile_b_id = %s)
-          AND c.status = 'ACTIVE'
+          AND {member_conversation_open_sql('c')}
           AND p.status = 'ACTIVE'
            AND NOT EXISTS (
              SELECT 1
@@ -5312,6 +5351,11 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
         user_payload = auth_user_payload(cursor, user)
         conn.commit()
     return auth_session_response(response, token, expires_at, user, user_payload=user_payload)
+
+
+@app.get("/api/auth/heartbeat")
+def auth_heartbeat(_user: dict[str, Any] = Depends(require_user)):
+    return {"ok": True}
 
 
 @app.get("/api/auth/me")
@@ -6428,7 +6472,7 @@ def member_unread_like_count(cursor, profile_id: int, read_through_id: int) -> i
 
 def member_unread_message_count(cursor, profile_id: int) -> int:
     cursor.execute(
-        """
+        f"""
         SELECT COUNT(*) AS cnt
         FROM conversation_messages m
         JOIN conversations c ON c.id = m.conversation_id
@@ -6438,7 +6482,7 @@ def member_unread_message_count(cursor, profile_id: int) -> int:
           AND m.sender_profile_id <> %s
           AND m.read_at IS NULL
           AND m.status = 'ACTIVE'
-          AND LOWER(COALESCE(c.status, 'active')) = 'active'
+          AND {member_conversation_open_sql('c')}
           AND p.status = 'ACTIVE'
           AND NOT EXISTS (
             SELECT 1 FROM profile_blocks b
@@ -6502,7 +6546,7 @@ def member_me(user: dict[str, Any] = Depends(require_user)):
         )
         photos = cursor.fetchall()
         cursor.execute(
-            """
+            f"""
             SELECT
               (SELECT COUNT(*)
                  FROM profile_likes l
@@ -6547,7 +6591,7 @@ def member_me(user: dict[str, Any] = Depends(require_user)):
                    AND m.sender_profile_id <> %s
                    AND m.read_at IS NULL
                    AND m.status = 'ACTIVE'
-                   AND LOWER(COALESCE(c.status, 'active')) = 'active'
+                   AND {member_conversation_open_sql('c')}
                    AND p.status = 'ACTIVE'
                    AND NOT EXISTS (
                      SELECT 1
@@ -6586,7 +6630,7 @@ def member_counters(user: dict[str, Any] = Depends(require_user)):
         except (TypeError, ValueError):
             likes_viewed_id = 0
         cursor.execute(
-            """
+            f"""
             SELECT
               (SELECT COUNT(*)
                  FROM profile_likes l
@@ -6607,7 +6651,7 @@ def member_counters(user: dict[str, Any] = Depends(require_user)):
                 WHERE (c.profile_a_id = %s OR c.profile_b_id = %s)
                   AND m.sender_profile_id <> %s
                   AND m.read_at IS NULL AND m.status = 'ACTIVE'
-                  AND LOWER(COALESCE(c.status, 'active')) = 'active'
+                  AND {member_conversation_open_sql('c')}
                   AND p.status = 'ACTIVE'
                   AND NOT EXISTS (
                     SELECT 1 FROM profile_blocks b
@@ -7174,7 +7218,11 @@ def apply_avatar_crop_moderation(
     primary_photo_id: int,
     result: dict[str, Any],
     actor: str = "google_vision",
+    *,
+    allow_non_primary: bool = False,
 ) -> dict[str, Any]:
+    if allow_non_primary and not actor.startswith("admin:"):
+        raise HTTPException(status_code=403, detail="Only admins can crop additional photos")
     result = automatic_photo_decision(result)
     decision = str(result.get("decision") or "REJECTED").upper()
     if decision not in {"APPROVED", "REJECTED"}:
@@ -7183,14 +7231,16 @@ def apply_avatar_crop_moderation(
     public_url = None
     with db_cursor() as (conn, cursor):
         if decision == "APPROVED":
-            cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
-            if not cursor.fetchone():
+            cursor.execute("SELECT id, data, (SELECT id FROM profile_photos WHERE profile_id = profiles.id AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED' ORDER BY id DESC LIMIT 1) AS primary_photo_id FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
+            locked_profile = cursor.fetchone()
+            if not locked_profile:
                 raise HTTPException(status_code=404, detail="User not found")
             cursor.execute(
-                "SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE",
-                (primary_photo_id, profile_id),
+                "SELECT id, position, public_url, (SELECT metadata->>'thumbnailUrl' FROM media_files WHERE id = profile_photos.media_file_id) AS thumbnailUrl, (SELECT public_url FROM media_files WHERE id = profile_photos.avatar_media_file_id) AS avatarUrl FROM profile_photos WHERE id = %s AND profile_id = %s AND (%s OR position = 0) AND status = 'ACTIVE' AND moderation_status = 'APPROVED' FOR UPDATE",
+                (primary_photo_id, profile_id, allow_non_primary),
             )
-            if not cursor.fetchone():
+            target_photo = cursor.fetchone()
+            if not target_photo:
                 raise HTTPException(status_code=409, detail="Approved primary photo is unavailable")
             public_url = promote_media_file(cursor, media_file_id)
             if not public_url:
@@ -7199,13 +7249,20 @@ def apply_avatar_crop_moderation(
                 """
                 UPDATE profile_photos
                 SET avatar_media_file_id = %s, updated_at = UTC_TIMESTAMP()
-                WHERE id = %s AND profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
+                WHERE id = %s AND profile_id = %s AND (%s OR position = 0) AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
                 """,
-                (media_file_id, primary_photo_id, profile_id),
+                (media_file_id, primary_photo_id, profile_id, allow_non_primary),
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=409, detail="Approved primary photo is unavailable")
-            update_profile_data(cursor, profile_id, {"avatarUrl": public_url, "isWizardCompleted": True})
+            is_primary = locked_profile.get("primary_photo_id") == primary_photo_id
+            if locked_profile.get("primary_photo_id") is None:
+                is_primary = photo_matches_avatar(target_photo, as_dict(locked_profile.get("data")))
+                if not is_primary:
+                    gallery = admin_user_photos(cursor, profile_id, as_dict(locked_profile.get("data")))
+                    is_primary = any(photo["id"] == primary_photo_id and photo["isPrimary"] for photo in gallery)
+            if is_primary:
+                update_profile_data(cursor, profile_id, {"avatarUrl": public_url, "isWizardCompleted": True})
         else:
             # Initial uploads may already point at the proposed crop. Do not let
             # a rejected crop replace the original photo or appear as an avatar.
@@ -7229,6 +7286,7 @@ def apply_avatar_crop_moderation(
                 "kind": "avatar_crop",
                 "profileId": profile_id,
                 "profilePhotoId": primary_photo_id,
+                "allowNonPrimary": allow_non_primary,
                 "mediaFileId": media_file_id,
                 "decision": decision,
                 "reason": reason,
@@ -7553,17 +7611,21 @@ async def upload_profile_avatar(
     *,
     expected_photo_id: int | None = None,
     actor: str = "google_vision",
+    allow_non_primary: bool = False,
 ):
+    if allow_non_primary and (expected_photo_id is None or not actor.startswith("admin:")):
+        raise HTTPException(status_code=403, detail="Only admins can crop additional photos")
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
             SELECT id
             FROM profile_photos
-            WHERE profile_id = %s AND position = 0 AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
+            WHERE profile_id = %s AND (%s OR position = 0) AND (%s::bigint IS NULL OR id = %s)
+              AND status = 'ACTIVE' AND moderation_status = 'APPROVED'
             ORDER BY id DESC
             LIMIT 1
             """,
-            (profile_id,),
+            (profile_id, allow_non_primary, expected_photo_id, expected_photo_id),
         )
         primary_photo = cursor.fetchone()
         max_faces = 2 if profile_type_allows_couple_photo(fetch_profile(cursor, profile_id)) else 1
@@ -7608,6 +7670,7 @@ async def upload_profile_avatar(
                         "kind": "avatar_crop",
                         "profileId": profile_id,
                         "profilePhotoId": primary_photo["id"],
+                        "allowNonPrimary": allow_non_primary,
                         "mediaFileId": media_file_id,
                         "contentUrl": f"/api/admin/media/{media_file_id}/content",
                         "moderationStatus": "PENDING",
@@ -7624,6 +7687,7 @@ async def upload_profile_avatar(
         int(primary_photo["id"]),
         moderation,
         actor=actor,
+        allow_non_primary=allow_non_primary,
     )
     if outcome["status"] == "REJECTED":
         raise HTTPException(
@@ -8807,7 +8871,7 @@ def member_conversations(
         ensure_support_welcome(cursor, profile_id)
         ensure_priority_support_note(cursor, profile_id)
         cursor.execute(
-            """
+            f"""
             UPDATE conversation_messages AS m
             SET delivered_at = COALESCE(m.delivered_at, UTC_TIMESTAMP())
             WHERE EXISTS (
@@ -8815,7 +8879,7 @@ def member_conversations(
                 FROM conversations AS c
                 WHERE c.id = m.conversation_id
                   AND (c.profile_a_id = %s OR c.profile_b_id = %s)
-                  AND c.status = 'ACTIVE'
+                  AND {member_conversation_open_sql('c')}
             )
               AND m.sender_profile_id <> %s
               AND m.status = 'ACTIVE'
@@ -8859,7 +8923,7 @@ def member_conversation_peer_profile(
     profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT CASE
                      WHEN profile_a_id = %s THEN profile_b_id
                      WHEN profile_b_id = %s THEN profile_a_id
@@ -8867,7 +8931,7 @@ def member_conversation_peer_profile(
                    END AS other_profile_id
             FROM conversations
             WHERE id = %s
-              AND status = 'ACTIVE'
+              AND {member_conversation_open_sql()}
               AND (profile_a_id = %s OR profile_b_id = %s)
             LIMIT 1
             """,
@@ -8914,7 +8978,7 @@ def member_create_conversation(payload: ConversationCreatePayload, user: dict[st
         )
         existing = cursor.fetchone()
         match_id = active_match_id(cursor, profile_id, target_profile_id)
-        if existing and existing.get("status") == "ACTIVE":
+        if existing and (existing.get("status") == "ACTIVE" or (target_role == "SUPPORT" and existing.get("status") == "RESOLVED")):
             cursor.execute(
                 "DELETE FROM conversation_hidden WHERE conversation_id = %s AND profile_id = %s",
                 (int(existing["id"]), profile_id),
@@ -8951,13 +9015,13 @@ def member_hide_conversation(conversation_id: int, user: dict[str, Any] = Depend
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT c.id, p.role AS other_role
             FROM conversations c
             JOIN profiles p ON p.id = CASE WHEN c.profile_a_id = %s THEN c.profile_b_id ELSE c.profile_a_id END
             WHERE c.id = %s
               AND (c.profile_a_id = %s OR c.profile_b_id = %s)
-              AND c.status = 'ACTIVE'
+              AND {member_conversation_open_sql('c')}
             LIMIT 1
             """,
             (profile_id, conversation_id, profile_id, profile_id),
@@ -8988,10 +9052,10 @@ def member_conversation_messages(
     profile_id = require_profile_id(user)
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
             LIMIT 1
             """,
             (conversation_id, profile_id, profile_id),
@@ -9066,11 +9130,11 @@ def member_send_message(
     with db_cursor() as (conn, cursor):
         body = validate_chat_message(cursor, payload.body)
         cursor.execute(
-            """
+            f"""
             SELECT id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -9099,7 +9163,7 @@ def member_send_message(
             (conversation_id, profile_id, body),
         )
         message_id = cursor.lastrowid
-        cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
+        cursor.execute("UPDATE conversations SET status = 'ACTIVE', updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
         cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
         conn.commit()
     recipient_profile_id = int(pair["profile_b_id"] if int(pair["profile_a_id"]) == profile_id else pair["profile_a_id"])
@@ -9132,11 +9196,11 @@ async def member_send_attachment(
     profile_id = require_profile_id(user)
     with db_cursor() as (_, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT id, profile_a_id, profile_b_id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -9172,11 +9236,11 @@ async def member_send_attachment(
 
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT id, profile_a_id, profile_b_id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -9217,7 +9281,7 @@ async def member_send_attachment(
             (conversation_id, profile_id, original_name, public_url),
         )
         message_id = cursor.lastrowid
-        cursor.execute("UPDATE conversations SET updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
+        cursor.execute("UPDATE conversations SET status = 'ACTIVE', updated_at = UTC_TIMESTAMP() WHERE id = %s", (conversation_id,))
         cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
         conn.commit()
 
@@ -10565,7 +10629,7 @@ def member_conversation_message_starters(
         if not profile_is_premium(profile):
             raise HTTPException(status_code=402, detail="Premium is required for AI-drafted message starters")
         cursor.execute(
-            """
+            f"""
             SELECT CASE
                      WHEN profile_a_id = %s THEN profile_b_id
                      WHEN profile_b_id = %s THEN profile_a_id
@@ -10573,7 +10637,7 @@ def member_conversation_message_starters(
                    END AS other_profile_id
             FROM conversations
             WHERE id = %s
-              AND status = 'ACTIVE'
+              AND {member_conversation_open_sql()}
               AND (profile_a_id = %s OR profile_b_id = %s)
             LIMIT 1
             """,
@@ -11992,11 +12056,11 @@ def member_send_sticker(
         if not profile_is_premium(profile):
             raise HTTPException(status_code=402, detail="Premium is required to send stickers")
         cursor.execute(
-            """
+            f"""
             SELECT profile_a_id, profile_b_id
             FROM conversations
-            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND status = 'ACTIVE'
-            LIMIT 1
+            WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) AND {member_conversation_open_sql()}
+            LIMIT 1 FOR UPDATE
             """,
             (conversation_id, profile_id, profile_id),
         )
@@ -12015,7 +12079,7 @@ def member_send_sticker(
             (conversation_id, profile_id, body),
         )
         message_id = cursor.lastrowid
-        cursor.execute("UPDATE conversations SET updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') WHERE id = %s", (conversation_id,))
+        cursor.execute("UPDATE conversations SET status = 'ACTIVE', updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') WHERE id = %s", (conversation_id,))
         cursor.execute("DELETE FROM conversation_hidden WHERE conversation_id = %s", (conversation_id,))
         conn.commit()
     recipient_profile_id = int(pair["profile_b_id"] if int(pair["profile_a_id"]) == profile_id else pair["profile_a_id"])
@@ -13852,20 +13916,7 @@ def admin_navigation_counts(_admin: str = Depends(require_admin)):
         )
         counts = {key: int(value or 0) for key, value in cursor.fetchone().items()}
         cursor.execute(
-            """
-            SELECT COUNT(*) AS unanswered_support
-            FROM conversations c
-            JOIN profiles a ON a.id = c.profile_a_id
-            JOIN profiles b ON b.id = c.profile_b_id
-            WHERE c.status = 'ACTIVE'
-              AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT')
-              AND EXISTS (
-                  SELECT 1 FROM conversation_messages um
-                  WHERE um.conversation_id = c.id
-                    AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END
-                  AND um.status = 'ACTIVE'
-              )
-            """
+            f"""SELECT COUNT(*) AS unanswered_support FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND {support_unresolved_sql()}"""
         )
         counts["unanswered_support"] = int(cursor.fetchone()["unanswered_support"] or 0)
     return {"counts": counts}
@@ -13978,7 +14029,7 @@ def admin_stats(_admin: str = Depends(require_admin)):
             "partner_accounts": "SELECT COUNT(*) AS cnt FROM profiles WHERE role = 'PARTNER'",
             "pending_subscriptions": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'subscription' AND status = 'PENDING'",
             "pending_verifications": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'verification' AND status = 'PENDING'",
-        "unanswered_support": "SELECT COUNT(DISTINCT c.id) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE c.status = 'ACTIVE' AND (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.status = 'ACTIVE')",
+        "unanswered_support": f"""SELECT COUNT(*) AS cnt FROM conversations c JOIN profiles a ON a.id = c.profile_a_id JOIN profiles b ON b.id = c.profile_b_id WHERE (a.role = 'SUPPORT' OR b.role = 'SUPPORT') AND {support_unresolved_sql()}""",
             "pending_photo_moderation": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_photo' AND status = 'PENDING'",
             "pending_reports": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'moderation_report' AND status = 'PENDING'",
             "pending_boosts": "SELECT COUNT(*) AS cnt FROM app_entities WHERE entity_type = 'boost' AND status = 'PENDING'",
@@ -15370,6 +15421,85 @@ def amplitude_is_configured() -> bool:
     return bool(AMPLITUDE_API_KEY and "{user_id}" in AMPLITUDE_USER_PROFILE_URL_TEMPLATE and url.scheme == "https" and (host == "amplitude.com" or host.endswith(".amplitude.com")))
 
 
+@lru_cache(maxsize=4096)
+def remote_profile_photo_missing(public_url: str, cache_epoch: int) -> bool:
+    del cache_epoch
+    if not re.match(r"^https?://", public_url, re.IGNORECASE):
+        return False
+    request = urllib.request.Request(public_url, headers={
+        "User-Agent": "LetsBeParents/1.0", "Accept": "image/*", "Range": "bytes=0-0",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            response.read(1)
+        return False
+    except urllib.error.HTTPError as exc:
+        return exc.code in {404, 410}
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return False
+
+
+def admin_photo_visible(photo: dict[str, Any]) -> bool:
+    if str(photo.get("status") or "").strip().upper() not in {"ACTIVE", "PENDING", "REJECTED"}:
+        return False
+    key = str(photo.get("storageKey") or "").strip().lstrip("/")
+    if key:
+        base = PRIVATE_UPLOAD_DIR if key.startswith("quarantine/") else UPLOAD_DIR
+        relative = key.removeprefix("quarantine/")
+        if safe_storage_path(base, relative).is_file():
+            return True
+    return not remote_profile_photo_missing(str(photo.get("public_url") or "").strip(), int(time.time() // 60))
+
+
+def photo_matches_avatar(photo: dict[str, Any], profile_data: dict[str, Any]) -> bool:
+    avatar = str(profile_data.get("avatarUrl") or profile_data.get("avatar_url") or "").strip()
+    return bool(avatar and avatar in {
+        str(photo.get(key) or "").strip() for key in ("public_url", "thumbnailUrl", "avatarUrl")
+    })
+
+
+def admin_user_photos(cursor, profile_id: int, profile_data: dict[str, Any]) -> list[dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT pp.id, pp.public_url, pp.position, pp.status, pp.moderation_status,
+               pp.created_at, pp.updated_at, mf.storage_key AS storageKey,
+               mf.metadata->>'thumbnailUrl' AS thumbnailUrl, amf.public_url AS avatarUrl,
+               CASE WHEN pp.avatar_media_file_id IS NOT NULL
+                    THEN CONCAT('/api/admin/media/', pp.avatar_media_file_id, '/content')
+                    ELSE CONCAT('/api/admin/profile-photos/', pp.id, '/content') END AS previewUrl
+        FROM profile_photos pp
+        LEFT JOIN media_files mf ON mf.id = pp.media_file_id
+        LEFT JOIN media_files amf ON amf.id = pp.avatar_media_file_id
+        WHERE pp.profile_id = %s AND pp.status IN ('ACTIVE', 'PENDING', 'REJECTED')
+        ORDER BY pp.position ASC, pp.id ASC
+        """, (profile_id,),
+    )
+    photos = [normalize_row(row) for row in cursor.fetchall()]
+    if photos:
+        with ThreadPoolExecutor(max_workers=min(4, len(photos))) as pool:
+            available = list(pool.map(admin_photo_visible, photos))
+        photos = [photo for photo, visible in zip(photos, available) if visible]
+    approved = [photo for photo in photos if photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"]
+    primary = next((photo for photo in reversed(approved) if int(photo.get("position") or 0) == 0), None)
+    if not primary:
+        primary = next((photo for photo in approved if photo_matches_avatar(photo, profile_data)), None)
+    if not primary and approved:
+        primary = approved[0]
+    for photo in photos:
+        photo["isPrimary"] = bool(primary and photo["id"] == primary["id"])
+        photo.pop("storageKey", None)
+    return photos
+
+
+@app.get("/api/admin/users/{profile_id}/presence")
+def admin_user_presence(profile_id: str, response: Response, _admin: str = Depends(require_admin)):
+    response.headers["Cache-Control"] = "private, no-store"
+    with db_cursor() as (_, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute(f"SELECT {profile_online_sql('%s')} AS isOnline", (resolved_id,))
+        return {"isOnline": bool(cursor.fetchone()["isOnline"])}
+
+
 @app.get("/api/admin/users/{profile_id}/overview")
 def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
     """One complete, internally consistent data source for the admin profile tabs."""
@@ -15386,21 +15516,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         source_user_id = str(profile_data.get("userId") or profile_data.get("id") or "")
         profile_ref = str(profile_id)
 
-        cursor.execute(
-            """
-            SELECT pp.id, pp.public_url, pp.position, pp.status, pp.moderation_status,
-                   pp.created_at, pp.updated_at,
-                   CASE WHEN pp.status = 'DELETED' THEN pp.updated_at ELSE NULL END AS deleted_at,
-                   (pp.id = (SELECT primary_photo.id FROM profile_photos primary_photo
-                             WHERE primary_photo.profile_id = pp.profile_id AND primary_photo.position = 0
-                               AND primary_photo.status = 'ACTIVE' AND primary_photo.moderation_status = 'APPROVED'
-                             ORDER BY primary_photo.id DESC LIMIT 1)) AS isPrimary
-            FROM profile_photos pp WHERE pp.profile_id = %s
-            ORDER BY pp.position ASC, pp.id ASC
-            """,
-            (profile_id,),
-        )
-        photos = [normalize_row(row) for row in cursor.fetchall()]
+        photos = admin_user_photos(cursor, profile_id, profile_data)
 
         verification_rows = admin_detail_rows(
             cursor,
@@ -15601,7 +15717,7 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         cursor.execute(
             """
             SELECT MAX(s.created_at) AS last_login_at,
-                   COALESCE(BOOL_OR(s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
+              COALESCE(BOOL_OR(u.status = 'ACTIVE' AND s.revoked_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP
                        AND s.last_seen_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'), FALSE) AS is_online
             FROM local_users u JOIN auth_sessions s ON s.user_id = u.id
             WHERE u.profile_id = %s
@@ -16429,6 +16545,7 @@ def admin_support_list(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     unanswered: bool = Query(False),
+    unresolved: bool | None = Query(None),
     _admin: str = Depends(require_admin),
 ):
     base_where = ["(a.role = 'SUPPORT' OR b.role = 'SUPPORT')"]
@@ -16453,9 +16570,10 @@ def admin_support_list(
             """)
             like = f"%{search}%"
             base_params.extend([like, like, like, like, like])
-    unanswered_clause = "c.status = 'ACTIVE' AND EXISTS (SELECT 1 FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.status = 'ACTIVE')"
+    unanswered_clause = support_unresolved_sql()
     where = list(base_where)
-    if unanswered:
+    only_unresolved = unresolved if unresolved is not None else unanswered
+    if only_unresolved:
         where.append(unanswered_clause)
     where_sql = "WHERE " + " AND ".join(where)
     base_where_sql = "WHERE " + " AND ".join(base_where)
@@ -16488,15 +16606,7 @@ def admin_support_list(
                 THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                 ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
               END AS profileType,
-              EXISTS (
-                SELECT 1
-                FROM local_users online_user
-                JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
-                  AND online_user.status = 'ACTIVE'
-                  AND online_session.revoked_at IS NULL
-                  AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-              ) AS isOnline,
+              {profile_online_sql("CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END")} AS isOnline,
                 (SELECT body FROM conversation_messages lm WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE' ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessage,
                 (SELECT created_at FROM conversation_messages lm WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE' ORDER BY lm.created_at DESC, lm.id DESC LIMIT 1) AS lastMessageAt,
               (SELECT COUNT(*) FROM conversation_messages um WHERE um.conversation_id = c.id AND um.sender_profile_id <> CASE WHEN a.role = 'SUPPORT' THEN a.id ELSE b.id END AND um.read_at IS NULL AND um.status = 'ACTIVE') AS unreadCount,
@@ -16515,7 +16625,7 @@ def admin_support_list(
                WHERE lm.conversation_id = c.id AND lm.status = 'ACTIVE'
                ORDER BY lm.created_at DESC, lm.id DESC
                LIMIT 1),
-              c.updated_at
+                    c.created_at
             ) DESC, c.id DESC
             LIMIT %s OFFSET %s
             """,
@@ -16527,6 +16637,7 @@ def admin_support_list(
         "total": total,
         "totalAll": total_all,
         "totalUnanswered": total_unanswered,
+        "totalUnresolved": total_unanswered,
         "limit": limit,
         "offset": offset,
     }
@@ -16536,7 +16647,7 @@ def admin_support_list(
 def admin_support_conversation(conversation_id: int, _admin: str = Depends(require_admin)):
     with db_cursor() as (conn, cursor):
         cursor.execute(
-            """
+            f"""
             SELECT c.id, c.status, c.profile_a_id, c.profile_b_id,
                    a.role AS profileARole, b.role AS profileBRole,
                    CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END AS userId,
@@ -16556,15 +16667,7 @@ def admin_support_conversation(conversation_id: int, _admin: str = Depends(requi
                      THEN JSON_UNQUOTE(JSON_EXTRACT(b.data, '$.profileType'))
                      ELSE JSON_UNQUOTE(JSON_EXTRACT(a.data, '$.profileType'))
                    END AS profileType,
-                   EXISTS (
-                     SELECT 1
-                     FROM local_users online_user
-                     JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                     WHERE online_user.profile_id = CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END
-                       AND online_user.status = 'ACTIVE'
-                       AND online_session.revoked_at IS NULL
-                       AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-                   ) AS isOnline
+                   {profile_online_sql("CASE WHEN a.role = 'SUPPORT' THEN b.id ELSE a.id END")} AS isOnline
             FROM conversations c
             JOIN profiles a ON a.id = c.profile_a_id
             JOIN profiles b ON b.id = c.profile_b_id
@@ -16599,7 +16702,7 @@ def admin_send_support_message(conversation_id: int, payload: AdminSupportMessag
     with db_cursor() as (conn, cursor):
         body = validate_chat_message(cursor, payload.body)
         support = support_profile(cursor)
-        cursor.execute("SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1", (conversation_id, support["id"], support["id"]))
+        cursor.execute("SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1 FOR UPDATE", (conversation_id, support["id"], support["id"]))
         conversation = cursor.fetchone()
         if not conversation:
             raise HTTPException(status_code=404, detail="Support conversation not found")
@@ -16618,12 +16721,16 @@ def admin_resolve_support_conversation(conversation_id: int, actor: str = Depend
     with db_cursor() as (conn, cursor):
         support = support_profile(cursor)
         cursor.execute(
-            "SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1",
+            "SELECT id, status FROM conversations WHERE id = %s AND (profile_a_id = %s OR profile_b_id = %s) LIMIT 1 FOR UPDATE",
             (conversation_id, support["id"], support["id"]),
         )
         conversation = cursor.fetchone()
         if not conversation:
             raise HTTPException(status_code=404, detail="Support conversation not found")
+        if conversation.get("status") == "RESOLVED":
+            return {"ok": True, "id": conversation_id, "status": "RESOLVED"}
+        if conversation.get("status") != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Support conversation is not active")
         cursor.execute(
             "UPDATE conversation_messages SET read_at = COALESCE(read_at, UTC_TIMESTAMP()) WHERE conversation_id = %s AND sender_profile_id <> %s AND status = 'ACTIVE'",
             (conversation_id, support["id"]),
@@ -16648,6 +16755,24 @@ ADMIN_LOCATION_MISMATCH_SQL = """
         ELSE ''
     END
 """
+
+
+def admin_directory_text_sql(*keys: str, media: bool = False) -> str:
+    candidates = []
+    for key in keys:
+        value = f"BTRIM(data ->> '{key}', E' \\t\\r\\n')"
+        condition = (
+            f"jsonb_typeof(data -> '{key}') = 'string' "
+            f"AND LOWER({value}) NOT IN ('', 'null', 'undefined')"
+        )
+        if media:
+            condition += f" AND {value} ~* '^(https?://|/|blob:|data:image/)'"
+        candidates.append(f"CASE WHEN {condition} THEN {value} END")
+    return "COALESCE(" + ", ".join([*candidates, "NULL"]) + ")"
+
+
+ADMIN_CLINIC_LOGO_SQL = admin_directory_text_sql("logoUrl", "logo", "imageUrl", media=True)
+ADMIN_CLINIC_WEBSITE_SQL = admin_directory_text_sql("website")
 
 
 ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
@@ -16697,13 +16822,7 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                AND pph.status = 'ACTIVE'
                AND pph.moderation_status = 'APPROVED'
              ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl,
-            EXISTS(
-                SELECT 1 FROM local_users lu
-                JOIN auth_sessions aus ON aus.user_id = lu.id
-                WHERE lu.profile_id = profiles.id
-                  AND aus.revoked_at IS NULL
-                  AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-            ) AS isOnline,
+            {profile_online_sql('profiles.id')} AS isOnline,
             {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
              WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
@@ -16779,13 +16898,7 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
                AND pph.status = 'ACTIVE'
                AND pph.moderation_status = 'APPROVED'
              ORDER BY pph.position ASC, pph.id ASC LIMIT 1) AS avatarFallbackUrl,
-            EXISTS(
-                SELECT 1 FROM local_users lu
-                JOIN auth_sessions aus ON aus.user_id = lu.id
-                WHERE lu.profile_id = profiles.id
-                  AND aus.revoked_at IS NULL
-                  AND aus.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-            ) AS isOnline,
+            {profile_online_sql('profiles.id')} AS isOnline,
             {ADMIN_LOCATION_MISMATCH_SQL} AS locationMismatch,
             (SELECT COUNT(*) FROM profile_blocks b
              WHERE b.blocked_profile_id = profiles.id AND COALESCE(b.status, 'ACTIVE') = 'ACTIVE') AS blocksCount,
@@ -16817,14 +16930,10 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
     },
     "clinics": {
         "table": "clinics",
-        "select": """
+        "select": f"""
             id, name, country, city, status, created_at, updated_at, data,
             JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug,
-            COALESCE(
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl')), ''),
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logo')), ''),
-                NULLIF(JSON_UNQUOTE(JSON_EXTRACT(data, '$.imageUrl')), '')
-            ) AS logoUrl,
+            {ADMIN_CLINIC_LOGO_SQL} AS logoUrl,
             CASE
                 WHEN COALESCE(data->>'servicesCount', '') ~ '^[0-9]+$'
                     THEN (data->>'servicesCount')::INTEGER
@@ -16841,8 +16950,8 @@ ADMIN_TABLE_VIEWS: dict[str, dict[str, Any]] = {
         "search": ["name", "country", "city", "JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug'))"],
         "filters": {"status": "status", "country": "COALESCE(NULLIF(country, ''), JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')))", "city": "city"},
         "boolean_filters": {
-            "hasWebsite": "JSON_UNQUOTE(JSON_EXTRACT(data, '$.website'))",
-            "hasLogo": "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.logoUrl')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.logo')), JSON_UNQUOTE(JSON_EXTRACT(data, '$.imageUrl')))",
+            "hasWebsite": ADMIN_CLINIC_WEBSITE_SQL,
+            "hasLogo": ADMIN_CLINIC_LOGO_SQL,
         },
         "order": "name ASC, id ASC",
     },
@@ -17077,6 +17186,12 @@ ADMIN_ARTICLE_CATEGORY_DEFAULTS: tuple[dict[str, Any], ...] = (
         "translations": [
             {"locale": "en", "name": "IVF - In Vitro Fertilization"},
             {"locale": "ru", "name": "ЭКО - Экстракорпоральное оплодотворение"},
+            {"locale": "es", "name": "FIV - Fertilización in vitro"},
+            {"locale": "pt", "name": "FIV - Fertilização in vitro"},
+            {"locale": "fr", "name": "FIV - Fécondation in vitro"},
+            {"locale": "de", "name": "IVF - In-vitro-Fertilisation"},
+            {"locale": "it", "name": "FIVET - Fecondazione in vitro"},
+            {"locale": "pl", "name": "In vitro - Zapłodnienie pozaustrojowe"},
         ],
     },
     {
@@ -17084,6 +17199,12 @@ ADMIN_ARTICLE_CATEGORY_DEFAULTS: tuple[dict[str, Any], ...] = (
         "translations": [
             {"locale": "en", "name": "Co-parenting"},
             {"locale": "ru", "name": "Копереннтинг"},
+            {"locale": "es", "name": "Coparentalidad"},
+            {"locale": "pt", "name": "Coparentalidade"},
+            {"locale": "fr", "name": "Coparentalité"},
+            {"locale": "de", "name": "Co-Parenting"},
+            {"locale": "it", "name": "Co-genitorialità"},
+            {"locale": "pl", "name": "Współrodzicielstwo"},
         ],
     },
     {
@@ -17091,22 +17212,52 @@ ADMIN_ARTICLE_CATEGORY_DEFAULTS: tuple[dict[str, Any], ...] = (
         "translations": [
             {"locale": "en", "name": "Sperm donor"},
             {"locale": "ru", "name": "Донор спермы"},
+            {"locale": "es", "name": "Donante de esperma"},
+            {"locale": "pt", "name": "Doador de esperma"},
+            {"locale": "fr", "name": "Donneur de sperme"},
+            {"locale": "de", "name": "Samenspender"},
+            {"locale": "it", "name": "Donatore di sperma"},
+            {"locale": "pl", "name": "Dawca nasienia"},
         ],
     },
     {
         "slug": "fertility",
-        "translations": [{"locale": "en", "name": "Fertility"}],
+        "translations": [
+            {"locale": "en", "name": "Fertility"},
+            {"locale": "ru", "name": "Фертильность"},
+            {"locale": "es", "name": "Fertilidad"},
+            {"locale": "pt", "name": "Fertilidade"},
+            {"locale": "fr", "name": "Fertilité"},
+            {"locale": "de", "name": "Fruchtbarkeit"},
+            {"locale": "it", "name": "Fertilità"},
+            {"locale": "pl", "name": "Płodność"},
+        ],
     },
     {
         "slug": "lgbtq",
         "translations": [
             {"locale": "en", "name": "LGBTQ+"},
             {"locale": "ru", "name": "ЛГБТК+"},
+            {"locale": "es", "name": "LGBTQ+"},
+            {"locale": "pt", "name": "LGBTQ+"},
+            {"locale": "fr", "name": "LGBTQ+"},
+            {"locale": "de", "name": "LGBTQ+"},
+            {"locale": "it", "name": "LGBTQ+"},
+            {"locale": "pl", "name": "LGBTQ+"},
         ],
     },
     {
         "slug": "Parenthood",
-        "translations": [{"locale": "en", "name": "Parenthood"}],
+        "translations": [
+            {"locale": "en", "name": "Parenthood"},
+            {"locale": "ru", "name": "Родительство"},
+            {"locale": "es", "name": "Parentalidad"},
+            {"locale": "pt", "name": "Parentalidade"},
+            {"locale": "fr", "name": "Parentalité"},
+            {"locale": "de", "name": "Elternschaft"},
+            {"locale": "it", "name": "Genitorialità"},
+            {"locale": "pl", "name": "Rodzicielstwo"},
+        ],
     },
 )
 
@@ -17151,6 +17302,18 @@ def admin_article_category_data(
         name = english["name"]
     elif name:
         translations.insert(0, {"locale": "en", "name": name})
+        seen_locales.add("en")
+    default = next(
+        (item for item in ADMIN_ARTICLE_CATEGORY_DEFAULTS if str(item["slug"]).casefold() == slug.casefold()),
+        None,
+    )
+    if default:
+        for translated in default["translations"]:
+            if translated["locale"] not in seen_locales:
+                translations.append(dict(translated))
+                seen_locales.add(translated["locale"])
+        if not name:
+            name = next(item["name"] for item in translations if item["locale"] == "en")
 
     return {
         **{key: value for key, value in raw.items() if key not in {"data", "title", "status", "locale"}},
@@ -17182,7 +17345,9 @@ def ensure_admin_article_categories(conn, cursor) -> None:
         )
         normalized_existing.append((row, normalized))
         stored = as_dict(row.get("data"))
-        if as_dict(stored.get("data")) and not (stored.get("name") or stored.get("translations")):
+        if (
+            as_dict(stored.get("data")) and not (stored.get("name") or stored.get("translations"))
+        ) or normalized["translations"] != stored.get("translations"):
             cursor.execute(
                 "UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
                 (json.dumps(normalized, ensure_ascii=False), row["id"]),
@@ -17411,6 +17576,25 @@ def admin_enrich_article_items(cursor, items: list[dict[str, Any]]) -> list[dict
         item["categoryName"] = category.get("name") or ""
         item["categorySlug"] = category.get("slug") or ""
     return items
+
+
+def public_enrich_article_category_labels(cursor, items: list[dict[str, Any]]) -> None:
+    records = [
+        {"title": item.get("title"), "slug": item.get("slug"), "data": as_dict(item.get("meta"))}
+        for item in items
+    ]
+    admin_enrich_article_items(cursor, records)
+    for item, record in zip(items, records):
+        category = as_dict(record.get("category"))
+        if not category:
+            continue
+        item["categorySlug"] = str(category.get("slug") or "")
+        item["categoryName"] = str(category.get("name") or "")
+        item["categoryTranslations"] = [
+            {"locale": str(translation.get("locale") or ""), "name": str(translation.get("name") or "")}
+            for value in category.get("translations") or []
+            if (translation := as_dict(value)).get("locale") and translation.get("name")
+        ]
 
 
 @app.post("/api/admin/article-images")
@@ -17999,6 +18183,9 @@ def build_list_where(
         if value and key in filters:
             if key == "city":
                 where_parts.append(f"STRPOS(LOWER(COALESCE({filters[key]}, '')), LOWER(%s)) > 0")
+            elif key == "status":
+                where_parts.append(f"LOWER(BTRIM(COALESCE({filters[key]}, ''))) = %s")
+                value = str(value).strip().lower()
             else:
                 where_parts.append(f"LOWER(COALESCE({filters[key]}, '')) = LOWER(%s)")
             params.append(value)
@@ -18024,19 +18211,7 @@ def build_list_where(
         if seeks_co_parent and str(seeks_co_parent).lower() in {"1", "true", "yes"}:
             where_parts.append("JSON_CONTAINS(COALESCE(JSON_EXTRACT(data, '$.lookingFor'), JSON_ARRAY()), JSON_QUOTE('CO_PARENTING_PARTNER')) = 1")
     if is_online and str(is_online).lower() in {"1", "true", "yes"} and definition.get("table") == "profiles":
-        where_parts.append(
-            """
-            EXISTS (
-                SELECT 1
-                FROM local_users online_user
-                JOIN auth_sessions online_session ON online_session.user_id = online_user.id
-                WHERE online_user.profile_id = profiles.id
-                  AND online_user.status = 'ACTIVE'
-                  AND online_session.revoked_at IS NULL
-                  AND online_session.last_seen_at >= UTC_TIMESTAMP() - INTERVAL 5 MINUTE
-            )
-            """
-        )
+        where_parts.append(profile_online_sql("profiles.id"))
     return ("WHERE " + " AND ".join(where_parts)) if where_parts else "", params
 
 
@@ -18842,7 +19017,7 @@ async def admin_crop_user_photo(
         cursor.execute("SELECT id FROM profile_photos WHERE id = %s AND profile_id = %s", (photo_id, resolved_id))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Photo not found")
-    return await upload_profile_avatar(file, resolved_id, expected_photo_id=photo_id, actor=f"admin:{actor}")
+    return await upload_profile_avatar(file, resolved_id, expected_photo_id=photo_id, actor=f"admin:{actor}", allow_non_primary=True)
 
 
 @app.post("/api/admin/users/{profile_id}/photos/{photo_id}/primary")
@@ -18853,6 +19028,9 @@ def admin_set_primary_user_photo(
 ):
     with db_cursor() as (conn, cursor):
         resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        cursor.execute("SELECT id FROM profiles WHERE id = %s FOR UPDATE", (resolved_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="User not found")
         cursor.execute(
             """
             SELECT id, position, status, moderation_status, public_url, avatar_media_file_id
@@ -19548,6 +19726,7 @@ def admin_update_item(
                 primary_photo_id,
                 {"decision": decision, "reason": reason, "providerConfigured": False, "manual": True},
                 actor=f"admin:{actor}",
+                    allow_non_primary=moderation_data.get("allowNonPrimary") is True,
             )
             return {"ok": True, "view": view, "id": numeric_item_id, "mediaFileId": media_file_id, "updated": updated}
         if not photo_id:
@@ -20587,6 +20766,9 @@ def public_articles(
             item["category"] = inferred_article_category(str(item.get("title") or ""), str(item.get("slug") or ""), meta)
             item["views"] = int_or_none(meta.get("views") or meta.get("viewCount") or meta.get("viewsCount")) or 0
             all_items.append(item)
+    if all_items:
+        with db_cursor() as (_, cursor):
+            public_enrich_article_category_labels(cursor, all_items)
     wanted = str(category or "").strip().lower()
     if wanted and wanted != "all":
         filtered = [item for item in all_items if str(item.get("category") or "").strip().lower() == wanted]
@@ -20633,6 +20815,7 @@ def public_article(locale: str, slug: str, preview: bool = Query(False)):
     item["meta"] = public_safe_data(as_dict(item.get("meta")))
     item["category"] = inferred_article_category(str(item.get("title") or ""), str(item.get("slug") or ""), item["meta"])
     with db_cursor() as (_, cursor):
+        public_enrich_article_category_labels(cursor, [item])
         cursor.execute(
             """
             SELECT slug, title
