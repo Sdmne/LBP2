@@ -62,7 +62,7 @@ def page_metadata(path, origin, article=None):
     locale, route, is_article = parse_public_path(path)
     parts = route.split("/") if route else ["home"]
     label = COPY["labels"].get(route, COPY["labels"].get(parts[0], COPY["labels"]["not-found"])).get(locale)
-    title = label + " | LetsBeParents"
+    title = (COPY.get("homeTitles", {}).get(locale) if not route else None) or label + " | LetsBeParents"
     description = label + ". " + COPY["descriptions"][locale]
     image = origin + COPY["defaultImage"]
     if is_article and article:

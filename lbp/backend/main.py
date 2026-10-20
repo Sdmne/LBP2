@@ -3599,7 +3599,23 @@ def normalized_avatar_url(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     value = value.strip()
-    return None if value.lower() in {"", "null", "none", "undefined"} else value
+    if value.lower() in {"", "null", "none", "undefined"}:
+        return None
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return None
+    upload_prefix = f"{UPLOAD_URL_PREFIX.rstrip('/')}/"
+    if not parsed.scheme and not parsed.netloc and parsed.path.startswith(upload_prefix):
+        key = urllib.parse.unquote(parsed.path[len(upload_prefix):])
+        try:
+            path = safe_storage_path(UPLOAD_DIR, key)
+            exists = path.is_file()
+        except (HTTPException, OSError):
+            exists = False
+        if not exists:
+            return None
+    return value
 
 
 def profile_summary_age(row: dict[str, Any], data: dict[str, Any]) -> int | None:
@@ -6926,6 +6942,12 @@ def member_me(user: dict[str, Any] = Depends(require_user)):
             (profile_id,),
         )
         photos = cursor.fetchall()
+        for photo in photos:
+            photo["avatarUrl"] = normalized_avatar_url(photo.get("avatarUrl")) or normalized_avatar_url(photo.get("publicUrl"))
+        if profile and approved_primary:
+            primary = next((photo for photo in photos if photo["id"] == approved_primary["id"]), None)
+            if primary:
+                profile["avatarUrl"] = primary["avatarUrl"]
         cursor.execute(
             f"""
             SELECT
@@ -7842,9 +7864,13 @@ def member_photo_avatar_content(photo_id: int, user: dict[str, Any] = Depends(re
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
-            SELECT amf.public_url AS publicUrl, amf.storage_key AS storageKey, amf.mime_type AS mimeType
+            SELECT amf.public_url AS publicUrl, amf.storage_key AS storageKey,
+                   amf.mime_type AS mimeType,
+                   mf.public_url AS originalUrl, mf.storage_key AS originalKey,
+                   mf.mime_type AS originalMimeType
             FROM profile_photos pp
-            JOIN media_files amf ON amf.id = pp.avatar_media_file_id
+            LEFT JOIN media_files amf ON amf.id = pp.avatar_media_file_id
+            JOIN media_files mf ON mf.id = pp.media_file_id
             WHERE pp.id = %s AND pp.profile_id = %s AND pp.status IN ('ACTIVE', 'PENDING', 'REJECTED')
             LIMIT 1
             """,
@@ -7853,8 +7879,16 @@ def member_photo_avatar_content(photo_id: int, user: dict[str, Any] = Depends(re
         avatar = cursor.fetchone()
     if not avatar:
         raise HTTPException(status_code=404, detail="Avatar source is unavailable")
-
-    return profile_photo_content_response(avatar)
+    try:
+        return profile_photo_content_response(avatar)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+    return profile_photo_content_response({
+        "publicUrl": avatar["originalUrl"],
+        "storageKey": avatar["originalKey"],
+        "mimeType": avatar["originalMimeType"],
+    })
 
 
 @app.post("/api/member/photos")

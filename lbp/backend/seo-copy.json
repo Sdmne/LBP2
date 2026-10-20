@@ -401,5 +401,8 @@
     "it": "it_IT",
     "pl": "pl_PL"
   },
-  "defaultImage": "/web-static/images/landing/hero-bg-280fbbea.jpg"
+  "defaultImage": "/web-static/images/landing/hero-bg-280fbbea.jpg",
+  "homeTitles": {
+    "en": "LetsBeParents — Alternative Parenting Platform"
+  }
 }

@@ -8,6 +8,7 @@ type Locale = (typeof locales)[number];
 const routeLabels: Record<string, Record<Locale, string>> = seoCopy.labels;
 
 const descriptions: Record<Locale, string> = seoCopy.descriptions;
+const homeTitles: Partial<Record<Locale, string>> = seoCopy.homeTitles;
 
 const privateRoutes = new Set(["auth", "profile", "settings", "messages", "chat", "likes", "visitors", "favourites", "blocked", "subscription", "boost", "referral", "community", "verification", "photos", "account", "family-room", "ai-advisor", "compatibility", "compatibility-report", "safety-checkin", "video-verification"]);
 
@@ -43,7 +44,7 @@ export function RouteSeo() {
     const routePath = parts.slice(1).join("/");
     const routeLabel = routeLabels[routePath]?.[locale] || routeLabels[`${route}/${parts[2]}`]?.[locale] || routeLabels[route]?.[locale] || routeLabels["not-found"][locale];
     const label = route === "home" ? routeLabels.home[locale] : routeLabel;
-    const title = `${label} | LetsBeParents`;
+    const title = (!route && homeTitles[locale]) || `${label} | LetsBeParents`;
     const description = `${label}. ${descriptions[locale]}`;
     const canonical = `${window.location.origin}${pathname.replace(/\/$/, "") || `/${locale}`}`;
     const suffix = parts.length > 1 ? `/${parts.slice(1).join("/")}` : "";
