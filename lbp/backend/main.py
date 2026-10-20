@@ -1,3 +1,4 @@
+from account_retention import TRASH_STATUSES, VISIBILITY_FIELDS, utc_datetime, deletion_deadline, can_restore_account, restored_profile_data
 import os
 import base64
 import html
@@ -143,7 +144,7 @@ EMAIL_VERIFICATION_HOURS = 24
 PASSWORD_RESET_MINUTES = 60
 AUTH_EMAIL_RESEND_SECONDS = 60
 ACCOUNT_DELETION_DAYS = 30
-ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "3600")))
+ACCOUNT_DELETION_POLL_SECONDS = max(60, int(os.getenv("ACCOUNT_DELETION_POLL_SECONDS", "300")))
 ACCOUNT_DELETION_PENDING_STATUS = "DELETION_PENDING"
 ACCOUNT_DELETION_LEGACY_PENDING_STATUS = "PENDING_DELETION"
 DELETED_ACCOUNT_EMAIL_DOMAIN = "deleted.invalid"
@@ -2949,7 +2950,10 @@ def has_valid_admin_credentials(user: str | None, password: str | None) -> bool:
     return primary_match or test_match
 
 
-ADMIN_ROUTE_PERMISSIONS = (('POST', '/api/admin/video-verifications/[^/]+/review', ('video-verifications',)),
+ADMIN_ROUTE_PERMISSIONS = (('GET', '/api/admin/users/trash', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/trash', ('users',)),
+ ('POST', '/api/admin/users/[^/]+/restore', ('users',)),
+ ('POST', '/api/admin/video-verifications/[^/]+/review', ('video-verifications',)),
  ('GET', '/api/admin/video-verifications/[^/]+/content', ('video-verifications',)),
  ('POST', '/api/admin/users/[^/]+/community-expert', ('users',)),
  ('POST', '/api/admin/login', ()),
@@ -9175,7 +9179,7 @@ def release_account_identity_for_deletion(
         cursor.execute(
             """
             UPDATE local_users
-            SET email = %s, password_hash = NULL, password_login_enabled = FALSE,
+            SET email = %s,
                 email_verified_at = NULL, updated_at = UTC_TIMESTAMP()
             WHERE id = %s
             """,
@@ -9188,73 +9192,14 @@ def release_account_identity_for_deletion(
 
 
 @app.post("/api/member/account-deletion")
-def member_account_deletion(
-    payload: AccountDeletionPayload,
-    response: Response,
-    user: dict[str, Any] = Depends(require_user),
-):
+def member_account_deletion(payload: AccountDeletionPayload, response: Response, user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
-    reason = (payload.reason or "").strip() or "Prefer not to say"
-    details = (payload.details or "").strip() or None
-    body = {
-        "profileId": profile_id,
-        "userId": user["id"],
-        "email": user["email"],
-        "emailVerified": user.get("email_verified_at") is not None,
-        "reason": reason,
-        "details": details,
-        "requestedAt": now_utc().isoformat(),
-        "deleteAfter": (now_utc() + timedelta(days=ACCOUNT_DELETION_DAYS)).isoformat(),
-        "mode": f"scheduled_{ACCOUNT_DELETION_DAYS}_days",
-    }
     with db_cursor() as (conn, cursor):
-        cursor.execute(
-            """
-            INSERT INTO app_entities (entity_type, source_key, title, status, data)
-            VALUES ('account_deletion_request', %s, %s, 'PENDING', %s)
-            ON DUPLICATE KEY UPDATE status = 'PENDING', data = VALUES(data), updated_at = UTC_TIMESTAMP()
-            """,
-            (f"local-{profile_id}", f"Account deletion request #{profile_id}", json.dumps(body, ensure_ascii=False)),
-        )
-        cursor.execute(
-            """
-            INSERT INTO api_events (event_type, payload)
-            VALUES ('member.account_deletion_requested', %s)
-            """,
-            (json.dumps(body, ensure_ascii=False),),
-        )
-        update_profile_data(cursor, profile_id, {
-            "deletionRequestedAt": body["requestedAt"],
-            "deletionScheduledFor": body["deleteAfter"],
-            "deletionReason": reason,
-            "visibleInCatalog": False,
-            "isVisibleInCatalog": False,
-        })
-        # Deletion takes the account out of the service immediately, but the
-        # profile record is retained for the statutory grace period so the
-        # scheduled worker can remove its remaining content.  The old login
-        # identity must *not* be retained for that period: otherwise an
-        # already-deleted member cannot register again with the same email or
-        # Google/Apple identity.
-        release_account_identity_for_deletion(cursor, profile_id, [int(user["id"])])
-        cursor.execute(
-            "UPDATE profiles SET status = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
-            (ACCOUNT_DELETION_PENDING_STATUS, profile_id),
-        )
-        cursor.execute(
-            "UPDATE local_users SET status = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s",
-            (ACCOUNT_DELETION_PENDING_STATUS, user["id"]),
-        )
-        audit(conn, user["email"], "USER_DELETION_REQUESTED", "profiles", profile_id, {"email": user["email"], "deleteAfter": body["deleteAfter"]})
+        body = schedule_account_deletion(conn, cursor, profile_id, user["email"], (payload.reason or "").strip() or "Prefer not to say", (payload.details or "").strip() or None)
         conn.commit()
     delete_private_cookie(response, COOKIE_SESSION_NAME)
     delete_private_cookie(response, COOKIE_LEGACY_SESSION_NAME)
-    return {
-        "ok": True,
-        "status": ACCOUNT_DELETION_PENDING_STATUS,
-        "deleteAfter": body["deleteAfter"],
-        "message": f"Account access ended. Permanent deletion is scheduled in {ACCOUNT_DELETION_DAYS} days.",
-    }
+    return {"ok": True, "status": ACCOUNT_DELETION_PENDING_STATUS, "deleteAfter": body["deleteAfter"], "message": "Account access ended. Contact support within 30 days to restore it. Permanent deletion follows automatically."}
 
 
 @app.get("/api/member/conversations")
@@ -18667,6 +18612,8 @@ def admin_list(
         )
         if view == "articles" and not status_filter:
             where += (" AND " if where else "WHERE ") + "LOWER(COALESCE(status, '')) <> 'archived'"
+        if view in {"users", "profiles"} and not status_filter:
+            where += (" AND " if where else "WHERE ") + "UPPER(COALESCE(status,'')) NOT IN ('DELETED','DELETION_PENDING','PENDING_DELETION')"
         table = definition["table"]
         order = definition["order"]
         if view in {"users", "profiles"}:
@@ -20001,6 +19948,17 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
         media_files.update({int(row["id"]): str(row.get("storage_key") or "") for row in cursor.fetchall()})
 
     # Conversations have child rows, so remove them before the conversation itself.
+    cursor.execute("SELECT id,storage_key FROM media_files WHERE metadata->>'profileId'=%s OR metadata->>'userId' IN (SELECT id::text FROM local_users WHERE profile_id=%s) OR id IN (SELECT media_file_id FROM pregnancy_room_entries WHERE uploaded_by_profile_id=%s OR match_id IN (SELECT id FROM profile_matches WHERE profile_a_id=%s OR profile_b_id=%s))", (str(profile_id),profile_id,profile_id,profile_id,profile_id))
+    media_files.update({int(row["id"]):str(row.get("storage_key") or "") for row in cursor.fetchall()})
+    cursor.execute("SELECT data->>'email' AS email FROM app_entities WHERE entity_type='account_deletion_request' AND source_key=%s", (f"local-{profile_id}",))
+    retained_emails = [str(value) for value in [profile.get("email"),(cursor.fetchone() or {}).get("email")] if value]
+    trash_keys = []
+    if media_files:
+        cursor.execute("SELECT metadata FROM media_files WHERE id=ANY(%s)", (list(media_files),))
+        for row in cursor.fetchall():
+            key = str(as_dict(as_dict(row.get("metadata")).get("adminTrash")).get("trashKey") or "")
+            if re.fullmatch(r"[0-9a-f]{48}",key):
+                trash_keys.append("quarantine/trash/"+key)
     cursor.execute("DELETE FROM member_calls WHERE caller_profile_id = %s OR callee_profile_id = %s", (profile_id, profile_id))
     cursor.execute(
         """
@@ -20072,177 +20030,223 @@ def permanently_delete_profile(cursor, profile_id: int) -> dict[str, Any]:
     )
     if media_files:
         media_file_ids = list(media_files)
+        cursor.execute("SELECT media_file_id AS id FROM profile_photos WHERE profile_id<>%s AND media_file_id=ANY(%s) UNION SELECT avatar_media_file_id AS id FROM profile_photos WHERE profile_id<>%s AND avatar_media_file_id=ANY(%s)", (profile_id,media_file_ids,profile_id,media_file_ids))
+        shared_ids = {int(row["id"]) for row in cursor.fetchall()}
+        media_file_ids = [item for item in media_file_ids if item not in shared_ids]
         placeholders = ", ".join(["%s"] * len(media_file_ids))
-        cursor.execute(f"DELETE FROM media_files WHERE id IN ({placeholders})", media_file_ids)
+        cursor.execute("DELETE FROM media_files WHERE id=ANY(%s)", (media_file_ids,))
     cursor.execute("DELETE FROM profiles WHERE id = %s", (profile_id,))
-    return {
-        "id": profile_id,
-        "email": profile.get("email"),
-        "_storageKeys": [storage_key for storage_key in media_files.values() if storage_key],
-    }
+    storage_keys = []
+    for storage_key in set(media_files.values()):
+        if not storage_key:
+            continue
+        cursor.execute("SELECT id FROM media_files WHERE storage_key=%s LIMIT 1", (storage_key,))
+        if not cursor.fetchone():
+            storage_keys.append(storage_key)
+    for trash_key in trash_keys:
+        cursor.execute("SELECT id FROM media_files WHERE metadata->'adminTrash'->>'trashKey'=%s LIMIT 1", (trash_key.rsplit("/",1)[-1],))
+        if not cursor.fetchone():
+            storage_keys.append(trash_key)
+    queue_deleted_profile_files(cursor, profile_id, storage_keys)
+    cursor.execute("UPDATE admin_audit_log SET payload=%s, actor=CASE WHEN actor=ANY(%s) THEN 'deleted-member' ELSE actor END WHERE target_id=%s AND target_type IN ('profiles','profile','users')", (json.dumps({"permanentlyDeleted": True}),retained_emails,str(profile_id)))
+    return {"id":profile_id,"_storageKeys":storage_keys}
 
 
-def remove_deleted_profile_files(storage_keys: list[str]) -> None:
+def remove_deleted_profile_files(storage_keys: list[str]) -> list[str]:
+    pending = []
     for storage_key in set(storage_keys):
         normalized = str(storage_key or "").strip().lstrip("/")
         if not normalized:
             continue
-        if normalized.startswith("quarantine/"):
-            root = PRIVATE_UPLOAD_DIR
-            relative_key = normalized.removeprefix("quarantine/")
-        elif normalized.startswith("family-room/"):
-            root = PRIVATE_UPLOAD_DIR
-            relative_key = normalized
-        else:
-            root = UPLOAD_DIR
-            relative_key = normalized
         try:
-            safe_storage_path(root, relative_key).unlink(missing_ok=True)
-        except Exception:
-            logger.exception("Could not remove deleted profile file")
+            target = storage_file_path(normalized, UPLOAD_DIR, PRIVATE_UPLOAD_DIR)
+            if target is not None:
+                target.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pending.append(normalized)
+            logger.exception("Could not remove deleted account file")
+    return pending
 
 
 def restore_retained_account(cursor, profile_id: int) -> bool:
-    cursor.execute(
-        "SELECT status, email FROM profiles WHERE id = %s FOR UPDATE",
-        (profile_id,),
-    )
+    cursor.execute("SELECT id, status, role, email, display_name, data FROM profiles WHERE id=%s FOR UPDATE", (profile_id,))
     profile = cursor.fetchone()
-    if not profile or str(profile.get("status") or "").upper() not in {
-        ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS, "DELETED",
-    }:
+    if not profile or str(profile.get("status") or "").upper() not in TRASH_STATUSES:
         return False
-
-    cursor.execute(
-        """
-        SELECT id, status, data FROM app_entities
-        WHERE entity_type = 'account_deletion_request' AND source_key = %s
-        ORDER BY id DESC LIMIT 1 FOR UPDATE
-        """,
-        (f"local-{profile_id}",),
-    )
+    if str(profile.get("role") or "").upper() in {"ADMIN", "SUPPORT"}:
+        raise HTTPException(status_code=422, detail="This account cannot be restored here")
+    cursor.execute("SELECT id, status, data FROM app_entities WHERE entity_type='account_deletion_request' AND source_key=%s FOR UPDATE", (f"local-{profile_id}",))
     request = cursor.fetchone()
-    if not request or request.get("status") != "PENDING":
-        raise HTTPException(status_code=409, detail="No pending account deletion request is available for restoration")
-    data = as_dict(request.get("data"))
+    data = as_dict((request or {}).get("data"))
+    if not request or not can_restore_account(profile["status"], request["status"], data, now_utc()):
+        raise HTTPException(status_code=409, detail="The 30-day restoration period has expired or no valid deletion request exists")
     if int_or_none(data.get("profileId")) != profile_id:
         raise HTTPException(status_code=409, detail="The deletion request does not belong to this profile")
-    try:
-        deadline = datetime.fromisoformat(str(data.get("deleteAfter") or "").replace("Z", "+00:00"))
-        if deadline.tzinfo is not None:
-            deadline = deadline.astimezone(timezone.utc).replace(tzinfo=None)
-    except ValueError:
-        raise HTTPException(status_code=409, detail="The account restoration deadline is unavailable") from None
-    current_time = now_utc()
-    if current_time.tzinfo is not None:
-        current_time = current_time.astimezone(timezone.utc).replace(tzinfo=None)
-    if deadline <= current_time:
-        raise HTTPException(status_code=409, detail="The account restoration window has expired")
-
-    cursor.execute(
-        "SELECT id, email FROM local_users WHERE profile_id = %s ORDER BY id FOR UPDATE",
-        (profile_id,),
-    )
-    users = cursor.fetchall()
-    if len(users) != 1 or int_or_none(data.get("userId")) != users[0]["id"]:
-        raise HTTPException(status_code=409, detail="The retained account identity cannot be restored safely")
     email = normalize_email(str(data.get("email") or ""))
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or email.endswith(f"@{DELETED_ACCOUNT_EMAIL_DOMAIN}"):
-        raise HTTPException(status_code=409, detail="The original account email is unavailable")
-    user_id = users[0]["id"]
-    retained_email = normalize_email(str(users[0].get("email") or ""))
-    if retained_email not in {email, f"deleted-user-{user_id}@{DELETED_ACCOUNT_EMAIL_DOMAIN}"}:
-        raise HTTPException(status_code=409, detail="The retained sign-in identity does not match the deletion request")
-    cursor.execute(
-        "SELECT id FROM local_users WHERE LOWER(email) = %s AND id <> %s LIMIT 1 FOR UPDATE",
-        (email, user_id),
-    )
+        raise HTTPException(status_code=409, detail="The original sign-in email is unavailable")
+    cursor.execute("SELECT id, email FROM local_users WHERE profile_id=%s ORDER BY id FOR UPDATE", (profile_id,))
+    users = cursor.fetchall()
+    if len(users) > 1 or (users and data.get("userId") is not None and int_or_none(data["userId"]) != users[0]["id"]):
+        raise HTTPException(status_code=409, detail="The retained sign-in identity cannot be restored safely")
+    user_id = users[0]["id"] if users else None
+    cursor.execute("SELECT id FROM local_users WHERE LOWER(email)=%s AND (%s::bigint IS NULL OR id<>%s) LIMIT 1", (email, user_id, user_id))
     if cursor.fetchone():
         raise HTTPException(status_code=409, detail="The original email is already used by another account")
-    cursor.execute(
-        "SELECT id FROM profiles WHERE LOWER(email) = %s AND id <> %s LIMIT 1 FOR UPDATE",
-        (email, profile_id),
-    )
+    cursor.execute("SELECT id FROM profiles WHERE LOWER(email)=%s AND id<>%s LIMIT 1", (email, profile_id))
     if cursor.fetchone():
         raise HTTPException(status_code=409, detail="The original email is already used by another profile")
-
-    try:
-        cursor.execute(
-            """
-            UPDATE local_users SET email = %s, status = 'ACTIVE',
-                email_verified_at = CASE WHEN %s THEN COALESCE(email_verified_at, UTC_TIMESTAMP()) ELSE email_verified_at END,
-                updated_at = UTC_TIMESTAMP() WHERE id = %s AND profile_id = %s
-            """,
-            (email, data.get("emailVerified") is True, user_id, profile_id),
-        )
-        cursor.execute("UPDATE profiles SET email = %s WHERE id = %s", (email, profile_id))
-        cursor.execute(
-            "UPDATE app_entities SET status = 'CANCELLED', updated_at = UTC_TIMESTAMP() WHERE id = %s AND status = 'PENDING'",
-            (request["id"],),
-        )
-    except psycopg.errors.UniqueViolation:
-        raise HTTPException(status_code=409, detail="The original email is already used by another account") from None
+    if user_id is None:
+        cursor.execute("INSERT INTO local_users(profile_id,email,password_hash,password_login_enabled,display_name,role,status) VALUES(%s,%s,'',0,%s,%s,'ACTIVE')", (profile_id, email, profile.get("display_name") or "", profile.get("role") or "USER"))
+    else:
+        cursor.execute("UPDATE local_users SET email=%s, status='ACTIVE', email_verified_at=CASE WHEN %s THEN COALESCE(email_verified_at,UTC_TIMESTAMP()) ELSE email_verified_at END, updated_at=UTC_TIMESTAMP() WHERE id=%s", (email, data.get("emailVerified") is True, user_id))
+    restored_at = utc_datetime(now_utc()).isoformat()
+    restored = restored_profile_data(as_dict(profile.get("data")), as_dict(data.get("retainedProfileData")), email, restored_at)
+    cursor.execute("UPDATE profiles SET email=%s, status='ACTIVE', data=%s, updated_at=UTC_TIMESTAMP() WHERE id=%s", (email, json.dumps(restored, ensure_ascii=False), profile_id))
+    cursor.execute("UPDATE app_entities SET status='CANCELLED', updated_at=UTC_TIMESTAMP() WHERE id=%s", (request["id"],))
     return True
 
 
 def purge_due_account_deletions() -> None:
-    """Permanently remove self-service deletion requests after their retention window."""
-    deleted_storage_keys: list[str] = []
     with db_cursor() as (conn, cursor):
         cursor.execute("SELECT pg_try_advisory_xact_lock(2026090801) AS locked")
-        lock_row = cursor.fetchone()
-        if not lock_row or not lock_row.get("locked"):
+        if not (cursor.fetchone() or {}).get("locked"):
             return
-        # Repair deletion requests created before identities were released at
-        # request time. This runs on every scheduled pass and is idempotent,
-        # so already-stuck accounts stop blocking a new registration as soon
-        # as the release is deployed.
-        cursor.execute(
-            "SELECT id FROM profiles WHERE status IN (%s, %s) ORDER BY id ASC",
-            (ACCOUNT_DELETION_PENDING_STATUS, ACCOUNT_DELETION_LEGACY_PENDING_STATUS),
-        )
-        for pending_profile in cursor.fetchall():
-            release_account_identity_for_deletion(cursor, int(pending_profile["id"]), require_pending=True)
-        cursor.execute(
-            """
-            SELECT data
-            FROM app_entities
-            WHERE entity_type = 'account_deletion_request' AND status = 'PENDING'
-            ORDER BY id ASC
-            """
-        )
-        current_time = now_utc()
-        if current_time.tzinfo is not None:
-            current_time = current_time.astimezone(timezone.utc).replace(tzinfo=None)
-        due_profile_ids: list[int] = []
-        for row in cursor.fetchall():
-            data = as_dict(row.get("data"))
+        enroll_legacy_account_deletions(conn, cursor)
+        cursor.execute("SELECT id,data FROM app_entities WHERE entity_type='account_deletion_request' AND status='PENDING' ORDER BY id")
+        requests = cursor.fetchall()
+        for request in requests:
+            data = as_dict(request.get("data"))
             profile_id = int_or_none(data.get("profileId"))
-            raw_due = str(data.get("deleteAfter") or "").strip()
-            try:
-                due_at = datetime.fromisoformat(raw_due.replace("Z", "+00:00"))
-                if due_at.tzinfo is not None:
-                    due_at = due_at.astimezone(timezone.utc).replace(tzinfo=None)
-            except ValueError:
+            deadline = deletion_deadline(data)
+            if not profile_id or deadline is None or utc_datetime(now_utc()) < deadline:
                 continue
-            if profile_id and due_at <= current_time:
-                cursor.execute("SELECT status FROM profiles WHERE id = %s LIMIT 1 FOR UPDATE", (profile_id,))
-                profile = cursor.fetchone()
-                if str((profile or {}).get("status") or "").upper() in {
-                    ACCOUNT_DELETION_PENDING_STATUS,
-                    ACCOUNT_DELETION_LEGACY_PENDING_STATUS,
-                    "DELETED",
-                }:
-                    due_profile_ids.append(profile_id)
-        for profile_id in due_profile_ids:
+            cursor.execute("SAVEPOINT account_purge")
             try:
-                deleted = permanently_delete_profile(cursor, profile_id)
-                deleted_storage_keys.extend(deleted.get("_storageKeys") or [])
-            except HTTPException as exc:
-                if exc.status_code != 404:
-                    raise
+                cursor.execute("SELECT status FROM profiles WHERE id=%s FOR UPDATE SKIP LOCKED", (profile_id,))
+                profile = cursor.fetchone()
+                if profile and str(profile.get("status") or "").upper() in TRASH_STATUSES:
+                    cursor.execute("SELECT status,data FROM app_entities WHERE id=%s FOR UPDATE", (request["id"],))
+                    current = cursor.fetchone()
+                    current_deadline = deletion_deadline(as_dict((current or {}).get("data")))
+                    if current and current["status"] == "PENDING" and current_deadline and utc_datetime(now_utc()) >= current_deadline:
+                        permanently_delete_profile(cursor, profile_id)
+                        audit(conn, "system", "ACCOUNT_PERMANENTLY_DELETED", "profiles", profile_id, {"retentionDays": ACCOUNT_DELETION_DAYS})
+                cursor.execute("RELEASE SAVEPOINT account_purge")
+            except Exception:
+                cursor.execute("ROLLBACK TO SAVEPOINT account_purge")
+                cursor.execute("RELEASE SAVEPOINT account_purge")
+                logger.exception("Scheduled account deletion failed for profile %s", profile_id)
         conn.commit()
-    remove_deleted_profile_files(deleted_storage_keys)
+    drain_account_deletion_cleanup()
+
+
+def schedule_account_deletion(conn, cursor, profile_id: int, actor: str, reason: str, details: str | None = None, *, legacy: bool = False):
+    cursor.execute("SELECT id, role, status, email, display_name, data FROM profiles WHERE id = %s FOR UPDATE", (profile_id,))
+    profile = cursor.fetchone()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    if str(profile.get("role") or "").upper() in {"ADMIN", "SUPPORT"}:
+        raise HTTPException(status_code=422, detail="Administrative and support accounts cannot be moved to Trash")
+    cursor.execute("SELECT status, data FROM app_entities WHERE entity_type = 'account_deletion_request' AND source_key = %s FOR UPDATE", (f"local-{profile_id}",))
+    previous = cursor.fetchone()
+    if previous and previous["status"] == "PENDING":
+        return as_dict(previous.get("data"))
+    cursor.execute("SELECT id, email, email_verified_at FROM local_users WHERE profile_id = %s ORDER BY id FOR UPDATE", (profile_id,))
+    users = cursor.fetchall()
+    profile_data = as_dict(profile.get("data"))
+    email = next((str(row.get("email") or "") for row in users if row.get("email") and not str(row["email"]).endswith(f"@{DELETED_ACCOUNT_EMAIL_DOMAIN}")), str(profile.get("email") or ""))
+    if email.endswith(f"@{DELETED_ACCOUNT_EMAIL_DOMAIN}"):
+        email = ""
+    requested = utc_datetime(now_utc())
+    body = {"profileId": profile_id, "userId": users[0]["id"] if len(users) == 1 else None, "email": email, "emailVerified": bool(users and users[0].get("email_verified_at")), "reason": reason, "details": details, "requestedAt": requested.isoformat(), "deleteAfter": (requested + timedelta(days=ACCOUNT_DELETION_DAYS)).isoformat(), "mode": "scheduled_30_days", "retainedProfileData": {key: profile_data[key] for key in VISIBILITY_FIELDS if key in profile_data}, "legacy": legacy}
+    cursor.execute("INSERT INTO app_entities(entity_type, source_key, title, status, data) VALUES ('account_deletion_request', %s, %s, 'PENDING', %s) ON CONFLICT (entity_type,source_key) DO UPDATE SET status='PENDING', data=EXCLUDED.data, updated_at=UTC_TIMESTAMP()", (f"local-{profile_id}", f"Account deletion #{profile_id}", json.dumps(body, ensure_ascii=False)))
+    cursor.execute("SELECT id, data FROM app_entities WHERE entity_type IN ('subscription', 'boost') AND data->>'profileId' = %s AND UPPER(status) IN ('PENDING','APPROVED','ACTIVE') FOR UPDATE", (str(profile_id),))
+    for subscription in cursor.fetchall():
+        data = as_dict(subscription.get("data"))
+        data.update(autoRenew=False, autoRenewing=False, cancelledAt=requested.isoformat(), cancellationReason="ACCOUNT_DELETION")
+        cursor.execute("UPDATE app_entities SET status='CANCELLED', data=%s, updated_at=UTC_TIMESTAMP() WHERE id=%s", (json.dumps(data, ensure_ascii=False), subscription["id"]))
+    recompute_profile_premium(cursor, profile_id)
+    update_profile_data(cursor, profile_id, {"deletionRequestedAt": body["requestedAt"], "deletionScheduledFor": body["deleteAfter"], "deletionReason": reason, "visibleInCatalog": False, "isVisibleInCatalog": False, "boostActive": False})
+    release_account_identity_for_deletion(cursor, profile_id, [int(row["id"]) for row in users])
+    cursor.execute("UPDATE profiles SET status=%s, updated_at=UTC_TIMESTAMP() WHERE id=%s", (ACCOUNT_DELETION_PENDING_STATUS, profile_id))
+    cursor.execute("UPDATE local_users SET status=%s, updated_at=UTC_TIMESTAMP() WHERE profile_id=%s", (ACCOUNT_DELETION_PENDING_STATUS, profile_id))
+    audit(conn, actor, "USER_DELETION_REQUESTED", "profiles", profile_id, {"deleteAfter": body["deleteAfter"], "legacy": legacy})
+    return body
+
+def enroll_legacy_account_deletions(conn, cursor):
+    cursor.execute("SELECT p.id FROM profiles p WHERE UPPER(p.status) IN ('DELETED','DELETION_PENDING','PENDING_DELETION') AND UPPER(p.role) NOT IN ('ADMIN','SUPPORT') AND NOT EXISTS(SELECT 1 FROM app_entities r WHERE r.entity_type='account_deletion_request' AND r.source_key='local-' || p.id::text AND r.status='PENDING') ORDER BY p.id LIMIT 200 FOR UPDATE OF p SKIP LOCKED")
+    ids = [int(row["id"]) for row in cursor.fetchall()]
+    for profile_id in ids:
+        schedule_account_deletion(conn, cursor, profile_id, "system", "Legacy deleted account", legacy=True)
+    return len(ids)
+
+def queue_deleted_profile_files(cursor, profile_id: int, storage_keys: list[str]):
+    keys = sorted(set(key for key in storage_keys if key))
+    if keys:
+        cursor.execute("INSERT INTO app_entities(entity_type,source_key,title,status,data) VALUES('account_deletion_cleanup',%s,'Deleted account file cleanup','PENDING',%s)", (f"profile-{profile_id}-{secrets.token_hex(8)}", json.dumps({"storageKeys": keys})))
+
+def drain_account_deletion_cleanup():
+    with db_cursor() as (conn, cursor):
+        cursor.execute("SELECT id,data FROM app_entities WHERE entity_type='account_deletion_cleanup' AND status='PENDING' ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED")
+        for row in cursor.fetchall():
+            pending = remove_deleted_profile_files(as_dict(row.get("data")).get("storageKeys") or [])
+            if pending:
+                cursor.execute("UPDATE app_entities SET data=%s,updated_at=UTC_TIMESTAMP() WHERE id=%s", (json.dumps({"storageKeys": pending}), row["id"]))
+            else:
+                cursor.execute("DELETE FROM app_entities WHERE id=%s", (row["id"],))
+        conn.commit()
+
+class AdminAccountTrashPayload(BaseModel):
+    reason: str = Field(default="Deleted from admin", min_length=1, max_length=500)
+
+@app.post("/api/admin/users/{profile_id}/trash")
+def admin_trash_user(profile_id: str, payload: AdminAccountTrashPayload, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        body = schedule_account_deletion(conn, cursor, resolved_id, actor, payload.reason.strip() or "Deleted from admin")
+        conn.commit()
+    return {"ok": True, "profileId": resolved_id, "deleteAfter": body["deleteAfter"]}
+
+@app.post("/api/admin/users/{profile_id}/restore")
+def admin_restore_user(profile_id: str, actor: str = Depends(require_admin)):
+    with db_cursor() as (conn, cursor):
+        resolved_id = resolve_admin_profile_id(cursor, profile_id)
+        if not restore_retained_account(cursor, resolved_id):
+            raise HTTPException(status_code=409, detail="The account is not in Trash")
+        cursor.execute("SELECT password_hash,password_login_enabled FROM local_users WHERE profile_id=%s", (resolved_id,))
+        account = cursor.fetchone() or {}
+        password_reset_required = not (account.get("password_hash") and account.get("password_login_enabled"))
+        audit(conn, actor, "ACCOUNT_RESTORED", "profiles", resolved_id, {})
+        conn.commit()
+    return {"ok": True, "profileId": resolved_id, "passwordResetRequired": password_reset_required}
+
+@app.get("/api/admin/users/trash")
+def admin_user_trash(q: str | None = Query(None, max_length=200), limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), actor: str = Depends(require_admin)):
+    conditions = ["UPPER(p.status) IN ('DELETED','DELETION_PENDING','PENDING_DELETION')", "UPPER(p.role) NOT IN ('ADMIN','SUPPORT')"]
+    params = []
+    if q and q.strip():
+        conditions.append("(p.display_name ILIKE %s OR COALESCE(r.data->>'email',p.email,'') ILIKE %s OR p.id::text=%s)")
+        params.extend([f"%{q.strip()}%", f"%{q.strip()}%", q.strip()])
+    joined = "FROM profiles p LEFT JOIN app_entities r ON r.entity_type='account_deletion_request' AND r.source_key='local-' || p.id::text AND r.status='PENDING' WHERE " + " AND ".join(conditions)
+    with db_cursor() as (_, cursor):
+        cursor.execute("SELECT COUNT(*) AS count " + joined, params)
+        total = int(cursor.fetchone()["count"])
+        cursor.execute("SELECT p.id,p.display_name,p.email,p.status,r.status AS request_status,r.data AS request_data " + joined + " ORDER BY r.data->>'deleteAfter' ASC NULLS LAST,p.id ASC LIMIT %s OFFSET %s", [*params,limit,offset])
+        rows = cursor.fetchall()
+    try:
+        require_admin_role(actor, "delete accounts permanently")
+        can_purge = True
+    except HTTPException as error:
+        if error.status_code != 403:
+            raise
+        can_purge = False
+    items = []
+    for row in rows:
+        data = as_dict(row.get("request_data"))
+        deadline = deletion_deadline(data)
+        items.append({"id": row["id"], "name": row.get("display_name"), "email": data.get("email") or row.get("email"), "requestedAt": data.get("requestedAt"), "deleteAfter": deadline.isoformat() if deadline else None, "canRestore": can_restore_account(row["status"],row.get("request_status"),data,now_utc()), "legacy": bool(data.get("legacy"))})
+    return {"items": items, "total": total, "limit": limit, "offset": offset, "canPermanentlyDelete": can_purge}
 
 
 def account_deletion_worker() -> None:
@@ -20363,6 +20367,10 @@ def admin_update_item(
             resolved_item_id: int | str = item_id
             if view in {"users", "profiles"}:
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
+                cursor.execute("SELECT status FROM profiles WHERE id=%s FOR UPDATE", (resolved_item_id,))
+                current_profile_status = str((cursor.fetchone() or {}).get("status") or "").upper()
+                if current_profile_status in TRASH_STATUSES or str(values.get("status") or "").upper() in TRASH_STATUSES:
+                    raise HTTPException(status_code=409, detail="Use the account Trash actions to delete or restore an account")
                 if "data" in payload.values:
                     cursor.execute("SELECT data FROM profiles WHERE id = %s FOR UPDATE", (resolved_item_id,))
                     current_data = as_dict((cursor.fetchone() or {}).get("data"))
@@ -20586,7 +20594,11 @@ def admin_delete_item(view: str, item_id: str, actor: str = Depends(require_admi
         # changed a status flag and left the login identity behind.
         if view in {"users", "profiles"}:
             with db_cursor() as (conn, cursor):
+                require_admin_role(actor, "delete accounts permanently")
                 resolved_item_id = resolve_admin_profile_id(cursor, item_id)
+                cursor.execute("SELECT status FROM profiles WHERE id=%s FOR UPDATE", (resolved_item_id,))
+                if str((cursor.fetchone() or {}).get("status") or "").upper() not in TRASH_STATUSES:
+                    raise HTTPException(status_code=409, detail="Move the account to Trash before deleting it permanently")
                 deleted = permanently_delete_profile(cursor, resolved_item_id)
                 audit(conn, actor, "permanent_delete", view, resolved_item_id, {"profileDeleted": True})
                 conn.commit()

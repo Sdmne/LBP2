@@ -5571,13 +5571,13 @@ function AdminVideoVerifications() {
   );
 }
 
-function reportDate(value: unknown) {
+function reportDate(value: unknown, detailed = false) {
   const date = value ? new Date(String(value)) : null;
   if (!date || Number.isNaN(date.valueOf())) return valueOf(value);
-  return `${date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  })}, ${date.toLocaleTimeString("en-US", {
+  const dateLabel = date.toLocaleDateString("en-US", detailed
+    ? { month: "long", day: "numeric", year: "numeric" }
+    : { month: "short", day: "numeric" });
+  return `${dateLabel}${detailed ? " at " : ", "}${date.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
@@ -5662,7 +5662,7 @@ function ReportPerson({
             B
           </span>
         )}
-        {["DELETED", "PENDING_DELETION"].includes(profileStatus) && (
+        {["DELETED", "DELETION_PENDING", "PENDING_DELETION"].includes(profileStatus) && (
           <span
             className="moderation-report-profile-status is-deleted"
             title="Deleted"
@@ -5688,7 +5688,80 @@ function ReportPerson({
   );
 }
 
+function ReportDetailsModal({ row, busy, error, onClose, onReview }: {
+  row: RecordValue;
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onReview: (row: RecordValue, next: "RESOLVED" | "DISMISSED") => Promise<void>;
+}) {
+  const titleId = useId();
+  const dateId = useId();
+  const dialogRef = useRef<HTMLElement>(null);
+  const status = String(row.status ?? "PENDING").toUpperCase();
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialogRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      if (!busy) onClose();
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [busy, onClose]);
+  return createPortal(
+    <div className="modal-backdrop moderation-report-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !busy) onClose();
+    }}>
+      <section className="modal moderation-report-modal" ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={dateId} aria-busy={busy} onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]'));
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (!first || !last) { event.preventDefault(); return; }
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || document.activeElement === event.currentTarget)) { event.preventDefault(); first.focus(); }
+      }}>
+        <button type="button" className="modal-close" aria-label="Close report details" disabled={busy} onClick={onClose}><AdminIcon name="x" /></button>
+        <h2 id={titleId}><AdminIcon name="flag" /> Report Details</h2>
+        <p className="moderation-report-detail-date" id={dateId}>{reportDate(row.createdAt ?? row.created_at, true)}</p>
+        <div className="moderation-report-detail-people">
+          <div><h3>Reporter</h3><ReportPerson row={row} kind="reporter" /></div>
+          <div><h3>Reported</h3><ReportPerson row={row} kind="reported" /></div>
+        </div>
+        <div className="moderation-report-detail-badges">
+          <span className={`moderation-report-reason reason-${reportReasonClass(row.reason)}`}>{valueOf(row.reason).toUpperCase()}</span>
+          <span className={`moderation-report-status status-${reportReasonClass(status)}`}>{status}</span>
+        </div>
+        <div className="moderation-report-detail-description"><h3>Description</h3><p>{valueOf(row.details ?? row.description)}</p></div>
+        {status !== "PENDING" && <div className="moderation-report-detail-resolution"><h3>{status === "DISMISSED" ? "Dismissed by" : "Resolved by"}</h3><p>{reportModeratorName(row)}</p>{Boolean(row.resolutionNote) && <p>{valueOf(row.resolutionNote)}</p>}</div>}
+        {error && <p className="error" role="alert">{error}</p>}
+        {status === "PENDING" && <div className="modal-actions">
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => void onReview(row, "DISMISSED")}><AdminIcon name="x" /> Dismiss</button>
+          <button type="button" className="primary" disabled={busy} onClick={() => void onReview(row, "RESOLVED")}><AdminIcon name="check" /> Resolve</button>
+        </div>}
+      </section>
+    </div>, document.body,
+  );
+}
+
 function ModerationReports() {
+  const reviewing = useRef(false);
+  const [selectedReport, setSelectedReport] = useState<RecordValue | null>(null);
+  const [reviewError, setReviewError] = useState("");
+  const openReport = (row: RecordValue) => {
+    setReviewError("");
+    setSelectedReport(row);
+  };
   const [status, setStatus] = useState("PENDING");
   const [result, setResult] = useState<ListResponse | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({
@@ -5734,7 +5807,10 @@ function ModerationReports() {
     void loadCounts();
   }, []);
   const review = async (row: RecordValue, next: "RESOLVED" | "DISMISSED") => {
+    if (reviewing.current) return;
     if (!window.confirm(`Mark this report as ${next.toLowerCase()}?`)) return;
+    reviewing.current = true;
+    setReviewError("");
     setReviewingId(String(row.id));
     try {
       await api.patch(
@@ -5743,12 +5819,16 @@ function ModerationReports() {
       );
       setNotice(next === "RESOLVED" ? "Report resolved." : "Report dismissed.");
       setNoticeIsError(false);
+      setSelectedReport(null);
       load();
       void loadCounts();
+      window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
     } catch (err) {
       setNotice(err instanceof ApiError ? err.message : "Could not update this report.");
       setNoticeIsError(true);
+      setReviewError(err instanceof ApiError ? err.message : "Could not update this report.");
     } finally {
+      reviewing.current = false;
       setReviewingId("");
     }
   };
@@ -5835,23 +5915,29 @@ function ModerationReports() {
                   <td>
                     <ReportPerson row={row} kind="reported" />
                   </td>
-                  <td>
-                    <span
-                      className={`moderation-report-reason reason-${reportReasonClass(row.reason)}`}
-                    >
-                      {valueOf(row.reason).toUpperCase()}
-                    </span>
+                  <td className="moderation-report-open-cell">
+                    <button type="button" className="moderation-report-open" aria-haspopup="dialog" aria-label={`Open report details: reason ${valueOf(row.reason)}`} onClick={() => openReport(row)}>
+                      <span
+                        className={`moderation-report-reason reason-${reportReasonClass(row.reason)}`}
+                      >
+                        {valueOf(row.reason).toUpperCase()}
+                      </span>
+                    </button>
                   </td>
-                  <td>
-                    <span
-                      className="moderation-report-description"
-                      title={valueOf(row.details ?? row.description)}
-                    >
-                      {valueOf(row.details ?? row.description)}
-                    </span>
+                  <td className="moderation-report-open-cell">
+                    <button type="button" className="moderation-report-open" aria-haspopup="dialog" aria-label={`Open report details: description ${valueOf(row.details ?? row.description)}`} onClick={() => openReport(row)}>
+                      <span
+                        className="moderation-report-description"
+                        title={valueOf(row.details ?? row.description)}
+                      >
+                        {valueOf(row.details ?? row.description)}
+                      </span>
+                    </button>
                   </td>
-                  <td className="moderation-report-date">
-                    {reportDate(row.createdAt ?? row.created_at)}
+                  <td className="moderation-report-open-cell moderation-report-date">
+                    <button type="button" className="moderation-report-open" aria-haspopup="dialog" aria-label={`Open report details: date ${reportDate(row.createdAt ?? row.created_at)}`} onClick={() => openReport(row)}>
+                      {reportDate(row.createdAt ?? row.created_at)}
+                    </button>
                   </td>
                   {status !== "PENDING" && (
                     <td>
@@ -5912,6 +5998,7 @@ function ModerationReports() {
           </p>
         </section>
       )}
+      {selectedReport && <ReportDetailsModal row={selectedReport} busy={reviewingId === String(selectedReport.id)} error={reviewError} onClose={() => setSelectedReport(null)} onReview={review} />}
     </>
   );
 }
@@ -7050,6 +7137,79 @@ function DeletionFeedback() {
   );
 }
 
+function UserTrash() {
+  const [result, setResult] = useState<(ListResponse & { canPermanentlyDelete: boolean }) | null>(null);
+  const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const pending = useRef(false);
+  const [action, setAction] = useState<{ kind: "restore" | "purge"; row: RecordValue } | null>(null);
+  useEffect(() => {
+    let live = true;
+    setLoading(true);
+    setError("");
+    const params = new URLSearchParams({ limit: "50", offset: String(offset) });
+    if (query.trim()) params.set("q", query.trim());
+    api.get<ListResponse & { canPermanentlyDelete: boolean }>(`/admin/users/trash?${params}`).then(data => {
+      if (live) { setResult(data); setLoading(false); }
+    }).catch(reason => { if (live) { setLoading(false); setError(reason instanceof ApiError ? reason.message : "Could not load account Trash."); } });
+    return () => { live = false; };
+  }, [query, offset, refresh]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefresh(value => value + 1), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const runAction = async () => {
+    if (!action || pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      if (action.kind === "restore") {
+        const restored = await api.post<{ passwordResetRequired: boolean }>(`/admin/users/${encodeURIComponent(String(action.row.id))}/restore`, {});
+        setNotice(restored.passwordResetRequired ? "Account restored. The member can use Forgot password to set a password." : "Account restored. The member can sign in again.");
+      } else {
+        await api.delete(`/admin/item/users/${encodeURIComponent(String(action.row.id))}`);
+        setNotice("Account permanently deleted.");
+      }
+      setAction(null);
+      setOffset(0);
+      setRefresh(value => value + 1);
+      window.dispatchEvent(new Event(ADMIN_NAV_COUNTS_CHANGED_EVENT));
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "Could not update the account.");
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  return <>
+    <header className="page-heading"><h1>Account Trash</h1></header>
+    <nav className="member-tabs"><NavLink to="/users" end>Users</NavLink><NavLink to="/users/partners">Partners</NavLink><NavLink to="/users/trash">Trash{result ? ` (${result.total})` : ""}</NavLink></nav>
+    <p className="account-trash-note">Accounts are hidden and signed out immediately. Restore them within 30 days; after that they are permanently deleted automatically. Cancelled subscriptions are not restored.</p>
+    <section className="list-controls account-trash-controls"><input aria-label="Search account Trash" placeholder="Search by email, name or ID…" value={query} disabled={busy} onChange={event => { setQuery(event.target.value); setOffset(0); }} /><button type="button" disabled={busy || loading} onClick={() => setRefresh(value => value + 1)}>Refresh</button></section>
+    {error && !action && <p className="error" role="alert">{error}</p>}
+    {notice && <p className="notice" role="status">{notice}</p>}
+    {loading ? <p className="loading-inline">Loading account Trash…</p> : result && <>
+      <section className="table account-trash-table"><table><thead><tr><th>User</th><th>Email</th><th>Deleted at</th><th>Permanent deletion after</th><th>Actions</th></tr></thead><tbody>
+        {result.items.map(row => {
+          const deadline = row.deleteAfter ? new Date(String(row.deleteAfter)).valueOf() : NaN;
+          const canRestore = row.canRestore === true && Number.isFinite(deadline) && deadline > Date.now();
+          return <tr key={String(row.id)}><td><Link to={`/users/${encodeURIComponent(String(row.id))}`}>{valueOf(row.name)}</Link></td><td>{valueOf(row.email)}</td><td>{compactDate(row.requestedAt)}</td><td>{row.deleteAfter ? compactDate(row.deleteAfter) : "Not scheduled"}{Boolean(row.deleteAfter) && !canRestore && <small>Awaiting automatic deletion</small>}</td><td><div className="row-actions"><button type="button" disabled={busy || !canRestore} onClick={() => { setError(""); setAction({ kind: "restore", row }); }}>Restore account</button>{result.canPermanentlyDelete && <button type="button" className="danger-text" disabled={busy} onClick={() => { setError(""); setAction({ kind: "purge", row }); }}>Delete permanently</button>}</div></td></tr>;
+        })}
+        {!result.items.length && <tr><td colSpan={5}>{query.trim() ? "No matching accounts in Trash." : "Account Trash is empty."}</td></tr>}
+      </tbody></table></section>
+      <div className="pagination"><button type="button" disabled={busy || offset === 0} onClick={() => setOffset(value => Math.max(0, value - 50))}>Previous</button><span>{result.total ? `${offset + 1}–${Math.min(offset + result.items.length, result.total)} of ${result.total}` : "0 accounts"}</span><button type="button" disabled={busy || offset + 50 >= result.total} onClick={() => setOffset(value => value + 50)}>Next</button></div>
+    </>}
+    <ConfirmModal open={Boolean(action)} title={action?.kind === "restore" ? "Restore account" : "Delete account permanently"} message={<>{action?.kind === "restore" ? "Restore this account? The member will need to sign in again. Cancelled subscriptions remain cancelled." : "Permanently delete this account and its personal data now? This cannot be undone."}{error && <p className="error" role="alert">{error}</p>}</>} confirmLabel={action?.kind === "restore" ? "Restore account" : "Delete permanently"} busy={busy} onClose={() => { if (!pending.current) setAction(null); }} onConfirm={runAction} />
+  </>;
+}
+
+
 function GenericList({ view }: { view: string }) {
   const location = useLocation();
   const isPartnerUsers =
@@ -7472,8 +7632,9 @@ function GenericList({ view }: { view: string }) {
     setSaving(true);
     try {
       if (userAction.kind === "delete")
-        await api.delete(
-          `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
+        await api.post(
+          `/admin/users/${encodeURIComponent(String(profileRef))}/trash`,
+          { reason: "Deleted from admin" },
         );
     else {
       const data = (
@@ -7482,20 +7643,8 @@ function GenericList({ view }: { view: string }) {
       : {}
       ) as RecordValue;
       if (userAction.kind === "restore") {
-      await api.patch(
-      `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
-      {
-      values: {
-      status: "ACTIVE",
-      data: {
-      ...data,
-      deletionRestoredAt: new Date().toISOString(),
-      restoredAt: new Date().toISOString(),
-      },
-      },
-      },
-      );
-      } else {
+          await api.post(`/admin/users/${encodeURIComponent(String(profileRef))}/restore`, {});
+        } else {
       await api.patch(
       `/admin/item/users/${encodeURIComponent(String(profileRef))}`,
       {
@@ -7638,6 +7787,7 @@ function GenericList({ view }: { view: string }) {
             Users
           </NavLink>
           <NavLink to="/users/partners">Partners</NavLink>
+          <NavLink to="/users/trash">Trash</NavLink>
         </nav>
       )}
       <section
@@ -8213,7 +8363,7 @@ function GenericList({ view }: { view: string }) {
                                           D
                                         </em>
                                       )}
-                                    {view === "users" && ["DELETED", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
+                                    {view === "users" && ["DELETED", "DELETION_PENDING", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (<em className="deleted-user-badge" title="Deleted" aria-label="Deleted">D</em>)}
                                     {view === "users" && <UserLocationMismatchFlag row={row} />}
                                   </span>
                                   {personSecondaryText(row) && (
@@ -8266,7 +8416,7 @@ function GenericList({ view }: { view: string }) {
                   >
                     Ban
                   </button>
-                  {String(row.status ?? "").toUpperCase() === "PENDING_DELETION" && (
+                  {["DELETED", "DELETION_PENDING", "PENDING_DELETION"].includes(String(row.status ?? "").toUpperCase()) && (
                   <button
                     type="button"
                     role="menuitem"
@@ -8285,7 +8435,7 @@ function GenericList({ view }: { view: string }) {
                                         setUserAction({ row, kind: "delete" })
                                       }
                                     >
-                                      <AdminIcon name="trash" /> Permanent Delete
+                                      <AdminIcon name="trash" /> Move to Trash
                                     </button>
                                   </span>
                                 )}
@@ -8595,7 +8745,7 @@ function GenericList({ view }: { view: string }) {
                   ? "Ban user"
                   : userAction.kind === "restore"
                   ? "Restore User"
-                  : "Permanently Delete User",
+                  : "Move user to Trash",
               }
             : null
         }
@@ -11673,10 +11823,7 @@ function ActionModal({
           </p>
         )}
         {state.kind === "delete" && (
-          <p>
-            This action cannot be undone. It permanently deletes the user
-            account, all data, photos, messages, matches and likes.
-          </p>
+          <p>The account will be hidden and signed out immediately. You can restore it from Account Trash within 30 days. After that it is permanently deleted automatically.</p>
         )}
         {error && <p className="error grant-premium-profile-error">{error}</p>}
         <div className="modal-actions">
@@ -11690,7 +11837,7 @@ function ActionModal({
             {busy
               ? "Working…"
               : state.kind === "delete"
-                ? "Delete Permanently"
+                ? "Move to Trash"
                 : state.kind === "ban"
                   ? "Ban user"
                   : state.kind === "grant"
@@ -12569,8 +12716,8 @@ function UserDetail() {
       setNotice(enabled ? "User shadow banned." : "Shadow ban removed.");
     }
     if (modal.kind === "delete") {
-      await api.delete(`/admin/item/users/${encodeURIComponent(profileId)}`);
-      navigate("/users");
+      await api.post(`/admin/users/${encodeURIComponent(profileId)}/trash`, { reason: "Deleted from admin" });
+      navigate("/users/trash");
       return;
     }
     setReload((value) => value + 1);
@@ -12706,7 +12853,7 @@ function UserDetail() {
           <button
             className="danger"
             onClick={() =>
-              setModal({ kind: "delete", title: "Permanently Delete User" })
+              setModal({ kind: "delete", title: "Move user to Trash" })
             }
           >
             <AdminIcon name="trash" /> Delete
@@ -14235,6 +14382,7 @@ export function AdminApp() {
               path="/verifications/:id"
               element={<VerificationDetail />}
             />
+            <Route path="/users/trash" element={<UserTrash />} />
             <Route path="/users/:id" element={<UserDetail />} />
             <Route
               path="/clinics/new"
