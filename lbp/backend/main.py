@@ -72,6 +72,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from public_seo import page_metadata, parse_public_path, render_page_html, render_sitemap
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator
+import logging
+from request_security import (
+    ContactBodyLimitMiddleware, RateLimitExceeded, request_ip, throttle_key, consume_window,
+    check_login_backoff, record_login_failure, clear_login_backoff,
+)
+
 from postgres_database import postgres_cursor
 
 
@@ -453,9 +459,9 @@ if EXPECTED_FIREBASE_PROJECT_ID and VISION_PROJECT_ID and VISION_PROJECT_ID != E
 app = FastAPI(
     title="Elena LetsBeParents replacement API",
     version="0.1.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 app.add_middleware(
@@ -465,6 +471,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+app.add_middleware(ContactBodyLimitMiddleware)
 
 
 @app.middleware("http")
@@ -1433,7 +1442,7 @@ def ai_advisor_call_claude(
     max_tokens: int | None = None,
 ) -> str:
     if not ai_advisor_is_configured():
-        raise HTTPException(status_code=503, detail="The AI Family Advisor is not configured yet")
+        raise HTTPException(status_code=503, detail="AI service is temporarily unavailable. Please try again later.")
     body = json.dumps(
         {
             "model": ANTHROPIC_MODEL,
@@ -1457,33 +1466,25 @@ def ai_advisor_call_claude(
         with urllib.request.urlopen(request, timeout=ANTHROPIC_TIMEOUT_SECONDS) as response:
             raw = response.read()
     except urllib.error.HTTPError as error:
-        provider_body = error.read().decode("utf-8", errors="replace")[:2000]
-        try:
-            provider_data = json.loads(provider_body)
-            detail = (provider_data.get("error") or {}).get("message") or "AI Family Advisor provider rejected the request"
-        except (json.JSONDecodeError, AttributeError):
-            detail = "AI Family Advisor provider rejected the request"
-        raise HTTPException(status_code=502, detail=str(detail)) from error
-    except (urllib.error.URLError, TimeoutError) as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor is temporarily unavailable") from error
+        logging.getLogger(__name__).warning("AI provider request failed with HTTP %s", error.code)
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.") from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        logging.getLogger(__name__).warning("AI provider transport failed")
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.") from None
     try:
         data = json.loads(raw.decode("utf-8")) if raw else {}
     except json.JSONDecodeError as error:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an invalid response") from error
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.") from error
     content = data.get("content") if isinstance(data, dict) else None
     text_parts = [block.get("text", "") for block in (content or []) if isinstance(block, dict) and block.get("type") == "text"]
     reply = "".join(text_parts).strip()
     if not reply:
-        raise HTTPException(status_code=502, detail="AI Family Advisor returned an empty response")
+        raise HTTPException(status_code=502, detail="AI service is temporarily unavailable. Please try again later.")
     return reply
 
 
 def client_ip_of(request: Request) -> str:
-    # Mirrors the forwarded-for extraction already used for device-session
-    # logging (record_device_session, below) - same reverse-proxy assumption.
-    forwarded_for = str(request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
-    client_host = getattr(request.client, "host", "") if request.client else ""
-    return forwarded_for or client_host or "unknown"
+    return request_ip(request)
 
 
 # Public AI tools (quiz insight / Ask AI / agreement draft) are free,
@@ -1533,6 +1534,10 @@ def ai_public_record_use(cursor, feature: str, client_ip: str) -> None:
 
 
 def enforce_ai_public_rate_limit(cursor, feature: str, client_ip: str) -> None:
+    cursor.execute("SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0)) AS acquired",
+                   (throttle_key("ai-quota-" + feature, client_ip),))
+    if not cursor.fetchone()["acquired"]:
+        raise HTTPException(status_code=429, detail="An AI request is already running. Please try again shortly.", headers={"Retry-After": "5"})
     limit = AI_PUBLIC_RATE_LIMITS.get(feature, 10)
     if ai_public_daily_use_count(cursor, feature, client_ip) >= limit:
         raise HTTPException(
@@ -1879,6 +1884,19 @@ class ContactPayload(BaseModel):
     subject: str | None = Field(default=None, max_length=255)
     message: str | None = Field(default=None, max_length=5000)
     payload: dict[str, Any] = Field(default_factory=dict)
+    website: str = Field(default="", max_length=512)
+
+    @field_validator("payload")
+    @classmethod
+    def bounded_payload(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+        except (ValueError, TypeError, RecursionError):
+            raise ValueError("Invalid contact payload") from None
+        if size > 8192:
+            raise ValueError("Contact payload exceeds the size limit")
+        return value
+
 
 
 class ProfileUpdatePayload(BaseModel):
@@ -5134,7 +5152,7 @@ def health():
     with db_cursor() as (_, cursor):
         cursor.execute("SELECT 1 AS ok")
         row = cursor.fetchone()
-    return {"ok": row["ok"] == 1, "database": DB_CONFIG["database"]}
+    return {"ok": row["ok"] == 1}
 
 
 @app.get("/api")
@@ -5146,8 +5164,24 @@ def api_root():
     }
 
 
+AUTH_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
+
+
+def rate_limit_error(error: RateLimitExceeded) -> HTTPException:
+    return HTTPException(status_code=429, detail="Too many requests. Please try again later.",
+                         headers={"Retry-After": str(error.retry_after)})
+
+
+def enforce_request_limit(request: Request, scope: str, limit: int, seconds: int) -> None:
+    try:
+        consume_window(db_cursor, throttle_key(scope, client_ip_of(request)), limit, seconds)
+    except RateLimitExceeded as error:
+        raise rate_limit_error(error) from None
+
+
 @app.post("/api/auth/signup", response_model=SignupSessionResponse)
 def auth_signup(payload: SignupPayload, response: Response, request: Request):
+    enforce_request_limit(request, "auth-signup", 5, 600)
     email = normalize_email(payload.email)
     if "@" not in email or "." not in email.rsplit("@", 1)[-1]:
         raise HTTPException(status_code=422, detail="Valid email is required")
@@ -5407,6 +5441,12 @@ def auth_firebase(payload: FirebaseAuthPayload, response: Response, request: Req
 @app.post("/api/auth/login", response_model=AuthSessionResponse)
 def auth_login(payload: LoginPayload, response: Response, request: Request):
     email = normalize_email(payload.email)
+    enforce_request_limit(request, "auth-login", 30, 60)
+    failure_key = throttle_key("login-failure", client_ip_of(request), email)
+    try:
+        check_login_backoff(db_cursor, failure_key)
+    except RateLimitExceeded as error:
+        raise rate_limit_error(error) from None
     with db_cursor() as (conn, cursor):
         cursor.execute(
             """
@@ -5419,14 +5459,11 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
             (email,),
         )
         user = cursor.fetchone()
-        if not user:
-            raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
-        if user["status"] != "ACTIVE":
-            raise HTTPException(status_code=403, detail="ACCOUNT_INACTIVE")
-        if not bool(user.get("password_login_enabled")):
-            raise HTTPException(status_code=409, detail="PASSWORD_LOGIN_UNAVAILABLE")
-        if not verify_password(payload.password, user["password_hash"]):
-            raise HTTPException(status_code=401, detail="INVALID_PASSWORD")
+        password_hash = str((user or {}).get("password_hash") or AUTH_DUMMY_PASSWORD_HASH)
+        password_valid = verify_password(payload.password, password_hash)
+        if not user or not password_valid or str(user.get("status") or "").upper() != "ACTIVE" or not bool(user.get("password_login_enabled")):
+            record_login_failure(db_cursor, failure_key)
+            raise HTTPException(status_code=401, detail="INVALID_CREDENTIALS")
         if password_needs_rehash(user["password_hash"]):
             upgraded_hash = hash_password(payload.password)
             cursor.execute(
@@ -5440,6 +5477,7 @@ def auth_login(payload: LoginPayload, response: Response, request: Request):
         token, expires_at = create_session(cursor, user["id"])
         user_payload = auth_user_payload(cursor, user)
         conn.commit()
+    clear_login_backoff(db_cursor, failure_key)
     return auth_session_response(response, token, expires_at, user, user_payload=user_payload)
 
 
@@ -5817,7 +5855,10 @@ def save_privacy_consent(payload: CookieConsentPayload, request: Request, respon
 
 
 @app.post("/api/public/contact")
-def public_contact(payload: ContactPayload):
+def public_contact(payload: ContactPayload, request: Request):
+    if payload.website.strip() or str(payload.payload.get("website") or "").strip():
+        return {"ok": True, "message": "Message sent"}
+    enforce_request_limit(request, "public-contact", 5, 600)
     body = {
         "name": payload.name,
         "email": normalize_email(payload.email) if payload.email else None,
@@ -5868,71 +5909,74 @@ def public_runtime_config(response: Response):
 # ai_advisor_call_claude() for the safety rules each one follows.
 @app.post("/api/public/quiz-insight")
 def public_quiz_insight(payload: QuizInsightPayload, request: Request):
+    enforce_request_limit(request, "ai-quiz-insight", 10, 60)
     client_ip = client_ip_of(request)
     with db_cursor() as (conn, cursor):
         enforce_ai_public_rate_limit(cursor, "quiz-insight", client_ip)
+        strongest = [s.strip()[:200] for s in payload.strongestTitles[:8] if s.strip()]
+        discuss = [s.strip()[:200] for s in payload.discussTitles[:8] if s.strip()]
+        answers = [s.strip()[:400] for s in payload.answers[:40] if s.strip()]
+        language = locale_language_name(payload.locale)
+        user_message = (
+            f"Reply in {language}.\n\n"
+            f"Their strongest areas (from the quiz's own bucketing): {'; '.join(strongest) or 'none identified'}\n"
+            f"Areas worth discussing further (from the quiz's own bucketing): {'; '.join(discuss) or 'none identified'}\n"
+            f"Their raw answers, in order: {' | '.join(answers) if answers else 'not provided'}\n\n"
+            "Write the personalized reflection now."
+        )
+        reply = ai_advisor_call_claude(
+            [{"role": "user", "content": user_message}],
+            system_prompt=QUIZ_INSIGHT_SYSTEM_PROMPT,
+            max_tokens=500,
+        )
         ai_public_record_use(cursor, "quiz-insight", client_ip)
         conn.commit()
-    strongest = [s.strip()[:200] for s in payload.strongestTitles[:8] if s.strip()]
-    discuss = [s.strip()[:200] for s in payload.discussTitles[:8] if s.strip()]
-    answers = [s.strip()[:400] for s in payload.answers[:40] if s.strip()]
-    language = locale_language_name(payload.locale)
-    user_message = (
-        f"Reply in {language}.\n\n"
-        f"Their strongest areas (from the quiz's own bucketing): {'; '.join(strongest) or 'none identified'}\n"
-        f"Areas worth discussing further (from the quiz's own bucketing): {'; '.join(discuss) or 'none identified'}\n"
-        f"Their raw answers, in order: {' | '.join(answers) if answers else 'not provided'}\n\n"
-        "Write the personalized reflection now."
-    )
-    reply = ai_advisor_call_claude(
-        [{"role": "user", "content": user_message}],
-        system_prompt=QUIZ_INSIGHT_SYSTEM_PROMPT,
-        max_tokens=500,
-    )
     return {"ok": True, "insight": reply}
 
 
 @app.post("/api/public/ask-ai")
 def public_ask_ai(payload: AskAiPayload, request: Request):
+    enforce_request_limit(request, "ai-ask-ai", 10, 60)
     client_ip = client_ip_of(request)
     with db_cursor() as (conn, cursor):
         enforce_ai_public_rate_limit(cursor, "ask-ai", client_ip)
+        question = payload.question.strip()
+        if not question:
+            raise HTTPException(status_code=422, detail="Question cannot be empty")
+        reply = ai_advisor_call_claude(
+            [{"role": "user", "content": question}],
+            system_prompt=ASK_AI_SYSTEM_PROMPT,
+            max_tokens=500,
+        )
         ai_public_record_use(cursor, "ask-ai", client_ip)
         conn.commit()
-    question = payload.question.strip()
-    if not question:
-        raise HTTPException(status_code=422, detail="Question cannot be empty")
-    reply = ai_advisor_call_claude(
-        [{"role": "user", "content": question}],
-        system_prompt=ASK_AI_SYSTEM_PROMPT,
-        max_tokens=500,
-    )
     return {"ok": True, "answer": reply}
 
 
 @app.post("/api/public/agreement-draft")
 def public_agreement_draft(payload: AgreementDraftPayload, request: Request):
+    enforce_request_limit(request, "ai-agreement-draft", 10, 60)
     client_ip = client_ip_of(request)
     with db_cursor() as (conn, cursor):
         enforce_ai_public_rate_limit(cursor, "agreement-draft", client_ip)
+        language = locale_language_name(payload.locale)
+        jurisdiction = (payload.jurisdiction or "").strip()[:200]
+        key_points = payload.keyPoints.strip()[:4000]
+        agreement_type = payload.agreementType.strip()[:120]
+        user_message = (
+            f"Reply in {language}.\n\n"
+            f"Agreement type: {agreement_type}\n"
+            f"Jurisdiction (as given by the user, may be blank or vague): {jurisdiction or 'not specified'}\n"
+            f"Key points the user wants included:\n{key_points}\n\n"
+            "Write the first-draft document now."
+        )
+        reply = ai_advisor_call_claude(
+            [{"role": "user", "content": user_message}],
+            system_prompt=AGREEMENT_DRAFT_SYSTEM_PROMPT,
+            max_tokens=1400,
+        )
         ai_public_record_use(cursor, "agreement-draft", client_ip)
         conn.commit()
-    language = locale_language_name(payload.locale)
-    jurisdiction = (payload.jurisdiction or "").strip()[:200]
-    key_points = payload.keyPoints.strip()[:4000]
-    agreement_type = payload.agreementType.strip()[:120]
-    user_message = (
-        f"Reply in {language}.\n\n"
-        f"Agreement type: {agreement_type}\n"
-        f"Jurisdiction (as given by the user, may be blank or vague): {jurisdiction or 'not specified'}\n"
-        f"Key points the user wants included:\n{key_points}\n\n"
-        "Write the first-draft document now."
-    )
-    reply = ai_advisor_call_claude(
-        [{"role": "user", "content": user_message}],
-        system_prompt=AGREEMENT_DRAFT_SYSTEM_PROMPT,
-        max_tokens=1400,
-    )
     return {"ok": True, "draft": reply}
 
 
@@ -6921,6 +6965,31 @@ def member_save_privacy_consent(payload: PrivacyConsentPayload, user: dict[str, 
     return {"ok": True, "consent": state}
 
 
+def catalog_city_identifier(country: str, city: str) -> str:
+    digest = hashlib.sha256(city.strip().casefold().encode("utf-8")).hexdigest()[:20]
+    return f"catalog:{country.strip().upper()}:{digest}"
+
+
+def require_selected_profile_city(cursor, updates: dict[str, Any], current: dict[str, Any]) -> None:
+    country = str(updates.get("country") or "").strip().upper()
+    city = str(updates.get("city") or "").strip()
+    place_id = str(updates.get("cityPlaceId") or "").strip()
+    unchanged = city == str(current.get("city") or "").strip() and country == str(current.get("country") or "").strip().upper()
+    if unchanged and (not place_id or place_id == str(current.get("cityPlaceId") or "").strip()):
+        return
+    if place_id:
+        for candidate in CATALOG_CITIES_BY_COUNTRY.get(country, []):
+            if str(candidate.get("name") or "").casefold() == city.casefold() and place_id == str(candidate.get("placeId") or catalog_city_identifier(country, city)):
+                return
+        if place_id == catalog_city_identifier(country, city):
+            cursor.execute("""SELECT 1 FROM profiles WHERE role = 'USER' AND status = 'ACTIVE'
+                              AND UPPER(BTRIM(data->>'country')) = %s AND LOWER(BTRIM(data->>'city')) = LOWER(%s) LIMIT 1""",
+                           (country, city))
+            if cursor.fetchone():
+                return
+    raise HTTPException(status_code=422, detail="Select a city from the list")
+
+
 @app.patch("/api/member/profile")
 def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = Depends(require_user)):
     profile_id = require_profile_id(user)
@@ -6943,17 +7012,10 @@ def member_update_profile(payload: ProfileUpdatePayload, user: dict[str, Any] = 
         raise HTTPException(status_code=422, detail="Country is required")
     if not updates.get("city"):
         raise HTTPException(status_code=422, detail="City is required")
-    if not updates.get("cityPlaceId"):
-        # Older profiles stored a free-text city before the Google Places
-        # identifier existed.  They must still be able to change unrelated
-        # profile fields (for example, languages).  A place ID is required
-        # only when the city itself is changed.
-        with db_cursor() as (_, cursor):
-            current_profile = fetch_profile(cursor, profile_id)
+    with db_cursor() as (_, cursor):
+        current_profile = fetch_profile(cursor, profile_id)
         current_data = as_dict(current_profile.get("data")) if current_profile else {}
-        current_city = str(current_data.get("city") or "").strip()
-        if updates["city"] != current_city:
-            raise HTTPException(status_code=422, detail="Select a city from the list")
+        require_selected_profile_city(cursor, updates, current_data)
     if not updates.get("profileType"):
         raise HTTPException(status_code=422, detail="Profile type is required")
     looking_for = updates.get("lookingFor") if isinstance(updates.get("lookingFor"), list) else []
@@ -13115,7 +13177,7 @@ def member_referral_redeem(payload: ReferralRedeemPayload, user: dict[str, Any] 
     return {"ok": True, "referralId": referral_id}
 
 
-@app.get("/api/meta")
+@app.get("/api/meta", dependencies=[Depends(require_admin)])
 def meta():
     tables = [
         "pages",
@@ -13157,7 +13219,7 @@ def meta():
     return {"counts": counts}
 
 
-@app.get("/api/pages")
+@app.get("/api/pages", dependencies=[Depends(require_admin)])
 def pages(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -13185,7 +13247,7 @@ def pages(
     return {"items": items, "limit": limit, "offset": offset}
 
 
-@app.get("/api/pages/{page_id}")
+@app.get("/api/pages/{page_id}", dependencies=[Depends(require_admin)])
 def page_detail(page_id: int):
     with db_cursor() as (_, cursor):
         cursor.execute(
@@ -20521,7 +20583,7 @@ def member_catalog_filter_options(
                 "value": name,
                 "label": name,
                 "region": region,
-                "placeId": str(city.get("placeId") or ""),
+                "placeId": str(city.get("placeId") or catalog_city_identifier(country_code, name)),
                 "population": int_or_none(city.get("population")) or 0,
             }
 
@@ -20565,7 +20627,7 @@ def member_catalog_filter_options(
                     continue
                 city_candidates.setdefault(
                     (name.casefold(), ""),
-                    {"value": name, "label": name, "region": "", "placeId": "", "population": 0},
+                    {"value": name, "label": name, "region": "", "placeId": catalog_city_identifier(country_code, name), "population": 0},
                 )
 
     for item in countries:
@@ -20658,7 +20720,7 @@ def public_catalog(
     q: str | None = Query(None, min_length=1, max_length=200),
     country: str | None = Query(None, min_length=1, max_length=128),
     city: str | None = Query(None, min_length=1, max_length=128),
-    user: dict[str, Any] | None = Depends(optional_user),
+    user: dict[str, Any] = Depends(require_user),
 ):
     viewer_profile_id = require_profile_id(user) if user else None
     params: list[Any] = []
@@ -20735,7 +20797,7 @@ def public_catalog(
 def public_catalog_detail(
     profile_id: str,
     background_tasks: BackgroundTasks,
-    user: dict[str, Any] | None = Depends(optional_user),
+    user: dict[str, Any] = Depends(require_user),
 ):
     where = "JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) = %s"
     params: tuple[Any, ...] = (profile_id,)
@@ -20999,7 +21061,7 @@ def public_footer_pages(locale: str):
     return {"items": [{"slug": item["slug"], "title": item["title"]} for item in items]}
 
 
-@app.get("/api/screenshot-sections")
+@app.get("/api/screenshot-sections", dependencies=[Depends(require_admin)])
 def screenshot_sections():
     with db_cursor() as (_, cursor):
         cursor.execute(

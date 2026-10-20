@@ -1,3 +1,4 @@
+import { FORM_LABELS } from "./form-labels";
 import { profilePhotoUrls } from "./profile-media";
 import {
   FormEvent,
@@ -3912,9 +3913,9 @@ function CatalogFilterModal({
     return () => document.removeEventListener("pointerdown", closeOutside);
   }, [openField]);
   useEffect(() => {
-    setCityQuery(catalogText(value.city));
+    if (openField !== "city") setCityQuery(catalogText(value.city));
     setCityActiveIndex(-1);
-  }, [value.city, value.country.join(",")]);
+  }, [value.city, value.country.join(","), openField]);
   useEffect(() => {
     if (!openField) return;
     const index = openField === "city" ? cityActiveIndex : dropdownActiveIndex;
@@ -4062,7 +4063,7 @@ function CatalogFilterModal({
             onChange={(event) => {
               const next = event.target.value;
               setCityQuery(next);
-              set("city", next);
+              set("city", "");
               setCityActiveIndex(-1);
               setOpenField("city");
             }}
@@ -9711,7 +9712,7 @@ function AiAdvisor({ session }: { session: Session }) {
           {sending && <p className="notice">{text.typing}</p>}
         </div>
         <form onSubmit={(event) => void send(event)}>
-          <input
+          <input aria-label={FORM_LABELS[locale].advisor}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={text.placeholder}
@@ -11360,7 +11361,7 @@ function Contact() {
     sendingRef.current = true;
     setSending(true);
     try {
-      await api.post("/public/contact", { ...draft, locale });
+      await api.post("/public/contact", { ...draft, locale, website: String(new FormData(event.currentTarget as HTMLFormElement).get("website") || "") });
       setSent(true);
       setNotice("");
       setDraft({ name: "", email: "", subject: "", message: "" });
@@ -11557,6 +11558,7 @@ function AskAiTool() {
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             placeholder={text.placeholder}
+            aria-label={FORM_LABELS[locale].question}
           />
           <button className="primary" disabled={!question.trim() || sending} aria-label={text.button}>
             {text.button}
@@ -15936,7 +15938,7 @@ function Referral({ session }: { session: Session }) {
           <div className="list-card referral-code-card">
             <p>{text.yourInviteLink}</p>
             <div className="referral-link-row">
-              <input className="referral-link-field" value={inviteLink} readOnly onFocus={(event) => event.target.select()} />
+              <input aria-label={FORM_LABELS[locale].invite} className="referral-link-field" value={inviteLink} readOnly onFocus={(event) => event.target.select()} />
               <button type="button" className="primary" onClick={() => void copyInviteLink()}>
                 {linkCopied ? text.copied : text.copyLink}
               </button>

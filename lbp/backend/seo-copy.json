@@ -269,6 +269,116 @@
       "de": "Community",
       "it": "Community",
       "pl": "Społeczność"
+    },
+    "tools/ask-ai": {
+      "en": "Ask AI",
+      "ru": "Спросить AI",
+      "es": "Pregúntale a la IA",
+      "pt": "Pergunte à IA",
+      "fr": "Demandez à l’IA",
+      "de": "KI fragen",
+      "it": "Chiedi all’IA",
+      "pl": "Zapytaj AI"
+    },
+    "tools/agreement-draft": {
+      "en": "Draft an agreement",
+      "ru": "Черновик соглашения",
+      "es": "Borrador de acuerdo",
+      "pt": "Rascunho de acordo",
+      "fr": "Projet d’accord",
+      "de": "Vereinbarungsentwurf",
+      "it": "Bozza di accordo",
+      "pl": "Projekt umowy"
+    },
+    "resources/co-parenting/compatibility-quiz": {
+      "en": "Co-parenting compatibility quiz",
+      "ru": "Совместимость для совместного родительства",
+      "es": "Test de compatibilidad para la coparentalidad",
+      "pt": "Teste de compatibilidade para coparentalidade",
+      "fr": "Quiz de compatibilité pour la coparentalité",
+      "de": "Kompatibilitätstest zur Co-Elternschaft",
+      "it": "Quiz di compatibilità per la cogenitorialità",
+      "pl": "Test zgodności we współrodzicielstwie"
+    },
+    "safety-checkin": {
+      "en": "Safety check-in",
+      "ru": "Проверка безопасности",
+      "es": "Control de seguridad",
+      "pt": "Verificação de segurança",
+      "fr": "Vérification de sécurité",
+      "de": "Sicherheitscheck",
+      "it": "Controllo di sicurezza",
+      "pl": "Kontrola bezpieczeństwa"
+    },
+    "boost": {
+      "en": "Profile Boost",
+      "ru": "Продвижение профиля",
+      "es": "Promoción del perfil",
+      "pt": "Destaque do perfil",
+      "fr": "Mise en avant du profil",
+      "de": "Profil hervorheben",
+      "it": "Promozione del profilo",
+      "pl": "Promowanie profilu"
+    },
+    "not-found": {
+      "en": "Page not found",
+      "ru": "Страница не найдена",
+      "es": "Página no encontrada",
+      "pt": "Página não encontrada",
+      "fr": "Page introuvable",
+      "de": "Seite nicht gefunden",
+      "it": "Pagina non trovata",
+      "pl": "Nie znaleziono strony"
+    },
+    "find-your-path/co-parenting": {
+      "en": "Find your path — Co-parenting",
+      "ru": "Ваш путь — Совместное родительство",
+      "es": "Encuentra tu camino — Coparentalidad",
+      "pt": "Encontre seu caminho — Coparentalidade",
+      "fr": "Trouvez votre voie — Coparentalité",
+      "de": "Finden Sie Ihren Weg — Co-Elternschaft",
+      "it": "Trova il tuo percorso — Cogenitorialità",
+      "pl": "Znajdź swoją drogę — Współrodzicielstwo"
+    },
+    "find-your-path/couple-donor": {
+      "en": "Find your path — Donor for a couple",
+      "ru": "Ваш путь — Донор для пары",
+      "es": "Encuentra tu camino — Donante para una pareja",
+      "pt": "Encontre seu caminho — Doador para um casal",
+      "fr": "Trouvez votre voie — Don pour un couple",
+      "de": "Finden Sie Ihren Weg — Spende für ein Paar",
+      "it": "Trova il tuo percorso — Donazione per una coppia",
+      "pl": "Znajdź swoją drogę — Dawca dla pary"
+    },
+    "find-your-path/donor": {
+      "en": "Find your path — Become a donor",
+      "ru": "Ваш путь — Стать донором",
+      "es": "Encuentra tu camino — Ser donante",
+      "pt": "Encontre seu caminho — Ser doador",
+      "fr": "Trouvez votre voie — Devenir donneur",
+      "de": "Finden Sie Ihren Weg — Spender werden",
+      "it": "Trova il tuo percorso — Diventare donatore",
+      "pl": "Znajdź swoją drogę — Zostań dawcą"
+    },
+    "find-your-path/exploring": {
+      "en": "Find your path — Exploring parenthood",
+      "ru": "Ваш путь — На пути к родительству",
+      "es": "Encuentra tu camino — Explorar la parentalidad",
+      "pt": "Encontre seu caminho — Explorar a parentalidade",
+      "fr": "Trouvez votre voie — Explorer la parentalité",
+      "de": "Finden Sie Ihren Weg — Elternschaft erkunden",
+      "it": "Trova il tuo percorso — Esplorare la genitorialità",
+      "pl": "Znajdź swoją drogę — Poznaj rodzicielstwo"
+    },
+    "find-your-path/partner": {
+      "en": "Find your path — Find a partner",
+      "ru": "Ваш путь — Найти партнёра",
+      "es": "Encuentra tu camino — Encontrar pareja",
+      "pt": "Encontre seu caminho — Encontrar um parceiro",
+      "fr": "Trouvez votre voie — Trouver un partenaire",
+      "de": "Finden Sie Ihren Weg — Partner finden",
+      "it": "Trova il tuo percorso — Trovare un partner",
+      "pl": "Znajdź swoją drogę — Znajdź partnera"
     }
   },
   "descriptions": {

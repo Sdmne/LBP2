@@ -16,14 +16,6 @@ function localeFromPath(pathname: string): Locale {
   return candidate && locales.includes(candidate) ? candidate : "en";
 }
 
-function readableSlug(value: string) {
-  let decoded = value || "";
-  try { decoded = decodeURIComponent(decoded); } catch { /* Preserve malformed route text without crashing navigation. */ }
-  return decoded
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 function upsertMeta(attribute: "name" | "property", key: string, content: string) {
   let element = document.head.querySelector<HTMLMetaElement>(`meta[${attribute}="${key}"][data-route-seo]`);
   if (!element) {
@@ -48,9 +40,9 @@ export function RouteSeo() {
     const isArticle = route === "knowledge-hub" && Boolean(parts[2]);
     if (isArticle) return;
 
-    const nestedLabel = routeLabels[`${route}/${parts[2]}`]?.[locale];
-    const baseLabel = routeLabels[route]?.[locale] || readableSlug(route) || routeLabels.home[locale];
-    const label = nestedLabel || (parts[2] ? `${baseLabel} — ${readableSlug(parts.at(-1) || "")}` : baseLabel);
+    const routePath = parts.slice(1).join("/");
+    const routeLabel = routeLabels[routePath]?.[locale] || routeLabels[`${route}/${parts[2]}`]?.[locale] || routeLabels[route]?.[locale] || routeLabels["not-found"][locale];
+    const label = route === "home" ? routeLabels.home[locale] : routeLabel;
     const title = `${label} | LetsBeParents`;
     const description = `${label}. ${descriptions[locale]}`;
     const canonical = `${window.location.origin}${pathname.replace(/\/$/, "") || `/${locale}`}`;

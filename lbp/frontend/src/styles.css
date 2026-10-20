@@ -10486,3 +10486,23 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
   font-size: 14px;
   line-height: 20px;
 }
+
+
+/* Keep auth forms centered while the desktop illustration is hidden. */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .auth-page.auth-login-page {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .auth-page.auth-login-page .auth-illustration { display: none; }
+  .auth-page.auth-login-page .auth-panel {
+    width: 100%;
+    max-width: 380px;
+    min-width: 0;
+    margin-left: auto;
+    margin-right: auto;
+    justify-self: center;
+  }
+}
