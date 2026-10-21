@@ -2855,41 +2855,58 @@ def admin_request_ip(request: Request) -> str:
 def admin_login_with_limits(request: Request, email: str, password: str) -> None:
     identity = str(email or "").strip().lower()[:320]
     client_ip = admin_request_ip(request)
-    key = hashlib.sha256((identity + "\0" + client_ip).encode("utf-8")).hexdigest()
-    lock_key = int.from_bytes(bytes.fromhex(key[:16]), "big", signed=True)
+    pair_key = hashlib.sha256((identity + "\0" + client_ip).encode("utf-8")).hexdigest()
+    account_key = hashlib.sha256(("admin-account\0" + identity).encode("utf-8")).hexdigest()
+    keys = sorted({pair_key, account_key})
     now = now_utc()
+
+    def timestamp(value):
+        try:
+            result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return result.replace(tzinfo=timezone.utc) if result.tzinfo is None else result
+        except (TypeError, ValueError):
+            return None
+
     with db_cursor() as (conn, cursor):
-        cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
-        cursor.execute("SELECT id, data FROM app_entities WHERE entity_type = 'admin_login_guard' AND source_key = %s ORDER BY id DESC LIMIT 1 FOR UPDATE", (key,))
-        row = cursor.fetchone()
-        state = as_dict((row or {}).get("data"))
-        def timestamp(value):
-            try:
-                result = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-                return result.replace(tzinfo=timezone.utc) if result.tzinfo is None else result
-            except (TypeError, ValueError):
-                return None
-        blocked_until = timestamp(state.get("blockedUntil"))
-        if blocked_until and blocked_until > now:
-            remaining = max(1, math.ceil((blocked_until - now).total_seconds()))
-            raise HTTPException(status_code=429, detail=f"Too many failed sign-in attempts. Try again in {math.ceil(remaining / 60)} minutes.", headers={"Retry-After": str(remaining)})
-        if len(identity) <= 320 and len(password) <= 200 and has_valid_admin_credentials(identity, password):
-            if row and state.get("failures"):
-                cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps({"failures": 0}), row["id"]))
-                conn.commit()
+        guards = []
+        # The account lock also serializes attempts arriving through different IPs.
+        for key in keys:
+            lock_key = int.from_bytes(bytes.fromhex(key[:16]), "big", signed=True)
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+            cursor.execute("SELECT id, data FROM app_entities WHERE entity_type = 'admin_login_guard' AND source_key = %s ORDER BY id DESC LIMIT 1 FOR UPDATE", (key,))
+            row = cursor.fetchone()
+            state = as_dict((row or {}).get("data"))
+            blocked_until = timestamp(state.get("blockedUntil"))
+            if blocked_until and blocked_until > now:
+                remaining = max(1, math.ceil((blocked_until - now).total_seconds()))
+                raise HTTPException(status_code=429, detail=f"Too many failed sign-in attempts. Try again in {math.ceil(remaining / 60)} minutes.", headers={"Retry-After": str(remaining)})
+            guards.append((key, row, state, blocked_until))
+
+        if has_valid_admin_credentials(identity, password):
+            for key, row, state, blocked_until in guards:
+                if row and state.get("failures"):
+                    cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps({"failures": 0}), row["id"]))
+            conn.commit()
             return
-        last_failure = timestamp(state.get("lastFailureAt"))
-        failures = int(state.get("failures") or 0) + 1 if last_failure and (now - last_failure).total_seconds() < ADMIN_LOGIN_LOCK_SECONDS and not blocked_until else 1
-        blocked_until = now + timedelta(seconds=ADMIN_LOGIN_LOCK_SECONDS) if failures >= ADMIN_LOGIN_MAX_FAILURES else None
-        state = {"failures": failures, "lastFailureAt": now.isoformat(), "blockedUntil": blocked_until.isoformat() if blocked_until else None}
-        if row:
-            cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps(state), row["id"]))
-        else:
-            cursor.execute("INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at) VALUES ('admin_login_guard', %s, 'Admin sign-in protection', 'ACTIVE', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())", (key, json.dumps(state)))
-        audit(conn, identity or "unknown", "ADMIN_LOGIN_FAILED", "admin_login", key, {"clientIp": client_ip, "failedAttempts": failures, "blockedUntil": state["blockedUntil"]})
+
+        highest_failures = 0
+        lock_until = None
+        for key, row, state, blocked_until in guards:
+            last_failure = timestamp(state.get("lastFailureAt"))
+            failures = int(state.get("failures") or 0) + 1 if last_failure and (now - last_failure).total_seconds() < ADMIN_LOGIN_LOCK_SECONDS and not blocked_until else 1
+            blocked_until = now + timedelta(seconds=ADMIN_LOGIN_LOCK_SECONDS) if failures >= ADMIN_LOGIN_MAX_FAILURES else None
+            state = {"failures": failures, "lastFailureAt": now.isoformat(), "blockedUntil": blocked_until.isoformat() if blocked_until else None}
+            if row:
+                cursor.execute("UPDATE app_entities SET data = %s, updated_at = UTC_TIMESTAMP() WHERE id = %s", (json.dumps(state), row["id"]))
+            else:
+                cursor.execute("INSERT INTO app_entities (entity_type, source_key, title, status, data, created_at, updated_at) VALUES ('admin_login_guard', %s, 'Admin sign-in protection', 'ACTIVE', %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())", (key, json.dumps(state)))
+            highest_failures = max(highest_failures, failures)
+            if blocked_until:
+                lock_until = blocked_until
+        audit(conn, identity or "unknown", "ADMIN_LOGIN_FAILED", "admin_login", pair_key, {"clientIp": client_ip, "failedAttempts": highest_failures, "blockedUntil": lock_until.isoformat() if lock_until else None})
         conn.commit()
-    if blocked_until:
-        raise HTTPException(status_code=429, detail="Too many failed sign-in attempts. Sign-in is blocked for 30 minutes.", headers={"Retry-After": str(ADMIN_LOGIN_LOCK_SECONDS)})
+        if lock_until:
+            raise HTTPException(status_code=429, detail="Too many failed sign-in attempts. Sign-in is blocked for 30 minutes.", headers={"Retry-After": str(ADMIN_LOGIN_LOCK_SECONDS)})
     raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 
