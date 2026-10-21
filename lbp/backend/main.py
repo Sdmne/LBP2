@@ -8694,6 +8694,7 @@ def member_likes(user: dict[str, Any] = Depends(require_user)):
             })
             for row in match_rows
         ]
+        attach_profile_photos(cursor, likes_you + my_likes + matches)
     return {
         "likesYou": likes_you,
         "likesYouCount": likes_you_count,
