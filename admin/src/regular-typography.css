@@ -1,7 +1,7 @@
 /* Use regular text throughout navigation, forms, dialogs and data tables. */
 .app,
-.app :where(:not(h1, h2, h3, h4, h5, h6, svg, svg *)),
-:is(dialog, [role="dialog"]) :where(:not(h1, h2, h3, h4, h5, h6, svg, svg *)),
+.app :where(:not(h1, h2, h3, h4, h5, h6, svg, svg *)):not([contenteditable], [contenteditable] *),
+:is(dialog, [role="dialog"]) :where(:not(h1, h2, h3, h4, h5, h6, svg, svg *)):not([contenteditable], [contenteditable] *),
 .login-card :where(label, input, button, p) {
   font-weight: 400 !important;
 }
