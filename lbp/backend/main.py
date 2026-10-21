@@ -3829,9 +3829,10 @@ def attach_profile_photos(cursor, items: list[dict[str, Any]]) -> list[dict[str,
         if "data" in item:
             data.update(photos=urls, avatarUrl=avatar, primaryPhotoUrl=current.get("publicUrl"))
             item["data"] = data
-        verified = profile_has_verified_badge({**item, "data": {**data, "source": source, "verificationProvider": provider}})
+        verified = profile_has_verified_badge({**item, "data": {**data, "source": source, "verificationProvider": provider, "verifiedAt": data.get("verifiedAt") or item.get("_photoVerifiedAt")}})
         item.pop("_photoSource", None)
         item.pop("_photoProvider", None)
+        item.pop("_photoVerifiedAt", None)
         item["isVerified"] = verified
         if "data" in item:
             data["isVerified"] = verified
@@ -21084,13 +21085,14 @@ def member_catalog(
                       AND verified_photo.status = 'ACTIVE'
                       AND verified_photo.moderation_status = 'APPROVED'
                 ) AND (
-                    EXISTS (
-                        SELECT 1 FROM app_entities verification
+                    profiles.id::text IN (
+                        SELECT verification.data->>'profileId' FROM app_entities verification
                         WHERE verification.entity_type = 'verification'
                           AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
-                          AND (verification.data->>'profileId' = profiles.id::text
-                            OR verification.data->'user'->>'id' = COALESCE(
-                                NULLIF(profiles.data->>'userId', ''), profiles.data->>'id'))
+                    ) OR COALESCE(NULLIF(profiles.data->>'userId', ''), profiles.data->>'id') IN (
+                        SELECT verification.data->'user'->>'id' FROM app_entities verification
+                        WHERE verification.entity_type = 'verification'
+                          AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
                     ) OR (
                         (LEFT(COALESCE(profiles.data->>'source', ''), 9) <> 'handover_'
                             OR NULLIF(profiles.data->>'verificationProvider', '') IS NOT NULL)
@@ -21128,6 +21130,7 @@ def member_catalog(
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) AS "sourceId",
                    data->>'source' AS "_photoSource",
                    data->>'verificationProvider' AS "_photoProvider",
+                   data->>'verifiedAt' AS "_photoVerifiedAt",
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) AS country,
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.city')) AS city,
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')) AS "avatarUrl",
