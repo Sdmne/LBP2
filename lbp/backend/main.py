@@ -3784,16 +3784,22 @@ def attach_profile_photos(cursor, items: list[dict[str, Any]]) -> list[dict[str,
         f"""
         SELECT pp.id, pp.profile_id AS profileId, pp.public_url AS publicUrl,
                COALESCE(NULLIF(avatar_media.public_url, ''), pp.public_url) AS avatarUrl,
-               pp.position
+               pp.position, pp.status, photo_media.storage_key AS "storageKey"
         FROM profile_photos pp
         LEFT JOIN media_files avatar_media ON avatar_media.id = pp.avatar_media_file_id
+        LEFT JOIN media_files photo_media ON photo_media.id = pp.media_file_id
         WHERE pp.status = 'ACTIVE' AND pp.moderation_status = 'APPROVED'
           AND pp.profile_id IN ({placeholders})
         ORDER BY pp.profile_id ASC, pp.position ASC, pp.id ASC
         """, profile_ids,
     )
     by_profile: dict[int, list[dict[str, Any]]] = {}
-    for photo in cursor.fetchall():
+    candidates = cursor.fetchall()
+    if candidates:
+        with ThreadPoolExecutor(max_workers=min(8, len(candidates))) as pool:
+            visible = list(pool.map(lambda photo: admin_photo_visible({**photo, "public_url": photo.get("publicUrl")}), candidates))
+        candidates = [photo for photo, available in zip(candidates, visible) if available]
+    for photo in candidates:
         profile_id = int_or_none(photo.get("profileId"))
         url = normalized_avatar_url(photo.get("publicUrl"))
         if profile_id and url:
@@ -15937,6 +15943,12 @@ def admin_user_overview(profile_id: str, _admin: str = Depends(require_admin)):
         profile_ref = str(profile_id)
 
         photos = admin_user_photos(cursor, profile_id, profile_data)
+
+        primary_photo = next((photo for photo in photos if photo.get("isPrimary") and photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"), None)
+        current_avatar = (normalized_avatar_url(primary_photo.get("avatarUrl")) or normalized_avatar_url(primary_photo.get("public_url"))) if primary_photo else None
+        profile_data["avatarUrl"] = current_avatar
+        profile["data"] = profile_data
+        profile["avatarUrl"] = current_avatar
 
         verification_rows = admin_detail_rows(
             cursor,
