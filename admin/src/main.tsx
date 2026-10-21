@@ -5,5 +5,6 @@ import "./styles.css";
 import "./dashboard-tables.css";
 import "./table-typography.css";
 import "./accessibility.css";
+import "./regular-typography.css";
 
 createRoot(document.getElementById("root")!).render(<BrowserRouter><AdminApp /></BrowserRouter>);

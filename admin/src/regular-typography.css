@@ -1,0 +1,18 @@
+/* Use regular text throughout navigation, forms, dialogs and data tables. */
+.app,
+.app :where(:not(h1, h2, h3, h4, h5, h6, svg, svg *)),
+.login-card :where(label, input, button, p) {
+  font-weight: 400 !important;
+}
+
+.message-thread article {
+  align-self: flex-start;
+  width: fit-content;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-thread article.is-own {
+  align-self: flex-end;
+  background: #fff0f6;
+}

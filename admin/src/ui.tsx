@@ -7850,8 +7850,11 @@ function GenericList({ view }: { view: string }) {
                 {(view === "verifications"
                   ? [
                       "PENDING",
+                      "NOT_STARTED",
+                      "IN_REVIEW",
                       "APPROVED",
                       "DECLINED",
+                      "FAILED",
                       "ABANDONED",
                       "EXPIRED",
                     ].map((value) => ({ value }))
@@ -8188,9 +8191,11 @@ function GenericList({ view }: { view: string }) {
                 <tbody>
                   {items.map((row, index) => {
                     const rowKey = String(
-                      view === "subscriptions"
-                        ? (row.id ?? row.profileId ?? index)
-                        : (row.profileId ?? row.profile_id ?? row.id ?? index),
+                      view === "verifications"
+                        ? verificationRouteId(row) || index
+                        : view === "subscriptions"
+                          ? (row.id ?? row.profileId ?? index)
+                          : (row.profileId ?? row.profile_id ?? row.id ?? index),
                     );
                     return (
                       <tr
@@ -12209,7 +12214,14 @@ function UserTabContent({
             <p>No hidden conversations</p>
           ) : currentId ? (
             messages.map((row, index) => (
-              <article key={String(row.id ?? index)}>
+              <article
+                key={String(row.id ?? index)}
+                className={
+                  String(row.sender_profile_id ?? row.senderProfileId ?? "") === profileId
+                    ? "is-own"
+                    : "is-other"
+                }
+              >
                 <b>{valueOf(row.sender_name ?? "Member")}</b>
                 <p>{valueOf(row.body)}</p>
                 <small>{verificationDate(row.created_at)}</small>
