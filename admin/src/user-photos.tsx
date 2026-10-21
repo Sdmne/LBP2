@@ -360,6 +360,7 @@ export function UserPhotos({
     const state = String(row.status ?? "").toUpperCase();
     return ["ACTIVE", "PENDING", "REJECTED"].includes(state) && row.isDeleted !== true;
   });
+  const cropPhoto = visibleRows.find((row) => String(row.id) === cropId);
   const sourceFor = (id: string) =>
     `/api/admin/profile-photos/${encodeURIComponent(id)}/content`;
   const pathFor = (id: string) =>
@@ -494,10 +495,10 @@ export function UserPhotos({
         })}
       </div>
       {!visibleRows.length && <p className="empty user-tab-empty">No photos.</p>}
-      {cropId && (
+      {cropId && cropPhoto && (
         <PhotoCrop
           key={cropId}
-          source={sourceFor(cropId)}
+          source={String(cropPhoto.previewUrl ?? "") || sourceFor(cropId)}
           closeIcon={closeIcon}
           close={() => setCropId("")}
           onSave={async (file) => {
