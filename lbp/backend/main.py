@@ -21077,7 +21077,29 @@ def member_catalog(
             )
             params.extend(looking_for)
         if verifiedOnly:
-            where_parts.append("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$.isVerified')), 'false') = 'true'")
+            where_parts.append("""
+                EXISTS (
+                    SELECT 1 FROM profile_photos verified_photo
+                    WHERE verified_photo.profile_id = profiles.id
+                      AND verified_photo.status = 'ACTIVE'
+                      AND verified_photo.moderation_status = 'APPROVED'
+                ) AND (
+                    EXISTS (
+                        SELECT 1 FROM app_entities verification
+                        WHERE verification.entity_type = 'verification'
+                          AND UPPER(verification.status) IN ('APPROVED', 'VERIFIED')
+                          AND (verification.data->>'profileId' = profiles.id::text
+                            OR verification.data->'user'->>'id' = COALESCE(
+                                NULLIF(profiles.data->>'userId', ''), profiles.data->>'id'))
+                    ) OR (
+                        (LEFT(COALESCE(profiles.data->>'source', ''), 9) <> 'handover_'
+                            OR NULLIF(profiles.data->>'verificationProvider', '') IS NOT NULL)
+                        AND (LOWER(COALESCE(profiles.data->>'isVerified', 'false')) IN ('true', '1', 'yes')
+                            OR LOWER(COALESCE(profiles.data->>'approvedVerification', 'false')) IN ('true', '1', 'yes')
+                            OR LOWER(TRIM(COALESCE(profiles.data->>'verifiedAt', ''))) NOT IN ('', 'null', 'none'))
+                    )
+                )
+            """)
         if videoVerifiedOnly:
             where_parts.append("COALESCE(data->>'isVideoVerified', 'false') = 'true'")
         if days is not None:
@@ -21135,6 +21157,8 @@ def member_catalog(
         )
         items = [normalize_row(row) for row in cursor.fetchall()]
         attach_profile_photos(cursor, items)
+        if verifiedOnly:
+            items = [item for item in items if item.get("isVerified")]
     response.headers["Cache-Control"] = "no-store"
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
