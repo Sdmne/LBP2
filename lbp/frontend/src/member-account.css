@@ -104,7 +104,7 @@
   background: #f1f5f9;
 }
 .member-account-surface .detail-gallery-image {
-  object-position: top;
+  object-position: center;
 }
 .member-account-surface .member-profile-surface .tag {
   font-size: 12px;
