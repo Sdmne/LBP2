@@ -19271,7 +19271,7 @@ def admin_storage_change(action: str, payload: AdminStorageSelectionPayload, act
                             snapshot["avatars"].append({"profileId": photo["profile_id"], "avatarUrl": data.get("avatarUrl"), "wizard": data.get("isWizardCompleted")})
                             update_profile_data(cursor, int(photo["profile_id"]), {"avatarUrl": None, "isWizardCompleted": False, "isVerified": False, "verifiedAt": None})
                             reset_verification_after_primary_photo_change(cursor, int(photo["profile_id"]))
-                        cursor.execute("UPDATE profile_photos SET status = 'TRASHED', public_url = NULL, updated_at = UTC_TIMESTAMP() WHERE id = %s", (photo["id"],))
+                        cursor.execute("UPDATE profile_photos SET status = 'TRASHED', public_url = '', updated_at = UTC_TIMESTAMP() WHERE id = %s", (photo["id"],))
                     if public_url and not shared:
                         cursor.execute("SELECT id, media_url, body FROM conversation_messages WHERE media_url = %s FOR UPDATE", (public_url,))
                         for message in cursor.fetchall():
@@ -19339,7 +19339,7 @@ def admin_storage_change(action: str, payload: AdminStorageSelectionPayload, act
                     continue
                 if file:
                     file.unlink(missing_ok=True)
-                cursor.execute("UPDATE profile_photos SET status = 'DELETED', public_url = NULL, updated_at = UTC_TIMESTAMP() WHERE (media_file_id = %s OR avatar_media_file_id = %s) AND status = 'TRASHED'", (identifier, identifier))
+                cursor.execute("UPDATE profile_photos SET status = 'DELETED', public_url = '', updated_at = UTC_TIMESTAMP() WHERE (media_file_id = %s OR avatar_media_file_id = %s) AND status = 'TRASHED'", (identifier, identifier))
                 metadata["adminTrash"] = {"state": "purged", "purgedAt": now_utc().isoformat(), "purgedBy": actor}
                 cursor.execute("UPDATE media_files SET public_url = NULL, metadata = %s WHERE id = %s", (json.dumps(metadata, ensure_ascii=False), identifier))
                 audit(conn, actor, "STORAGE_PURGED", "media", identifier)
