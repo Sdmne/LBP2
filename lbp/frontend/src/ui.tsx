@@ -3856,7 +3856,6 @@ function CatalogFilterModal({
   onClose,
   onApply,
   countries,
-  cities,
   premium,
   onPremium,
   premiumPromptOpen,
@@ -3867,7 +3866,6 @@ function CatalogFilterModal({
   onClose: () => void;
   onApply: () => void;
   countries: CatalogOption[];
-  cities: CatalogOption[];
   premium: boolean;
   onPremium: () => void;
   premiumPromptOpen: boolean;
@@ -3876,6 +3874,8 @@ function CatalogFilterModal({
   const [openField, setOpenField] = useState("");
   const [query, setQuery] = useState("");
   const [cityQuery, setCityQuery] = useState(catalogText(value.city));
+  const cities = useCatalogCities(value.country.length === 1 ? value.country[0] : "", cityQuery, true);
+  const citySelectionRequired = Boolean(cityQuery.trim() && cityQuery !== value.city);
   const [cityActiveIndex, setCityActiveIndex] = useState(-1);
   const [dropdownActiveIndex, setDropdownActiveIndex] = useState(-1);
   const set = <K extends keyof CatalogFilters>(
@@ -3915,7 +3915,7 @@ function CatalogFilterModal({
   useEffect(() => {
     if (openField !== "city") setCityQuery(catalogText(value.city));
     setCityActiveIndex(-1);
-  }, [value.city, value.country.join(","), openField]);
+  }, [value.city, value.country.join(",")]);
   useEffect(() => {
     if (!openField) return;
     const index = openField === "city" ? cityActiveIndex : dropdownActiveIndex;
@@ -4021,6 +4021,7 @@ function CatalogFilterModal({
             placeholder={disabled ? copy.cityFirst : copy.cityPlaceholder}
             aria-labelledby={labelId}
             aria-autocomplete="list"
+            aria-invalid={citySelectionRequired || undefined}
             aria-expanded={dropdownOpen}
             aria-controls={dropdownOpen ? `${controlId}-options` : undefined}
             aria-activedescendant={
@@ -4451,6 +4452,7 @@ function CatalogFilterModal({
           <button
             type="button"
             className="catalog-filter-apply"
+            disabled={citySelectionRequired}
             onClick={onApply}
           >
             {copy.apply}
@@ -4538,11 +4540,6 @@ function Catalog({ session }: { session: Session }) {
     countries: CatalogOption[];
     premium: boolean;
   }>({ countries: [], premium: catalogBoolean(session?.user.isPremium) });
-  const cities = useCatalogCities(
-    draftFilters.country.length === 1 ? draftFilters.country[0] : "",
-    draftFilters.city,
-    filterOpen,
-  );
   const querySignature = JSON.stringify([period, filters]);
   useEffect(() => {
     let alive = true;
@@ -4846,7 +4843,6 @@ function Catalog({ session }: { session: Session }) {
           }}
           onApply={applyFilters}
           countries={catalogOptions.countries}
-          cities={cities}
           premium={catalogOptions.premium}
           onPremium={openPremiumPrompt}
           premiumPromptOpen={premiumPromptOpen}
