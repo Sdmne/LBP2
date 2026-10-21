@@ -297,7 +297,7 @@ function label(value: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 function statusLabel(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+  return (value.charAt(0).toUpperCase() + value.slice(1).toLowerCase()).replace(/_/g, " ");
 }
 function settingBoolean(value: unknown) {
   if (typeof value === "string")
@@ -12795,7 +12795,7 @@ function UserDetail() {
         <AdminIcon name="arrowLeft" /> Back to Users
       </Link>
       {notice && <p className="notice">{notice}</p>}
-      {actionError && <p className="error" role="alert">{actionError}</p>}
+      {actionError && !verificationOpen && <p className="error" role="alert">{actionError}</p>}
       <header className="detail-heading user-detail-heading">
         <div className="user-detail-identity">
           <PersonAvatar
@@ -12836,7 +12836,7 @@ function UserDetail() {
             type="button"
             className="user-grant-premium"
             disabled={!canGrantPremium}
-            title={premium ? "Premium is already active" : !verified ? "Verify the profile before granting Premium" : "Grant Premium"}
+            title={premium ? "Premium is already active" : "Grant Premium"}
             onClick={() => setModal({ kind: "grant", title: "Grant Premium" })}
           >
             <AdminIcon name="crown" /> Grant Premium
@@ -13052,7 +13052,7 @@ function UserDetail() {
             />
           ))}
       </div>
-      <ConfirmModal open={canVerify && verificationOpen} title={verified ? "Revoke Verification" : "Verify User Manually"} message={<label className="verification-reason-field" htmlFor="profile-verification-reason">Reason<textarea id="profile-verification-reason" value={verificationReason} onChange={event => setVerificationReason(event.target.value)} maxLength={2000} rows={3} required /></label>} confirmLabel={verified ? "Revoke" : "Verify"} confirmClassName={verified ? "danger" : "primary"} confirmDisabled={!verificationReason.trim()} busy={verificationBusy} onClose={() => { if (!verificationBusy) setVerificationOpen(false); }} onConfirm={toggleVerification} />
+      <ConfirmModal open={canVerify && verificationOpen} title={verified ? "Revoke Verification" : "Verify User Manually"} message={<><label className="verification-reason-field" htmlFor="profile-verification-reason">Reason<textarea id="profile-verification-reason" value={verificationReason} onChange={event => setVerificationReason(event.target.value)} maxLength={2000} rows={3} required /></label>{actionError && <p className="error" role="alert">{actionError}</p>}</>} confirmLabel={verified ? "Revoke" : "Verify"} confirmClassName={verified ? "danger" : "primary"} confirmDisabled={!verificationReason.trim()} busy={verificationBusy} onClose={() => { if (!verificationBusy) setVerificationOpen(false); }} onConfirm={toggleVerification} />
       <ActionModal
         state={modal}
         onClose={() => setModal(null)}
