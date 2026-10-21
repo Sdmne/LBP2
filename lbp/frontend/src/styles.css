@@ -5973,15 +5973,18 @@ button.landing-gradient-button:disabled {
 }
 
 .catalog-card-actions button.active {
-  background: #25a8e0;
+  background: #e2e8f0;
+  color: #64748b;
+  box-shadow: none;
+  filter: none;
   transform: none;
   cursor: default;
   opacity: 1;
-  transition: none;
+  transition: none !important;
 }
 
 .catalog-card-actions button.active:hover {
-  background: #25a8e0;
+  background: #e2e8f0;
   transform: none;
 }
 

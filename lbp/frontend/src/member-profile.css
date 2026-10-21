@@ -1246,9 +1246,13 @@
 }
 .member-profile-surface .detail-like.active,
 .member-profile-surface [data-like-profile].primary.active {
-  border-color: var(--pink);
-  color: #fff;
-  background: var(--pink);
+  border-color: #e2e8f0;
+  color: #64748b;
+  background: #e2e8f0;
+  box-shadow: none;
+  filter: none;
+  transform: none;
+  transition: none !important;
 }
 .member-profile-surface .detail-like.active .action-icon {
   fill: currentColor;
