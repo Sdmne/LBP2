@@ -4488,7 +4488,7 @@ function useCatalogCities(
               cities: (data.cities || []).map((item) => ({
                 value: catalogText(item.value),
                 label: catalogText(item.label ?? item.value),
-              })),
+              })).filter((item, index, all) => all.findIndex((other) => other.value.toLowerCase() === item.value.toLowerCase()) === index),
             });
         })
         .catch(() => {
