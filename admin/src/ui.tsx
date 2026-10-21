@@ -8776,7 +8776,7 @@ function VerificationDetail() {
   >(null);
   const [busy, setBusy] = useState(false);
   const [actionReason, setActionReason] = useState("");
-  useEffect(() => { setActionReason(""); }, [confirmAction]);
+  useEffect(() => { setActionReason(""); setError(""); }, [confirmAction]);
   // Manual approval is limited to ADMIN accounts (the API enforces it too).
   const [isAdminRole, setIsAdminRole] = useState(false);
   useEffect(() => {
@@ -8831,8 +8831,8 @@ function VerificationDetail() {
         await api.delete(`/admin/verifications/${encodeURIComponent(id)}`, { reason: actionReason.trim() });
         navigate("/verifications");
       }
-    } catch {
-      setError(
+    } catch (actionError) {
+      setError(actionError instanceof Error && actionError.message ? actionError.message :
         confirmAction === "approve"
           ? "Could not approve this verification."
           : confirmAction === "revoke"
@@ -8844,7 +8844,7 @@ function VerificationDetail() {
     }
   };
 
-  const reasonField = <label className="verification-reason-field" htmlFor="verification-action-reason">Reason<textarea id="verification-action-reason" value={actionReason} onChange={event => setActionReason(event.target.value)} rows={3} maxLength={2000} required disabled={busy} /></label>;
+  const reasonField = <><label className="verification-reason-field" htmlFor="verification-action-reason">Reason<textarea id="verification-action-reason" value={actionReason} onChange={event => setActionReason(event.target.value)} rows={3} maxLength={2000} required disabled={busy} /></label>{error && <p className="error" role="alert">{error}</p>}</>;
   if (!detail) {
     return (
       <section className="verification-detail-page">
@@ -8971,7 +8971,7 @@ function VerificationDetail() {
           <AdminIcon name="arrowLeft" /> Back to Verifications
         </Link>
         {notice && <p className="notice">{notice}</p>}
-        {error && <p className="error">{error}</p>}
+        {error && !confirmAction && <p className="error">{error}</p>}
         <header className="verification-detail-heading">
           <div className="verification-detail-identity">
             <PersonAvatar
@@ -9233,7 +9233,7 @@ function VerificationDetail() {
         confirmDisabled={!actionReason.trim()}
         modalClassName="verification-confirm-modal"
         title="Delete Session"
-        message={`Delete the verification session for ${profileName}? This action cannot be undone.`}
+        message={<><p>Delete the verification session for {profileName}? This action cannot be undone.</p>{reasonField}</>}
         confirmLabel="Delete Session"
         busy={busy}
         onClose={() => setConfirmAction(null)}
