@@ -1802,6 +1802,15 @@ def clinic_slug_target(rows: list[dict[str, Any]], slug: str) -> dict[str, Any] 
         target = next((row for row in rows if str(row.get(key) or "").strip() == slug), None)
         if target is not None:
             return target
+    for row in rows:
+        aliases = row.get("slugAliases") or []
+        if isinstance(aliases, str):
+            try:
+                aliases = json.loads(aliases)
+            except (ValueError, TypeError):
+                aliases = []
+        if isinstance(aliases, list) and slug in aliases:
+            return row
     aliases = [row for row in rows if slugify(str(row.get("name") or ""), "clinic") == slug]
     return aliases[0] if len(aliases) == 1 else None
 
@@ -20814,7 +20823,8 @@ def public_clinic_detail(slug: str):
         cursor.execute(
             """
             SELECT id, name, city, country,
-                   JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug
+                   JSON_UNQUOTE(JSON_EXTRACT(data, '$.slug')) AS slug,
+                   JSON_EXTRACT(data, '$.slugAliases') AS "slugAliases"
             FROM clinics
             WHERE status = 'active'
             ORDER BY name ASC, id ASC
