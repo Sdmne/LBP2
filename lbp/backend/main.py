@@ -3762,7 +3762,7 @@ def attach_profile_photos(cursor, items: list[dict[str, Any]]) -> list[dict[str,
     if not profile_ids:
         return items
     legacy_ids = [int(item["id"]) for item in items
-                  if str(as_dict(item.get("data")).get("source") or "").startswith("handover_")
+                  if str(as_dict(item.get("data")).get("source") or item.get("_photoSource") or "").startswith("handover_")
                   and "approvedVerification" not in item]
     approved_ids: set[int] = set()
     if legacy_ids:
@@ -3811,8 +3811,10 @@ def attach_profile_photos(cursor, items: list[dict[str, Any]]) -> list[dict[str,
         if "approvedVerification" not in item and profile_id in legacy_ids:
             item["approvedVerification"] = profile_id in approved_ids
         primary = next((photo for photo in reversed(photos) if photo.get("position") == 0), None)
-        legacy = str(data.get("source") or "").startswith("handover_")
-        if primary is None and legacy and (item.get("approvedVerification") or data.get("verificationProvider")):
+        source = data.get("source") or item.get("_photoSource") or ""
+        provider = data.get("verificationProvider") or item.get("_photoProvider")
+        legacy = str(source).startswith("handover_")
+        if primary is None and legacy and (item.get("approvedVerification") or provider):
             available = [photo for photo in admin_user_photos(cursor, profile_id, data)
                          if photo.get("status") == "ACTIVE" and photo.get("moderation_status") == "APPROVED"]
             primary_row = next((photo for photo in available if photo.get("isPrimary")), None)
@@ -3827,7 +3829,9 @@ def attach_profile_photos(cursor, items: list[dict[str, Any]]) -> list[dict[str,
         if "data" in item:
             data.update(photos=urls, avatarUrl=avatar, primaryPhotoUrl=current.get("publicUrl"))
             item["data"] = data
-        verified = profile_has_verified_badge(item)
+        verified = profile_has_verified_badge({**item, "data": {**data, "source": source, "verificationProvider": provider}})
+        item.pop("_photoSource", None)
+        item.pop("_photoProvider", None)
         item["isVerified"] = verified
         if "data" in item:
             data["isVerified"] = verified
@@ -21100,6 +21104,8 @@ def member_catalog(
                    role,
                    status,
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.id')) AS "sourceId",
+                   data->>'source' AS "_photoSource",
+                   data->>'verificationProvider' AS "_photoProvider",
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.country')) AS country,
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.city')) AS city,
                    JSON_UNQUOTE(JSON_EXTRACT(data, '$.avatarUrl')) AS "avatarUrl",
