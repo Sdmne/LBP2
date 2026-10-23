@@ -10506,7 +10506,8 @@ body:has(.catalog-filter-overlay) .member-profile-surface .premium-mobile-only {
 .profile-city-field { display: contents; }
 .profile-field-invalid input,
 .profile-field-invalid .profile-picker-trigger,
-.profile-edit-form input[aria-invalid="true"] {
+.profile-edit-form input[aria-invalid="true"],
+.profile-edit-form textarea[aria-invalid="true"] {
   border-color: #d92d20;
   box-shadow: 0 0 0 1px #d92d20;
 }

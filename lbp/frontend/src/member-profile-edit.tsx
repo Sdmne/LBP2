@@ -1329,6 +1329,8 @@ function ProfileEditor({
                 {c.about}
                 <textarea
                   name="bio"
+                  aria-invalid={invalidFields.includes("bio") || undefined}
+                  aria-describedby={invalidFields.includes("bio") ? "profile-edit-error" : undefined}
                   rows={6}
                   maxLength={2000}
                   value={draft.bio}
