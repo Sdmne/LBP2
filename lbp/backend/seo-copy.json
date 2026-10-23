@@ -379,6 +379,126 @@
       "de": "Finden Sie Ihren Weg — Partner finden",
       "it": "Trova il tuo percorso — Trovare un partner",
       "pl": "Znajdź swoją drogę — Znajdź partnera"
+    },
+    "likes": {
+      "en": "Likes",
+      "ru": "Симпатии",
+      "es": "Me gusta",
+      "pt": "Gostos",
+      "fr": "Mentions J’aime",
+      "de": "Likes",
+      "it": "Mi piace",
+      "pl": "Polubienia"
+    },
+    "visitors": {
+      "en": "Visitors",
+      "ru": "Посетители",
+      "es": "Visitantes",
+      "pt": "Visitantes",
+      "fr": "Visiteurs",
+      "de": "Besucher",
+      "it": "Visitatori",
+      "pl": "Odwiedzający"
+    },
+    "favourites": {
+      "en": "Saved profiles",
+      "ru": "Сохранённые профили",
+      "es": "Perfiles guardados",
+      "pt": "Perfis guardados",
+      "fr": "Profils enregistrés",
+      "de": "Gespeicherte Profile",
+      "it": "Profili salvati",
+      "pl": "Zapisane profile"
+    },
+    "blocked": {
+      "en": "Blocked users",
+      "ru": "Заблокированные пользователи",
+      "es": "Usuarios bloqueados",
+      "pt": "Utilizadores bloqueados",
+      "fr": "Utilisateurs bloqués",
+      "de": "Blockierte Nutzer",
+      "it": "Utenti bloccati",
+      "pl": "Zablokowani użytkownicy"
+    },
+    "photos": {
+      "en": "My photos",
+      "ru": "Мои фотографии",
+      "es": "Mis fotos",
+      "pt": "As minhas fotos",
+      "fr": "Mes photos",
+      "de": "Meine Fotos",
+      "it": "Le mie foto",
+      "pl": "Moje zdjęcia"
+    },
+    "verification": {
+      "en": "Profile verification",
+      "ru": "Верификация профиля",
+      "es": "Verificación del perfil",
+      "pt": "Verificação do perfil",
+      "fr": "Vérification du profil",
+      "de": "Profilverifizierung",
+      "it": "Verifica del profilo",
+      "pl": "Weryfikacja profilu"
+    },
+    "compatibility": {
+      "en": "Compatibility profile",
+      "ru": "Профиль совместимости",
+      "es": "Perfil de compatibilidad",
+      "pt": "Perfil de compatibilidade",
+      "fr": "Profil de compatibilité",
+      "de": "Kompatibilitätsprofil",
+      "it": "Profilo di compatibilità",
+      "pl": "Profil zgodności"
+    },
+    "referral": {
+      "en": "Invite friends",
+      "ru": "Пригласить друзей",
+      "es": "Invitar amigos",
+      "pt": "Convidar amigos",
+      "fr": "Inviter des amis",
+      "de": "Freunde einladen",
+      "it": "Invita amici",
+      "pl": "Zaproś znajomych"
+    },
+    "video-verification": {
+      "en": "Video verification",
+      "ru": "Видеоверификация",
+      "es": "Verificación por vídeo",
+      "pt": "Verificação por vídeo",
+      "fr": "Vérification vidéo",
+      "de": "Videoverifizierung",
+      "it": "Verifica video",
+      "pl": "Weryfikacja wideo"
+    },
+    "account": {
+      "en": "Account",
+      "ru": "Аккаунт",
+      "es": "Cuenta",
+      "pt": "Conta",
+      "fr": "Compte",
+      "de": "Konto",
+      "it": "Account",
+      "pl": "Konto"
+    },
+    "family-room": {
+      "en": "Family Room",
+      "ru": "Семейная комната",
+      "es": "Sala familiar",
+      "pt": "Sala familiar",
+      "fr": "Espace familial",
+      "de": "Familienraum",
+      "it": "Spazio familiare",
+      "pl": "Pokój rodzinny"
+    },
+    "compatibility-report": {
+      "en": "Compatibility report",
+      "ru": "Отчёт о совместимости",
+      "es": "Informe de compatibilidad",
+      "pt": "Relatório de compatibilidade",
+      "fr": "Rapport de compatibilité",
+      "de": "Kompatibilitätsbericht",
+      "it": "Rapporto di compatibilità",
+      "pl": "Raport zgodności"
     }
   },
   "descriptions": {

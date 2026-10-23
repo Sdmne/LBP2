@@ -8,8 +8,8 @@ import {
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { profileLanguageCodes } from "./profile-language-values";
-import { profileCitySelectionValid, profileConstraintMessage, profileValidationMessage, type ProfileValidationLocale } from "./profile-validation";
-import { createApiClient } from "./api";
+import { profileCitySelectionValid, profileConstraintMessage, profileServerValidation, profileValidationMessage, type ProfileValidationLocale } from "./profile-validation";
+import { ApiError, createApiClient } from "./api";
 import {
   MemberError,
   MemberLoading,
@@ -1007,7 +1007,13 @@ function ProfileEditor({
       notifyMemberChanged();
       navigate(`/${routeLocale}/profile`);
     } catch (err) {
-      setError(
+      if (err instanceof ApiError && err.status === 422) {
+        const validation = profileServerValidation(routeLocale, err.detail);
+        setInvalidFields(validation.fields);
+        setError(validation.message);
+        const first = validation.fields[0];
+        if (first) form.current?.querySelector<HTMLElement>(`[name="${first}"], [data-profile-picker="${first}"] button`)?.focus();
+      } else setError(
         toolsError(
           err,
           t(

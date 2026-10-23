@@ -711,8 +711,10 @@ function Overview({
         <span className="account-setting-icon">
           <AccountIcon name={action} />
         </span>
-        <span className="account-setting-label">{label}</span>
-        {extra && <span className="account-setting-value">{extra}</span>}
+        <span className="account-setting-copy">
+          <span className="account-setting-label">{label}</span>
+          {extra && <span className="account-setting-value">{extra}</span>}
+        </span>
         {(href || action === "language") && <Icon name="arrowRightIcon" />}
       </>
     );

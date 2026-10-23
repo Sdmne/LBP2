@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(public readonly status: number, message: string, public readonly detail?: unknown) {
     super(message);
     this.name = "ApiError";
   }
@@ -38,7 +38,9 @@ export function createApiClient(basePath = "/api"): ApiClient {
         window.dispatchEvent(new Event("lbp-session-expired"));
       }
       const message = await response.text();
-      throw new ApiError(response.status, message || `Request failed (${response.status})`);
+      let detail: unknown;
+      try { detail = JSON.parse(message)?.detail; } catch { /* Keep the existing message for non-JSON errors. */ }
+      throw new ApiError(response.status, message || `Request failed (${response.status})`, detail);
     }
     return response.status === 204 ? (undefined as T) : response.json() as Promise<T>;
   };

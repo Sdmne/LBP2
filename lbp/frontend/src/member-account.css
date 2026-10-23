@@ -300,6 +300,13 @@
 .account-setting-icon-blocked {
   background: linear-gradient(135deg, #94a3b8, #64748b);
 }
+.account-setting-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
 .account-setting-label {
   flex: 1;
   min-width: 0;

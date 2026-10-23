@@ -1,5 +1,6 @@
 /* Shared responsive container widths measured from the public reference. */
 .web-app > .web-header .compact-navigation nav { display: none; }
+.web-app > .web-header .compact-navigation .header-actions { margin-left: auto; }
 .web-app > .web-header .compact-navigation .mobile-menu { display: inline-flex; width: 40px; height: 40px; order: 3; padding: 0; flex: 0 0 40px; }
 .web-app > .web-header .compact-navigation nav.open {
   position: absolute; z-index: 60; top: 64px; right: 16px; left: auto;

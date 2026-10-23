@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 
-export type NotFoundLocale = "en" | "ru" | "es";
+export type NotFoundLocale = "en" | "ru" | "es" | "pt" | "fr" | "de" | "it" | "pl";
 
 const NOT_FOUND_TEXT = {
   en: {
@@ -18,6 +18,11 @@ const NOT_FOUND_TEXT = {
     description: "La página que buscas no existe.",
     action: "Ir al inicio",
   },
+  pt: { title: "Página não encontrada", description: "A página que procura não existe.", action: "Ir para o início" },
+  fr: { title: "Page introuvable", description: "La page que vous recherchez n’existe pas.", action: "Retour à l’accueil" },
+  de: { title: "Seite nicht gefunden", description: "Die gesuchte Seite existiert nicht.", action: "Zur Startseite" },
+  it: { title: "Pagina non trovata", description: "La pagina che cerchi non esiste.", action: "Vai alla home" },
+  pl: { title: "Nie znaleziono strony", description: "Strona, której szukasz, nie istnieje.", action: "Strona główna" },
 } satisfies Record<NotFoundLocale, {
   title: string;
   description: string;

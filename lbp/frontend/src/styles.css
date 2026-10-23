@@ -1319,6 +1319,8 @@ a.profile-card-linked:hover {
 .access-card > .account-back {
   width: fit-content;
   margin: 0;
+  font-weight: 600;
+  text-decoration: none;
 }
 .advisor-page > .account-back svg,
 .access-card > .account-back svg {
@@ -8284,6 +8286,30 @@ body.catalog-filter-open {
   text-decoration: none;
   font-weight: 700;
 }
+@media (max-width: 768px) {
+  .reference-directory-card h2 {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .reference-directory-card .reference-directory-location {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .reference-directory-card .reference-directory-location > span {
+    flex: 1 1 calc(100% - 22px);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .reference-directory-card .reference-website-label {
+    margin-left: 22px;
+  }
+}
 
 .reference-directory-location {
   display: flex;
@@ -9953,6 +9979,16 @@ a.detail-location:hover {
 }
 .web-footer {
   flex: 0 0 auto;
+}
+.web-main.auth-main,
+.web-main.standalone-auth-main {
+  display: flex;
+  flex-direction: column;
+}
+.web-main.auth-main > .auth-page,
+.web-main.standalone-auth-main > .standalone-auth-page {
+  flex: 1 0 auto;
+  min-height: 0;
 }
 .web-main > .loading,
 .web-main .loading-page,

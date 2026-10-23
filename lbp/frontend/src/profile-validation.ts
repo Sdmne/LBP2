@@ -11,6 +11,28 @@ const messages = {
 
 export type ProfileValidationLocale = keyof typeof messages;
 
+const markupMessages: Record<ProfileValidationLocale, string> = {
+  en: "Remove < and > from the highlighted fields. HTML markup is not allowed.",
+  ru: "Удалите < и > из выделенных полей. HTML-разметка не разрешена.",
+  es: "Elimina < y > de los campos resaltados. No se permite código HTML.",
+  pt: "Remova < e > dos campos destacados. Não é permitido código HTML.",
+  fr: "Retirez < et > des champs surlignés. Le code HTML n’est pas autorisé.",
+  de: "Entfernen Sie < und > aus den markierten Feldern. HTML ist nicht erlaubt.",
+  it: "Rimuovi < e > dai campi evidenziati. Il codice HTML non è consentito.",
+  pl: "Usuń < i > z zaznaczonych pól. Kod HTML jest niedozwolony.",
+};
+
+export function profileServerValidation(locale: ProfileValidationLocale, detail: unknown): { fields: string[]; message: string } {
+  const errors = Array.isArray(detail) ? detail : [];
+  const fields = [...new Set(errors.flatMap((item) => {
+    if (!item || typeof item !== "object" || !Array.isArray(item.loc)) return [];
+    const field = item.loc.find((value: unknown) => typeof value === "string" && value !== "body");
+    return typeof field === "string" && /^[a-zA-Z][a-zA-Z0-9]*$/.test(field) ? [field] : [];
+  }))];
+  const hasMarkup = errors.some((item) => /HTML markup/i.test(String(item?.msg ?? ""))) || /HTML markup/i.test(typeof detail === "string" ? detail : "");
+  return { fields, message: hasMarkup ? markupMessages[locale] : messages[locale].invalid };
+}
+
 const citySelectionMessages: Record<ProfileValidationLocale, string> = {
   en: "Select a city from the list.",
   ru: "Выберите город из списка.",

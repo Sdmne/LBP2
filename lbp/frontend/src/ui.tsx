@@ -1158,7 +1158,7 @@ function Shell({
               <Link to={`/${locale}/contact`}>{text.contact}</Link>
               <Link to={`/${locale}/trust-safety`}>{text.safety}</Link>
               {footerPages.map((page) => (
-                <Link key={page.slug} to={footerPagePath(locale, page.slug)}>{page.title}</Link>
+                <Link key={page.slug} to={footerPagePath(locale, page.slug)}>{page.slug === "delete-account" ? ({ en: "Delete Your Account", ru: "Удалить аккаунт", es: "Eliminar tu cuenta", pt: "Eliminar a sua conta", fr: "Supprimer votre compte", de: "Konto löschen", it: "Elimina il tuo account", pl: "Usuń konto" }[locale]) : defaultFooterPages(text).find((item) => item.slug === page.slug)?.title ?? page.title}</Link>
               ))}
             </nav>
           </div>
@@ -3237,13 +3237,13 @@ try { return new Intl.DisplayNames([locale], { type: "region" }).of(value) || va
                   <div className="reference-directory-card-link">
                     <Link className={`reference-directory-card-media ${kind}`} to={href}><span>{initials(name)}</span>{image ? <img src={image} alt="" loading="lazy" onError={(event) => event.currentTarget.remove()} /> : null}</Link>
                     <div className="reference-directory-card-content">
-                      <h2><Link to={href}>{name}</Link></h2>
-                      <p className="reference-directory-location">{icon("pin")}<span>{itemLocation(item)}</span>{website ? <a className="reference-website-label" href={website} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>{icon("globe")}<span>{copy.website}</span></a> : null}</p>
+                    <h2><Link to={href} title={name}>{name}</Link></h2>
+                    <p className="reference-directory-location">{icon("pin")}<span title={itemLocation(item)}>{itemLocation(item)}</span>{website ? <a className="reference-website-label" href={website} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>{icon("globe")}<span>{copy.website}</span></a> : null}</p>
                       <div className="reference-directory-tags">{cardTags(item).map((tag, index) => <span key={`${tagKey(tag)}-${index}`}>{tagLabel(tag)}</span>)}</div>
                       {excerpt ? <p className="reference-directory-excerpt">{excerpt}</p> : null}
                     </div>
                   </div>
-                  <button className="reference-favourite-button" type="button" disabled={pendingFavourite.has(id)} aria-pressed={liked} onClick={(event) => { event.stopPropagation(); void toggleFavourite(item); }}>{icon("like")}<span>{liked ? copy.liked : copy.like}</span></button>
+                <button className="reference-favourite-button" type="button" disabled={pendingFavourite.has(id)} aria-label={liked ? copy.liked : copy.like} aria-pressed={liked} onClick={(event) => { event.stopPropagation(); void toggleFavourite(item); }}>{icon("like")}<span>{liked ? copy.liked : copy.like}</span></button>
                 </article>;
               })}
             </div>
@@ -9538,7 +9538,7 @@ function AiAdvisor({ session }: { session: Session }) {
   const text = AI_ADVISOR_TEXT[locale] ?? AI_ADVISOR_TEXT.en;
   const navigate = useNavigate();
   const backLabel = ({
-    en: "Back",
+    en: "Go back",
     ru: "Назад",
     es: "Volver",
     pt: "Voltar",
@@ -9546,7 +9546,7 @@ function AiAdvisor({ session }: { session: Session }) {
     de: "Zurück",
     it: "Indietro",
     pl: "Wstecz",
-  } as Record<string, string>)[locale] ?? "Back";
+  } as Record<string, string>)[locale] ?? "Go back";
   const backButton = (
     <Link className="account-back" to={`/${locale}/profile`}>
       <ProfileIcon name="pageBackIcon" /> {backLabel}
@@ -10773,7 +10773,7 @@ const knowledgeCategoryCopy: Record<CookieLocale, Record<string, string>> = {
   },
   ru: {
     "ivf-in-vitro-fertilization": "ЭКО - Экстракорпоральное оплодотворение",
-    "co-parenting": "Копереннтинг",
+    "co-parenting": "Совместное воспитание",
     "sperm-donor": "Донор спермы",
     fertility: "Фертильность",
     parenthood: "Родительство",
@@ -11650,19 +11650,17 @@ function ContentPage({ forcedSlug }: { forcedSlug?: string } = {}) {
   const slug = forcedSlug ?? routeSlug;
   const [page, setPage] = useState<Row | null>(null);
   useEffect(() => {
+    setPage(null);
     api
       .get<Row>(
         `/public/content-pages/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}`,
       )
       .then(setPage)
-      .catch(() =>
-        setPage({
-          title: "Page not found",
-          content: "This page is not currently available.",
-        }),
-      );
+      .catch((error) => setPage({ missing: error instanceof ApiError && error.status === 404, failed: true }));
   }, [locale, slug]);
   if (!page) return <LoadingIndicator />;
+  if (page.missing) return <NotFoundPage locale={localeOf()} />;
+  if (page.failed) return <p className="error" role="alert">{knowledgeHubCopy[localeOf()].unavailable}</p>;
   const html = asText(page.bodyHtml ?? page.body_html ?? page.content ?? page.body ?? page.html);
   return (
     <article className="static-page">
@@ -18620,7 +18618,7 @@ export function WebApp() {
         path="/:locale/community/post/:postId"
         element={content(<CommunityPostDetail session={session} />)}
       />
-      <Route path="*" element={content(<NotFoundPage locale={legacyLocaleOf(locale)} />)} />
+      <Route path="*" element={content(<NotFoundPage locale={localeOf()} />)} />
       </Routes>
     </>
   );
