@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
 
 export type NotFoundLocale = "en" | "ru" | "es" | "pt" | "fr" | "de" | "it" | "pl";
 
@@ -30,14 +31,18 @@ const NOT_FOUND_TEXT = {
 }>;
 
 export function NotFoundPage({ locale }: { locale: NotFoundLocale }) {
-  const copy = NOT_FOUND_TEXT[locale];
+  const { pathname } = useLocation();
+  const routeLocale = pathname.split("/").filter(Boolean)[0];
+  const activeLocale = routeLocale in NOT_FOUND_TEXT ? routeLocale as NotFoundLocale : locale;
+  const copy = NOT_FOUND_TEXT[activeLocale];
+  useEffect(() => { document.title = `${copy.title} | LetsBeParents`; }, [copy.title]);
 
   return (
     <section className="not-found-page" aria-labelledby="not-found-heading">
       <strong className="not-found-code" aria-hidden="true">404</strong>
       <h1 id="not-found-heading">{copy.title}</h1>
       <p>{copy.description}</p>
-      <Link className="not-found-action" to={`/${locale}`}>{copy.action}</Link>
+      <Link className="not-found-action" to={`/${activeLocale}`}>{copy.action}</Link>
     </section>
   );
 }
