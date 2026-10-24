@@ -825,6 +825,9 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   primaryButton: {
+    minWidth: 144,
+    maxWidth: "100%",
+    paddingHorizontal: 24,
     marginTop: spacing.sm,
     backgroundColor: colors.pink,
     borderRadius: radius.pill,

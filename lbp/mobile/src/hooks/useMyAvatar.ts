@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
+import { AppState } from "react-native";
 import { fetchPhotos } from "../api/photos";
 
 // All headers share the primary photo and one in-flight request. Successful
-// results stay cached until PhotosScreen or AuthContext invalidates them;
-// failed requests can retry when a header mounts or its screen regains focus.
+// results remain visible during background revalidation on screen focus and
+// foreground resume. Local photo changes and account changes invalidate them.
 let cached: string | null | undefined; // undefined = not loaded yet
 let inFlight: Promise<string | null> | null = null;
 let generation = 0;
@@ -14,8 +15,8 @@ function publish(url: string | null) {
   listeners.forEach((listener) => listener(url));
 }
 
-function load(): Promise<string | null> {
-  if (cached !== undefined) return Promise.resolve(cached);
+function load(refresh = false): Promise<string | null> {
+  if (!refresh && cached !== undefined) return Promise.resolve(cached);
   if (!inFlight) {
     const requestGeneration = generation;
     inFlight = fetchPhotos()
@@ -65,7 +66,13 @@ export function useMyAvatarUrl(): string | null {
     };
   }, []);
   useFocusEffect(useCallback(() => {
-    void load();
+    void load(true);
   }, []));
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void load(true);
+    });
+    return () => subscription.remove();
+  }, []);
   return url;
 }

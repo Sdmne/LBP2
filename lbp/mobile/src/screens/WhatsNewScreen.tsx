@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -81,6 +81,7 @@ const TIER_COLORS: Record<Tier, { bg: string; text: string }> = {
 };
 
 export default function WhatsNewScreen() {
+  const [expanded, setExpanded] = useState<ItemKey | null>(null);
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -187,7 +188,13 @@ export default function WhatsNewScreen() {
             {ITEMS.map((item) => {
               const tierStyle = TIER_COLORS[item.tier];
               return (
-                <Pressable key={item.key} style={styles.card} onPress={() => openItem(item.key)}>
+                <View key={item.key} style={styles.card}>
+                <Pressable
+                  style={styles.featureToggle}
+                  onPress={() => setExpanded(expanded === item.key ? null : item.key)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: expanded === item.key }}
+                >
                   <View style={styles.iconWrap}>
                     <Feather name={ICONS[item.key]} size={20} color={colors.white} />
                   </View>
@@ -196,10 +203,22 @@ export default function WhatsNewScreen() {
                       <Text style={[styles.tierBadgeText, { color: tierStyle.text }]}>{tierLabel(item.tier)}</Text>
                     </View>
                     <Text style={styles.cardTitle}>{t(item.titleKey)}</Text>
-                    <Text style={styles.cardBodyText}>{t(item.bodyKey)}</Text>
                   </View>
-                  <Feather name="chevron-right" size={18} color="#a3a3a3" />
+                  <Feather name={expanded === item.key ? "chevron-up" : "chevron-down"} size={18} color="#a3a3a3" />
                 </Pressable>
+                {expanded === item.key ? (
+                  <View style={styles.featureDetails}>
+                    <Text style={styles.cardBodyText}>{t(item.bodyKey)}</Text>
+                    <Pressable
+                      style={styles.featureAction}
+                      accessibilityRole="button"
+                      onPress={() => item.tier === "free" ? openItem(item.key) : navigation.push("Subscription")}
+                    >
+                      <Text style={styles.ctaButtonText}>{t(item.tier === "free" ? "whatsnew.tryFeature" : "whatsnew.viewPlans")}</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+                </View>
               );
             })}
           </View>
@@ -231,13 +250,14 @@ const styles = StyleSheet.create({
   intro: { fontSize: 14.5, color: colors.mutedOnGradient, textAlign: "center", marginTop: spacing.sm, lineHeight: 21, marginBottom: spacing.lg },
   list: { gap: spacing.sm },
   card: {
-    flexDirection: "row",
-    alignItems: "center",
     gap: spacing.sm,
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
   },
+  featureToggle: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  featureDetails: { gap: spacing.sm },
+  featureAction: { backgroundColor: colors.pink, borderRadius: radius.pill, paddingVertical: 12, paddingHorizontal: 24, alignItems: "center" },
   iconWrap: {
     width: 44,
     height: 44,

@@ -313,7 +313,7 @@ export default function LikesScreen({ navigation }: Props) {
   const listContentStyle = styles.list;
 
   return (
-    <GradientBackground variant="vivid">
+    <GradientBackground variant="vivid" transparent>
     <View style={styles.container}>
       <View style={styles.header}>
         <AppHeader title={t("nav.likes")} actions={headerActions} />
@@ -578,7 +578,7 @@ export default function LikesScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "transparent" },
-  header: { paddingHorizontal: spacing.md },
+  header: { paddingHorizontal: 0 },
   tabsScroll: { flexGrow: 0, flexShrink: 0 },
   tabsRow: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 6, alignItems: "center" },
   tabChip: {

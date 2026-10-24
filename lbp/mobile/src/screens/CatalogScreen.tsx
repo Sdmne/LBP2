@@ -316,7 +316,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
 
   if (loading) {
     return (
-      <GradientBackground variant="vivid">
+      <GradientBackground variant="vivid" transparent>
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.white} />
         </View>
@@ -326,7 +326,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
 
   if (error) {
     return (
-      <GradientBackground variant="vivid">
+      <GradientBackground variant="vivid" transparent>
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
           <Pressable style={styles.retryButton} onPress={() => load()}>
@@ -359,7 +359,7 @@ export default function CatalogScreen({ navigation, route }: Props) {
   );
 
   return (
-    <GradientBackground variant="vivid">
+    <GradientBackground variant="vivid" transparent>
     <View style={styles.screen}>
       <View style={styles.header}>
         <AppHeader
@@ -922,7 +922,7 @@ function ExpandedProfileCard({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "transparent" },
-  header: { paddingHorizontal: spacing.md },
+  header: { paddingHorizontal: 0 },
   avatarButton: {
     width: APP_HEADER_ITEM_SIZE,
     height: APP_HEADER_ITEM_SIZE,
@@ -1121,7 +1121,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   lookingForChipText: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  expandedScroll: { flex: 1 },
+  expandedScroll: { flex: 1, backgroundColor: colors.white },
   expandedScrollContent: { flexGrow: 1 },
   expandedPhotoWrap: { height: 324, alignSelf: "stretch", position: "relative" },
   expandedCardFooter: { bottom: spacing.md + 24 },

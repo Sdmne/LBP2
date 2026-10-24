@@ -116,6 +116,7 @@ export default function KnowledgeHubScreen() {
         contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + insets.bottom }]}
       >
         <AppHeader
+          contentInset={spacing.lg}
           title={t("nav.knowledgeHubTitle")}
           onBackPress={() => navigation.goBack()}
           onAvatarPress={() => navigation.popTo("MainTabs", { screen: "Me" })}

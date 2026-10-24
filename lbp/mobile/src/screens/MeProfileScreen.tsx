@@ -15,7 +15,7 @@ import type { RootStackParamList } from "../navigation/RootNavigator";
 import { openFamilyPlan, openPregnancyRoom } from "../utils/familyPlan";
 import { fetchSubscriptionStatus } from "../api/subscription";
 import { fetchBoostStatus, requestBoost, type BoostStatus } from "../api/boost";
-import { fetchMe } from "../api/profile";
+import { useMyAvatarUrl } from "../hooks/useMyAvatar";
 import { ApiError } from "../api/client";
 import { profilePhotoSource } from "../api/profilePhotoSource";
 import type { SubscriptionTier } from "../api/types";
@@ -57,19 +57,8 @@ export default function MeProfileScreen(_props: Props) {
   // a previous one failed to load tries the new URL fresh, instead of
   // staying stuck on the placeholder from an unrelated earlier failure.
   const [avatarPhotoFailed, setAvatarPhotoFailed] = useState(false);
-  // AuthContext's `user` is only ever public_user() + profileVerified/
-  // isPremium/profileCompleteness (see /api/auth/me in main.py) - it has
-  // NO avatarUrl field at all, so `user?.avatarUrl` referenced here
-  // before was always undefined and this always fell through to the
-  // initial-letter placeholder no matter what photo was set (the actual
-  // cause of Alena's "я поставила фото а на иконке в кабинете ничего не
-  // изменилось" - not a rendering bug, a data-source bug). The real
-  // avatar lives on the profile, via GET /api/member/me
-  // (MemberProfileSummary.avatarUrl) - same endpoint EditProfileScreen
-  // already uses to prefill its form. Fetched on every focus (not just
-  // once) so returning here right after setting a new primary photo on
-  // the Photos screen shows it immediately.
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  // Keep the profile circle and all app headers on the same photo source.
+  const avatarUrl = useMyAvatarUrl();
   useEffect(() => {
     setAvatarPhotoFailed(false);
   }, [avatarUrl]);
@@ -100,14 +89,7 @@ export default function MeProfileScreen(_props: Props) {
           // Leave the previous value (or the isPremium fallback below) in
           // place rather than showing an error on what's a secondary card.
         });
-      fetchMe()
-        .then((res) => {
-          if (!cancelled) setAvatarUrl(res.profile?.avatarUrl ?? null);
-        })
-        .catch(() => {
-          // Leave the previous value in place rather than showing an
-          // error on what's a secondary bit of chrome.
-        });
+      setAvatarPhotoFailed(false);
       fetchBoostStatus()
         .then((status) => {
           if (!cancelled) setBoostStatus(status);
@@ -222,14 +204,14 @@ export default function MeProfileScreen(_props: Props) {
   ];
 
   return (
-    <GradientBackground variant="soft">
+    <GradientBackground variant="soft" transparent>
     <ScrollView style={styles.container} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} contentContainerStyle={styles.content}>
       {/* Was the only tab still relying on the native headerShown:true
           title bar (a plain white "Profile" bar, no brand mark) while
           Explore/Catalog/Messages all build this same in-content header -
           Alena: "почему сверху нету логотипа как на остальных страницах".
           See MainTabs.tsx's headerShown:false for "Me". */}
-      <AppHeader />
+      <AppHeader contentInset={spacing.lg} />
       <View style={styles.hero}>
         {/* Was hardcoded to always show the initial-letter placeholder,
             never checking for a real avatar at all - so uploading and

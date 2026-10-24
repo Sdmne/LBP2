@@ -2,7 +2,10 @@ import React, { useCallback, useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+import { spacing } from "../theme";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
@@ -18,9 +21,11 @@ type Props = {
   badgeCount?: number;
   onBackPress?: () => void;
   onAvatarPress?: () => void;
+  contentInset?: number;
 };
 
-export default function AppHeader({ title, actions, badgeCount, onBackPress, onAvatarPress }: Props) {
+export default function AppHeader({ title, actions, badgeCount, onBackPress, onAvatarPress, contentInset = 0 }: Props) {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user } = useAuth();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -31,10 +36,10 @@ export default function AppHeader({ title, actions, badgeCount, onBackPress, onA
   useFocusEffect(useCallback(() => {
     setFailedAvatarUrl(null);
   }, []));
-  const AvatarWrapper = onAvatarPress ? Pressable : View;
+  const openProfile = onAvatarPress ?? (() => navigation.navigate("MainTabs", { screen: "Me" }));
 
   return (
-    <View style={[styles.row, { paddingTop: Math.max(0, insets.top - headerHeight) }]}>
+    <View style={[styles.row, { paddingTop: Math.max(0, insets.top - headerHeight), marginHorizontal: -contentInset }]}>
       <View style={styles.brand}>
         {onBackPress ? (
           <Pressable hitSlop={10} onPress={onBackPress} style={styles.backButton}>
@@ -46,11 +51,11 @@ export default function AppHeader({ title, actions, badgeCount, onBackPress, onA
       </View>
       <View style={styles.actions}>
         {actions}
-        <AvatarWrapper
+        <Pressable
           style={styles.avatarWrap}
-          onPress={onAvatarPress}
-          accessibilityRole={onAvatarPress ? "button" : undefined}
-          accessibilityLabel={onAvatarPress ? t("nav.profile") : undefined}
+          onPress={openProfile}
+          accessibilityRole="button"
+          accessibilityLabel={t("nav.profile")}
         >
           {avatarUrl && avatarUrl !== failedAvatarUrl ? (
             <Image source={profilePhotoSource(avatarUrl)} style={styles.avatar} onError={() => setFailedAvatarUrl(avatarUrl)} />
@@ -69,7 +74,7 @@ export default function AppHeader({ title, actions, badgeCount, onBackPress, onA
               <Text style={styles.badgeText}>{badgeCount > 99 ? "99+" : String(badgeCount)}</Text>
             </View>
           ) : null}
-        </AvatarWrapper>
+        </Pressable>
       </View>
     </View>
   );
@@ -82,6 +87,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
     paddingBottom: 8,
+    paddingHorizontal: spacing.md,
   },
   brand: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
   backButton: { minWidth: 44, height: APP_HEADER_ITEM_SIZE, alignItems: "center", justifyContent: "center" },

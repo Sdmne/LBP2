@@ -1,10 +1,10 @@
-import React, { useContext } from "react";
+import React, { useContext, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { BottomTabBarHeightCallbackContext, createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { BlurView } from "expo-blur";
+import GradientBackground from "../components/GradientBackground";
 import { Feather } from "@expo/vector-icons";
 import { colors, navigationLayout } from "../theme";
 import { useI18n } from "../i18n/I18nContext";
@@ -54,6 +54,10 @@ const ICON_NAMES: Record<keyof MainTabsParamList, keyof typeof Feather.glyphMap>
 
 const TAB_BAR_HEIGHT = navigationLayout.tabBarHeight;
 
+function tabBackground(name?: string): "soft" | "vivid" | "flat" {
+  return name === "Catalog" || name === "Likes" ? "vivid" : name === "Messages" ? "flat" : "soft";
+}
+
 // UPDATE (Sept 2026, THIRD attempt at this same bug): every previous fix
 // (tabIconWrap centering, then tabBarButton's justifyContent override,
 // then giving that button an explicit height) still shipped Alena
@@ -88,11 +92,6 @@ function CustomTabBar({ state, descriptors, navigation, insets }: BottomTabBarPr
         },
       ]}
     >
-      <BlurView
-        intensity={80}
-        tint="light"
-        style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(255,255,255,0.35)" }]}
-      />
       <View style={styles.row}>
         {state.routes.map((route, index) => {
           const focused = state.index === index;
@@ -137,11 +136,6 @@ const styles = StyleSheet.create({
     height: TAB_BAR_HEIGHT,
     borderRadius: 999,
     overflow: "hidden",
-    shadowColor: "rgba(2,8,23,1)",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18,
-    shadowRadius: 30,
-    elevation: 12,
   },
   row: {
     flex: 1,
@@ -200,12 +194,19 @@ function AiAdvisorFab({ bottomInset, rightInset }: { bottomInset: number; rightI
 
 export default function MainTabs() {
   const { t } = useI18n();
+  const route = useRoute<RouteProp<RootStackParamList, "MainTabs">>();
+  const [background, setBackground] = useState(() => tabBackground(route.params?.screen));
   return (
-    <View style={styles.root}>
+    <GradientBackground variant={background === "vivid" ? "vivid" : "soft"} transparent={background === "flat"} style={{ backgroundColor: colors.bgSoft }}>
     <Tab.Navigator
+      backBehavior={route.params?.returnToWhatsNew ? "none" : "firstRoute"}
+      screenListeners={({ route: tabRoute }) => ({
+        focus: () => setBackground(tabBackground(tabRoute.name)),
+      })}
       tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
         headerShown: true,
+        sceneStyle: { backgroundColor: "transparent" },
       }}
     >
       {/* Explore/Messages build their own in-content .app-header (brand mark +
@@ -239,6 +240,6 @@ export default function MainTabs() {
       <Tab.Screen name="Me" component={MeProfileScreen} options={{ title: t("nav.profile"), headerShown: false }} />
     </Tab.Navigator>
 
-    </View>
+    </GradientBackground>
   );
 }

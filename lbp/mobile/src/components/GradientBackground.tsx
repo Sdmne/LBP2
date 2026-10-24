@@ -24,9 +24,11 @@ type Props = {
   variant: "soft" | "vivid";
   style?: ViewStyle;
   children: React.ReactNode;
+  transparent?: boolean;
 };
 
-export default function GradientBackground({ variant, style, children }: Props) {
+export default function GradientBackground({ variant, style, children, transparent = false }: Props) {
+  if (transparent) return <View style={[styles.flex, style]}>{children}</View>;
   if (variant === "vivid") {
     // Prototype: linear-gradient(155deg,#d199c4 0%,#a385ec 45%,#97b6ec 100%)
     return (

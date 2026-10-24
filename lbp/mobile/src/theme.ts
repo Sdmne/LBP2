@@ -71,7 +71,7 @@ export const radius = {
 // MainTabs reserves the shared navigation and AI footer outside each scene.
 export const navigationLayout = {
   tabBarHeight: 60,
-  tabBarBottom: 22,
+  tabBarBottom: 6,
   aiButtonSize: 52,
   aiButtonGap: 12,
 };

@@ -17,6 +17,7 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useHeaderHeight } from "@react-navigation/elements";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { deleteConversation, fetchConversationPeerProfile, fetchMessages, sendAttachment, sendMessage, sendSticker } from "../api/messages";
@@ -61,6 +62,7 @@ function looksLikeImageUrl(url: string): boolean {
 export default function ChatScreen({ route, navigation }: Props) {
   const { conversationId, title } = route.params;
   const insets = useSafeAreaInsets();
+  const headerHeight = useHeaderHeight();
   const { user } = useAuth();
   const { startCall } = useCall();
   const { t, locale } = useI18n();
@@ -435,14 +437,11 @@ export default function ChatScreen({ route, navigation }: Props) {
     // "не видно что ты пишешь и сообщения вообще не отправляется" - not
     // that text was invisible, the whole input+send row was hidden under
     // the keyboard, so nothing could be typed or tapped). behavior=
-    // undefined means KeyboardAvoidingView does nothing on Android, relying
-    // entirely on the native windowSoftInputMode - which isn't reliably
-    // resizing this screen. "height" is the standard fix for this exact
-    // symptom on Android.
+    // Use the measured stack-header height for keyboard coordinates.
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      behavior="padding"
+      keyboardVerticalOffset={headerHeight}
     >
       {callError ? <Text style={styles.errorBanner}>{callError}</Text> : null}
       {error ? <Text style={styles.errorBanner}>{error}</Text> : null}

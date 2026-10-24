@@ -3,7 +3,7 @@
     "name": "LetsBeParents",
     "slug": "letsbeparents-mobile",
     "scheme": "letsbeparents",
-    "version": "4.2.48",
+    "version": "4.2.49",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "icon": "./assets/icon.png",
@@ -28,11 +28,11 @@
         "ITSAppUsesNonExemptEncryption": false
       },
       "bitcode": false,
-      "buildNumber": "48"
+      "buildNumber": "49"
     },
     "android": {
       "package": "com.letsBeParents.letsBeParents",
-      "versionCode": 48,
+      "versionCode": 49,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -89,7 +89,8 @@
       ],
       "expo-secure-store",
       "expo-sharing",
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/with-ios-scenes"
     ],
     "extra": {
       "eas": {

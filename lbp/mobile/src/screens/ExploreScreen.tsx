@@ -73,9 +73,9 @@ export default function ExploreScreen() {
   ];
 
   return (
-    <GradientBackground variant="soft">
+    <GradientBackground variant="soft" transparent>
       <ScrollView style={styles.container} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} contentContainerStyle={styles.content}>
-      <AppHeader />
+      <AppHeader contentInset={spacing.lg} />
       <Text style={styles.greeting}>{t("explore.greeting", { name: user?.displayName || "" })}</Text>
       <Text style={styles.subtitle}>{t("explore.subtitle")}</Text>
 

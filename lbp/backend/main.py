@@ -21649,6 +21649,9 @@ def public_content_page(locale: str, slug: str):
         if not row:
             raise HTTPException(status_code=404, detail="Content page not found")
     page = normalize_row(row)
+    if page.get("locale") != locale:
+        from legal_content import localized_legal_page
+        page = localized_legal_page(locale, slug, page)
     page["requestedLocale"] = locale
     page["translationMissing"] = page.get("locale") != locale
     return page

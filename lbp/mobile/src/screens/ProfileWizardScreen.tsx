@@ -447,7 +447,10 @@ export default function ProfileWizardScreen({ navigation }: Props) {
   }
 
   function renderGoalStep() {
-    const parentsSub = needsEggDonor ? t("wizard.goalParentsSubEgg") : t("wizard.goalParentsSubSperm");
+    const couple = role.endsWith("_COUPLE");
+    const parentsSub = t(needsEggDonor
+      ? couple ? "wizard.goalParentsSubEgg" : "wizard.goalParentsSingleSubEgg"
+      : couple ? "wizard.goalParentsSubSperm" : "wizard.goalParentsSingleSubSperm");
     const donorSub = needsEggDonor ? t("wizard.goalDonorSubSperm") : t("wizard.goalDonorSubEgg");
     const parentsEmoji = needsEggDonor ? "🥚" : "👶";
     const donorEmoji = needsEggDonor ? "🧬" : "🥚";
@@ -460,7 +463,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         >
           <Text style={styles.optionEmojiLg}>{parentsEmoji}</Text>
           <View style={styles.optionCardText}>
-            <Text style={styles.optionLabel}>{t("wizard.goalParentsLabel")}</Text>
+            <Text style={styles.optionLabel}>{t(couple ? "wizard.goalParentsLabel" : "wizard.goalParentsSingleLabel")}</Text>
             <Text style={styles.optionSub}>{parentsSub}</Text>
           </View>
           <View style={[styles.radio, goal === "parents" && styles.radioSelected]}>
@@ -473,7 +476,7 @@ export default function ProfileWizardScreen({ navigation }: Props) {
         >
           <Text style={styles.optionEmojiLg}>{donorEmoji}</Text>
           <View style={styles.optionCardText}>
-            <Text style={styles.optionLabel}>{t("wizard.goalDonorLabel")}</Text>
+            <Text style={styles.optionLabel}>{t(couple ? "wizard.goalDonorLabel" : "wizard.goalDonorSingleLabel")}</Text>
             <Text style={styles.optionSub}>{donorSub}</Text>
           </View>
           <View style={[styles.radio, goal === "donor" && styles.radioSelected]}>

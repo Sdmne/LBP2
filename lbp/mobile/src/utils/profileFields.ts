@@ -91,6 +91,12 @@ export function firstString(data: Record<string, unknown> | undefined, keys: str
 
 export type DetailRow = { label: string; value: string };
 
+export function metricValue(value: string | null, unit: string): string {
+  if (!value?.trim()) return "";
+  const text = value.trim();
+  return /^\d+(?:[.,]\d+)?$/.test(text) ? `${text} ${unit}` : text;
+}
+
 // Same field list/order as ProfileDetailScreen's old inline `detailRows`,
 // traced from the website's profile-edit form (frontend/src/ui.tsx's Basic
 // information / Appearance & lifestyle sections). `t` is the screen's own
@@ -103,8 +109,8 @@ export function buildDetailRows(t: (key: string) => string, data: Record<string,
     { label: t("profileDetail.education"), value: rawToLabel("education", dataString(data, "education")) },
     { label: t("profileDetail.smoking"), value: rawToLabel("smokingStatus", dataString(data, "smokingStatus")) },
     { label: t("profileDetail.drinking"), value: rawToLabel("drinkingStatus", dataString(data, "drinkingStatus")) },
-    { label: t("profileDetail.height"), value: dataString(data, "height") || "" },
-    { label: t("profileDetail.weight"), value: dataString(data, "weight") || "" },
+    { label: t("profileDetail.height"), value: metricValue(dataString(data, "height"), t("profileDetail.heightUnit")) },
+    { label: t("profileDetail.weight"), value: metricValue(dataString(data, "weight"), t("profileDetail.weightUnit")) },
     { label: t("profileDetail.eyeColor"), value: rawToLabel("eyeColor", dataString(data, "eyeColor")) },
     { label: t("profileDetail.hairColor"), value: rawToLabel("hairColor", dataString(data, "hairColor")) },
   ].filter((row) => row.value);

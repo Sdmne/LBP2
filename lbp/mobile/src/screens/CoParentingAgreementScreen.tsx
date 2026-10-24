@@ -262,6 +262,9 @@ const styles = StyleSheet.create({
   progressTrack: { height: 8, borderRadius: radius.pill, backgroundColor: "rgba(2,8,23,0.08)", overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: radius.pill, backgroundColor: colors.pink },
   primaryButton: {
+    minWidth: 144,
+    maxWidth: "100%",
+    paddingHorizontal: 24,
     backgroundColor: colors.pink,
     borderRadius: radius.pill,
     paddingVertical: 12,

@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
   // to sit on top of - Alena's report that rows read as "stuck together"
   // was this screen using the same white for both the page and the rows.
   container: { flex: 1, backgroundColor: colors.bgSoft },
-  headerPad: { paddingHorizontal: spacing.md },
+  headerPad: { paddingHorizontal: 0 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.lg },
   errorText: { color: colors.danger, textAlign: "center" },
   emptyText: { color: colors.muted, textAlign: "center" },

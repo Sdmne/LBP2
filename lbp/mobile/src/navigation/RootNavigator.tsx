@@ -3,15 +3,27 @@ import { ActivityIndicator, View } from "react-native";
 import {
   NavigationContainer,
   useNavigationContainerRef,
+  getFocusedRouteNameFromRoute,
   type NavigatorScreenParams,
 } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { useHeaderHeight } from "@react-navigation/elements";
+import GradientBackground from "../components/GradientBackground";
 import { Feather } from "@expo/vector-icons";
 import { Pressable } from "react-native";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../i18n/I18nContext";
 import { RESOURCES_CATEGORIES } from "../data/resources";
 import { colors } from "../theme";
+
+function StackScene({ children, reserveHeader }: { children: React.ReactNode; reserveHeader: boolean }) {
+  const headerHeight = useHeaderHeight();
+  return (
+    <GradientBackground variant="soft">
+      <View style={{ flex: 1, paddingTop: reserveHeader ? headerHeight : 0 }}>{children}</View>
+    </GradientBackground>
+  );
+}
 import WelcomeScreen from "../screens/WelcomeScreen";
 import LoginScreen from "../screens/LoginScreen";
 import SignupScreen from "../screens/SignupScreen";
@@ -248,11 +260,18 @@ export default function RootNavigator() {
           screens. canGoBack() guards the rare case of a headerShown:true
           screen with nothing to go back to. */}
       <Stack.Navigator
+        screenLayout={({ children, options, route }) => (
+          <StackScene reserveHeader={options.headerShown === true && route.name !== "Settings"}>{children}</StackScene>
+        )}
         screenOptions={({ navigation }) => ({
           headerShown: false,
+          headerTransparent: true,
+          headerStyle: { backgroundColor: "transparent" },
+          headerShadowVisible: false,
+          headerBackVisible: false,
           headerLeft: () =>
             navigation.canGoBack() ? (
-              <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={{ paddingRight: 12 }}>
+              <Pressable onPress={() => navigation.goBack()} hitSlop={12} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
                 <Feather name="arrow-left" size={22} color={colors.ink} />
               </Pressable>
             ) : null,
@@ -265,10 +284,11 @@ export default function RootNavigator() {
             <Stack.Screen
               name="MainTabs"
               component={MainTabs}
-              options={({ route }) => ({
-                headerShown: route.params?.returnToWhatsNew === true,
-                title: t(route.params?.screen === "Messages" ? "nav.messages" : "nav.profile"),
-              })}
+              options={({ route }) => {
+                const screen = getFocusedRouteNameFromRoute(route) || route.params?.screen;
+                const titleKey = screen === "Explore" ? "nav.explore" : screen === "Catalog" ? "nav.browse" : screen === "Likes" ? "nav.likes" : screen === "Messages" ? "nav.messages" : "nav.profile";
+                return { headerShown: route.params?.returnToWhatsNew === true, title: t(titleKey) };
+              }}
             />
             <Stack.Screen
               name="Chat"
@@ -325,7 +345,7 @@ export default function RootNavigator() {
                   <Pressable
                     onPress={() => navigation.goBack()}
                     hitSlop={12}
-                    style={{ paddingRight: 12 }}
+                    style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}
                   >
                     <Feather name="arrow-left" size={22} color={colors.ink} />
                   </Pressable>
