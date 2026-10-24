@@ -8183,8 +8183,8 @@ body {
   left: 10px;
   z-index: 1;
   padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.78);
+  border-radius: 4px;
+  background: #f31260;
   color: #fff;
   font-size: 11px;
   font-style: normal;
