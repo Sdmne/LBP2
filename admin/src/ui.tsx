@@ -612,6 +612,12 @@ function recordValue(value: unknown): RecordValue | null {
 }
 
 function avatarSources(row: RecordValue) {
+  if (row.avatarSourceResolved === true) {
+    const source = row.avatarUrl;
+    return typeof source === "string" && source.startsWith("/api/admin/")
+      ? [source]
+      : [];
+  }
   const records: RecordValue[] = [row];
   ["data", "profile", "user"].forEach((key) => {
     const nested = recordValue(row[key]);
@@ -14319,7 +14325,7 @@ export function AdminApp() {
           ))}
         </nav>
         <div className="admin-account">
-          <div className="admin-version">v4.3.50 ({__ADMIN_BUILD_REVISION__})</div>
+        <div className="admin-version">v4.3.51 ({__ADMIN_BUILD_REVISION__})</div>
           <div className="admin-identity">
             <strong>{session.email}</strong>
             <small>{session.role ?? "ADMIN"}</small>

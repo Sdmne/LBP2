@@ -15900,6 +15900,63 @@ def admin_photo_visible(photo: dict[str, Any]) -> bool:
     return not remote_profile_photo_missing(str(photo.get("public_url") or "").strip(), int(time.time() // 60))
 
 
+def admin_enrich_profile_avatars(cursor, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    profile_ids = sorted({int(item["id"]) for item in items if int_or_none(item.get("id"))})
+    if not profile_ids:
+        return items
+    placeholders = ", ".join(["%s"] * len(profile_ids))
+    cursor.execute(
+        f"""
+        SELECT pp.id, pp.profile_id, pp.avatar_media_file_id,
+               pp.public_url AS photoPublicUrl, mf.storage_key AS photoStorageKey,
+               amf.public_url AS avatarPublicUrl, amf.storage_key AS avatarStorageKey
+        FROM profile_photos pp
+        LEFT JOIN media_files mf ON mf.id = pp.media_file_id
+        LEFT JOIN media_files amf ON amf.id = pp.avatar_media_file_id
+        WHERE pp.profile_id IN ({placeholders})
+          AND pp.status = 'ACTIVE' AND pp.moderation_status = 'APPROVED'
+        ORDER BY pp.profile_id, pp.position, pp.id
+        """,
+        profile_ids,
+    )
+    photos = cursor.fetchall()
+    sources = {
+        (str(photo.get(key) or ""), str(photo.get(url) or ""))
+        for photo in photos
+        for key, url in (("avatarStorageKey", "avatarPublicUrl"), ("photoStorageKey", "photoPublicUrl"))
+    }
+
+    def available(source: tuple[str, str]) -> tuple[tuple[str, str], bool]:
+        key, url = source
+        try:
+            if media_storage_available(key):
+                return source, True
+        except HTTPException:
+            return source, False
+        if not re.match(r"^https?://", url, re.IGNORECASE):
+            return source, False
+        return source, not remote_profile_photo_missing(url, int(time.time() // 60))
+
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(sources)))) as executor:
+        availability = dict(executor.map(available, sources))
+    resolved: dict[int, str] = {}
+    for photo in photos:
+        profile_id = int(photo["profile_id"])
+        if profile_id in resolved:
+            continue
+        crop = (str(photo.get("avatarStorageKey") or ""), str(photo.get("avatarPublicUrl") or ""))
+        original = (str(photo.get("photoStorageKey") or ""), str(photo.get("photoPublicUrl") or ""))
+        if photo.get("avatar_media_file_id") and availability.get(crop):
+            resolved[profile_id] = f"/api/admin/media/{int(photo['avatar_media_file_id'])}/content"
+        elif availability.get(original):
+            resolved[profile_id] = f"/api/admin/profile-photos/{int(photo['id'])}/content"
+    for item in items:
+        item["avatarUrl"] = resolved.get(int(item["id"]))
+        item["avatarFallbackUrl"] = None
+        item["avatarSourceResolved"] = True
+    return items
+
+
 def photo_matches_avatar(photo: dict[str, Any], profile_data: dict[str, Any]) -> bool:
     avatar = str(profile_data.get("avatarUrl") or profile_data.get("avatar_url") or "").strip()
     return bool(avatar and avatar in {
@@ -18743,7 +18800,9 @@ def admin_list(
                 [*params, limit, offset],
             )
             items = [normalize_row(row) for row in cursor.fetchall()]
-            if view == "articles":
+            if view in {"users", "profiles"}:
+                admin_enrich_profile_avatars(cursor, items)
+            elif view == "articles":
                 admin_enrich_article_items(cursor, items)
             elif view == "clinics":
                 for item in items:
