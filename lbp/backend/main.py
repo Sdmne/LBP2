@@ -21633,20 +21633,25 @@ def public_article(locale: str, slug: str, preview: bool = Query(False)):
 
 @app.get("/api/public/content-pages/{locale}/{slug}")
 def public_content_page(locale: str, slug: str):
+    fallback_locale = "en" if slug in {"terms-of-use", "privacy-policy", "delete-account"} else locale
     with db_cursor() as (_, cursor):
         cursor.execute(
             """
             SELECT id, locale, slug, title, body_html, status, published_at, updated_at
             FROM content_pages
-            WHERE locale = %s AND slug = %s AND status = 'PUBLISHED'
+            WHERE locale IN (%s, %s) AND slug = %s AND status = 'PUBLISHED'
+            ORDER BY CASE WHEN locale = %s THEN 0 ELSE 1 END, id ASC
             LIMIT 1
             """,
-            (locale, slug),
+            (locale, fallback_locale, slug, locale),
         )
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Content page not found")
-        return normalize_row(row)
+    page = normalize_row(row)
+    page["requestedLocale"] = locale
+    page["translationMissing"] = page.get("locale") != locale
+    return page
 
 
 @app.get("/api/public/footer-pages/{locale}")

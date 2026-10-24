@@ -3768,7 +3768,7 @@ body {
 }
 .moderation-photo-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
 .moderation-tabs {
@@ -8166,6 +8166,9 @@ body {
   position: absolute;
   inset: 0;
 }
+.moderation-photo-media:has(img) > span {
+  visibility: hidden;
+}
 .moderation-photo-grid article.rejected .moderation-photo-media img {
   filter: grayscale(1);
   opacity: 0.58;
@@ -8189,7 +8192,10 @@ body {
   line-height: 16px;
 }
 .moderation-photo-state.deleted {
-  background: rgba(100, 116, 139, 0.88);
+  left: auto;
+  right: 10px;
+  border-radius: 4px;
+  background: #ef4444;
 }
 .moderation-photo-details > a,
 .moderation-photo-details > b {
@@ -8221,6 +8227,11 @@ body {
 .moderation-photo-grid article p {
   margin: 7px 0;
   color: #63758e;
+}
+.moderation-photo-details .row-actions button {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
 }
 .row-actions {
   display: flex;

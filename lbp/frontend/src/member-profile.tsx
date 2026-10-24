@@ -114,8 +114,8 @@ export function profileCountry(value: unknown, locale: Locale) {
   return countryLabel(value, locale);
 }
 
-export function profilePhotos(item: Row, failedSources: string[] = []): string[] {
-  return profilePhotoUrls(item, failedSources);
+export function profilePhotos(item: Row, failedSources: string[] = [], ownerView = false): string[] {
+  return profilePhotoUrls(item, failedSources, ownerView);
 }
 
 export function profileLanguages(data: Row, locale: Locale): string[] {
@@ -582,15 +582,17 @@ export function ProfileGallery({
   name,
   locale,
   tags,
+  ownerView = false,
 }: {
   profile: Row;
   name: string;
   locale: Locale;
   tags: ReactNode;
+  ownerView?: boolean;
 }) {
   const c = PROFILE_COPY[locale];
   const [failed, setFailed] = useState<string[]>([]);
-  const photos = profilePhotos(profile, failed).filter((url) => !failed.includes(url));
+  const photos = profilePhotos(profile, failed, ownerView).filter((url) => !failed.includes(url));
   const [index, setIndex] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const thumbnails = useRef<HTMLDivElement>(null);

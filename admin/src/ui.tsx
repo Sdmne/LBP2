@@ -715,6 +715,7 @@ function PersonAvatar({
 }
 
 function moderationPhotoSources(row: RecordValue) {
+  if (row.isUnavailable === true) return [];
   const data = recordValue(row.data);
   const photoId = row.photoId ?? data?.photoId ?? data?.profilePhotoId;
   const mediaFileId =

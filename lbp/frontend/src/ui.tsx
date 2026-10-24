@@ -11645,27 +11645,45 @@ function AgreementDraftTool() {
   );
 }
 
+const LEGAL_TRANSLATION_NOTICE: Record<string, string> = {
+  en: "This page is currently available in English. The original text is shown below.",
+  ru: "Перевод этой страницы пока недоступен. Ниже приведён оригинальный текст на английском языке.",
+  es: "La traducción de esta página aún no está disponible. A continuación se muestra el texto original en inglés.",
+  pt: "A tradução desta página ainda não está disponível. O texto original em inglês é apresentado abaixo.",
+  fr: "La traduction de cette page n’est pas encore disponible. Le texte original en anglais figure ci-dessous.",
+  de: "Die Übersetzung dieser Seite ist noch nicht verfügbar. Unten finden Sie den englischen Originaltext.",
+  it: "La traduzione di questa pagina non è ancora disponibile. Di seguito è riportato il testo originale in inglese.",
+  pl: "Tłumaczenie tej strony nie jest jeszcze dostępne. Poniżej znajduje się oryginalny tekst w języku angielskim.",
+};
+
 function ContentPage({ forcedSlug }: { forcedSlug?: string } = {}) {
   const { locale = "en", slug: routeSlug = "" } = useParams();
   const slug = forcedSlug ?? routeSlug;
   const [page, setPage] = useState<Row | null>(null);
   useEffect(() => {
+    let cancelled = false;
     setPage(null);
     api
       .get<Row>(
         `/public/content-pages/${encodeURIComponent(locale)}/${encodeURIComponent(slug)}`,
       )
-      .then(setPage)
-      .catch((error) => setPage({ missing: error instanceof ApiError && error.status === 404, failed: true }));
+      .then((result) => { if (!cancelled) setPage(result); })
+      .catch((error) => { if (!cancelled) setPage({ missing: error instanceof ApiError && error.status === 404, failed: true }); });
+    return () => { cancelled = true; };
   }, [locale, slug]);
   if (!page) return <LoadingIndicator />;
   if (page.missing) return <NotFoundPage locale={localeOf()} />;
   if (page.failed) return <p className="error" role="alert">{knowledgeHubCopy[localeOf()].unavailable}</p>;
   const html = asText(page.bodyHtml ?? page.body_html ?? page.content ?? page.body ?? page.html);
+  const contentLocale = asText(page.locale) || locale;
   return (
     <article className="static-page">
-      <h1>{asText(page.title)}</h1>
+      {page.translationMissing === true && (
+        <p role="note" lang={locale}>{LEGAL_TRANSLATION_NOTICE[locale] || LEGAL_TRANSLATION_NOTICE.en}</p>
+      )}
+      <h1 lang={contentLocale}>{asText(page.title)}</h1>
       <div
+        lang={contentLocale}
         className="article-body"
         dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(html) }}
       />

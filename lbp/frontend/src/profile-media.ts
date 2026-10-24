@@ -15,7 +15,7 @@ function photoList(value: unknown): unknown[] {
   return [];
 }
 
-export function profilePhotoUrls(profile: MediaRow, failed: readonly string[] = []): string[] {
+export function profilePhotoUrls(profile: MediaRow, failed: readonly string[] = [], ownerView = false): string[] {
   const data = row(profile.data);
   const hasPhotos = profile.photos !== undefined || data.photos !== undefined;
   const values = photoList(profile.photos !== undefined ? profile.photos : data.photos);
@@ -24,7 +24,11 @@ export function profilePhotoUrls(profile: MediaRow, failed: readonly string[] = 
     const photo = row(value);
     const status = String(photo.status || "ACTIVE").toUpperCase();
     const moderation = String(photo.moderationStatus || photo.moderation_status || "APPROVED").toUpperCase();
-    if (status !== "ACTIVE" || moderation !== "APPROVED") continue;
+    if (ownerView) {
+      if (!["ACTIVE", "PENDING", "REJECTED"].includes(status)) continue;
+      const uploadStatus = String(photo.uploadStatus || photo.upload_status || "COMMITTED").toUpperCase();
+      if (uploadStatus !== "COMMITTED") continue;
+    } else if (status !== "ACTIVE" || moderation !== "APPROVED") continue;
     const original = photoUrl(typeof value === "string" ? value : photo.publicUrl || photo.public_url || photo.url);
     if (!original) continue;
     const primary = original === photoUrl(profile.primaryPhotoUrl || data.primaryPhotoUrl)

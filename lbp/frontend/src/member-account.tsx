@@ -742,6 +742,7 @@ function Overview({
           <div className="member-profile-surface">
             <ProfileGallery
               key={String(profile.id)}
+              ownerView
               profile={gallery}
               name={name}
               locale={locale}
